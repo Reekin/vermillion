@@ -1,0 +1,32 @@
+import type { WorkbenchClientApi } from "@vermillion/shared";
+
+declare global {
+  type WorkbenchLocalAssetsApi = {
+    materializeAttachmentDataUri: (input: {
+      attachmentId: string;
+      dataUri: string;
+      mimeType: string;
+      name?: string;
+    }) => Promise<{
+      bytesWritten: number;
+      displayUri: string;
+      filePath: string;
+    }>;
+  };
+
+  type WorkbenchDesktopApi = {
+    pickEngineProgramPath: (engineId: string) => Promise<{
+      canceled: boolean;
+      path?: string;
+    }>;
+    writeClipboardText: (text: string) => Promise<void>;
+  };
+
+  interface Window {
+    workbench?: WorkbenchClientApi;
+    workbenchLocalAssets?: WorkbenchLocalAssetsApi;
+    workbenchDesktop?: WorkbenchDesktopApi;
+  }
+}
+
+export {};
