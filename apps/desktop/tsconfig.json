@@ -10,7 +10,9 @@
       "DOM",
       "DOM.Iterable"
     ],
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "baseUrl": ".",
     "paths": {
       "@vermillion/shared": [
@@ -24,6 +26,9 @@
       ],
       "@vermillion/desktop-server": [
         "../../apps/desktop-server/src/index.ts"
+      ],
+      "@vermillion/workbench": [
+        "../../packages/workbench/src/index.ts"
       ]
     }
   },
@@ -42,6 +47,9 @@
     },
     {
       "path": "../desktop-server"
+    },
+    {
+      "path": "../../packages/workbench"
     }
   ]
 }

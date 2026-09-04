@@ -12,3 +12,5 @@ export const WORKBENCH_IPC_PICK_ENGINE_PROGRAM_CHANNEL =
 
 export const WORKBENCH_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL =
   "vermillion:desktop:write-clipboard-text";
+
+export const VERMILLION_IPC_REQUEST_CHANNEL = "vermillion:workbench:request";

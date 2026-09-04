@@ -18,9 +18,11 @@ import {
   WORKBENCH_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
   WORKBENCH_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
   WORKBENCH_IPC_REQUEST_CHANNEL,
-  WORKBENCH_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL
+  WORKBENCH_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
+  VERMILLION_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createWorkbenchIpcRouter } from "./workbench-ipc-router.js";
+import { WorkbenchService, createWorkbenchRpcHandler } from "@vermillion/workbench";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
   resolveWillNavigate,
@@ -707,6 +709,36 @@ const boot = async (): Promise<void> => {
 
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     router.handleRequest(payload)
+  );
+  const vermillionRpc = createWorkbenchRpcHandler(
+    new WorkbenchService({
+      workspaces: {
+        list: async () =>
+          (await service.listWorkspaces()).workspaces.map((workspace) => ({
+            workspaceId: workspace.workspaceId,
+            rootPath: workspace.absolutePath,
+            label: workspace.label,
+            createdAt: workspace.createdAt,
+            updatedAt: workspace.updatedAt
+          })),
+        register: async (input) => {
+          const workspace = await service.addWorkspace(input);
+          return {
+            workspaceId: workspace.workspaceId,
+            rootPath: workspace.absolutePath,
+            label: workspace.label,
+            createdAt: workspace.createdAt,
+            updatedAt: workspace.updatedAt
+          };
+        },
+        remove: async (workspaceId) => {
+          await service.removeWorkspace(workspaceId);
+        }
+      }
+    })
+  );
+  ipcMain.handle(VERMILLION_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
+    vermillionRpc(payload as { method: string; params: unknown })
   );
   ipcMain.handle(WORKBENCH_IPC_MATERIALIZE_ATTACHMENT_CHANNEL, (_event, payload: unknown) =>
     materializeAttachmentDataUri(

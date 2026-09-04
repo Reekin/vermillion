@@ -16,7 +16,8 @@ import {
   WORKBENCH_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
   WORKBENCH_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
   WORKBENCH_IPC_REQUEST_CHANNEL,
-  WORKBENCH_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL
+  WORKBENCH_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
+  VERMILLION_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 
 type WorkbenchLocalAssetsApi = {
@@ -164,3 +165,7 @@ const desktopApi: WorkbenchDesktopApi = {
 contextBridge.exposeInMainWorld("workbench", api);
 contextBridge.exposeInMainWorld("workbenchLocalAssets", localAssetsApi);
 contextBridge.exposeInMainWorld("workbenchDesktop", desktopApi);
+contextBridge.exposeInMainWorld("vermillion", {
+  request: (payload: { method: string; params: unknown }) =>
+    ipcRenderer.invoke(VERMILLION_IPC_REQUEST_CHANNEL, payload)
+});

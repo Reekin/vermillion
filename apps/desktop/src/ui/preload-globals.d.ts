@@ -1,4 +1,5 @@
 import type { WorkbenchClientApi } from "@vermillion/shared";
+import type { WorkbenchRpcRequest, WorkbenchRpcResponse } from "@vermillion/workbench";
 
 declare global {
   type WorkbenchLocalAssetsApi = {
@@ -26,6 +27,7 @@ declare global {
     workbench?: WorkbenchClientApi;
     workbenchLocalAssets?: WorkbenchLocalAssetsApi;
     workbenchDesktop?: WorkbenchDesktopApi;
+    vermillion?: { request: (payload: WorkbenchRpcRequest) => Promise<WorkbenchRpcResponse> };
   }
 }
 
