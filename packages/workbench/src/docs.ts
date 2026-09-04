@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { DocChange, DocFile } from "./contracts.js";
+import { DESIGN_PARTNER_INSTRUCTIONS } from "./design-partner-instructions.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,9 @@ const git = async (cwd: string, args: string[]): Promise<string> => {
 
 const toPosix = (value: string): string => value.split(sep).join("/");
 
+const samePath = (a: string, b: string): boolean =>
+  toPosix(resolve(a)).toLowerCase() === toPosix(resolve(b)).toLowerCase();
+
 const assertDocPath = (path: string): void => {
   const normalized = toPosix(path);
   if (!normalized.startsWith(DOCS_DIR + "/") || normalized.includes("..")) {
@@ -26,12 +30,20 @@ export class DocsService {
   constructor(private readonly rootPath: string) {}
 
   async ensureRepo(): Promise<void> {
+    let topLevel = "";
     try {
-      await git(this.rootPath, ["rev-parse", "--git-dir"]);
-    } catch {
+      topLevel = (await git(this.rootPath, ["rev-parse", "--show-toplevel"])).trim();
+    } catch {}
+    if (!topLevel || !samePath(topLevel, this.rootPath)) {
       await git(this.rootPath, ["init", "-q"]);
     }
     await mkdir(join(this.rootPath, DOCS_DIR), { recursive: true });
+    const instructionsPath = join(this.rootPath, DOCS_DIR, "AGENTS.md");
+    try {
+      await stat(instructionsPath);
+    } catch {
+      await writeFile(instructionsPath, DESIGN_PARTNER_INSTRUCTIONS, "utf8");
+    }
   }
 
   async list(): Promise<DocFile[]> {

@@ -14,6 +14,7 @@ export default defineConfig({
       "@vermillion/shared": fromHere("../../packages/shared/src/index.ts"),
       "@vermillion/core": fromHere("../../packages/core/src/index.ts"),
       "@vermillion/adapters": fromHere("../../packages/adapters/src/index.ts"),
+      "@vermillion/workbench/client": fromHere("../../packages/workbench/src/client.ts"),
       "@vermillion/workbench": fromHere("../../packages/workbench/src/index.ts")
     }
   },

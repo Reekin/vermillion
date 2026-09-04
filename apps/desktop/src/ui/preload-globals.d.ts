@@ -1,5 +1,5 @@
 import type { WorkbenchClientApi } from "@vermillion/shared";
-import type { WorkbenchRpcRequest, WorkbenchRpcResponse } from "@vermillion/workbench";
+import type { WorkbenchRpcRequest, WorkbenchRpcResponse } from "@vermillion/workbench/client";
 
 declare global {
   type WorkbenchLocalAssetsApi = {

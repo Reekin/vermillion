@@ -9,7 +9,8 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type RefObject,
-  type SetStateAction
+  type SetStateAction,
+  type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
 import type {
@@ -218,6 +219,16 @@ export type ChatShellAppProps = {
   store: RendererStore;
   transport?: DesktopTransport;
   title?: string;
+  /** Replaces the sidebar header (brand + title). */
+  sidebarHeader?: ReactNode;
+  /** Replaces the right-hand detail column. Receives the active workspace id. */
+  renderDetail?: (context: { activeWorkspaceId?: string; activeSessionId?: string }) => ReactNode;
+  /** Restricts the workspace tree to one workspace. */
+  visibleWorkspaceId?: string;
+  /** Hides the settings launcher in the sidebar footer. */
+  hideSettings?: boolean;
+  /** Increment to force a workspace/session tree reload from the host. */
+  externalRefreshSignal?: number;
 };
 
 const uniqueByEngineId = (
@@ -1261,7 +1272,12 @@ const SettingsLauncher = ({
 export const ChatShellApp = ({
   store,
   transport,
-  title = "Vermillion"
+  title = "Vermillion",
+  sidebarHeader,
+  renderDetail,
+  visibleWorkspaceId,
+  hideSettings = false,
+  externalRefreshSignal = 0
 }: ChatShellAppProps): ReactElement => {
   const state = useRendererStoreState(store);
   const [availableEngines, setAvailableEngines] = useState<EngineDefinitionRpc[]>([]);
@@ -1395,7 +1411,7 @@ export const ChatShellApp = ({
     onNextWorkspacePage
   } = useWorkspaceBrowserController({
     transport,
-    refreshSignal: state.refreshSignals.sessionBrowser,
+    refreshSignal: state.refreshSignals.sessionBrowser + externalRefreshSignal,
     focusSessionId: openingSessionId ?? browserSelectedSessionId ?? state.activeSessionId,
     onStatusNotice: setStatusNotice
   });
@@ -2173,10 +2189,12 @@ export const ChatShellApp = ({
     <>
       <div className="awb-shell">
         <aside className="awb-shell__sidebar">
-          <header className="awb-sidebar__header">
-            <span className="awb-sidebar__eyebrow">Vermillion</span>
-            <h1>{title}</h1>
-          </header>
+          {sidebarHeader ?? (
+            <header className="awb-sidebar__header">
+              <span className="awb-sidebar__eyebrow">Vermillion</span>
+              <h1>{title}</h1>
+            </header>
+          )}
 
           <section className="awb-attention">
             <div className="awb-attention__header">
@@ -2194,21 +2212,23 @@ export const ChatShellApp = ({
 
           <section className="awb-sidebar__section awb-sidebar__section--grow">
             <div className="awb-sidebar__section-header">
-              <h2>Workspaces</h2>
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={() => void onAddWorkspace()}
-              >
-                Add workspace
-              </Button>
+              <h2>{visibleWorkspaceId ? "Sessions" : "Workspaces"}</h2>
+              {!visibleWorkspaceId && (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => void onAddWorkspace()}
+                >
+                  Add workspace
+                </Button>
+              )}
             </div>
 
             <div className="awb-workspace-tree">
               {workspaceTree.length === 0 && (
                 <p className="awb-list__empty">No workspace yet</p>
               )}
-              {workspaceTree.map((workspace) => (
+              {workspaceTree.filter((workspace) => !visibleWorkspaceId || workspace.workspaceId === visibleWorkspaceId).map((workspace) => (
                 <section key={workspace.workspaceId} className="awb-workspace">
                   <header
                     className={`awb-workspace__header ${workspace.isActive ? "is-active" : ""}`}
@@ -2299,7 +2319,7 @@ export const ChatShellApp = ({
             </div>
           </section>
 
-          <footer className="awb-sidebar__footer">
+          {!hideSettings && <footer className="awb-sidebar__footer">
             <SettingsLauncher
               engines={engines}
               surfacesByEngineId={engineSurfacesById}
@@ -2326,7 +2346,7 @@ export const ChatShellApp = ({
               }}
               onStatusNotice={setStatusNotice}
             />
-          </footer>
+          </footer>}
         </aside>
 
         <main className="awb-shell__main">
@@ -2402,12 +2422,16 @@ export const ChatShellApp = ({
         </main>
 
         <aside className="awb-shell__detail" aria-label="Session details">
-          <section className="awb-detail__graph">
-            <ChatTreePanel
-              chatTree={activeChatTree}
-              onJump={transport ? (nodeId) => void onJumpChatTree(nodeId) : undefined}
-            />
-          </section>
+          {renderDetail ? (
+            renderDetail({ activeWorkspaceId: activeWorkspace?.workspaceId, activeSessionId: activeSessionId })
+          ) : (
+            <section className="awb-detail__graph">
+              <ChatTreePanel
+                chatTree={activeChatTree}
+                onJump={transport ? (nodeId) => void onJumpChatTree(nodeId) : undefined}
+              />
+            </section>
+          )}
         </aside>
       </div>
       {sessionMenuMarkup &&

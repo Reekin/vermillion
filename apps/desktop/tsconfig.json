@@ -29,6 +29,9 @@
       ],
       "@vermillion/workbench": [
         "../../packages/workbench/src/index.ts"
+      ],
+      "@vermillion/workbench/client": [
+        "../../packages/workbench/src/client.ts"
       ]
     }
   },

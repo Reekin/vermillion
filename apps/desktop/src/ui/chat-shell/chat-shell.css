@@ -2,20 +2,20 @@
 
 :root {
   color-scheme: dark;
-  --awb-bg: #181818;
-  --awb-bg-alt: #1b1b1b;
-  --awb-panel: #202020;
-  --awb-panel-alt: #1d1d1d;
-  --awb-panel-elevated: #242424;
-  --awb-panel-soft: #222222;
-  --awb-input: #151515;
-  --awb-input-soft: #191919;
+  --awb-bg: oklch(0.18 0.005 285.823);
+  --awb-bg-alt: oklch(0.155 0.005 285.823);
+  --awb-panel: oklch(0.18 0.005 285.823);
+  --awb-panel-alt: oklch(0.155 0.005 285.823);
+  --awb-panel-elevated: oklch(0.235 0.007 285.885);
+  --awb-panel-soft: oklch(0.21 0.006 285.885);
+  --awb-input: oklch(0.14 0.005 285.823);
+  --awb-input-soft: oklch(0.16 0.005 285.823);
   --awb-ink-strong: #f0f0ee;
   --awb-ink: #cdcdc9;
   --awb-ink-muted: #9a9a96;
   --awb-ink-faint: #777773;
-  --awb-rule: #2b2b2b;
-  --awb-rule-strong: #343434;
+  --awb-rule: oklch(1 0 0 / 6%);
+  --awb-rule-strong: oklch(1 0 0 / 10%);
   --awb-accent: #8c8f8d;
   --awb-accent-strong: #b6b9b7;
   --awb-accent-soft: rgba(140, 143, 141, 0.14);
@@ -109,7 +109,7 @@ button:disabled {
 }
 
 .awb-shell {
-  position: fixed;
+  position: absolute;
   inset: 0;
   display: grid;
   grid-template-columns: 296px minmax(0, 1fr) 336px;
@@ -137,14 +137,14 @@ button:disabled {
 .awb-shell__main {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
 .awb-shell__detail {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
   background: var(--awb-panel-alt);
 }
@@ -194,6 +194,7 @@ button:disabled {
 .awb-main__header p,
 .awb-list__empty {
   margin: 0;
+  padding: 4px 16px;
   color: var(--awb-ink-muted);
 }
 

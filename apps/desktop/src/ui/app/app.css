@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--awb-font-sans);
+  --font-mono: var(--awb-font-mono);
+  --color-app-shell: var(--app-shell);
+  --color-page-canvas: var(--page-canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+  --color-surface-border: var(--surface-border);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint-foreground: var(--faint-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+@theme {
+  --text-micro: 11px;
+  --text-micro--line-height: 15px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-label: 13px;
+  --text-label--line-height: 18px;
+  --text-body: 14px;
+  --text-body--line-height: 20px;
+  --text-title-sm: 16px;
+  --text-title-sm--line-height: 24px;
+  --text-title: 18px;
+  --text-title--line-height: 28px;
+  --text-display-sm: 24px;
+  --text-display-sm--line-height: 32px;
+}
+
+:root {
+  --radius: 0.625rem;
+  --app-shell: oklch(0.155 0.005 285.823);
+  --page-canvas: oklch(0.18 0.005 285.823);
+  --surface: oklch(0.21 0.006 285.885);
+  --surface-raised: oklch(0.235 0.007 285.885);
+  --surface-hover: oklch(0.274 0.006 286.033);
+  --surface-selected: oklch(0.3 0.006 286.033);
+  --surface-border: oklch(1 0 0 / 10%);
+  --floating-shadow: 0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28);
+  --background: var(--page-canvas);
+  --foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --faint-foreground: oklch(0.6 0.015 286.067);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 6%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --brand: oklch(0.62 0.19 25);
+  --brand-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --success: oklch(0.65 0.15 145);
+  --warning: oklch(0.7 0.16 85);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+}
+
+@utility surface-shadow {
+  box-shadow: var(--floating-shadow);
+}
+
+/* Host for the embedded session shell; .awb-shell fills this box. */
+.vm-think {
+  position: absolute;
+  inset: 0;
+}

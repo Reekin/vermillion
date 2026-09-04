@@ -5,7 +5,7 @@ import {
   createDesktopTransport,
   type DesktopTransport
 } from "../transport/desktop-transport.js";
-import { ChatShellApp } from "./chat-shell/ChatShellApp.js";
+import { App } from "./app/App.js";
 import { RendererErrorBoundary } from "./RendererErrorBoundary.js";
 
 const root = document.getElementById("root");
@@ -77,11 +77,7 @@ if (transport) {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <RendererErrorBoundary transport={transport}>
-        <ChatShellApp
-          store={store}
-          transport={transport}
-          title="Vermillion"
-        />
+        <App sessionStore={store} transport={transport} />
       </RendererErrorBoundary>
     </React.StrictMode>
   );
