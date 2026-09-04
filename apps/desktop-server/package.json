@@ -1,0 +1,23 @@
+{
+  "name": "@vermillion/desktop-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "pnpm exec tsc -b tsconfig.json --pretty false",
+    "typecheck": "pnpm exec tsc -b tsconfig.json --pretty false",
+    "lint": "pnpm exec tsc -b tsconfig.json --pretty false",
+    "test": "pnpm exec vitest run"
+  },
+  "dependencies": {
+    "@vermillion/core": "workspace:*",
+    "@vermillion/shared": "workspace:*",
+    "@vermillion/adapters": "workspace:*",
+    "zod": "^3.25.76"
+  }
+}

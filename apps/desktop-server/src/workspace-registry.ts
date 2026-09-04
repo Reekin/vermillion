@@ -1,0 +1,481 @@
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { z } from "zod";
+import {
+  arePathsEquivalent,
+  toDisplayPath,
+  writeEngineExecutionPreference,
+  zExecutionPreferencesByEngineIdSchema,
+  zSessionExecutionProfileInputSchema,
+  type ExecutionPreferencesByEngineId
+} from "@vermillion/shared";
+import {
+  cloneAllowedModelIdsByEngineId,
+  cloneCustomModelReasoningOptionIdsByEngineId,
+  cloneExecutionPreferencesByEngineId,
+  cloneModelSettings
+} from "./model-settings.js";
+import {
+  loadJsonFile,
+  PersistentStoreCorruptionError,
+  saveJsonFile
+} from "./persistence-store.js";
+
+const workspaceRecordSchema = z.object({
+  workspaceId: z.string().min(1),
+  absolutePath: z.string().min(1),
+  label: z.string().min(1),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1)
+});
+
+const workspaceRegistryDocumentSchema = z.object({
+  version: z.literal(1),
+  workspaces: z.array(workspaceRecordSchema).default([]),
+  expandedWorkspaceIds: z.array(z.string().min(1)).default([]),
+  expandedSessionIds: z.array(z.string().min(1)).default([]),
+  pinnedSessionIds: z.array(z.string().min(1)).default([]),
+  defaultNewSessionEngineId: z.string().min(1).optional(),
+  engineProgramPathsByEngineId: z.record(z.string(), z.string().min(1)).default({}),
+  allowedModelIdsByEngineId: z
+    .record(z.string(), z.array(z.string().min(1)))
+    .default({}),
+  customModelReasoningOptionIdsByEngineId: z
+    .record(z.string(), z.record(z.string(), z.array(z.string().min(1))))
+    .default({}),
+  executionPreferencesByEngineId: zExecutionPreferencesByEngineIdSchema,
+  lastActiveWorkspaceId: z.string().min(1).optional(),
+  lastActiveSessionId: z.string().min(1).optional()
+});
+
+const legacyExecutionSettingsSchema = z.object({
+  serviceTierPreferencesByEngineId: z
+    .record(z.string(), z.record(z.string(), z.string().min(1).nullable()))
+    .default({}),
+  lastExecutionByEngineId: z
+    .record(z.string(), zSessionExecutionProfileInputSchema)
+    .default({})
+});
+
+export type WorkspaceRecord = z.infer<typeof workspaceRecordSchema>;
+export type WorkspaceRegistryDocument = z.infer<
+  typeof workspaceRegistryDocumentSchema
+>;
+
+type Clock = () => string;
+type IdFactory = () => string;
+
+export type WorkspaceRegistryServiceOptions = {
+  baseDir?: string;
+  now?: Clock;
+  createWorkspaceId?: IdFactory;
+};
+
+export type WorkspaceRegistrationInput = {
+  absolutePath: string;
+  label?: string;
+  workspaceId?: string;
+};
+
+const createOpaqueWorkspaceId = (): string =>
+  `workspace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+const defaultBaseDir = (): string => join(homedir(), ".vermillion");
+
+const dedupeIds = (items: readonly string[]): string[] => [...new Set(items)];
+
+const migrateWorkspaceRegistry = (
+  document: Record<string, unknown>
+): Record<string, unknown> => {
+  const legacy = legacyExecutionSettingsSchema.parse(document);
+  let executionPreferencesByEngineId: ExecutionPreferencesByEngineId =
+    Object.fromEntries(
+      Object.entries(legacy.serviceTierPreferencesByEngineId).map(
+        ([engineId, tiers]) => [
+          engineId,
+          {
+            modelPreferences: Object.fromEntries(
+              Object.entries(tiers).map(([modelId, serviceTierId]) => [
+                modelId,
+                { serviceTierId }
+              ])
+            )
+          }
+        ]
+      )
+    );
+  for (const [engineId, execution] of Object.entries(
+    legacy.lastExecutionByEngineId
+  )) {
+    if (!execution.modelId) {
+      if (execution.modeId) {
+        executionPreferencesByEngineId[engineId] = {
+          ...executionPreferencesByEngineId[engineId],
+          modeId: execution.modeId,
+          modelPreferences:
+            executionPreferencesByEngineId[engineId]?.modelPreferences ?? {}
+        };
+      }
+      continue;
+    }
+    const legacyModelPreference =
+      executionPreferencesByEngineId[engineId]?.modelPreferences[
+        execution.modelId
+      ];
+    executionPreferencesByEngineId = writeEngineExecutionPreference(
+      executionPreferencesByEngineId,
+      engineId,
+      {
+        modeId: execution.modeId,
+        modelId: execution.modelId,
+        reasoningOptionId: execution.reasoningOptionId,
+        serviceTierId: Object.hasOwn(
+          legacyModelPreference ?? {},
+          "serviceTierId"
+        )
+          ? legacyModelPreference?.serviceTierId
+          : execution.serviceTierId
+      }
+    );
+  }
+  return {
+    ...document,
+    executionPreferencesByEngineId
+  };
+};
+
+export class WorkspaceRegistryService {
+  private readonly filePath: string;
+  private readonly now: Clock;
+  private readonly createWorkspaceId: IdFactory;
+  private document: WorkspaceRegistryDocument = {
+    version: 1,
+    workspaces: [],
+    expandedWorkspaceIds: [],
+    expandedSessionIds: [],
+    pinnedSessionIds: [],
+    engineProgramPathsByEngineId: {},
+    allowedModelIdsByEngineId: {},
+    customModelReasoningOptionIdsByEngineId: {},
+    executionPreferencesByEngineId: {}
+  };
+  private loadPromise: Promise<void> | undefined;
+  private persistPromise = Promise.resolve();
+  private revision = 0;
+  private sessionBrowserRevision = 0;
+
+  public constructor(options: WorkspaceRegistryServiceOptions = {}) {
+    const baseDir = options.baseDir ?? defaultBaseDir();
+    this.filePath = join(baseDir, "workspace-registry.json");
+    this.now = options.now ?? (() => new Date().toISOString());
+    this.createWorkspaceId = options.createWorkspaceId ?? createOpaqueWorkspaceId;
+  }
+
+  public async ready(): Promise<void> {
+    if (!this.loadPromise) {
+      this.loadPromise = this.load();
+    }
+    await this.loadPromise;
+  }
+
+  public listWorkspaces(): WorkspaceRecord[] {
+    return [...this.document.workspaces];
+  }
+
+  public getWorkspace(workspaceId: string): WorkspaceRecord | undefined {
+    return this.document.workspaces.find((workspace) => workspace.workspaceId === workspaceId);
+  }
+
+  public getState(): WorkspaceRegistryDocument {
+    return {
+      ...this.document,
+      workspaces: [...this.document.workspaces],
+      expandedWorkspaceIds: [...this.document.expandedWorkspaceIds],
+      expandedSessionIds: [...this.document.expandedSessionIds],
+      pinnedSessionIds: [...this.document.pinnedSessionIds],
+      engineProgramPathsByEngineId: { ...this.document.engineProgramPathsByEngineId },
+      ...cloneModelSettings(this.document)
+    };
+  }
+
+  public getRevision(): number {
+    return this.revision;
+  }
+
+  public getSessionBrowserRevision(): number {
+    return this.sessionBrowserRevision;
+  }
+
+  public async registerWorkspace(
+    input: WorkspaceRegistrationInput
+  ): Promise<WorkspaceRecord> {
+    await this.ready();
+    const normalizedPath = resolve(toDisplayPath(input.absolutePath));
+    const existing = this.document.workspaces.find(
+      (workspace) => arePathsEquivalent(workspace.absolutePath, normalizedPath)
+    );
+    const timestamp = this.now();
+    if (existing) {
+      const updated = workspaceRecordSchema.parse({
+        ...existing,
+        label: input.label?.trim() || existing.label,
+        updatedAt: timestamp
+      });
+      this.document = {
+        ...this.document,
+        workspaces: this.document.workspaces.map((workspace) =>
+          workspace.workspaceId === updated.workspaceId ? updated : workspace
+        )
+      };
+      await this.persist();
+      return updated;
+    }
+
+    const created = workspaceRecordSchema.parse({
+      workspaceId: input.workspaceId ?? this.createWorkspaceId(),
+      absolutePath: normalizedPath,
+      label:
+        input.label?.trim() ||
+        normalizedPath.split(/[/\\]/).filter(Boolean).at(-1) ||
+        normalizedPath,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+
+    this.document = {
+      ...this.document,
+      workspaces: [...this.document.workspaces, created]
+    };
+    await this.persist();
+    return created;
+  }
+
+  public async reorderWorkspaces(workspaceIds: readonly string[]): Promise<void> {
+    await this.ready();
+    const knownIds = new Set(this.document.workspaces.map((workspace) => workspace.workspaceId));
+    const prioritized = workspaceIds.filter((workspaceId) => knownIds.has(workspaceId));
+    const orderedIds = dedupeIds([
+      ...prioritized,
+      ...this.document.workspaces.map((workspace) => workspace.workspaceId)
+    ]);
+    const byId = new Map(
+      this.document.workspaces.map((workspace) => [workspace.workspaceId, workspace] as const)
+    );
+    this.document = {
+      ...this.document,
+      workspaces: orderedIds
+        .map((workspaceId) => byId.get(workspaceId))
+        .filter((workspace): workspace is WorkspaceRecord => Boolean(workspace))
+    };
+    await this.persist();
+  }
+
+  public async removeWorkspace(workspaceId: string): Promise<boolean> {
+    await this.ready();
+    const existed = this.document.workspaces.some(
+      (workspace) => workspace.workspaceId === workspaceId
+    );
+    if (!existed) {
+      return false;
+    }
+
+    const removedActiveSelection = this.document.lastActiveWorkspaceId === workspaceId;
+    this.document = {
+      ...this.document,
+      workspaces: this.document.workspaces.filter(
+        (workspace) => workspace.workspaceId !== workspaceId
+      ),
+      expandedWorkspaceIds: this.document.expandedWorkspaceIds.filter(
+        (value) => value !== workspaceId
+      ),
+      lastActiveWorkspaceId:
+        this.document.lastActiveWorkspaceId === workspaceId
+          ? undefined
+          : this.document.lastActiveWorkspaceId,
+      lastActiveSessionId:
+        this.document.lastActiveWorkspaceId === workspaceId
+          ? undefined
+          : this.document.lastActiveSessionId
+    };
+    if (removedActiveSelection) {
+      this.sessionBrowserRevision += 1;
+    }
+    await this.persist();
+    return true;
+  }
+
+  public async setWorkspaceExpanded(
+    workspaceId: string,
+    expanded: boolean
+  ): Promise<void> {
+    await this.ready();
+    this.document = {
+      ...this.document,
+      expandedWorkspaceIds: expanded
+        ? dedupeIds([...this.document.expandedWorkspaceIds, workspaceId])
+        : this.document.expandedWorkspaceIds.filter((value) => value !== workspaceId)
+    };
+    await this.persist();
+  }
+
+  public async setSessionExpanded(
+    sessionId: string,
+    expanded: boolean
+  ): Promise<void> {
+    await this.ready();
+    this.document = {
+      ...this.document,
+      expandedSessionIds: expanded
+        ? dedupeIds([...this.document.expandedSessionIds, sessionId])
+        : this.document.expandedSessionIds.filter((value) => value !== sessionId)
+    };
+    await this.persist();
+  }
+
+  public async setSessionPinned(
+    sessionId: string,
+    pinned: boolean
+  ): Promise<void> {
+    await this.ready();
+    this.document = {
+      ...this.document,
+      pinnedSessionIds: pinned
+        ? dedupeIds([...this.document.pinnedSessionIds, sessionId])
+        : this.document.pinnedSessionIds.filter((value) => value !== sessionId)
+    };
+    this.sessionBrowserRevision += 1;
+    await this.persist();
+  }
+
+  public async setLastActiveSelection(input: {
+    workspaceId?: string;
+    sessionId?: string;
+  }): Promise<void> {
+    await this.ready();
+    this.document = {
+      ...this.document,
+      lastActiveWorkspaceId: input.workspaceId,
+      lastActiveSessionId: input.sessionId
+    };
+    this.sessionBrowserRevision += 1;
+    await this.persist();
+  }
+
+  public async updateSettings(input: {
+    defaultNewSessionEngineId?: string;
+    engineProgramPathsByEngineId?: Record<string, string>;
+    allowedModelIdsByEngineId?: Record<string, string[]>;
+    customModelReasoningOptionIdsByEngineId?: Record<
+      string,
+      Record<string, string[]>
+    >;
+    executionPreferencesByEngineId?: WorkspaceRegistryDocument["executionPreferencesByEngineId"];
+  }): Promise<void> {
+    await this.ready();
+    this.document = {
+      ...this.document,
+      ...(Object.hasOwn(input, "defaultNewSessionEngineId")
+        ? { defaultNewSessionEngineId: input.defaultNewSessionEngineId }
+        : {}),
+      ...(Object.hasOwn(input, "engineProgramPathsByEngineId")
+        ? {
+            engineProgramPathsByEngineId: Object.fromEntries(
+              Object.entries(input.engineProgramPathsByEngineId ?? {})
+                .map(([engineId, path]) => [engineId, path.trim()] as const)
+                .filter(([, path]) => path.length > 0)
+            )
+          }
+        : {}),
+      ...(Object.hasOwn(input, "allowedModelIdsByEngineId")
+        ? {
+            allowedModelIdsByEngineId: cloneAllowedModelIdsByEngineId(
+              input.allowedModelIdsByEngineId ?? {}
+            )
+          }
+        : {}),
+      ...(Object.hasOwn(input, "customModelReasoningOptionIdsByEngineId")
+        ? {
+            customModelReasoningOptionIdsByEngineId:
+              cloneCustomModelReasoningOptionIdsByEngineId(
+                input.customModelReasoningOptionIdsByEngineId ?? {}
+              )
+          }
+        : {}),
+      ...(Object.hasOwn(input, "executionPreferencesByEngineId")
+        ? {
+            executionPreferencesByEngineId:
+              cloneExecutionPreferencesByEngineId(
+                input.executionPreferencesByEngineId ?? {}
+              )
+          }
+        : {})
+    };
+    await this.persist();
+  }
+
+  private async load(): Promise<void> {
+    const loaded = await loadJsonFile<unknown>(this.filePath, {
+      version: 1,
+      workspaces: [],
+      expandedWorkspaceIds: [],
+      expandedSessionIds: [],
+      pinnedSessionIds: [],
+      engineProgramPathsByEngineId: {},
+      allowedModelIdsByEngineId: {},
+      customModelReasoningOptionIdsByEngineId: {},
+      executionPreferencesByEngineId: {}
+    });
+    const hadLegacySessionViewState =
+      typeof loaded.value === "object" &&
+      loaded.value !== null &&
+      "sessionViewStateBySessionId" in loaded.value;
+    const migratedValue =
+      typeof loaded.value === "object" &&
+      loaded.value !== null &&
+      !("defaultNewSessionEngineId" in loaded.value) &&
+      "defaultNewSessionAgentId" in loaded.value
+        ? {
+            ...loaded.value,
+            defaultNewSessionEngineId: (loaded.value as {
+              defaultNewSessionAgentId?: unknown;
+            }).defaultNewSessionAgentId
+          }
+        : loaded.value;
+    const needsExecutionPreferenceMigration =
+      typeof migratedValue === "object" &&
+      migratedValue !== null &&
+      !Object.hasOwn(migratedValue, "executionPreferencesByEngineId");
+    let currentValue = migratedValue;
+    if (needsExecutionPreferenceMigration) {
+      try {
+        currentValue = migrateWorkspaceRegistry(
+          migratedValue as Record<string, unknown>
+        );
+      } catch (error) {
+        throw new PersistentStoreCorruptionError(this.filePath, error);
+      }
+    }
+    const parsed = workspaceRegistryDocumentSchema.safeParse(currentValue);
+    if (!parsed.success) {
+      throw new PersistentStoreCorruptionError(this.filePath, parsed.error);
+    }
+    this.document = parsed.data;
+    this.revision += 1;
+    this.sessionBrowserRevision += 1;
+    if (hadLegacySessionViewState || needsExecutionPreferenceMigration) {
+      await this.persist();
+    }
+  }
+
+  private async persist(): Promise<void> {
+    this.revision += 1;
+    const pending = this.persistPromise.then(() =>
+      saveJsonFile(
+        this.filePath,
+        workspaceRegistryDocumentSchema.parse(this.document)
+      )
+    );
+    this.persistPromise = pending.catch(() => undefined);
+    await pending;
+  }
+}

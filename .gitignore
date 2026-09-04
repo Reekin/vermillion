@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-electron
+dist-web
+release/
+*.log
+*.tsbuildinfo
+.tmp/
+shots/

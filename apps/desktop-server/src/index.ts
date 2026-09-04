@@ -1,0 +1,29 @@
+export const DESKTOP_SERVER_APP_NAME = "@vermillion/desktop-server";
+
+export const desktopServerDependencies = ["@vermillion/core", "@vermillion/adapters", "@vermillion/shared"];
+
+export * from "./runtime-service.js";
+export * from "./workbench-rpc-handler.js";
+export * from "./prod-service.js";
+export * from "./local-preload.js";
+export * from "./file-action-service.js";
+export * from "./error-log-service.js";
+export * from "./diagnostic-log-service.js";
+export * from "./host-tools.js";
+export * from "./read-session-host-tool.js";
+export * from "./read-session-transcript.js";
+export * from "./workspace-registry.js";
+export * from "./session-index.js";
+export * from "./session-catalog.js";
+export * from "./session-discovery.js";
+export * from "./session-actions.js";
+export * from "./chat-tree-provider.js";
+export * from "./workbench-shell-service.js";
+export * from "./engine-extensions/codex/turn-changes-store.js";
+export * from "./engine-extensions/codex/turn-changes-service.js";
+export * from "./engine-extensions/codex/hook-activity-store.js";
+export * from "./engine-extensions/codex/hook-activity-service.js";
+export * from "./engine-control/engine-definition.js";
+export * from "./engine-control/engine-registry.js";
+export * from "./engine-control/capability-surface.js";
+export * from "./engine-control/native-onboarding-contract.js";

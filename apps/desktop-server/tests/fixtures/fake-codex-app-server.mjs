@@ -1,0 +1,2181 @@
+import readline from "node:readline";
+import { appendFileSync } from "node:fs";
+
+let nextThreadNumber = 1;
+let nextTurnNumber = 1;
+let nextApprovalRequestId = 0;
+let nextDynamicToolRequestId = 1000;
+let nextInteractionRequestId = 2000;
+const pendingApprovalByRequestId = new Map();
+const pendingDynamicToolByRequestId = new Map();
+const pendingInteractionByRequestId = new Map();
+let lastThreadStartParams = null;
+const threadStartParamsByThreadId = new Map();
+const threadGoalByThreadId = new Map();
+
+const send = (payload) => {
+  process.stdout.write(`${JSON.stringify(payload)}\n`);
+};
+
+const recordRequest = (payload) => {
+  if (!process.env.FAKE_CODEX_REQUEST_LOG) {
+    return;
+  }
+  appendFileSync(process.env.FAKE_CODEX_REQUEST_LOG, `${JSON.stringify(payload)}\n`);
+};
+
+const nowMs = () => 1_700_000_000_000;
+
+const buildThreadGoal = (threadId, input = {}) => ({
+  threadId,
+  objective: input.objective ?? "Hydrated goal from fake server",
+  status: input.status ?? "active",
+  tokenBudget: input.tokenBudget ?? null,
+  tokensUsed: input.tokensUsed ?? 12,
+  timeUsedSeconds: input.timeUsedSeconds ?? 3,
+  createdAt: input.createdAt ?? nowMs(),
+  updatedAt: input.updatedAt ?? nowMs() + 1_000
+});
+
+const getThreadGoal = (threadId) => {
+  const existing = threadGoalByThreadId.get(threadId);
+  if (existing) {
+    return existing;
+  }
+  if (!process.env.FAKE_CODEX_THREAD_GOAL_OBJECTIVE) {
+    return null;
+  }
+  const goal = buildThreadGoal(threadId, {
+    objective: process.env.FAKE_CODEX_THREAD_GOAL_OBJECTIVE,
+    status: process.env.FAKE_CODEX_THREAD_GOAL_STATUS ?? "active"
+  });
+  threadGoalByThreadId.set(threadId, goal);
+  return goal;
+};
+
+const emitHappyPath = ({ threadId, turnId, prompt, messagePhase = null }) => {
+  const messageId = `msg-${turnId}`;
+  const commandId = `cmd-${turnId}`;
+  const renderedPrompt =
+    prompt === "__THREAD_START_PARAMS__"
+      ? JSON.stringify(lastThreadStartParams ?? {})
+      : prompt;
+  const output = "$ pwd\nD:/workspace\n";
+
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "agentMessage",
+        id: messageId,
+        text: "",
+        phase: messagePhase,
+        memoryCitation: null
+      }
+    }
+  });
+  send({
+    method: "item/agentMessage/delta",
+    params: {
+      threadId,
+      turnId,
+      itemId: messageId,
+      delta: `Real Codex says: ${renderedPrompt}\n`
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "agentMessage",
+        id: messageId,
+        text: `Real Codex says: ${renderedPrompt}\n`,
+        phase: messagePhase,
+        memoryCitation: null
+      }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "commandExecution",
+        id: commandId,
+        command: "pwd",
+        cwd: "D:/workspace",
+        processId: "proc-1",
+        status: "inProgress",
+        commandActions: [],
+        aggregatedOutput: null,
+        exitCode: null,
+        durationMs: null
+      }
+    }
+  });
+  send({
+    method: "item/commandExecution/outputDelta",
+    params: {
+      threadId,
+      turnId,
+      itemId: commandId,
+      delta: "$ pwd\n"
+    }
+  });
+  send({
+    method: "item/commandExecution/outputDelta",
+    params: {
+      threadId,
+      turnId,
+      itemId: commandId,
+      delta: "D:/workspace\n"
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "commandExecution",
+        id: commandId,
+        command: "pwd",
+        cwd: "D:/workspace",
+        processId: "proc-1",
+        status: "completed",
+        commandActions: [],
+        aggregatedOutput: output,
+        exitCode: 0,
+        durationMs: 4
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "thread/tokenUsage/updated",
+    params: {
+      threadId,
+      turnId,
+      tokenUsage: {
+        total: {
+          totalTokens: 42000,
+          inputTokens: 40000,
+          cachedInputTokens: 12000,
+          outputTokens: 1200,
+          reasoningOutputTokens: 800
+        },
+        last: {
+          totalTokens: 2200,
+          inputTokens: 1500,
+          cachedInputTokens: 200,
+          outputTokens: 400,
+          reasoningOutputTokens: 300
+        },
+        modelContextWindow: 128000
+      }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitCollabPath = ({ threadId, turnId, keepRunning = false }) => {
+  const collabId = `collab-${turnId}`;
+  const childThreadId = "sub-thread-1";
+  const childTurnId = `child-${turnId}`;
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "thread/started",
+    params: {
+      thread: {
+        id: childThreadId,
+        source: {
+          subAgent: {
+            thread_spawn: {
+              parent_thread_id: threadId
+            }
+          }
+        },
+        status: { type: "active" },
+        agentNickname: "Reviewer"
+      }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId: childThreadId,
+      turn: { id: childTurnId }
+    }
+  });
+  const childUserMessage = {
+    type: "userMessage",
+    id: `user-${childTurnId}`,
+    content: [
+      {
+        type: "text",
+        text: "Review this file",
+        text_elements: []
+      }
+    ]
+  };
+  send({
+    method: "item/started",
+    params: {
+      threadId: childThreadId,
+      turnId: childTurnId,
+      item: childUserMessage
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId: childThreadId,
+      turnId: childTurnId,
+      item: childUserMessage
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId: childThreadId,
+      turnId: childTurnId,
+      item: {
+        type: "agentMessage",
+        id: `agent-${childTurnId}`,
+        text: "",
+        phase: "final_answer",
+        memoryCitation: null
+      }
+    }
+  });
+  send({
+    method: "item/agentMessage/delta",
+    params: {
+      threadId: childThreadId,
+      turnId: childTurnId,
+      itemId: `agent-${childTurnId}`,
+      delta: "Reviewed successfully"
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId: childThreadId,
+      turnId: childTurnId,
+      item: {
+        type: "agentMessage",
+        id: `agent-${childTurnId}`,
+        text: "Reviewed successfully",
+        phase: "final_answer",
+        memoryCitation: null
+      }
+    }
+  });
+  if (!keepRunning) {
+    send({
+      method: "turn/completed",
+      params: {
+        threadId: childThreadId,
+        turn: {
+          id: childTurnId,
+          status: "completed"
+        }
+      }
+    });
+  }
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "collabAgentToolCall",
+        id: collabId,
+        tool: "spawnAgent",
+        status: "inProgress",
+        senderThreadId: threadId,
+        receiverThreadIds: ["sub-thread-1"],
+        prompt: "Review this file",
+        model: "gpt-5",
+        reasoningEffort: "high",
+        agentsStates: {
+          "sub-thread-1": {
+            status: "pendingInit",
+            message: null
+          }
+        }
+      }
+    }
+  });
+  if (keepRunning) {
+    return;
+  }
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "collabAgentToolCall",
+        id: collabId,
+        tool: "spawnAgent",
+        status: "completed",
+        senderThreadId: threadId,
+        receiverThreadIds: ["sub-thread-1"],
+        prompt: "Review this file",
+        model: "gpt-5",
+        reasoningEffort: "high",
+        agentsStates: {
+          "sub-thread-1": {
+            status: "completed",
+            message: "Reviewed successfully"
+          }
+        }
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitToolUserInputRequest = ({ threadId, turnId }) => {
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  const requestId = nextInteractionRequestId++;
+  pendingInteractionByRequestId.set(requestId, { threadId, turnId });
+  send({
+    id: requestId,
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId,
+      turnId,
+      itemId: `tool-${turnId}`,
+      questions: [
+        {
+          id: "confirm",
+          question: "Confirm value"
+        }
+      ]
+    }
+  });
+};
+
+const emitMcpElicitationRequest = ({ threadId }) => {
+  const requestId = nextInteractionRequestId++;
+  pendingInteractionByRequestId.set(requestId, { threadId });
+  send({
+    id: requestId,
+    method: "mcpServer/elicitation/request",
+    params: {
+      threadId,
+      turnId: null,
+      serverName: "browser",
+      mode: "form",
+      message: "Authorize out-of-band MCP prompt",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          confirmed: {
+            type: "boolean"
+          }
+        }
+      },
+      _meta: {
+        codex_approval_kind: "mcp_tool_call"
+      }
+    }
+  });
+};
+
+const emitMcpToolCallPath = ({ threadId, turnId }) => {
+  const item = {
+    type: "mcpToolCall",
+    id: `mcp-${turnId}`,
+    server: "browser",
+    tool: "open",
+    status: "completed",
+    arguments: { url: "https://example.com" },
+    result: {
+      content: [
+        {
+          type: "text",
+          text: "opened"
+        }
+      ],
+      structuredContent: null,
+      _meta: {
+        trace: "ok"
+      }
+    },
+    error: null,
+    durationMs: 5
+  };
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        ...item,
+        status: "inProgress",
+        result: null
+      }
+    }
+  });
+  send({
+    method: "item/mcpToolCall/progress",
+    params: {
+      threadId,
+      turnId,
+      itemId: item.id,
+      message: "opening page"
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitFileChangePath = ({ threadId, turnId }) => {
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "fileChange",
+        id: `file-${turnId}`,
+        status: "completed",
+        changes: [
+          {
+            path: "apps/desktop/abc.txt",
+            kind: {
+              type: "update",
+              move_path: null
+            },
+            diff: "@@ -1 +1,3 @@\n-\n+第一行内容\n+第二行内容\n+第三行内容\n"
+          }
+        ]
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitProcessPath = ({ threadId, turnId }) => {
+  const reasoningId = `reason-${turnId}`;
+  const emptyReasoningId = `reason-empty-${turnId}`;
+  const webSearchId = `web-${turnId}`;
+  const compactionId = `compact-${turnId}`;
+  const messageId = `msg-${turnId}`;
+
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "reasoning",
+        id: reasoningId,
+        summary: [],
+        content: []
+      }
+    }
+  });
+  send({
+    method: "item/reasoning/summaryPartAdded",
+    params: {
+      threadId,
+      turnId,
+      itemId: reasoningId,
+      summaryIndex: 0
+    }
+  });
+  send({
+    method: "item/reasoning/summaryTextDelta",
+    params: {
+      threadId,
+      turnId,
+      itemId: reasoningId,
+      delta: "Looking up current market data.\n",
+      summaryIndex: 0
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "reasoning",
+        id: reasoningId,
+        summary: ["Looking up current market data."],
+        content: []
+      }
+    }
+  });
+  send({
+    method: "rawResponseItem/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "reasoning",
+        summary: [
+          {
+            type: "summary_text",
+            text: "Comparing low-power CPU options."
+          }
+        ],
+        content: [],
+        encrypted_content: null
+      }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "reasoning",
+        id: emptyReasoningId,
+        summary: [],
+        content: []
+      }
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "reasoning",
+        id: emptyReasoningId,
+        summary: [],
+        content: []
+      }
+    }
+  });
+  send({
+    method: "rawResponseItem/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "web_search_call",
+        status: "completed",
+        action: {
+          type: "search",
+          query: "AMD Ryzen low power official specs",
+          queries: ["Ryzen 7840U official TDP"]
+        }
+      }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "webSearch",
+        id: webSearchId,
+        query: "mini PC low power CPUs",
+        action: {
+          type: "search",
+          query: "mini PC low power CPUs",
+          queries: ["Intel N150 official specs"]
+        }
+      }
+    }
+  });
+  send({
+    method: "rawResponseItem/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "web_search_call",
+        status: "completed",
+        action: {
+          type: "search",
+          query: "mini PC low power CPUs",
+          queries: ["Intel N150 official specs"]
+        }
+      }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "contextCompaction",
+        id: compactionId
+      }
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "contextCompaction",
+        id: compactionId
+      }
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "webSearch",
+        id: webSearchId,
+        query: "mini PC low power CPUs",
+        action: {
+          type: "search",
+          query: "mini PC low power CPUs",
+          queries: ["Intel N150 official specs"]
+        }
+      }
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "agentMessage",
+        id: messageId,
+        text: "Finished process events.",
+        phase: "final_answer",
+        memoryCitation: null
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitRuntimeErrorPath = ({ threadId, turnId }) => {
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "error",
+    params: {
+      threadId,
+      turnId,
+      error: {
+        message: "Boom from app-server",
+        codexErrorInfo: "other",
+        additionalDetails: "extra details"
+      },
+      willRetry: false
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "failed",
+        error: {
+          message: "Boom from app-server",
+          codexErrorInfo: "other",
+          additionalDetails: "extra details"
+        }
+      }
+    }
+  });
+};
+
+const emitRawCustomToolPath = ({ threadId, turnId }) => {
+  const callId = `apply-patch-${turnId}`;
+  const patch = "*** Begin Patch\n*** Add File: live.txt\n+live line\n*** End Patch\n";
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "rawResponseItem/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "custom_tool_call",
+        status: "completed",
+        call_id: callId,
+        name: "apply_patch",
+        input: patch
+      }
+    }
+  });
+  send({
+    method: "rawResponseItem/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "custom_tool_call_output",
+        call_id: callId,
+        name: "apply_patch",
+        output:
+          "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM live.txt\n"
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitRawCustomToolOutputOnlyPath = ({ threadId, turnId }) => {
+  const callId = `notify-${turnId}`;
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "rawResponseItem/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "custom_tool_call_output",
+        call_id: callId,
+        name: "notify",
+        output: [
+          {
+            type: "input_text",
+            text: "background notification"
+          }
+        ]
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitImageItemsPath = ({ threadId, turnId }) => {
+  const imageViewId = `image-view-${turnId}`;
+  const imageGenerationId = `image-generation-${turnId}`;
+  const imagePath = "D:/workspace/sample.png";
+  const generatedPath = "D:/workspace/generated.png";
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "imageView",
+        id: imageViewId,
+        path: imagePath
+      }
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "imageView",
+        id: imageViewId,
+        path: imagePath
+      }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "imageGeneration",
+        id: imageGenerationId,
+        status: "inProgress",
+        revisedPrompt: "A quiet dashboard screenshot",
+        result: ""
+      }
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "imageGeneration",
+        id: imageGenerationId,
+        status: "completed",
+        revisedPrompt: "A quiet dashboard screenshot",
+        result: "ignored-when-saved-path-exists",
+        savedPath: generatedPath
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitUnhandledDiagnosticsPath = ({ threadId, turnId }) => {
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  for (const suffix of ["a", "b"]) {
+    send({
+      method: "item/completed",
+      params: {
+        threadId,
+        turnId,
+        item: {
+          type: "plan",
+          id: `plan-${suffix}-${turnId}`,
+          text: "diagnostic plan"
+        }
+      }
+    });
+    send({
+      method: "rawResponseItem/completed",
+      params: {
+        threadId,
+        turnId,
+        item: {
+          type: "tool_search_call",
+          call_id: `tool-search-${suffix}-${turnId}`,
+          status: "completed",
+          execution: "search",
+          arguments: {
+            query: "diagnostic"
+          }
+        }
+      }
+    });
+  }
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const sampleHookRun = ({
+  id,
+  eventName,
+  status,
+  entries = [],
+  durationMs = null,
+  scope = "turn"
+}) => ({
+  id,
+  eventName,
+  handlerType: "command",
+  executionMode: "sync",
+  scope,
+  sourcePath: "D:/workspace/.codex/hooks.json",
+  source: "project",
+  displayOrder: 1,
+  status,
+  statusMessage: status === "running" ? "running hook" : null,
+  startedAt: 1700000000000,
+  completedAt: status === "running" ? null : 1700000000025,
+  durationMs,
+  entries
+});
+
+const emitHookActivityPath = ({ threadId, turnId }) => {
+  const startedRun = sampleHookRun({
+    id: `hook-${turnId}`,
+    eventName: "preToolUse",
+    status: "running"
+  });
+  const completedRun = sampleHookRun({
+    id: `hook-${turnId}`,
+    eventName: "preToolUse",
+    status: "completed",
+    durationMs: 25,
+    entries: [
+      {
+        kind: "warning",
+        text: "checked command policy"
+      },
+      {
+        kind: "context",
+        text: "workspace hook context"
+      }
+    ]
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "hook/started",
+    params: {
+      threadId,
+      turnId,
+      run: startedRun
+    }
+  });
+  send({
+    method: "hook/completed",
+    params: {
+      threadId,
+      turnId,
+      run: completedRun
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitThreadScopeHookActivityPath = ({ threadId, turnId }) => {
+  const completedRun = sampleHookRun({
+    id: `thread-hook-${turnId}`,
+    eventName: "sessionStart",
+    status: "completed",
+    scope: "thread",
+    durationMs: 12,
+    entries: [
+      {
+        kind: "context",
+        text: "thread startup hook context"
+      }
+    ]
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "hook/completed",
+    params: {
+      threadId,
+      turnId: null,
+      run: completedRun
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitPostCompleteHookActivityPath = ({ threadId, turnId }) => {
+  const completedRun = sampleHookRun({
+    id: `late-thread-hook-${turnId}`,
+    eventName: "stop",
+    status: "completed",
+    scope: "thread",
+    durationMs: 9
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+  send({
+    method: "hook/completed",
+    params: {
+      threadId,
+      turnId: null,
+      run: completedRun
+    }
+  });
+};
+
+const emitAsyncThreadScopeHookActivityPath = ({ threadId, turnId }) => {
+  const hookRunId = `async-thread-hook-${turnId}`;
+  const startedRun = sampleHookRun({
+    id: hookRunId,
+    eventName: "stop",
+    status: "running",
+    scope: "thread"
+  });
+  const completedRun = sampleHookRun({
+    id: hookRunId,
+    eventName: "stop",
+    status: "completed",
+    scope: "thread",
+    durationMs: 42,
+    entries: [
+      {
+        kind: "context",
+        text: "async hook completed after turn"
+      }
+    ]
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "hook/started",
+    params: {
+      threadId,
+      turnId: null,
+      run: startedRun
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+  send({
+    method: "hook/completed",
+    params: {
+      threadId,
+      turnId: null,
+      run: completedRun
+    }
+  });
+};
+
+const emitRecoverableRuntimeErrorPath = ({ threadId, turnId }) => {
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "error",
+    params: {
+      threadId,
+      turnId,
+      error: {
+        message: "Reconnecting... 1/5",
+        codexErrorInfo: "CODEX_APP_SERVER_ERROR"
+      },
+      willRetry: true
+    }
+  });
+};
+
+const emitApprovalResolution = ({ threadId, turnId, requestId, action }) => {
+  const commandId = `cmd-${turnId}`;
+
+  send({
+    method: "serverRequest/resolved",
+    params: {
+      threadId,
+      requestId
+    }
+  });
+
+  if (action !== "approve") {
+    send({
+      method: "thread/status/changed",
+      params: {
+        threadId,
+        status: { type: "idle" }
+      }
+    });
+    return;
+  }
+
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "commandExecution",
+        id: commandId,
+        command: "rm -rf tmp",
+        cwd: "D:/workspace",
+        processId: "proc-2",
+        status: "inProgress",
+        commandActions: [],
+        aggregatedOutput: null,
+        exitCode: null,
+        durationMs: null
+      }
+    }
+  });
+  send({
+    method: "item/commandExecution/outputDelta",
+    params: {
+      threadId,
+      turnId,
+      itemId: commandId,
+      delta: "approved\n"
+    }
+  });
+  send({
+    method: "item/completed",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "commandExecution",
+        id: commandId,
+        command: "rm -rf tmp",
+        cwd: "D:/workspace",
+        processId: "proc-2",
+        status: "completed",
+        commandActions: [],
+        aggregatedOutput: "approved\n",
+        exitCode: 0,
+        durationMs: 3
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed"
+      }
+    }
+  });
+};
+
+const emitReadSessionRequest = ({ threadId, turnId }) => {
+  const toolCallId = `read-session-${turnId}`;
+  const requestId = nextDynamicToolRequestId++;
+  const threadStartParams = threadStartParamsByThreadId.get(threadId);
+  const dynamicTool = (threadStartParams?.dynamicTools ?? []).find(
+    (tool) =>
+      tool?.namespace === "another_workbench" && tool?.name === "read_session"
+  );
+  const args = {
+    sessionId: "session-read-target"
+  };
+
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId,
+      status: { type: "active" }
+    }
+  });
+  send({
+    method: "turn/started",
+    params: {
+      threadId,
+      turn: { id: turnId }
+    }
+  });
+  send({
+    method: "item/started",
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: "dynamicToolCall",
+        id: toolCallId,
+        namespace: dynamicTool?.namespace ?? "another_workbench",
+        tool: dynamicTool?.name ?? "read_session",
+        arguments: args,
+        status: "inProgress",
+        contentItems: null,
+        success: null,
+        durationMs: null
+      }
+    }
+  });
+  pendingDynamicToolByRequestId.set(requestId, {
+    threadId,
+    turnId,
+    toolCallId,
+    namespace: dynamicTool?.namespace ?? "another_workbench",
+    tool: dynamicTool?.name ?? "read_session",
+    arguments: args
+  });
+  send({
+    id: requestId,
+    method: "item/tool/call",
+    params: {
+      threadId,
+      turnId,
+      callId: toolCallId,
+      namespace: dynamicTool?.namespace ?? "another_workbench",
+      tool: dynamicTool?.name ?? "read_session",
+      arguments: args
+    }
+  });
+};
+
+const emitDynamicToolResolution = ({ dynamicTool, response }) => {
+  const success = response?.success !== false;
+  send({
+    method: "item/completed",
+    params: {
+      threadId: dynamicTool.threadId,
+      turnId: dynamicTool.turnId,
+      item: {
+        type: "dynamicToolCall",
+        id: dynamicTool.toolCallId,
+        namespace: dynamicTool.namespace,
+        tool: dynamicTool.tool,
+        arguments: dynamicTool.arguments,
+        status: success ? "completed" : "failed",
+        contentItems: response?.contentItems ?? [],
+        success,
+        durationMs: 2
+      }
+    }
+  });
+  send({
+    method: "thread/status/changed",
+    params: {
+      threadId: dynamicTool.threadId,
+      status: { type: "idle" }
+    }
+  });
+  send({
+    method: "turn/completed",
+    params: {
+      threadId: dynamicTool.threadId,
+      turn: {
+        id: dynamicTool.turnId,
+        status: success ? "completed" : "failed"
+      }
+    }
+  });
+};
+
+const handleRequest = (payload) => {
+  recordRequest(payload);
+  if (
+    process.env.FAKE_CODEX_EXIT_ON_METHOD &&
+    process.env.FAKE_CODEX_EXIT_ON_METHOD === payload.method
+  ) {
+    process.exit(Number(process.env.FAKE_CODEX_EXIT_CODE ?? 23));
+  }
+  if (
+    process.env.FAKE_CODEX_HANG_METHOD &&
+    process.env.FAKE_CODEX_HANG_METHOD === payload.method
+  ) {
+    return;
+  }
+  if (payload.method === "initialized") {
+    return;
+  }
+
+  if (typeof payload.method === "string") {
+    switch (payload.method) {
+      case "initialize":
+        send({
+          id: payload.id,
+          result: {
+            accepted: true
+          }
+        });
+        return;
+      case "thread/start": {
+        lastThreadStartParams = payload.params ?? null;
+        const threadId = `thread-${nextThreadNumber++}`;
+        threadStartParamsByThreadId.set(threadId, payload.params ?? null);
+        send({
+          id: payload.id,
+          result: {
+            thread: {
+              id: threadId
+            }
+          }
+        });
+        return;
+      }
+      case "turn/start": {
+        const threadId = String(payload.params.threadId);
+        const prompt = String(payload.params.input?.[0]?.text ?? "");
+        const turnId = `turn-${nextTurnNumber++}`;
+
+        send({
+          id: payload.id,
+          result: {
+            turn: {
+              id: turnId
+            }
+          }
+        });
+
+        queueMicrotask(() => {
+          if (prompt.includes("permissions-approval")) {
+            send({
+              method: "thread/status/changed",
+              params: {
+                threadId,
+                status: { type: "active" }
+              }
+            });
+            send({
+              method: "turn/started",
+              params: {
+                threadId,
+                turn: { id: turnId }
+              }
+            });
+            const requestId = nextApprovalRequestId++;
+            pendingApprovalByRequestId.set(requestId, { threadId, turnId });
+            send({
+              id: requestId,
+              method: "item/permissions/requestApproval",
+              params: {
+                threadId,
+                turnId,
+                itemId: `perm-${turnId}`,
+                cwd: "D:/workspace",
+                permissions: {
+                  network: {
+                    domains: ["example.com"]
+                  },
+                  fileSystem: {
+                    entries: [
+                      {
+                        path: "D:/workspace",
+                        access: "read"
+                      }
+                    ]
+                  }
+                }
+              }
+            });
+            return;
+          }
+
+          if (prompt.includes("object-approval")) {
+            send({
+              method: "thread/status/changed",
+              params: {
+                threadId,
+                status: { type: "active" }
+              }
+            });
+            send({
+              method: "turn/started",
+              params: {
+                threadId,
+                turn: { id: turnId }
+              }
+            });
+            const requestId = nextApprovalRequestId++;
+            pendingApprovalByRequestId.set(requestId, { threadId, turnId });
+            send({
+              id: requestId,
+              method: "item/commandExecution/requestApproval",
+              params: {
+                threadId,
+                turnId,
+                itemId: `cmd-${turnId}`,
+                reason: "Need network policy amendment",
+                command: "curl https://example.com",
+                availableDecisions: [
+                  {
+                    applyNetworkPolicyAmendment: {
+                      network_policy_amendment: {
+                        host: "example.com",
+                        action: "allow"
+                      }
+                    }
+                  },
+                  "decline",
+                  "cancel"
+                ]
+              }
+            });
+            return;
+          }
+
+          if (prompt.includes("approval")) {
+            send({
+              method: "thread/status/changed",
+              params: {
+                threadId,
+                status: { type: "active" }
+              }
+            });
+            send({
+              method: "turn/started",
+              params: {
+                threadId,
+                turn: { id: turnId }
+              }
+            });
+            const requestId = nextApprovalRequestId++;
+            pendingApprovalByRequestId.set(requestId, { threadId, turnId });
+            send({
+              id: requestId,
+              method: "item/commandExecution/requestApproval",
+              params: {
+                threadId,
+                turnId,
+                itemId: `cmd-${turnId}`,
+                reason: "Need permission to continue",
+                command: "rm -rf tmp",
+                availableDecisions: ["acceptForSession", "decline", "cancel"]
+              }
+            });
+            return;
+          }
+
+
+          if (prompt.includes("read-session-tool")) {
+            emitReadSessionRequest({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("subagent")) {
+            emitCollabPath({
+              threadId,
+              turnId,
+              keepRunning: prompt.includes("subagent-running")
+            });
+            return;
+          }
+
+          if (prompt.includes("user-input")) {
+            emitToolUserInputRequest({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("mcp-elicitation-null")) {
+            emitMcpElicitationRequest({ threadId });
+            return;
+          }
+
+          if (prompt.includes("mcp-tool")) {
+            emitMcpToolCallPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("file-change")) {
+            emitFileChangePath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("async-thread-scope hook-activity")) {
+            emitAsyncThreadScopeHookActivityPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("thread-scope hook-activity")) {
+            emitThreadScopeHookActivityPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("post-complete hook-activity")) {
+            emitPostCompleteHookActivityPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("hook-activity")) {
+            emitHookActivityPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("recoverable-runtime-error")) {
+            emitRecoverableRuntimeErrorPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("runtime-error")) {
+            emitRuntimeErrorPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("process-events")) {
+            emitProcessPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("raw-custom-tool-output-only")) {
+            emitRawCustomToolOutputOnlyPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("raw-custom-tool")) {
+            emitRawCustomToolPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("image-items")) {
+            emitImageItemsPath({ threadId, turnId });
+            return;
+          }
+
+          if (prompt.includes("unhandled-diagnostics")) {
+            emitUnhandledDiagnosticsPath({ threadId, turnId });
+            return;
+          }
+
+          emitHappyPath({
+            threadId,
+            turnId,
+            prompt,
+            messagePhase: prompt.includes("commentary")
+              ? "commentary"
+              : prompt.includes("final-answer")
+                ? "final_answer"
+                : null
+          });
+        });
+        return;
+      }
+      case "turn/interrupt":
+        if (process.env.FAKE_CODEX_INTERRUPT_ERROR) {
+          send({
+            id: payload.id,
+            error: {
+              message: process.env.FAKE_CODEX_INTERRUPT_ERROR
+            }
+          });
+          return;
+        }
+        send({
+          id: payload.id,
+          result: {
+            interrupted: true
+          }
+        });
+        return;
+      case "thread/unsubscribe":
+        send({
+          id: payload.id,
+          result: {
+            status: "unsubscribed"
+          }
+        });
+        return;
+      case "thread/resume": {
+        const threadId = String(payload.params?.threadId ?? `thread-${nextThreadNumber++}`);
+        send({
+          id: payload.id,
+          result: {
+            thread: {
+              id: threadId,
+              turns: []
+            }
+          }
+        });
+        return;
+      }
+      case "thread/goal/get": {
+        const threadId = String(payload.params?.threadId ?? "");
+        send({
+          id: payload.id,
+          result: {
+            goal: getThreadGoal(threadId)
+          }
+        });
+        return;
+      }
+      case "thread/goal/set": {
+        const threadId = String(payload.params?.threadId ?? "");
+        const existing = getThreadGoal(threadId);
+        const goal = buildThreadGoal(threadId, {
+          ...existing,
+          objective:
+            typeof payload.params?.objective === "string"
+              ? payload.params.objective
+              : existing?.objective,
+          status:
+            typeof payload.params?.status === "string"
+              ? payload.params.status
+              : existing?.status,
+          tokenBudget:
+            Object.prototype.hasOwnProperty.call(payload.params ?? {}, "tokenBudget")
+              ? payload.params.tokenBudget
+              : existing?.tokenBudget,
+          updatedAt: nowMs() + 2_000
+        });
+        threadGoalByThreadId.set(threadId, goal);
+        send({
+          id: payload.id,
+          result: {
+            goal
+          }
+        });
+        send({
+          method: "thread/goal/updated",
+          params: {
+            threadId,
+            turnId: null,
+            goal
+          }
+        });
+        return;
+      }
+      case "thread/goal/clear": {
+        const threadId = String(payload.params?.threadId ?? "");
+        const cleared = threadGoalByThreadId.delete(threadId);
+        send({
+          id: payload.id,
+          result: {
+            cleared
+          }
+        });
+        if (cleared) {
+          send({
+            method: "thread/goal/cleared",
+            params: {
+              threadId
+            }
+          });
+        }
+        return;
+      }
+      case "thread/fork": {
+        const parentThreadId = String(payload.params?.threadId ?? "thread-parent");
+        const threadId = `thread-${nextThreadNumber++}`;
+        send({
+          id: payload.id,
+          result: {
+            thread: {
+              id: threadId,
+              forkedFromId: parentThreadId,
+              turns: []
+            },
+            model: payload.params?.model ?? "gpt-5",
+            modelProvider: payload.params?.modelProvider ?? "openai",
+            serviceTier: payload.params?.serviceTier ?? null,
+            cwd: payload.params?.cwd ?? "D:/workspace",
+            instructionSources: [],
+            approvalPolicy: payload.params?.approvalPolicy ?? "never",
+            approvalsReviewer: null,
+            sandbox: null,
+            reasoningEffort: null
+          }
+        });
+        return;
+      }
+      case "skills/list":
+        send({
+          id: payload.id,
+          result: {
+            skills: []
+          }
+        });
+        return;
+      case "config/batchWrite":
+        send({
+          id: payload.id,
+          result: {}
+        });
+        return;
+      case "config/mcpServer/reload":
+        send({
+          id: payload.id,
+          result: {}
+        });
+        return;
+      case "getAuthStatus":
+        send({
+          id: payload.id,
+          result: {
+            authMethod: "apikey",
+            authToken: payload.params?.includeToken
+              ? process.env.FAKE_CODEX_AUTH_TOKEN ?? null
+              : null,
+            requiresOpenaiAuth: false
+          }
+        });
+        return;
+      case "config/read":
+        send({
+          id: payload.id,
+          result: {
+            config: {
+              model_provider: "fake-provider",
+              model_providers: {
+                "fake-provider": {
+                  base_url:
+                    process.env.FAKE_CODEX_AUTH_BASE_URL ??
+                    "https://codex-auth.example.test/v1"
+                }
+              }
+            },
+            origins: {},
+            layers: null
+          }
+        });
+        return;
+      default:
+        send({
+          id: payload.id,
+          result: {
+            accepted: true
+          }
+        });
+        return;
+    }
+  }
+
+  if (payload.id !== undefined && payload.result) {
+    const dynamicTool = pendingDynamicToolByRequestId.get(payload.id);
+    if (dynamicTool) {
+      pendingDynamicToolByRequestId.delete(payload.id);
+      queueMicrotask(() => {
+        emitDynamicToolResolution({
+          dynamicTool,
+          response: payload.result
+        });
+      });
+      return;
+    }
+
+    const approval = pendingApprovalByRequestId.get(payload.id);
+    if (!approval) {
+      const interaction = pendingInteractionByRequestId.get(payload.id);
+      if (!interaction) {
+        return;
+      }
+      pendingInteractionByRequestId.delete(payload.id);
+      queueMicrotask(() => {
+        send({
+          method: "serverRequest/resolved",
+          params: {
+            requestId: payload.id
+          }
+        });
+        if (interaction.turnId) {
+          send({
+            method: "turn/completed",
+            params: {
+              threadId: interaction.threadId,
+              turn: {
+                id: interaction.turnId,
+                status: "completed"
+              }
+            }
+          });
+        }
+      });
+      return;
+    }
+    pendingApprovalByRequestId.delete(payload.id);
+    const action =
+      payload.result?.decision === "acceptForSession" ||
+      payload.result?.scope === "session"
+        ? "approve"
+        : payload.result?.decision === "decline"
+          ? "deny"
+          : "defer";
+    queueMicrotask(() => {
+      emitApprovalResolution({
+        ...approval,
+        requestId: payload.id,
+        action
+      });
+    });
+  }
+};
+
+const reader = readline.createInterface({
+  input: process.stdin,
+  crlfDelay: Infinity
+});
+
+reader.on("line", (line) => {
+  if (!line.trim()) {
+    return;
+  }
+  handleRequest(JSON.parse(line));
+});

@@ -1,0 +1,90 @@
+import { describe, expect, it } from "vitest";
+import type { Attachment } from "@vermillion/shared";
+import {
+  buildCodexTurnInput,
+  buildLocalEchoMessageText
+} from "../src/attachment-inputs.js";
+
+describe("attachment input helpers", () => {
+  it("renders attachment markdown into local echo content", () => {
+    const attachments: Attachment[] = [
+      {
+        attachmentId: "image-1",
+        mimeType: "image/png",
+        uri: "file:///C:/Users/TestUser/Pictures/reference.png",
+        name: "reference.png"
+      },
+      {
+        attachmentId: "file-1",
+        mimeType: "text/plain",
+        uri: "file:///D:/workspace/vermillion/README.md",
+        name: "README.md"
+      }
+    ];
+
+    expect(buildLocalEchoMessageText("Please inspect these.", attachments)).toBe(
+      "Please inspect these.\n\n![reference.png](file:///C:/Users/TestUser/Pictures/reference.png)\n[README.md](file:///D:/workspace/vermillion/README.md)"
+    );
+  });
+
+  it("renders image display URIs into local echo content without leaking data URIs", () => {
+    const attachments: Attachment[] = [
+      {
+        attachmentId: "image-1",
+        mimeType: "image/png",
+        uri: "data:image/png;base64,AAAA",
+        displayUri:
+          "file:///C:/Users/TestUser/AppData/Roaming/vermillion/attachments/pasted-image.png",
+        name: "clipboard.png"
+      }
+    ];
+
+    const text = buildLocalEchoMessageText("Please inspect this.", attachments);
+
+    expect(text).toBe(
+      "Please inspect this.\n\n![clipboard.png](file:///C:/Users/TestUser/AppData/Roaming/vermillion/attachments/pasted-image.png)"
+    );
+    expect(text).not.toContain("data:image/png;base64");
+  });
+
+  it("builds Codex turn input with images as structured items and files as text context", () => {
+    const inputs = buildCodexTurnInput("Review the attached context.", [
+      {
+        attachmentId: "image-1",
+        mimeType: "image/png",
+        uri: "file:///C:/Users/TestUser/Pictures/reference.png",
+        name: "reference.png"
+      },
+      {
+        attachmentId: "image-2",
+        mimeType: "image/png",
+        uri: "data:image/png;base64,AAAA",
+        displayUri: "file:///C:/Users/TestUser/AppData/Roaming/vermillion/clipboard.png",
+        name: "clipboard.png"
+      },
+      {
+        attachmentId: "file-1",
+        mimeType: "text/plain",
+        uri: "file:///D:/workspace/vermillion/README.md",
+        name: "README.md"
+      }
+    ]);
+
+    expect(inputs).toEqual([
+      {
+        type: "text",
+        text:
+          "Review the attached context.\n\nAttached file: README.md\nPath: D:\\workspace\\vermillion\\README.md",
+        text_elements: []
+      },
+      {
+        type: "localImage",
+        path: "C:\\Users\\TestUser\\Pictures\\reference.png"
+      },
+      {
+        type: "image",
+        url: "data:image/png;base64,AAAA"
+      }
+    ]);
+  });
+});
