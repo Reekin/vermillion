@@ -67,7 +67,7 @@ const ReviewRow = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbox
         <Badge>{workItem.risk}</Badge>
         {workItem.rejections.length > 0 && <Badge>第 {workItem.rejections.length + 1} 轮</Badge>}
       </div>
-      <p className="mt-1 text-caption text-muted-foreground">任务：{item.mission.title}</p>
+      <p className="mt-1 text-caption text-muted-foreground">{item.mission ? "任务：" + item.mission.title : "独立工单"}</p>
       {workItem.evidence && (
         <div className="mt-2 rounded-md border border-border bg-input px-3 py-2">
           <div className="eyebrow mb-1 px-0 pt-0">证据</div>

@@ -1,0 +1,125 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createMemoryWorkspaceSource } from "../src/memory-workspace-source.js";
+import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
+import { RoleService } from "../src/roles.js";
+import { WorkbenchService } from "../src/workbench-service.js";
+
+const defaultsDir = new URL("../roles/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const dirs: string[] = [];
+const cleanup: Array<() => void> = [];
+afterEach(async () => {
+  for (const fn of cleanup.splice(0)) fn();
+  await new Promise((r) => setTimeout(r, 100)); // let the recursive fs watcher release its handle
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5 })));
+});
+
+const tick = () => new Promise((r) => setTimeout(r, 30));
+const until = async (check: () => Promise<boolean>) => {
+  for (let i = 0; i < 100; i += 1) {
+    if (await check()) return;
+    await tick();
+  }
+  throw new Error("timeout");
+};
+
+/** Scripted runner: records opened sessions and messages; test completes turns by hand. */
+const createFakeRunner = () => {
+  const sessions: Array<{ sessionId: string; title: string; cwd: string; metadata: Record<string, unknown>; messages: string[]; reply?: string }> = [];
+  const listeners = new Set<(e: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void>();
+  const runner: AgentRunner = {
+    open: async (input) => {
+      const sessionId = "s" + (sessions.length + 1);
+      sessions.push({ sessionId, title: input.title, cwd: input.cwd, metadata: input.metadata, messages: [] });
+      return { sessionId };
+    },
+    send: async (sessionId, content) => { sessions.find((s) => s.sessionId === sessionId)!.messages.push(content); },
+    interrupt: async () => {},
+    lastReply: (sessionId) => sessions.find((s) => s.sessionId === sessionId)?.reply,
+    onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
+  };
+  const complete = (sessionId: string, reply: string) => {
+    sessions.find((s) => s.sessionId === sessionId)!.reply = reply;
+    for (const l of [...listeners]) l({ sessionId, turnId: "t", finishReason: "completed" });
+  };
+  return { runner, sessions, complete };
+};
+
+const setup = async () => {
+  const root = await mkdtemp(join(tmpdir(), "verm-orch-"));
+  const globalDir = await mkdtemp(join(tmpdir(), "verm-orch-roles-"));
+  dirs.push(root, globalDir);
+  const roles = new RoleService({ globalDir, defaultsDir });
+  await roles.ensureGlobal();
+  const service = new WorkbenchService({ workspaces: createMemoryWorkspaceSource(), roles });
+  cleanup.push(() => service.dispose());
+  const ws = await service.addWorkspace({ rootPath: root, label: "O" });
+  await service.setAutomation(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+  const fake = createFakeRunner();
+  const orchestrator = new Orchestrator({ service, roles, runner: fake.runner, maxIdleTurns: 1 });
+  orchestrator.start();
+  cleanup.push(() => orchestrator.dispose());
+  return { service, ws, ...fake };
+};
+
+describe("Orchestrator", () => {
+  it("opens a steward per new revision and a worker per queued item, then closes the run on submit", async () => {
+    const { service, ws, sessions, complete } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n- login\n");
+    const mission = await service.createMission(ws.workspaceId, { title: "Login", summary: "" });
+    await until(async () => sessions.some((s) => s.metadata.role === "steward" && s.messages.length > 0));
+    const steward = sessions.find((s) => s.metadata.role === "steward")!;
+    expect(steward.messages[0]).toContain("missionId: " + mission.missionId);
+    expect(steward.messages[0]).toContain("+- login");
+
+    // steward creates a work item via the service (as the CLI would), then its turn ends
+    const item = await service.createWorkItem(ws.workspaceId, {
+      missionId: mission.missionId, title: "Impl login", objective: "do", risk: "R2",
+      refs: [{ path: ".vermillion/docs/spec.md", commit: mission.revisions[0]!.commit }],
+      scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: [{ given: "g", when: "w", then: "t" }]
+    });
+    complete(steward.sessionId, "建了 1 个工单");
+    await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
+    const worker = sessions.find((s) => s.metadata.role === "worker")!;
+    expect(worker.metadata.workItemId).toBe(item.workItemId);
+    expect(worker.cwd).toContain("worktrees");
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "running");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "steward" && r.status === "done"));
+    const runs = await service.listRuns(ws.workspaceId);
+    expect(runs.map((r) => r.role + ":" + r.status).sort()).toEqual(["steward:done", "worker:running"]);
+
+    // worker submits, then its turn ends -> run done, nothing else scheduled
+    await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [{ index: 0, pass: true, evidence: "seen" }], verdict: "pass" } });
+    complete(worker.sessionId, "done");
+    await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("review");
+  });
+
+  it("runs the supervisor after an unfinished worker turn and requeues after too many idle turns", async () => {
+    const { service, ws, sessions, complete } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Package", objective: "pnpm package", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] });
+    await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
+    const worker = sessions.find((s) => s.metadata.role === "worker")!;
+    expect(worker.cwd).not.toContain("worktrees");
+    complete(worker.sessionId, "still going");
+    await until(async () => sessions.some((s) => s.metadata.role === "supervisor" && s.messages.length > 0));
+    const supervisor = sessions.find((s) => s.metadata.role === "supervisor")!;
+    expect(supervisor.messages[0]).toContain("Worker turn #1");
+    complete(supervisor.sessionId, "remind: 别跑题");
+    await until(async () => worker.messages.length === 2);
+    expect(worker.messages[1]).toContain("Supervisor 提醒：别跑题");
+    complete(worker.sessionId, "still going");
+    await until(async () => sessions.filter((s) => s.metadata.role === "supervisor").length === 1 && supervisor.messages.length === 2);
+    complete(supervisor.sessionId, "none");
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.lastFailure === "多轮未提交");
+    // requeued and immediately picked up again by a fresh worker session
+    await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2 && sessions[sessions.length - 1]!.messages.length > 0);
+    const retried = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    expect(retried.status).toBe("running");
+    expect(retried.run.attempts).toBe(1);
+    expect(sessions[sessions.length - 1]!.messages[0]).toContain("上次运行失败：多轮未提交");
+    expect((await service.listRuns(ws.workspaceId)).filter((r) => r.role === "worker").map((r) => r.status).sort()).toEqual(["failed", "running"]);
+  });
+});

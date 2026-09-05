@@ -1,11 +1,15 @@
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { STATE_DIR } from "./docs.js";
 import type { z } from "zod";
 import {
+  zAgentRun,
+  zAutomation,
   zDecisionCard,
   zMission,
   zWorkItem,
+  type AgentRun,
+  type Automation,
   type DecisionCard,
   type Mission,
   type WorkItem
@@ -67,6 +71,8 @@ export class WorkspaceStore {
   readonly missions: Collection<Mission>;
   readonly workItems: Collection<WorkItem>;
   readonly decisions: Collection<DecisionCard>;
+  readonly runs: Collection<AgentRun>;
+  private readonly automationPath: string;
 
   constructor(rootPath: string) {
     this.rootPath = rootPath;
@@ -74,6 +80,27 @@ export class WorkspaceStore {
     this.missions = createCollection(join(this.stateDir, "missions"), zMission, "missionId");
     this.workItems = createCollection(join(this.stateDir, "workitems"), zWorkItem, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
+    this.runs = createCollection(join(this.stateDir, "runs"), zAgentRun, "runId");
+    this.automationPath = join(this.stateDir, "automation.json");
+  }
+
+  async readAutomation(): Promise<Automation> {
+    try {
+      return zAutomation.parse(JSON.parse(await readFile(this.automationPath, "utf8")));
+    } catch {
+      return { enabled: false, maxWorkers: 2 };
+    }
+  }
+
+  async writeAutomation(value: Automation): Promise<Automation> {
+    const parsed = zAutomation.parse(value);
+    await mkdir(this.stateDir, { recursive: true });
+    await writeJsonAtomic(this.automationPath, parsed);
+    return parsed;
+  }
+
+  async removeRun(runId: string): Promise<void> {
+    await rm(join(this.stateDir, "runs", runId + ".json"), { force: true });
   }
 
   async exists(): Promise<boolean> {

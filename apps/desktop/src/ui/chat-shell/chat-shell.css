@@ -395,7 +395,7 @@ button:disabled {
 
 .awb-chat-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 33.333%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(100%, 92ch)) minmax(0, 1fr);
   gap: 6px;
   padding: 10px 0 12px;
   border-bottom: 1px solid var(--awb-rule);
@@ -511,7 +511,7 @@ button:disabled {
 
 .awb-message__content {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 33.333%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(100%, 92ch)) minmax(0, 1fr);
   color: var(--awb-ink);
 }
 
@@ -634,7 +634,7 @@ button:disabled {
 
 .awb-chat-entry > .awb-turn__process--history {
   grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 33.333%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(100%, 92ch)) minmax(0, 1fr);
 }
 
 .awb-turn__process--history > * {

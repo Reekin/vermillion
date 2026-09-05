@@ -93,12 +93,16 @@ export const zRun = z.object({
   lastTurnId: z.string().optional(),
   heartbeatAt: z.string().optional(),
   worktreePath: z.string().optional(),
-  branch: z.string().optional()
+  branch: z.string().optional(),
+  /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
+  lastFailure: z.string().optional(),
+  attempts: z.number().int().nonnegative().optional()
 });
 
 export const zWorkItem = z.object({
   workItemId: z.string().min(1),
-  missionId: z.string().min(1),
+  /** Absent for standalone operations (package, run tests, ...) that change no doc. */
+  missionId: z.string().min(1).optional(),
   title: z.string().min(1),
   objective: z.string(),
   status: zWorkItemStatus,
@@ -162,9 +166,37 @@ export type DocChange = z.infer<typeof zDocChange>;
 
 export const zInboxItem = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("decision"), workspaceId: z.string(), card: zDecisionCard }),
-  z.object({ kind: z.literal("review"), workspaceId: z.string(), workItem: zWorkItem, mission: zMission })
+  z.object({ kind: z.literal("review"), workspaceId: z.string(), workItem: zWorkItem, mission: zMission.optional() })
 ]);
 export type InboxItem = z.infer<typeof zInboxItem>;
+
+/** Per-workspace automation switch; stored at .vermillion/automation.json. */
+export const zAutomation = z.object({
+  enabled: z.boolean(),
+  maxWorkers: z.number().int().min(1).max(8)
+});
+export type Automation = z.infer<typeof zAutomation>;
+
+export const agentRoles = ["steward", "worker", "supervisor"] as const;
+export const zAgentRole = z.enum(agentRoles);
+export type AgentRole = z.infer<typeof zAgentRole>;
+
+/** One background agent session started by the orchestrator; stored at .vermillion/runs/<runId>.json. */
+export const zAgentRun = z.object({
+  runId: z.string().min(1),
+  role: zAgentRole,
+  sessionId: z.string().min(1),
+  missionId: z.string().optional(),
+  workItemId: z.string().optional(),
+  /** Steward: the revision commit this run processed. */
+  revision: z.string().optional(),
+  status: z.enum(["running", "done", "failed"]),
+  turns: z.number().int().nonnegative(),
+  note: z.string().optional(),
+  startedAt: z.string(),
+  endedAt: z.string().optional()
+});
+export type AgentRun = z.infer<typeof zAgentRun>;
 
 /** Change notifications emitted by the workbench service after every write, and by the docs watcher. */
 export const zWorkbenchEvent = z.discriminatedUnion("type", [
@@ -173,6 +205,8 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("missions.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() }),
-  z.object({ type: z.literal("roles.changed"), workspaceId: z.string() })
+  z.object({ type: z.literal("roles.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("automation.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("runs.changed"), workspaceId: z.string() })
 ]);
 export type WorkbenchEvent = z.infer<typeof zWorkbenchEvent>;

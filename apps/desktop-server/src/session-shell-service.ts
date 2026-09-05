@@ -339,6 +339,10 @@ export class SessionShellService {
     return this.runtimeService.executeCommand(input);
   }
 
+  public setSessionTitle(sessionId: string, title: string): Promise<void> {
+    return this.runtimeService.setSessionTitle(sessionId, title);
+  }
+
   public listSessions(options: {
     conversationId?: string;
     includeArchived?: boolean;

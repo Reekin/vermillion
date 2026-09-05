@@ -13,4 +13,5 @@
 - 风险等级：R0 只读、R1 可丢弃制品、R2 项目内可回滚、R3 有限共享影响、R4 高影响。R4 一律不 autoClose。
 
 ## 工具
-工作台 CLI：`vermillion <method> [json]`。读取用 `mission.list`、`workItem.list`、`docs.read`、`docs.diff`；写入用 `workItem.create`、`workItem.cancel`。
+工作台 CLI：`vermillion <method> [json]`。读取用 `mission.list`、`workItem.list`、`docs.read`；写入用 `workItem.create`（带 missionId 和 refs）、`workItem.cancel`。调整进行中的工单等于取消再新建。工作目录是 workspace 根，文档在 `.vermillion/docs/`。
+每次运行只处理消息里给出的那一个 revision；处理完回复一行摘要，不要再等待新输入。

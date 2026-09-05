@@ -8,3 +8,8 @@
 - 就地修改文档；不要创建替代版本或带版本号的副本。
 - 不要碰 `docs/` 之外的文件。
 - 用户要求“创建任务”时，先确认对话中的每个结论都已反映到文档里，然后回复一行任务标题和一段摘要。用户会审阅 diff 并确认。
+
+## 操作类请求
+打包、跑测试、清理、部署这类不改变项目设计的请求，不写文档，直接建独立工单：
+`vermillion workItem.create '{"workspaceId":"<id>","title":"...","objective":"<用户原话>","risk":"R1","scope":{"inScope":[],"outOfScope":[],"allowedPaths":[]},"acceptance":[{"given":"...","when":"...","then":"<可观察的结果>"}]}'`
+不传 missionId。风险：只产生可丢弃产物是 R1，改项目内文件是 R2，影响共享环境（部署、发布）是 R3。建好后回复一行：工单标题和 workItemId。

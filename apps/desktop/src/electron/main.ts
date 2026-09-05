@@ -10,7 +10,7 @@ import {
   Tray
 } from "electron";
 import { createSessionRuntimeService } from "@vermillion/desktop-server";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -24,7 +24,8 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { RoleService, WorkbenchService, createWorkbenchRpcHandler, startLocalEndpoint } from "@vermillion/workbench";
+import { Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, startLocalEndpoint } from "@vermillion/workbench";
+import { createAgentRunner } from "./agent-runner.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
   resolveWillNavigate,
@@ -55,6 +56,22 @@ const bundledPreloadPath = join(currentDir, "preload.cjs");
 const bundledRendererIndexPath = join(appRoot, "dist-web", "index.html");
 // Shipped role prompts: resources/app/roles in a release, packages/workbench/roles in the repo.
 const roleDefaultsDir = [join(appRoot, "roles"), resolve(appRoot, "../../packages/workbench/roles")].find((dir) => existsSync(dir));
+// CLI entry: bundled in a release, built package output in the repo.
+const cliEntryPath = [join(appRoot, "cli", "vermillion.mjs"), resolve(appRoot, "../../packages/workbench/bin/vermillion.mjs")].find((path) => existsSync(path));
+
+/** Puts a `vermillion` command on PATH for every agent process spawned from here. */
+const exposeCliOnPath = (baseDir: string): void => {
+  if (!cliEntryPath) return;
+  const binDir = join(baseDir, "bin");
+  mkdirSync(binDir, { recursive: true });
+  if (process.platform === "win32") {
+    writeFileSync(join(binDir, "vermillion.cmd"), "@echo off\r\nnode \"" + cliEntryPath + "\" %*\r\n", "utf8");
+  } else {
+    writeFileSync(join(binDir, "vermillion"), "#!/bin/sh\nexec node \"" + cliEntryPath + "\" \"$@\"\n", { encoding: "utf8", mode: 0o755 });
+  }
+  process.env.PATH = binDir + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? "");
+  process.env.VERMILLION_PERSISTENCE_BASE_DIR = baseDir;
+};
 const defaultDevServerUrl = "http://127.0.0.1:4173/";
 const iconFileNames =
   process.platform === "win32"
@@ -608,6 +625,7 @@ const boot = async (): Promise<void> => {
 
   const persistenceBaseDir =
     process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion");
+  exposeCliOnPath(persistenceBaseDir);
 
   const service = createSessionRuntimeService({
     persistenceBaseDir,
@@ -758,7 +776,10 @@ const boot = async (): Promise<void> => {
     }
   });
   const localEndpoint = await startLocalEndpoint(persistenceBaseDir, workbenchRpc);
+  const orchestrator = new Orchestrator({ service: workbenchService, roles: roleService, runner: createAgentRunner(service, "codex") });
+  orchestrator.start();
   app.on("before-quit", () => {
+    orchestrator.dispose();
     unsubscribeWorkbench();
     workbenchService.dispose();
     void localEndpoint.close();

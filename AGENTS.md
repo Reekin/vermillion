@@ -28,7 +28,16 @@
 - 解析顺序：`<root>/.vermillion/roles/<role>.md` → `~/.vermillion/roles/<role>.md`。RPC：`role.list / read / write / reset`；Workspaces → Domain 页编辑的是 workspace 覆盖。
 - 注入方式：会话 metadata 带 `developerInstructions`，runtime port 在 `thread/start` 时读 codex `config/read` 的 `developer_instructions` 并追加角色文本，不覆盖用户 config.toml 里的配置。思考会话注入 `design-partner`。
 
+## 调度（packages/workbench/src/orchestrator.ts）
+- 三个循环都在 `Orchestrator` 里，靠 `WorkbenchEvent` 和 `turn.completed` 驱动，状态只在 `.vermillion/` 文件里（`automation.json`、`runs/`、工单的 `run` 段）；进程重启后 `reconcile` 从文件恢复，未完成的 run 标 failed、工单退回队列。
+- 管家：`missions.changed` 后找最新 revision 没有 steward run 的任务，开一个 cwd = workspace 根的会话，首条消息带 revision diff 与现有工单；同一 workspace 串行。
+- 调度器：`workItems.changed` / `decisions.changed` / worker turn 结束后取单；上限 `automation.maxWorkers`，Inbox 有未答决策卡时不取；attempts ≥ 3 不再取。有 missionId 且有 allowedPaths 的工单在 `.vermillion/worktrees/<id>` + 分支 `vermillion/<id>` 里跑，其余在 workspace 根。approve 时 merge 分支并删 worktree，cancel 直接删。
+- Supervisor：每个 worker turn 结束且工单仍 running 时调用，一个任务一个会话；回复 `none | remind: … | interrupt: …`。超过 `maxIdleTurns` 未提交则 requeue。
+- `AgentRunner`（apps/desktop/src/electron/agent-runner.ts）是编排层对会话引擎的唯一依赖：open / send / interrupt / lastReply / onTurnCompleted。agent 会话 metadata 带 `role`、`workItemId`、`missionId`。
+- 启动时把 `vermillion` CLI 放到 `<baseDir>/bin` 并加进本进程 PATH，codex 子进程继承，agent 直接 `vermillion <method> [json]`。
+
 ## 工单
+- 独立工单：无 missionId、无 refs，用于打包、跑测试这类不改文档的操作；设计伙伴在聊天里直接 `workItem.create`，不经管家。
 - Mission 是 Doc revision 的序列；commit 只能通过 `mission.create` / `mission.addRevision` 产生，支持部分路径提交。一个会话可以产出多个任务或给已有任务补 revision。
 - 状态：queued → running → review → closed，decision 为挂起。写操作有业务含义：create / start / heartbeat / submit(evidence+review+verify) / approve / reject(reason) / cancel，不暴露裸 status 修改。
 - submit 时 verify 通过且 autoClose（R0/R1 默认）直接 closed；rework 回 queued；否则进 review。

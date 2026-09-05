@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   zAcceptanceItem,
+  zAgentRun,
+  zAutomation,
   zDecisionCard,
   zDecisionOption,
   zDocChange,
@@ -58,11 +60,11 @@ export const workbenchRpc = {
   "workItem.get": { params: zWi, result: zWorkItem },
   "workItem.create": {
     params: zWs.extend({
-      missionId: z.string().min(1),
+      missionId: z.string().min(1).optional(),
       title: z.string().min(1),
       objective: z.string(),
       risk: zRisk,
-      refs: z.array(zDocRef),
+      refs: z.array(zDocRef).optional(),
       scope: zScope,
       acceptance: z.array(zAcceptanceItem),
       needs: z.array(z.string()).optional(),
@@ -79,6 +81,10 @@ export const workbenchRpc = {
   "workItem.approve": { params: zWi, result: zWorkItem },
   "workItem.reject": { params: zWi.extend({ reason: z.string().min(1) }), result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
+
+  "automation.get": { params: zWs, result: zAutomation },
+  "automation.set": { params: zWs.extend({ value: zAutomation }), result: zAutomation },
+  "run.list": { params: zWs, result: z.array(zAgentRun) },
 
   "decision.list": { params: zWs, result: z.array(zDecisionCard) },
   "decision.create": {

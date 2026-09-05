@@ -610,6 +610,11 @@ export class RuntimeOrchestrator {
     }
   }
 
+  public async setSessionTitle(sessionId: string, title: string): Promise<void> {
+    this.domainService.updateSessionTitle({ sessionId, title });
+    await this.sessionIndexSyncService.syncSession(sessionId);
+  }
+
   private accept(
     envelope: CommandEnvelope,
     accepted: boolean,

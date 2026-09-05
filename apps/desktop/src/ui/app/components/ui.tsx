@@ -15,7 +15,7 @@ export const Button = ({ variant = "secondary", size = "md", ...rest }: ButtonPr
 export const Badge = ({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" }) => (
   <span
     className={cn(
-      "inline-flex items-center rounded-sm border px-1.5 py-0.5 font-mono text-micro uppercase tracking-[0.12em]",
+      "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-mono text-micro uppercase tracking-[0.12em]",
       tone === "neutral" && "border-border-strong text-muted-foreground",
       tone === "accent" && "border-control-border-hover bg-accent-soft text-strong"
     )}

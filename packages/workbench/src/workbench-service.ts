@@ -1,6 +1,8 @@
 import type { FSWatcher } from "node:fs";
 import { basename, resolve } from "node:path";
 import type {
+  AgentRun,
+  Automation,
   DecisionCard,
   DocChange,
   DocFile,
@@ -228,10 +230,12 @@ export class WorkbenchService {
 
   async createWorkItem(
     workspaceId: string,
-    input: Pick<WorkItem, "missionId" | "title" | "objective" | "risk" | "refs" | "scope" | "acceptance"> & { needs?: string[]; autoClose?: boolean }
+    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { missionId?: string; refs?: WorkItem["refs"]; needs?: string[]; autoClose?: boolean }
   ): Promise<WorkItem> {
     const now = this.now();
-    const item = await (await this.context(workspaceId)).store.workItems.put({
+    const { store } = await this.context(workspaceId);
+    if (input.missionId && !(await store.missions.get(input.missionId))) throw new Error("Unknown mission: " + input.missionId);
+    const item = await store.workItems.put({
       workItemId: createId("wi"),
       missionId: input.missionId,
       title: input.title.trim(),
@@ -240,7 +244,7 @@ export class WorkbenchService {
       risk: input.risk,
       autoClose: input.autoClose ?? isLowRisk(input.risk),
       needs: input.needs ?? [],
-      refs: input.refs,
+      refs: input.refs ?? [],
       scope: input.scope,
       acceptance: input.acceptance,
       review: [],
@@ -291,11 +295,13 @@ export class WorkbenchService {
     });
   }
 
+  /** Accepts the work: merges the worker's branch into the workspace (when it ran in a worktree) and closes the item. */
   async approveWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
-    return this.updateWorkItem(workspaceId, workItemId, (item) => {
-      if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
-      return { ...item, status: "closed" };
-    });
+    const { docs } = await this.context(workspaceId);
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
+    if (item.run.worktreePath && item.run.branch) await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
+    return this.updateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
   }
 
   async rejectWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
@@ -306,7 +312,46 @@ export class WorkbenchService {
   }
 
   async cancelWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
-    return this.updateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "closed" }));
+    const { docs } = await this.context(workspaceId);
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch);
+    return this.updateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
+  }
+
+  /** Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted. */
+  async requeueWorkItem(workspaceId: string, workItemId: string, failure: string): Promise<WorkItem> {
+    return this.updateWorkItem(workspaceId, workItemId, (item) => ({
+      ...item,
+      status: "queued",
+      run: { ...item.run, sessionId: undefined, lastFailure: failure, attempts: (item.run.attempts ?? 0) + 1 }
+    }));
+  }
+
+  // ---- automation ----
+
+  async getAutomation(workspaceId: string): Promise<Automation> {
+    return (await this.context(workspaceId)).store.readAutomation();
+  }
+
+  async setAutomation(workspaceId: string, value: Automation): Promise<Automation> {
+    const saved = await (await this.context(workspaceId)).store.writeAutomation(value);
+    this.emit({ type: "automation.changed", workspaceId });
+    return saved;
+  }
+
+  async listRuns(workspaceId: string): Promise<AgentRun[]> {
+    const list = await (await this.context(workspaceId)).store.runs.list();
+    return list.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  async putRun(workspaceId: string, run: AgentRun): Promise<AgentRun> {
+    const saved = await (await this.context(workspaceId)).store.runs.put(run);
+    this.emit({ type: "runs.changed", workspaceId });
+    return saved;
+  }
+
+  async workspaceRoot(workspaceId: string): Promise<string> {
+    return (await this.context(workspaceId)).rootPath;
   }
 
   // ---- decisions ----
@@ -353,8 +398,7 @@ export class WorkbenchService {
       const missions = await store.missions.list();
       for (const workItem of await store.workItems.list()) {
         if (workItem.status !== "review") continue;
-        const mission = missions.find((m) => m.missionId === workItem.missionId);
-        if (mission) items.push({ kind: "review", workspaceId: workspace.workspaceId, workItem, mission });
+        items.push({ kind: "review", workspaceId: workspace.workspaceId, workItem, mission: missions.find((m) => m.missionId === workItem.missionId) });
       }
     }
     return items;
@@ -368,5 +412,7 @@ const watchedAreas: Record<string, Extract<WorkbenchEvent, { workspaceId: string
   roles: "roles.changed",
   missions: "missions.changed",
   workitems: "workItems.changed",
-  decisions: "decisions.changed"
+  decisions: "decisions.changed",
+  runs: "runs.changed",
+  "automation.json": "automation.changed"
 };

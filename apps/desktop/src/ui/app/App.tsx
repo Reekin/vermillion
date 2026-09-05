@@ -62,7 +62,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
         engineId,
-        metadata: { cwd: sessionCwd(workspace.rootPath), developerInstructions: role.content }
+        metadata: { cwd: sessionCwd(workspace.rootPath), developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
       });
       void content;
       void attachments;
@@ -86,6 +86,14 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     return result.canceled ? undefined : result.rootPath;
   }, [transport]);
 
+  const showSession = useCallback(
+    (id: string) => {
+      setSessionId(id);
+      setPanel("think"); // also clears any overlay
+    },
+    [setPanel]
+  );
+
   const onFileAction = useCallback(
     async (path: string, action: "open" | "reveal") => {
       await transport.file.runAction({ path, action });
@@ -94,7 +102,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   );
 
   const renderPanel = (target: Panel) =>
-    target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} />;
+    target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} onOpenSession={showSession} />;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-page-canvas text-foreground">

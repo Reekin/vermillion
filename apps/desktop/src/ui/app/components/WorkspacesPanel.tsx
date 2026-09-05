@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { latestRevision, type DecisionCard, type Mission, type RoleFile, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
+import { latestRevision, type AgentRun, type Automation, type DecisionCard, type Mission, type RoleFile, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Badge, Button, Empty, SectionLabel } from "./ui.js";
@@ -8,6 +8,8 @@ import { Badge, Button, Empty, SectionLabel } from "./ui.js";
 type WorkspacesPanelProps = {
   store: WorkbenchStore;
   pickDirectory: () => Promise<string | undefined>;
+  /** Opens a session in the think page (used to look into agent runs). */
+  onOpenSession: (sessionId: string) => void;
 };
 
 /** Secondary navigation inside a workspace. Sections without a backing feature yet render a placeholder. */
@@ -20,7 +22,7 @@ const sections: Array<{ id: Section; label: string }> = [
   { id: "automation", label: "Automation" }
 ];
 
-export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) => {
+export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
   const workspaces = store((s) => s.workspaces);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
@@ -96,7 +98,7 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
               ))}
             </nav>
             <div className="min-h-0 flex-1 overflow-auto">
-              {section === "missions" && <MissionsSection missions={view?.missions ?? []} workItems={view?.workItems ?? []} />}
+              {section === "missions" && <MissionsSection missions={view?.missions ?? []} workItems={view?.workItems ?? []} onOpenSession={onOpenSession} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
                 <RolesSection
@@ -107,7 +109,9 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
                 />
               )}
               {section === "issues" && <Empty title="Issues 尚未提供" hint="来自 IM 和 Maintainer 的议题会在这里汇总，经思考流程转化为任务。" />}
-              {section === "automation" && <Empty title="Automation 尚未提供" hint="管家、Worker、Supervisor 的调度与运行记录会在这里展示。" />}
+              {section === "automation" && view && (
+                <AutomationSection client={client} workspaceId={activeWorkspaceId} automation={view.automation} runs={view.runs} workItems={view.workItems} missions={view.missions} onOpenSession={onOpenSession} />
+              )}
             </div>
           </>
         )}
@@ -118,8 +122,20 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
 
 const statusLabel: Record<WorkItem["status"], string> = { queued: "排队中", running: "进行中", review: "待验收", decision: "待决策", closed: "已关闭" };
 
-const MissionsSection = ({ missions, workItems }: { missions: Mission[]; workItems: WorkItem[] }) => {
-  if (missions.length === 0) {
+const WorkItemRow = ({ item, onOpenSession }: { item: WorkItem; onOpenSession: (sessionId: string) => void }) => (
+  <li className="flex items-center gap-2 text-caption">
+    <Badge>{item.risk}</Badge>
+    <span className="truncate text-foreground">{item.title}</span>
+    {item.run.sessionId && (item.status === "running" || item.status === "review") && (
+      <button type="button" className="shrink-0 text-micro text-muted-foreground underline-offset-2 hover:text-strong hover:underline" onClick={() => onOpenSession(item.run.sessionId!)}>会话</button>
+    )}
+    <span className="ml-auto shrink-0 font-mono text-micro text-faint-foreground">{statusLabel[item.status]}{item.rejections.length > 0 ? " · 打回 " + item.rejections.length : ""}{item.run.lastFailure ? " · " + item.run.lastFailure : ""}</span>
+  </li>
+);
+
+const MissionsSection = ({ missions, workItems, onOpenSession }: { missions: Mission[]; workItems: WorkItem[]; onOpenSession: (sessionId: string) => void }) => {
+  const standalone = workItems.filter((w) => !w.missionId);
+  if (missions.length === 0 && standalone.length === 0) {
     return <p className="px-4 py-3 text-caption text-muted-foreground">还没有任务。去「思考」里和设计伙伴聊出一个。</p>;
   }
   return (
@@ -136,19 +152,66 @@ const MissionsSection = ({ missions, workItems }: { missions: Mission[]; workIte
             <p className="mt-1 font-mono text-micro text-faint-foreground">{mission.revisions.length} 个 revision · 最新 {latestRevision(mission).commit.slice(0, 8)} · {new Date(mission.updatedAt).toLocaleString()}</p>
             {items.length > 0 && (
               <ul className="mt-2 space-y-1">
-                {items.map((item) => (
-                  <li key={item.workItemId} className="flex items-center gap-2 text-caption">
-                    <Badge>{item.risk}</Badge>
-                    <span className="truncate text-foreground">{item.title}</span>
-                    <span className="ml-auto shrink-0 font-mono text-micro text-faint-foreground">{statusLabel[item.status]}{item.rejections.length > 0 ? " · 打回 " + item.rejections.length : ""}</span>
-                  </li>
-                ))}
+                {items.map((item) => <WorkItemRow key={item.workItemId} item={item} onOpenSession={onOpenSession} />)}
               </ul>
             )}
           </li>
         );
       })}
+      {standalone.length > 0 && (
+        <li className="border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-label text-strong">独立工单</span>
+            <Badge>不经文档</Badge>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {standalone.map((item) => <WorkItemRow key={item.workItemId} item={item} onOpenSession={onOpenSession} />)}
+          </ul>
+        </li>
+      )}
     </ul>
+  );
+};
+
+const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
+const runStatusLabel: Record<AgentRun["status"], string> = { running: "运行中", done: "完成", failed: "失败" };
+
+const AutomationSection = ({ client, workspaceId, automation, runs, workItems, missions, onOpenSession }: { client: WorkbenchClient; workspaceId: string; automation: Automation; runs: AgentRun[]; workItems: WorkItem[]; missions: Mission[]; onOpenSession: (sessionId: string) => void }) => {
+  const update = (value: Partial<Automation>) => void client.request("automation.set", { workspaceId, value: { ...automation, ...value } });
+  const titleOf = (run: AgentRun) =>
+    (run.workItemId ? workItems.find((w) => w.workItemId === run.workItemId)?.title : undefined) ??
+    (run.missionId ? missions.find((m) => m.missionId === run.missionId)?.title : undefined) ??
+    "";
+  return (
+    <div>
+      <SectionLabel>调度</SectionLabel>
+      <div className="flex items-center gap-3 px-4 pb-3">
+        <Button size="sm" variant={automation.enabled ? "accent" : "secondary"} onClick={() => update({ enabled: !automation.enabled })}>{automation.enabled ? "已开启" : "已关闭"}</Button>
+        <label className="flex shrink-0 items-center gap-2 whitespace-nowrap text-caption text-muted-foreground">
+          并发 Worker
+          <input type="number" min={1} max={8} value={automation.maxWorkers} onChange={(e) => update({ maxWorkers: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} className="w-12 border border-border bg-input px-1.5 py-0.5 text-label text-foreground outline-none" />
+        </label>
+        <span className="text-caption text-faint-foreground">开启后：新 revision 触发管家；排队工单由 Worker 接手；Inbox 有未答决策卡时暂停取单。</span>
+      </div>
+      <SectionLabel>运行记录</SectionLabel>
+      {runs.length === 0 ? (
+        <p className="px-4 pb-3 text-caption text-muted-foreground">还没有运行。</p>
+      ) : (
+        <ul>
+          {runs.map((run) => (
+            <li key={run.runId} className="border-b border-border px-4 py-2 text-caption">
+              <div className="flex items-center gap-2">
+                <Badge tone={run.status === "running" ? "accent" : "neutral"}>{roleLabel[run.role]}</Badge>
+                <span className="truncate text-foreground">{titleOf(run)}</span>
+                <button type="button" className="ml-auto shrink-0 text-micro text-muted-foreground underline-offset-2 hover:text-strong hover:underline" onClick={() => onOpenSession(run.sessionId)}>会话</button>
+                <span className="shrink-0 font-mono text-micro text-faint-foreground">{runStatusLabel[run.status]} · {run.turns} turn · {new Date(run.startedAt).toLocaleTimeString()}</span>
+              </div>
+              {run.note && <p className="mt-0.5 line-clamp-2 text-caption text-muted-foreground">{run.note}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 };
 

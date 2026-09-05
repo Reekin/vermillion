@@ -7,5 +7,6 @@ export * from "./workbench-service.js";
 export * from "./file-workspace-source.js";
 export * from "./memory-workspace-source.js";
 export * from "./roles.js";
+export * from "./orchestrator.js";
 export * from "./cli.js";
 export * from "./local-endpoint.js";

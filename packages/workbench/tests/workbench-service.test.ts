@@ -1,6 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import { afterEach, describe, expect, it } from "vitest";
 import type { WorkbenchEvent } from "../src/contracts.js";
 import { createMemoryWorkspaceSource } from "../src/memory-workspace-source.js";
@@ -64,6 +68,28 @@ describe("WorkbenchService", () => {
     await service.resetRoleOverride(ws.workspaceId, "worker");
     expect((await service.readRole(ws.workspaceId, "worker")).source).toBe("global");
     expect(events.filter((e) => e.type === "roles.changed")).toHaveLength(2);
+  });
+
+  it("approve merges the worker's worktree branch into the workspace and removes it", async () => {
+    const { service, ws } = await setup();
+    const root = await service.workspaceRoot(ws.workspaceId);
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/a.md", "# a\n");
+    const mission = await service.createMission(ws.workspaceId, { title: "A", summary: "" });
+    const item = await service.createWorkItem(ws.workspaceId, { ...baseWorkItem(mission.missionId), scope: { inScope: [], outOfScope: [], allowedPaths: ["out.txt"] } });
+    const worktreePath = join(root, ".vermillion", "worktrees", item.workItemId);
+    await mkdir(join(root, ".vermillion", "worktrees"), { recursive: true });
+    await execFileAsync("git", ["worktree", "add", "-b", "vermillion/" + item.workItemId, worktreePath, "HEAD"], { cwd: root });
+    await writeFile(join(worktreePath, "out.txt"), "done\n");
+    await service.startWorkItem(ws.workspaceId, item.workItemId, { worktreePath, branch: "vermillion/" + item.workItemId });
+    await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+    const approved = await service.approveWorkItem(ws.workspaceId, item.workItemId);
+    expect(approved.status).toBe("closed");
+    expect(approved.run.worktreePath).toBeUndefined();
+    expect((await readFile(join(root, "out.txt"), "utf8")).trim()).toBe("done");
+    expect((await execFileAsync("git", ["worktree", "list"], { cwd: root })).stdout.trim().split("\n")).toHaveLength(1);
+    // state dirs stay out of git; only docs are tracked
+    const status = (await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: root })).stdout;
+    expect(status).not.toContain("workitems/");
   });
 
   it("rejects doc paths outside .vermillion/docs", async () => {

@@ -45,6 +45,21 @@ export class DocsService {
       await git(this.rootPath, ["init", "-q"]);
     }
     await mkdir(join(this.rootPath, DOCS_DIR), { recursive: true });
+    await this.excludeStateFromGit();
+  }
+
+  /** Only docs/ is versioned; work files under .vermillion stay out of git via the repo-local exclude file. */
+  private async excludeStateFromGit(): Promise<void> {
+    const gitDir = (await git(this.rootPath, ["rev-parse", "--git-common-dir"])).trim();
+    const excludePath = resolve(this.rootPath, gitDir, "info", "exclude");
+    const marker = "# vermillion";
+    let current = "";
+    try {
+      current = await readFile(excludePath, "utf8");
+    } catch {}
+    if (current.includes(marker)) return;
+    await mkdir(dirname(excludePath), { recursive: true });
+    await writeFile(excludePath, current + (current.endsWith("\n") || !current ? "" : "\n") + [marker, STATE_DIR + "/*", "!" + STATE_DIR + "/docs/", ""].join("\n"), "utf8");
   }
 
   async list(): Promise<DocFile[]> {
@@ -115,6 +130,21 @@ export class DocsService {
     await git(this.rootPath, ["add", "-A", "--", ...targets]);
     await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message, "--", ...targets]);
     return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
+  }
+
+  /** Commits everything in a work item's worktree onto its branch, merges into the workspace branch, and removes the worktree. */
+  async mergeWorktree(worktreePath: string, branch: string, message: string): Promise<string> {
+    await git(worktreePath, ["add", "-A"]);
+    const staged = (await git(worktreePath, ["status", "--porcelain=v1"])).trim();
+    if (staged) await git(worktreePath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message]);
+    await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "merge", "--no-ff", "-q", "-m", "Merge " + message, branch]);
+    await this.dropWorktree(worktreePath, branch);
+    return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
+  }
+
+  async dropWorktree(worktreePath: string, branch: string): Promise<void> {
+    await git(this.rootPath, ["worktree", "remove", "--force", worktreePath]).catch(() => undefined);
+    await git(this.rootPath, ["branch", "-D", branch]).catch(() => undefined);
   }
 
   async head(): Promise<string | undefined> {

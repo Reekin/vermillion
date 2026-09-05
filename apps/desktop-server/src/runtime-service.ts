@@ -157,6 +157,10 @@ export class SessionRuntimeService {
     return this.runtimeOrchestrator.executeCommand(input);
   }
 
+  public setSessionTitle(sessionId: string, title: string): Promise<void> {
+    return this.runtimeOrchestrator.setSessionTitle(sessionId, title);
+  }
+
   public listSessions(options: SessionListOptions = {}): ChatSession[] {
     return this.domainService.listSessions(options);
   }
