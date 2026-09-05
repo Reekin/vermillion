@@ -15,6 +15,8 @@ const git = async (cwd: string, args: string[]): Promise<string> =>
 export type AgentRunner = {
   open: (input: { workspaceId: string; cwd: string; developerInstructions: string; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
   send: (sessionId: string, content: string) => Promise<void>;
+  /** Delivers into the running turn when there is one, otherwise as the next message. */
+  steer: (sessionId: string, content: string) => Promise<void>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Text of the last assistant message in the session, if any. */
   lastReply: (sessionId: string) => string | undefined;
@@ -66,6 +68,7 @@ export class Orchestrator {
         if (!("workspaceId" in event)) return;
         if (event.type === "missions.changed" || event.type === "scheduler.changed") this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
         else if (event.type === "workItems.changed" || event.type === "decisions.changed") this.enqueue(event.workspaceId, () => this.schedule(event.workspaceId));
+        else if (event.type === "workItem.updated") this.enqueue(event.workspaceId, () => this.steerWorker(event.sessionId, event.note));
         else if (event.type === "workItem.cancelled") this.enqueue(event.workspaceId, () => this.cancelWorker(event.workspaceId, event.sessionId));
       }),
       this.runner.onTurnCompleted((event) => {
@@ -184,6 +187,18 @@ export class Orchestrator {
     for (const item of queued.slice(0, capacity)) await this.openWorker(workspaceId, item);
   }
 
+  /** The steward changed a running item's contract: tell the worker now, mid-turn if needed. */
+  private async steerWorker(sessionId: string, note: string): Promise<void> {
+    const bound = this.runsBySession.get(sessionId);
+    if (!bound) return;
+    bound.idleTurns = 0; // a new contract restarts the progress budget
+    await this.runner.steer(sessionId, [
+      "工单已调整：" + note,
+      "立即重新执行 vermillion workItem.get 读取最新合同（objective / scope / acceptance / contractVersion 已变），按新合同继续；已完成但不再需要的部分回退。",
+      "submit 时带上最新的 contractVersion。"
+    ].join("\n"));
+  }
+
   /** The item a worker holds was cancelled: interrupt the session and close the run. */
   private async cancelWorker(workspaceId: string, sessionId: string): Promise<void> {
     const bound = this.runsBySession.get(sessionId);
@@ -285,16 +300,6 @@ export class Orchestrator {
       return;
     }
     await this.service.heartbeatWorkItem(workspaceId, item.workItemId);
-    if (item.run.pendingUpdate) {
-      await this.service.ackWorkItemUpdate(workspaceId, item.workItemId);
-      bound.idleTurns = 0; // a new contract restarts the progress budget
-      await this.runner.send(run.sessionId, [
-        "工单已调整：" + item.run.pendingUpdate,
-        "重新执行 vermillion workItem.get 读取最新合同（objective / scope / acceptance 可能已变），按新合同继续；已完成但不再需要的部分回退。",
-        "完成后仍然调用 workItem.submit。"
-      ].join("\n"));
-      return;
-    }
     const verdict = await this.supervise(workspaceId, item, run);
     if (verdict.kind === "interrupt") {
       await this.runner.interrupt(run.sessionId).catch(() => undefined);

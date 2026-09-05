@@ -81,7 +81,7 @@ describe("WorkbenchService", () => {
     await execFileAsync("git", ["worktree", "add", "-b", "vermillion/" + item.workItemId, worktreePath, "HEAD"], { cwd: root });
     await writeFile(join(worktreePath, "out.txt"), "done\n");
     await service.startWorkItem(ws.workspaceId, item.workItemId, { worktreePath, branch: "vermillion/" + item.workItemId });
-    await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+    await service.submitWorkItem(ws.workspaceId, item.workItemId, { contractVersion: 0, evidence: { summary: "", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
     const approved = await service.approveWorkItem(ws.workspaceId, item.workItemId);
     expect(approved.status).toBe("closed");
     expect(approved.run.worktreePath).toBeUndefined();
@@ -144,6 +144,7 @@ describe("WorkbenchService", () => {
 
     await service.heartbeatWorkItem(ws.workspaceId, item.workItemId, "turn-9");
     const submitted = await service.submitWorkItem(ws.workspaceId, item.workItemId, {
+      contractVersion: 0,
       evidence: { summary: "done", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] },
       review: [{ comment: "add guard", decision: "rejected", reason: "out of scope" }],
       verify: { items: [{ index: 0, pass: true, evidence: "screenshot" }], verdict: "pass" }
@@ -158,6 +159,7 @@ describe("WorkbenchService", () => {
     expect(rejected.rejections.map((r) => r.reason)).toEqual(["边界没处理"]);
 
     await service.submitWorkItem(ws.workspaceId, item.workItemId, {
+      contractVersion: 0,
       evidence: { summary: "fixed", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] },
       review: [],
       verify: { items: [{ index: 0, pass: true, evidence: "ok" }], verdict: "pass" }
@@ -172,10 +174,10 @@ describe("WorkbenchService", () => {
     const mission = await seedMission(service, ws.workspaceId);
     const low = await service.createWorkItem(ws.workspaceId, { ...baseWorkItem(mission.missionId), risk: "R1" });
     const evidence = { summary: "", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] };
-    const closed = await service.submitWorkItem(ws.workspaceId, low.workItemId, { evidence, review: [], verify: { items: [], verdict: "pass" } });
+    const closed = await service.submitWorkItem(ws.workspaceId, low.workItemId, { contractVersion: 0, evidence, review: [], verify: { items: [], verdict: "pass" } });
     expect(closed.status).toBe("closed");
     const high = await service.createWorkItem(ws.workspaceId, baseWorkItem(mission.missionId));
-    const rework = await service.submitWorkItem(ws.workspaceId, high.workItemId, { evidence, review: [], verify: { items: [], verdict: "rework" } });
+    const rework = await service.submitWorkItem(ws.workspaceId, high.workItemId, { contractVersion: 0, evidence, review: [], verify: { items: [], verdict: "rework" } });
     expect(rework.status).toBe("queued");
   });
 

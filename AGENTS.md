@@ -32,7 +32,7 @@
 - 三个循环都在 `Orchestrator` 里，靠 `WorkbenchEvent` 和 `turn.completed` 驱动，状态只在 `.vermillion/` 文件里（`scheduler.json`、`runs/`、工单的 `run` 段）；进程重启后 `reconcile` 从文件恢复，未完成的 run 标 failed、工单退回队列。
 - 管家：`missions.changed` 后找最新 revision 没有 steward run 的任务，开一个 cwd = workspace 根的会话，首条消息带 revision diff 与现有工单；同一 workspace 串行。
 - 调度器：`workItems.changed` / `decisions.changed` / worker turn 结束后取单；上限 `scheduler.maxWorkers`；attempts ≥ 3 不再取。挂在决策卡上的工单是 `decision` 状态，不占并发，也不会被取。有 missionId 且有 allowedPaths 的工单在 `.vermillion/worktrees/<id>` + 分支 `vermillion/<id>` 里跑，其余在 workspace 根。approve 时 merge 分支并删 worktree，cancel 直接删。
-- 管家调整进行中的工单用 `workItem.update`（带 note）：note 写进工单 `run.pendingUpdate`；worker 当前 turn 结束后编排层把它作为下一条消息送达并清掉（idle 计数归零）。在此之前到达的 `workItem.submit` 作废：工单回 queued、丢弃 evidence，保留 worktree 给下一个 worker。`workItem.cancel` 对进行中的工单发 `workItem.cancelled`，编排层 interrupt 该会话。
+- 工单有 `contractVersion`，每次 `workItem.update` 加一；`workItem.submit` 必须带 worker 依据的版本，不等于当前版本就作废（工单回 queued、丢弃 evidence，保留 worktree）。update 对进行中的工单发 `workItem.updated`，编排层用 `runner.steer`（有活跃 turn 就 `turn/steer`，否则作为下一条消息）立即通知 worker，idle 计数归零。`workItem.cancel` 对进行中的工单发 `workItem.cancelled`，编排层 interrupt 该会话。
 - `decision.create` 只把 running 的工单转为 decision；`decision.answer` 只把 decision 的转回 queued，其他状态不动。
 - Supervisor：每个 worker turn 结束且工单仍 running 时调用，一个任务一个会话；回复 `none | remind: … | interrupt: …`。超过 `maxIdleTurns` 未提交则 requeue。
 - 调度开关和运行记录在 Workspaces → 任务 页；Automation 页留给用户自定义的定时/触发任务，与这套循环无关。

@@ -23,6 +23,17 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     });
     if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
   },
+  steer: async (sessionId, content) => {
+    const turn = shell
+      .getSnapshot()
+      .turns.filter((t) => t.sessionId === sessionId && t.status !== "completed")
+      .at(-1);
+    const command = turn
+      ? { type: "steerTurn" as const, sessionId, turnId: turn.turnId, messageId: createId(), content, attachments: [] }
+      : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
+    const receipt = await shell.executeCommand({ commandId: createId(), command });
+    if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
+  },
   interrupt: async (sessionId) => {
     const turn = shell
       .getSnapshot()

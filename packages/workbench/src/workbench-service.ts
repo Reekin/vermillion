@@ -252,6 +252,7 @@ export class WorkbenchService {
     if (input.missionId && !(await store.missions.get(input.missionId))) throw new Error("Unknown mission: " + input.missionId);
     const item = await store.workItems.put({
       workItemId: createId("wi"),
+      contractVersion: 0,
       missionId: input.missionId,
       title: input.title.trim(),
       objective: input.objective,
@@ -294,13 +295,13 @@ export class WorkbenchService {
   async submitWorkItem(
     workspaceId: string,
     workItemId: string,
-    input: { evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
+    input: { contractVersion: number; evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
   ): Promise<WorkItem> {
     const now = this.now();
     const submitted = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
-      if (item.run.pendingUpdate) {
-        // Submitted against a contract that changed mid-turn: void it, back to the queue, same worktree.
-        return { ...item, status: "queued", decisions: [...item.decisions, "提交作废：合同已变更（" + item.run.pendingUpdate + "）"], run: { ...item.run, sessionId: undefined, pendingUpdate: undefined } };
+      if (input.contractVersion !== item.contractVersion) {
+        // Made against an older contract: void it, back to the queue, same worktree.
+        return { ...item, status: "queued", decisions: [...item.decisions, "提交作废：依据的合同版本 " + input.contractVersion + " 已被 " + item.contractVersion + " 取代"], run: { ...item.run, sessionId: undefined } };
       }
       const verify = { ...input.verify, verifiedAt: now };
       return {
@@ -340,8 +341,8 @@ export class WorkbenchService {
   }
 
   /**
-   * Steward adjusts a contract after a new revision. A running item keeps its session and worktree; the change is
-   * relayed to the worker as its next message. Anything else just gets the new contract for its next run.
+   * Steward adjusts a contract after a new revision. A running item keeps its session and worktree and its worker is
+   * steered immediately; a submission awaiting review goes back to the queue; anything else just gets the new contract.
    */
   async updateWorkItem(
     workspaceId: string,
@@ -349,18 +350,13 @@ export class WorkbenchService {
     input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk">> & { note: string }
   ): Promise<WorkItem> {
     const { note, ...changes } = input;
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
+    const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status === "closed") throw new Error("Work item is closed: " + workItemId);
-      // A submission awaiting the user was made against the old contract; it goes back to the queue.
       const status = item.status === "review" ? "queued" : item.status;
-      const pendingUpdate = item.status === "running" ? [item.run.pendingUpdate, note].filter(Boolean).join("；") : undefined;
-      return { ...item, ...changes, status, decisions: [...item.decisions, "工单调整：" + note], run: { ...item.run, pendingUpdate } };
+      return { ...item, ...changes, status, contractVersion: item.contractVersion + 1, decisions: [...item.decisions, "工单调整：" + note] };
     });
-  }
-
-  /** Orchestrator: the worker has received the changed contract. */
-  async ackWorkItemUpdate(workspaceId: string, workItemId: string): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, pendingUpdate: undefined } }));
+    if (updated.status === "running" && updated.run.sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId, sessionId: updated.run.sessionId, note });
+    return updated;
   }
 
   /** Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted. */

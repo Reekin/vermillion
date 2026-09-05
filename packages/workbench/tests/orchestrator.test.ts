@@ -36,6 +36,7 @@ const createFakeRunner = () => {
       return { sessionId };
     },
     send: async (sessionId, content) => { sessions.find((s) => s.sessionId === sessionId)!.messages.push(content); },
+    steer: async (sessionId, content) => { sessions.find((s) => s.sessionId === sessionId)!.messages.push("[steer] " + content); },
     interrupt: async () => {},
     lastReply: (sessionId) => sessions.find((s) => s.sessionId === sessionId)?.reply,
     onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
@@ -91,42 +92,48 @@ describe("Orchestrator", { timeout: 20000 }, () => {
     expect(runs.map((r) => r.role + ":" + r.status).sort()).toEqual(["steward:done", "worker:running"]);
 
     // worker submits, then its turn ends -> run done, nothing else scheduled
-    await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [{ index: 0, pass: true, evidence: "seen" }], verdict: "pass" } });
+    await service.submitWorkItem(ws.workspaceId, item.workItemId, { contractVersion: 0, evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [{ index: 0, pass: true, evidence: "seen" }], verdict: "pass" } });
     complete(worker.sessionId, "done");
     await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("review");
   });
 
-  it("relays a steward contract change to the running worker once its turn ends", async () => {
+  it("steers the running worker on a contract change and only voids submits made against an older version", async () => {
     const { service, ws, sessions, complete } = await setup();
     const item = await service.createWorkItem(ws.workspaceId, { title: "Op", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] });
     await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
     const worker = sessions.find((s) => s.metadata.role === "worker")!;
-    await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v2", note: "范围收窄" });
-    await tick();
-    expect(worker.messages).toHaveLength(1); // nothing mid-turn
-    complete(worker.sessionId, "working");
+    const v1 = await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v2", note: "范围收窄" });
+    expect(v1.contractVersion).toBe(1);
     await until(async () => worker.messages.length === 2);
-    expect(worker.messages[1]).toContain("工单已调整：范围收窄");
+    expect(worker.messages[1]).toContain("[steer] 工单已调整：范围收窄"); // delivered mid-turn
+    expect(worker.messages[1]).toContain("contractVersion");
     expect(sessions.some((s) => s.metadata.role === "supervisor")).toBe(false);
-    const after = await service.getWorkItem(ws.workspaceId, item.workItemId);
-    expect(after.decisions).toEqual(["工单调整：范围收窄"]);
-    expect(after.run.pendingUpdate).toBeUndefined();
 
-    // a submit that lands before the worker was told is void: back to queued, no evidence kept
-    await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v3", note: "再改" });
-    const voided = await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "old", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+    // the worker re-read the contract (version 1) and submits against it: accepted even though a turn is still open
+    const evidence = { summary: "done", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] };
+    const accepted = await service.submitWorkItem(ws.workspaceId, item.workItemId, { contractVersion: 1, evidence, review: [], verify: { items: [], verdict: "pass" } });
+    expect(accepted.status).toBe("closed"); // R1 auto-closes
+    complete(worker.sessionId, "submitted");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.status === "done"));
+
+    // a second item: a submit quoting a stale version is void
+    const item2 = await service.createWorkItem(ws.workspaceId, { title: "Op2", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] });
+    await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2 && sessions[sessions.length - 1]!.messages.length > 0);
+    const worker2 = sessions[sessions.length - 1]!;
+    await service.updateWorkItem(ws.workspaceId, item2.workItemId, { objective: "v3", note: "再改" });
+    const voided = await service.submitWorkItem(ws.workspaceId, item2.workItemId, { contractVersion: 0, evidence, review: [], verify: { items: [], verdict: "pass" } });
     expect(voided.status).toBe("queued");
     expect(voided.evidence).toBeUndefined();
     expect(voided.decisions.at(-1)).toContain("提交作废");
-    complete(worker.sessionId, "submitted");
+    complete(worker2.sessionId, "submitted");
     await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.note === "提交作废：合同已变更"));
-    // the item is queued again and picked up by a new worker in the same worktree-less cwd
-    await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2);
+    // the item is queued again and picked up by a new worker
+    await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 3);
 
     // cancelling the item interrupts its worker and closes the run as failed
-    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "running");
-    await service.cancelWorkItem(ws.workspaceId, item.workItemId);
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item2.workItemId)).status === "running");
+    await service.cancelWorkItem(ws.workspaceId, item2.workItemId);
     await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.status === "failed" && r.note === "工单已取消"));
   });
 

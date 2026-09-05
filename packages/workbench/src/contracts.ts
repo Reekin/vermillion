@@ -96,13 +96,13 @@ export const zRun = z.object({
   branch: z.string().optional(),
   /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
-  /** Contract changed while a worker holds the item; cleared once the worker has been told. A submit before that is void. */
-  pendingUpdate: z.string().optional(),
   attempts: z.number().int().nonnegative().optional()
 });
 
 export const zWorkItem = z.object({
   workItemId: z.string().min(1),
+  /** Bumped by every workItem.update; a submit must quote the version it was made against. */
+  contractVersion: z.number().int().nonnegative(),
   /** Absent for standalone operations (package, run tests, ...) that change no doc. */
   missionId: z.string().min(1).optional(),
   title: z.string().min(1),
@@ -215,6 +215,8 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("roles.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("scheduler.changed"), workspaceId: z.string() }),
+  /** A running work item's contract changed; the orchestrator steers its worker right away. */
+  z.object({ type: z.literal("workItem.updated"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string(), note: z.string() }),
   /** A work item was cancelled while a worker held it; the orchestrator interrupts that worker. */
   z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal("runs.changed"), workspaceId: z.string() })
