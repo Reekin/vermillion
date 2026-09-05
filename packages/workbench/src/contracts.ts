@@ -166,6 +166,12 @@ export const zDocChange = z.object({
 });
 export type DocChange = z.infer<typeof zDocChange>;
 
+export const zDocCommit = z.object({
+  commit: z.string().min(1),
+  message: z.string().min(1)
+});
+export type DocCommit = z.infer<typeof zDocCommit>;
+
 export const zInboxItem = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("decision"), workspaceId: z.string(), card: zDecisionCard }),
   z.object({ kind: z.literal("review"), workspaceId: z.string(), workItem: zWorkItem, mission: zMission.optional() })

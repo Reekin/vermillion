@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, DocChange, DocCommit, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
 
 export type Panel = "think" | "inbox" | "workspaces";
 
@@ -19,6 +19,7 @@ export type WorkspaceView = {
 /** What the text editor modal is showing: a doc under .vermillion/docs or a role prompt override. */
 export type EditorTarget = { kind: "doc"; path: string } | { kind: "role"; roleId: string };
 
+
 export type WorkbenchState = {
   client: WorkbenchClient;
   panel: Panel;
@@ -31,6 +32,9 @@ export type WorkbenchState = {
   view: WorkspaceView | undefined;
   inbox: InboxItem[];
   editor: EditorTarget | undefined;
+  /** Last "仅提交" result, shown under the Docs tree until dismissed or the workspace changes. */
+  docCommit: DocCommit | undefined;
+  setDocCommit: (result: DocCommit | undefined) => void;
 
   setPanel: (panel: Panel) => void;
   openOverlay: (panel: Panel) => void;
@@ -94,6 +98,8 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       view: undefined,
       inbox: [],
       editor: undefined,
+      docCommit: undefined,
+      setDocCommit: (result) => set({ docCommit: result }),
 
       setPanel: (panel) => set({ panel, overlay: undefined }),
       openOverlay: (panel) => set({ overlay: panel }),
@@ -105,7 +111,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
       browseWorkspace: (workspaceId) => {
         if (workspaceId === get().browsingWorkspaceId) return;
-        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined });
+        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined, docCommit: undefined });
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),
