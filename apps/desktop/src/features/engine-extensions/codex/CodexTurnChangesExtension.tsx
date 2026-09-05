@@ -3,6 +3,7 @@ import {
   summarizeUnifiedDiff,
   type CodexChangedFileRpc
 } from "@vermillion/shared";
+import { DiffDialog } from "../../../ui/app/components/DiffDialog.js";
 import { Button } from "../../../ui/chat-shell/Button.js";
 
 export type CodexTurnChangesExtensionProps = {
@@ -38,7 +39,7 @@ export const CodexTurnChangesExtension = ({
     [changedFiles]
   );
   const summary = useMemo(() => summarizeUnifiedDiff(mergedDiff), [mergedDiff]);
-  const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
+  const [diffPath, setDiffPath] = useState<string>();
   const [isUndoing, setIsUndoing] = useState(false);
   const [undoError, setUndoError] = useState<string | undefined>();
   const [isUndone, setIsUndone] = useState(false);
@@ -46,13 +47,6 @@ export const CodexTurnChangesExtension = ({
   if (changedFiles.length === 0) {
     return null;
   }
-
-  const toggleFile = (path: string): void => {
-    setExpandedPaths((current) => ({
-      ...current,
-      [path]: !current[path]
-    }));
-  };
 
   const onUndo = async (): Promise<void> => {
     if (!onUndoTurn || isUndoing || isUndone) {
@@ -102,15 +96,14 @@ export const CodexTurnChangesExtension = ({
       ) : null}
       <div className="awb-turn-changes__list">
         {changedFiles.map((file) => {
-          const isExpanded = expandedPaths[file.displayPath] ?? false;
           const fileSummary = summarizeUnifiedDiff(file.diff);
           return (
             <article key={file.displayPath} className="awb-turn-changes__file">
               <button
                 type="button"
                 className="awb-turn-changes__file-toggle"
-                onClick={() => toggleFile(file.displayPath)}
-                aria-expanded={isExpanded}
+                onClick={() => setDiffPath(file.displayPath)}
+                aria-haspopup="dialog"
               >
                 <span className="awb-turn-changes__file-path">{file.displayPath}</span>
                 <span className="awb-turn-changes__file-stats">
@@ -118,32 +111,17 @@ export const CodexTurnChangesExtension = ({
                   <span className="is-delete">-{fileSummary.linesDeleted}</span>
                 </span>
               </button>
-              {isExpanded && fileSummary.files[0] ? (
-                <div className="awb-turn-changes__diff">
-                  {fileSummary.files[0].hunks.map((hunk) => (
-                    <section
-                      key={`${file.displayPath}:${hunk.header}`}
-                      className="awb-turn-changes__hunk"
-                    >
-                      <div className="awb-turn-changes__hunk-header">{hunk.header}</div>
-                      <pre className="awb-turn-changes__hunk-body">
-                        {hunk.lines.map((line, index) => (
-                          <div
-                            key={`${file.displayPath}:${hunk.header}:${index}`}
-                            className={`awb-turn-changes__line is-${line.kind}`}
-                          >
-                            {line.text || " "}
-                          </div>
-                        ))}
-                      </pre>
-                    </section>
-                  ))}
-                </div>
-              ) : null}
             </article>
           );
         })}
       </div>
+      {diffPath !== undefined && (
+        <DiffDialog
+          files={changedFiles.map((file) => ({ path: file.displayPath, diff: file.diff }))}
+          initialPath={diffPath}
+          onClose={() => setDiffPath(undefined)}
+        />
+      )}
     </section>
   );
 };

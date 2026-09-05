@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { parseUnifiedDiff, summarizeUnifiedDiff } from "./unified-diff.js";
 
 describe("summarizeUnifiedDiff", () => {
+  it("preserves content that resembles file headers inside a hunk", () => {
+    const [file] = parseUnifiedDiff("diff --git a/doc.md b/doc.md\n--- a/doc.md\n+++ b/doc.md\n@@ -1,2 +1,2 @@\n--- old heading\n+++ new heading\n context\n");
+    expect(file).toMatchObject({ displayPath: "doc.md", linesAdded: 1, linesDeleted: 1 });
+    expect(file?.hunks[0]?.lines).toEqual([
+      { kind: "delete", text: "--- old heading" },
+      { kind: "add", text: "+++ new heading" },
+      { kind: "context", text: " context" }
+    ]);
+  });
+
   it("extracts file counts and line stats from unified diffs", () => {
     const summary = summarizeUnifiedDiff(`diff --git a/src/foo.ts b/src/foo.ts
 index 1111111..2222222 100644
