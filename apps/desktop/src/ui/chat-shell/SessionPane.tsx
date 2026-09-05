@@ -60,11 +60,15 @@ import { useTranscriptViewportController } from "./use-transcript-viewport-contr
 import { useSessionOpenController } from "./use-session-open-controller.js";
 import type { SessionWindowCoverage } from "./use-session-open-controller.js";
 import { useChatTreeController } from "./use-chat-tree-controller.js";
+import { ChatTreePanel } from "./ChatTreePanel.js";
+import { GitBranch } from "lucide-react";
 import { useRendererDiagnostics } from "./use-renderer-diagnostics.js";
 import { resolveAutoRefreshBacklogAttempt } from "./auto-refresh-backlog.js";
 import { ComposerContainer } from "./composer/ComposerContainer.js";
 import type { ComposerExecutionSelection } from "./composer/composer-types.js";
 import "./chat-shell.css";
+
+const CHAT_TREE_VISIBLE_KEY = "vermillion.chatTreeVisible";
 
 const autoRefreshBacklogCooldownMs = 30_000;
 const autoRefreshBacklogStreamThreshold = 500;
@@ -832,7 +836,7 @@ export const SessionPane = ({
     };
   }, [attemptBacklogAutoRefresh]);
 
-  const { chatTree } = useChatTreeController({
+  const { chatTree, onJumpChatTree } = useChatTreeController({
     transport,
     browsedSessionId,
     displayedSessionId: sessionId,
@@ -844,6 +848,13 @@ export const SessionPane = ({
   });
   const activeChatTree =
     chatTree?.sessionId === sessionId ? chatTree : undefined;
+  const [showChatTree, setShowChatTree] = useState(() => globalThis.localStorage?.getItem(CHAT_TREE_VISIBLE_KEY) === "1");
+  const toggleChatTree = () => {
+    setShowChatTree((current) => {
+      globalThis.localStorage?.setItem(CHAT_TREE_VISIBLE_KEY, current ? "0" : "1");
+      return !current;
+    });
+  };
   const visibleTranscriptRows = useMemo(
     () => filterTranscriptRowsForChatTree(transcriptRows, activeChatTree),
     [transcriptRows, activeChatTree]
@@ -1057,9 +1068,22 @@ export const SessionPane = ({
               {sessionId ? truncateSessionHeading(displayedSession?.title) : "新会话"}
             </h2>
           </div>
+          <div className="awb-main__header-actions">
+            <button
+              type="button"
+              className={"awb-header-toggle" + (showChatTree ? " is-on" : "")}
+              aria-pressed={showChatTree}
+              aria-label="对话树"
+              title="对话树"
+              onClick={toggleChatTree}
+            >
+              <GitBranch size={15} />
+            </button>
+          </div>
         </header>
 
         <div className="awb-main__body">
+          <div className="awb-transcript-column">
           <TranscriptPane
             transcriptRef={viewport.transcriptRef}
             transcriptContentRef={viewport.transcriptContentRef}
@@ -1080,6 +1104,17 @@ export const SessionPane = ({
             onRespondApproval={onRespondApproval}
             onRespondInteraction={onRespondInteraction}
           />
+          </div>
+          {showChatTree && (
+            <aside className="awb-chat-tree-column" aria-label="对话树">
+              <section className="awb-detail__graph">
+                <ChatTreePanel
+                  chatTree={activeChatTree}
+                  onJump={sessionId ? (nodeId) => void onJumpChatTree(nodeId) : undefined}
+                />
+              </section>
+            </aside>
+          )}
         </div>
 
         <ComposerContainer
