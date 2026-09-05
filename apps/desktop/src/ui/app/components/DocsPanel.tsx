@@ -54,8 +54,8 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
   const docs = view?.docs ?? EMPTY_DOCS;
   const pending = view?.pendingDocChanges ?? EMPTY_CHANGES;
   const missions = view?.missions ?? EMPTY_MISSIONS;
-  const openDocPath = store((s) => s.openDocPath);
-  const setOpenDocPath = store((s) => s.setOpenDocPath);
+  const openDocPath = store((s) => (s.editor?.kind === "doc" ? s.editor.path : undefined));
+  const openEditor = store((s) => s.openEditor);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
   const [missionOpen, setMissionOpen] = useState(false);
@@ -110,7 +110,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
       <li key={node.path}>
         <button
           type="button"
-          onClick={() => (isDir ? toggle(node.path) : setOpenDocPath(node.path))}
+          onClick={() => (isDir ? toggle(node.path) : openEditor({ kind: "doc", path: node.path }))}
           onContextMenu={(event) => onContextMenu(event, node.path)}
           className={cn(
             "flex h-[26px] w-full items-center gap-1.5 pr-3 text-left text-label text-foreground hover:bg-surface-hover",

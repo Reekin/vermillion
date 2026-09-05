@@ -4,15 +4,21 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { WorkbenchEvent } from "../src/contracts.js";
 import { createMemoryWorkspaceSource } from "../src/memory-workspace-source.js";
+import { RoleService } from "../src/roles.js";
 import { WorkbenchService } from "../src/workbench-service.js";
+
+const defaultsDir = new URL("../roles/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
 const dirs: string[] = [];
 const services: WorkbenchService[] = [];
 
 const setup = async () => {
   const root = await mkdtemp(join(tmpdir(), "verm-ws-"));
-  dirs.push(root);
-  const service = new WorkbenchService({ workspaces: createMemoryWorkspaceSource() });
+  const globalDir = await mkdtemp(join(tmpdir(), "verm-roles-"));
+  dirs.push(root, globalDir);
+  const roles = new RoleService({ globalDir, defaultsDir });
+  await roles.ensureGlobal();
+  const service = new WorkbenchService({ workspaces: createMemoryWorkspaceSource(), roles });
   services.push(service);
   const events: WorkbenchEvent[] = [];
   service.subscribe((event) => events.push(event));
@@ -41,11 +47,23 @@ const baseWorkItem = (missionId: string) => ({
 });
 
 describe("WorkbenchService", () => {
-  it("registers a workspace, seeds instructions, and emits workspaces.changed", async () => {
+  it("registers a workspace and emits workspaces.changed", async () => {
     const { service, ws, events } = await setup();
     expect(ws.label).toBe("Demo");
     expect(await service.listDocs(ws.workspaceId)).toEqual([]);
     expect(events).toEqual([{ type: "workspaces.changed" }]);
+  });
+
+  it("resolves role prompts workspace override -> global and emits roles.changed", async () => {
+    const { service, ws, events } = await setup();
+    expect((await service.listRoles(ws.workspaceId)).map((r) => r.roleId)).toContain("design-partner");
+    expect((await service.readRole(ws.workspaceId, "worker")).source).toBe("global");
+    await service.writeRoleOverride(ws.workspaceId, "worker", "# W\ncustom\n");
+    expect(await service.readRole(ws.workspaceId, "worker")).toEqual({ content: "# W\ncustom\n", source: "workspace" });
+    expect((await service.listRoles(ws.workspaceId)).find((r) => r.roleId === "worker")).toEqual({ roleId: "worker", title: "W", source: "workspace" });
+    await service.resetRoleOverride(ws.workspaceId, "worker");
+    expect((await service.readRole(ws.workspaceId, "worker")).source).toBe("global");
+    expect(events.filter((e) => e.type === "roles.changed")).toHaveLength(2);
   });
 
   it("rejects doc paths outside .vermillion/docs", async () => {

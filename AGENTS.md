@@ -19,9 +19,14 @@
 - 查询结果带 workspaceId，store 丢弃与当前 browsing 不匹配的响应。
 
 ## 持久化
-- 全局 `~/.vermillion/`：workspace 注册表（引擎的 `workspace-registry.json` 是唯一注册表）、会话索引。
-- 每个 workspace `<root>/.vermillion/`：`AGENTS.md`（设计伙伴规则）、`docs/`（真相源，走 git）、`missions/` `workitems/` `decisions/`（一条一 JSON）。
+- 全局 `~/.vermillion/`：workspace 注册表（引擎的 `workspace-registry.json` 是唯一注册表）、会话索引、`roles/<role>.md`（角色 prompt 的全局版本）。
+- 每个 workspace `<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 的 workspace 覆盖）、`missions/` `workitems/` `decisions/`（一条一 JSON）。
 - 思考会话 cwd = `<root>/.vermillion`。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
+
+## 角色 prompt
+- 默认版本是 `packages/workbench/roles/<role>.md`（打包后在 `resources/app/roles/`）。启动时 `RoleService.ensureGlobal` 把缺失的角色补到 `~/.vermillion/roles/`；已存在的不覆盖。
+- 解析顺序：`<root>/.vermillion/roles/<role>.md` → `~/.vermillion/roles/<role>.md`。RPC：`role.list / read / write / reset`；Workspaces → Domain 页编辑的是 workspace 覆盖。
+- 注入方式：会话 metadata 带 `developerInstructions`，runtime port 在 `thread/start` 时读 codex `config/read` 的 `developer_instructions` 并追加角色文本，不覆盖用户 config.toml 里的配置。思考会话注入 `design-partner`。
 
 ## 工单
 - Mission 是 Doc revision 的序列；commit 只能通过 `mission.create` / `mission.addRevision` 产生，支持部分路径提交。一个会话可以产出多个任务或给已有任务补 revision。

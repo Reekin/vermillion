@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { DecisionCard, DocChange, DocFile, InboxItem, Mission, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
+import type { DecisionCard, DocChange, DocFile, InboxItem, Mission, RoleFile, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
 
 export type Panel = "think" | "inbox" | "workspaces";
 
@@ -11,7 +11,11 @@ export type WorkspaceView = {
   decisions: DecisionCard[];
   docs: DocFile[];
   pendingDocChanges: DocChange[];
+  roles: RoleFile[];
 };
+
+/** What the text editor modal is showing: a doc under .vermillion/docs or a role prompt override. */
+export type EditorTarget = { kind: "doc"; path: string } | { kind: "role"; roleId: string };
 
 export type WorkbenchState = {
   client: WorkbenchClient;
@@ -24,14 +28,14 @@ export type WorkbenchState = {
   browsingWorkspaceId: string | undefined;
   view: WorkspaceView | undefined;
   inbox: InboxItem[];
-  openDocPath: string | undefined;
+  editor: EditorTarget | undefined;
 
   setPanel: (panel: Panel) => void;
   openOverlay: (panel: Panel) => void;
   closeOverlay: () => void;
   setDraftWorkspace: (workspaceId: string | undefined) => void;
   browseWorkspace: (workspaceId: string | undefined) => void;
-  setOpenDocPath: (path: string | undefined) => void;
+  openEditor: (target: EditorTarget | undefined) => void;
   /** Subscribes to workbench events and loads initial state. Returns an unsubscribe. */
   connect: () => () => void;
 };
@@ -60,15 +64,16 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         set({ view: undefined });
         return;
       }
-      const [missions, workItems, decisions, docs, pendingDocChanges] = await Promise.all([
+      const [missions, workItems, decisions, docs, pendingDocChanges, roles] = await Promise.all([
         client.request("mission.list", { workspaceId }),
         client.request("workItem.list", { workspaceId }),
         client.request("decision.list", { workspaceId }),
         client.request("docs.list", { workspaceId }),
-        client.request("docs.pending", { workspaceId })
+        client.request("docs.pending", { workspaceId }),
+        client.request("role.list", { workspaceId })
       ]);
       if (generation !== viewGeneration) return;
-      set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges } });
+      set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges, roles } });
     };
 
     const loadInbox = async () => {
@@ -84,7 +89,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       browsingWorkspaceId: undefined,
       view: undefined,
       inbox: [],
-      openDocPath: undefined,
+      editor: undefined,
 
       setPanel: (panel) => set({ panel, overlay: undefined }),
       openOverlay: (panel) => set({ overlay: panel }),
@@ -96,10 +101,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
       browseWorkspace: (workspaceId) => {
         if (workspaceId === get().browsingWorkspaceId) return;
-        set({ browsingWorkspaceId: workspaceId, openDocPath: undefined, view: undefined });
+        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined });
         void loadView();
       },
-      setOpenDocPath: (path) => set({ openDocPath: path }),
+      openEditor: (target) => set({ editor: target }),
 
       connect: () => {
         void loadWorkspaces();
@@ -110,6 +115,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
               void loadWorkspaces();
               return;
             case "docs.changed":
+            case "roles.changed":
             case "missions.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               return;

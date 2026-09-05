@@ -1575,6 +1575,11 @@ export class CodexAppServerRuntimePort
       payload.params.providerSessionId.trim().length > 0
         ? payload.params.providerSessionId
         : undefined;
+    const developerInstructions =
+      typeof payload.params.developerInstructions === "string" &&
+      payload.params.developerInstructions.trim().length > 0
+        ? payload.params.developerInstructions
+        : undefined;
     const execution =
       typeof payload.params.execution === "object" &&
       payload.params.execution !== null
@@ -1600,7 +1605,8 @@ export class CodexAppServerRuntimePort
       sessionId,
       cwd,
       options,
-      providerSessionId
+      providerSessionId,
+      developerInstructions
     );
     const input = buildCodexTurnInput(content, attachments);
 
@@ -1967,7 +1973,8 @@ export class CodexAppServerRuntimePort
     sessionId: string,
     cwd?: string,
     options: RuntimeOperationOptions = {},
-    providerSessionId?: string
+    providerSessionId?: string,
+    developerInstructions?: string
   ): Promise<string> {
     const existing = this.threadIdBySessionId.get(sessionId);
     if (existing && (!providerSessionId || existing === providerSessionId)) {
@@ -2022,6 +2029,13 @@ export class CodexAppServerRuntimePort
     if (selected.sandbox !== undefined) {
       threadStartParams.sandbox = selected.sandbox;
     }
+    if (developerInstructions) {
+      threadStartParams.developerInstructions = await this.appendDeveloperInstructions(
+        developerInstructions,
+        resolvedCwd,
+        options
+      );
+    }
 
     const result = (await this.rpc(
       "thread/start",
@@ -2032,6 +2046,24 @@ export class CodexAppServerRuntimePort
     const threadId = result.thread.id;
     this.attachThreadToSession(sessionId, threadId);
     return threadId;
+  }
+
+  /**
+   * thread/start's developerInstructions replaces the user's config-level
+   * developer_instructions, so we read the configured text and append ours.
+   */
+  private async appendDeveloperInstructions(
+    extra: string,
+    cwd: string | undefined,
+    options: RuntimeOperationOptions
+  ): Promise<string> {
+    const config = (await this.rpc(
+      "config/read",
+      { includeLayers: false, cwd: cwd ?? null } satisfies ConfigReadParams,
+      options
+    )) as ConfigReadResponse;
+    const base = config.config.developer_instructions?.trim();
+    return base ? `${base}\n\n${extra}` : extra;
   }
 
   private resolveSelectedConfig(): CodexSelectedConfig {

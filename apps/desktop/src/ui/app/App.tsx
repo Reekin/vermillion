@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { SessionPane } from "../chat-shell/SessionPane.js";
-import { DocEditor } from "./components/DocEditor.js";
 import { DocsPanel } from "./components/DocsPanel.js";
 import { InboxPanel } from "./components/InboxPanel.js";
 import { Modal } from "./components/Modal.js";
 import { Rail } from "./components/Rail.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
+import { TextEditor } from "./components/TextEditor.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { WorkspacesPanel } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
@@ -58,17 +58,18 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       const workspace = draftWorkspaceId ? workspaceById.get(draftWorkspaceId) : undefined;
       if (!workspace) throw new Error("请先在 Composer 里选择一个 workspace。");
       const engineId = (await transport.engine.list()).find((e) => e.engineId === "codex")?.engineId ?? "codex";
+      const role = await store.getState().client.request("role.read", { workspaceId: workspace.workspaceId, roleId: "design-partner" });
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
         engineId,
-        metadata: { cwd: sessionCwd(workspace.rootPath) }
+        metadata: { cwd: sessionCwd(workspace.rootPath), developerInstructions: role.content }
       });
       void content;
       void attachments;
       setSessionId(created.sessionId);
       return created.sessionId;
     },
-    [draftWorkspaceId, workspaceById, transport]
+    [draftWorkspaceId, workspaceById, transport, store]
   );
 
   const onSelect = useCallback(
@@ -134,7 +135,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
           {renderPanel(overlay)}
         </Modal>
       )}
-      <DocEditor store={store} />
+      <TextEditor store={store} />
     </div>
   );
 };

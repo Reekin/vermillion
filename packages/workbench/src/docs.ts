@@ -4,7 +4,6 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { DocChange, DocFile } from "./contracts.js";
-import { DESIGN_PARTNER_INSTRUCTIONS } from "./design-partner-instructions.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -46,12 +45,6 @@ export class DocsService {
       await git(this.rootPath, ["init", "-q"]);
     }
     await mkdir(join(this.rootPath, DOCS_DIR), { recursive: true });
-    const instructionsPath = join(this.rootPath, STATE_DIR, "AGENTS.md");
-    try {
-      await stat(instructionsPath);
-    } catch {
-      await writeFile(instructionsPath, DESIGN_PARTNER_INSTRUCTIONS, "utf8");
-    }
   }
 
   async list(): Promise<DocFile[]> {
@@ -133,7 +126,7 @@ export class DocsService {
   }
 
   /**
-   * Recursive watcher over .vermillion; reports which area changed ("docs", "missions", "workitems", "decisions")
+   * Recursive watcher over .vermillion; reports which area changed ("docs", "roles", "missions", "workitems", "decisions")
    * so out-of-process writers (CLI, agents) surface as the same events as in-process writes. Debounced per area.
    */
   watch(onChange: (area: string) => void): FSWatcher {

@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { latestRevision, type DecisionCard, type Mission, type WorkItem } from "@vermillion/workbench/client";
+import { latestRevision, type DecisionCard, type Mission, type RoleFile, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Badge, Button, Empty, SectionLabel } from "./ui.js";
@@ -26,7 +26,7 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
   const view = store((s) => s.view);
   const selectWorkspace = store((s) => s.browseWorkspace);
-  const setOpenDocPath = store((s) => s.setOpenDocPath);
+  const openEditor = store((s) => s.openEditor);
   const [section, setSection] = useState<Section>("missions");
   const [error, setError] = useState<string | undefined>();
 
@@ -97,8 +97,15 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
             </nav>
             <div className="min-h-0 flex-1 overflow-auto">
               {section === "missions" && <MissionsSection missions={view?.missions ?? []} workItems={view?.workItems ?? []} />}
-              {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={setOpenDocPath} />}
-              {section === "domains" && <Empty title="Domain 尚未提供" hint="默认一个 workspace 就是一个 Domain；维护者、监控范围和执行规范会在这里配置。" />}
+              {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
+              {section === "domains" && (
+                <RolesSection
+                  client={client}
+                  workspaceId={activeWorkspaceId}
+                  roles={view?.roles ?? []}
+                  onEdit={(roleId) => openEditor({ kind: "role", roleId })}
+                />
+              )}
               {section === "issues" && <Empty title="Issues 尚未提供" hint="来自 IM 和 Maintainer 的议题会在这里汇总，经思考流程转化为任务。" />}
               {section === "automation" && <Empty title="Automation 尚未提供" hint="管家、Worker、Supervisor 的调度与运行记录会在这里展示。" />}
             </div>
@@ -144,6 +151,32 @@ const MissionsSection = ({ missions, workItems }: { missions: Mission[]; workIte
     </ul>
   );
 };
+
+const roleSourceLabel: Record<RoleFile["source"], string> = { global: "全局", workspace: "本 workspace" };
+
+const RolesSection = ({ client, workspaceId, roles, onEdit }: { client: WorkbenchClient; workspaceId: string; roles: RoleFile[]; onEdit: (roleId: string) => void }) => (
+  <div>
+    <SectionLabel>角色 prompt</SectionLabel>
+    <p className="px-4 pb-2 text-caption text-muted-foreground">全局版本在 ~/.vermillion/roles；在这里编辑会写入本 workspace 的 .vermillion/roles 作为覆盖。</p>
+    <ul>
+      {roles.map((role) => (
+        <li key={role.roleId} className="group flex items-center gap-2 border-b border-border px-4 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-label text-strong">{role.title}</span>
+              <Badge tone={role.source === "workspace" ? "accent" : "neutral"}>{roleSourceLabel[role.source]}</Badge>
+            </div>
+            <span className="font-mono text-micro text-faint-foreground">{role.roleId}.md</span>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => onEdit(role.roleId)}>{role.source === "workspace" ? "编辑" : "覆盖"}</Button>
+          {role.source === "workspace" && (
+            <Button size="sm" variant="ghost" onClick={() => void client.request("role.reset", { workspaceId, roleId: role.roleId })}>恢复全局</Button>
+          )}
+        </li>
+      ))}
+    </ul>
+  </div>
+);
 
 const DocsSection = ({ docs, decisions, onOpen }: { docs: string[]; decisions: DecisionCard[]; onOpen: (path: string) => void }) => (
   <div>

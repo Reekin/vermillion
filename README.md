@@ -11,12 +11,13 @@
 
 ## 使用
 
-1. 思考页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并写入 `.vermillion/AGENTS.md`。
-2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 `<root>/.vermillion`，设计伙伴只会改 `docs/` 下的文件。
+1. 思考页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并创建 `.vermillion/docs/`。
+2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 `<root>/.vermillion`，设计伙伴的角色 prompt 作为 developer instructions 注入（追加在 codex config.toml 的 `developer_instructions` 之后），只会改 `docs/` 下的文件。
 3. 右栏 Docs 树按文件夹显示 `.vermillion/docs/`；有改动的文件带 M/U/D 标记，点击可编辑，右键可在文件管理器或默认编辑器中打开。
 4. 点 **提交变更**：选「新任务」或「补充到现有任务」，勾选本次要提交的文件；每次提交是任务的一个 revision，管家据此判断拆单、调整还是重发。
 5. **Inbox** 汇总所有 workspace 的决策卡（选一个选项即回答）和待验收工单（通过 / 打回并写原因 / 不做），并展示证据包与验收结果。
 6. 左栏 **New Chat** 回到草稿态；会话列表按最近完成的 turn 排序，可切换为按 workspace 分组，可加载更多。
+7. **Workspaces → Domain** 列出所有角色 prompt（设计伙伴、管家、Worker、Supervisor、Maintainer、Liaison、Reviewer、Verifier）及其来源。全局版本在 `~/.vermillion/roles/` 直接改文件；点「覆盖」在本 workspace 的 `.vermillion/roles/` 写一份覆盖版本，「恢复全局」删除覆盖。
 
 ## CLI
 
@@ -31,8 +32,8 @@ CLI 与桌面共用同一个服务和方法表；CLI 的写入会通过文件监
 
 ## 数据位置
 
-- 全局：`~/.vermillion/`（workspace 注册表、会话索引）
-- 每个 workspace：`<root>/.vermillion/`：`AGENTS.md`、`docs/`（真相源，走 git）、`missions/` `workitems/` `decisions/`（一条一 JSON）
+- 全局：`~/.vermillion/`（workspace 注册表、会话索引、`roles/` 角色 prompt）
+- 每个 workspace：`<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 覆盖）、`missions/` `workitems/` `decisions/`（一条一 JSON）
 
 ## 结构
 

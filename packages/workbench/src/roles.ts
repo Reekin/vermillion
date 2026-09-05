@@ -1,0 +1,88 @@
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { RoleFile } from "./contracts.js";
+import { STATE_DIR } from "./docs.js";
+
+export const ROLES_DIR = STATE_DIR + "/roles";
+
+const roleFile = (dir: string, roleId: string): string => join(dir, roleId + ".md");
+
+const assertRoleId = (roleId: string): void => {
+  if (!/^[a-z][a-z0-9-]*$/.test(roleId)) throw new Error("Invalid role id: " + roleId);
+};
+
+const listIds = async (dir: string): Promise<string[]> => {
+  try {
+    return (await readdir(dir)).filter((name) => name.endsWith(".md")).map((name) => name.slice(0, -3));
+  } catch {
+    return [];
+  }
+};
+
+const exists = async (path: string): Promise<boolean> => {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const titleOf = (content: string): string => content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? "";
+
+export type RoleServiceOptions = {
+  /** ~/.vermillion/roles: the user's editable copy of every role prompt. */
+  globalDir: string;
+  /** Prompts shipped with the app; missing files are copied into globalDir on ensureGlobal(). Omit when running without the package (CLI). */
+  defaultsDir?: string;
+};
+
+/**
+ * Role prompts resolve workspace override (<root>/.vermillion/roles/<id>.md) -> global (~/.vermillion/roles/<id>.md).
+ * The global layer is seeded from the shipped defaults, so it always holds every role once the app has started.
+ */
+export class RoleService {
+  constructor(private readonly options: RoleServiceOptions) {}
+
+  async ensureGlobal(): Promise<void> {
+    const { defaultsDir, globalDir } = this.options;
+    if (!defaultsDir) return;
+    await mkdir(globalDir, { recursive: true });
+    for (const roleId of await listIds(defaultsDir)) {
+      const target = roleFile(globalDir, roleId);
+      if (!(await exists(target))) await writeFile(target, await readFile(roleFile(defaultsDir, roleId), "utf8"), "utf8");
+    }
+  }
+
+  async list(workspaceRoot: string): Promise<RoleFile[]> {
+    const overrides = new Set(await listIds(join(workspaceRoot, ROLES_DIR)));
+    const ids = new Set([...(await listIds(this.options.globalDir)), ...overrides]);
+    const out: RoleFile[] = [];
+    for (const roleId of [...ids].sort()) {
+      const { content, source } = await this.read(workspaceRoot, roleId);
+      out.push({ roleId, source, title: titleOf(content) || roleId });
+    }
+    return out;
+  }
+
+  async read(workspaceRoot: string, roleId: string): Promise<{ content: string; source: RoleFile["source"] }> {
+    assertRoleId(roleId);
+    const override = roleFile(join(workspaceRoot, ROLES_DIR), roleId);
+    if (await exists(override)) return { content: await readFile(override, "utf8"), source: "workspace" };
+    const global = roleFile(this.options.globalDir, roleId);
+    if (await exists(global)) return { content: await readFile(global, "utf8"), source: "global" };
+    throw new Error("Unknown role: " + roleId);
+  }
+
+  async writeOverride(workspaceRoot: string, roleId: string, content: string): Promise<void> {
+    assertRoleId(roleId);
+    const dir = join(workspaceRoot, ROLES_DIR);
+    await mkdir(dir, { recursive: true });
+    await writeFile(roleFile(dir, roleId), content, "utf8");
+  }
+
+  async removeOverride(workspaceRoot: string, roleId: string): Promise<void> {
+    assertRoleId(roleId);
+    await rm(roleFile(join(workspaceRoot, ROLES_DIR), roleId), { force: true });
+  }
+}

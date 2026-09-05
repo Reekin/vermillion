@@ -684,7 +684,11 @@ export class RuntimeOrchestrator {
         : undefined;
     const providerSessionId =
       runtimeProviderSessionId ?? persistedProviderSessionId;
-    if (!cwd && !providerSessionId) {
+    const developerInstructions =
+      session.metadata && typeof session.metadata.developerInstructions === "string"
+        ? session.metadata.developerInstructions
+        : undefined;
+    if (!cwd && !providerSessionId && !developerInstructions) {
       return envelope;
     }
     return {
@@ -692,7 +696,8 @@ export class RuntimeOrchestrator {
       command: {
         ...envelope.command,
         ...(cwd ? { cwd } : {}),
-        ...(providerSessionId ? { providerSessionId } : {})
+        ...(providerSessionId ? { providerSessionId } : {}),
+        ...(developerInstructions ? { developerInstructions } : {})
       } as CommandEnvelope["command"]
     };
   }

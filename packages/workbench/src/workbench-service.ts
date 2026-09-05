@@ -7,11 +7,13 @@ import type {
   InboxItem,
   Mission,
   Risk,
+  RoleFile,
   WorkItem,
   WorkbenchEvent,
   Workspace
 } from "./contracts.js";
 import { DocsService } from "./docs.js";
+import { RoleService } from "./roles.js";
 import { WorkspaceStore } from "./workspace-store.js";
 
 const createId = (prefix: string): string =>
@@ -26,19 +28,22 @@ export type WorkspaceSource = {
 
 export type WorkbenchServiceOptions = {
   workspaces: WorkspaceSource;
+  roles: RoleService;
   now?: () => string;
 };
 
-type WorkspaceContext = { store: WorkspaceStore; docs: DocsService; watcher?: FSWatcher };
+type WorkspaceContext = { rootPath: string; store: WorkspaceStore; docs: DocsService; watcher?: FSWatcher };
 
 export class WorkbenchService {
   private readonly workspaces: WorkspaceSource;
+  private readonly roles: RoleService;
   private readonly now: () => string;
   private readonly contexts = new Map<string, WorkspaceContext>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
 
   constructor(options: WorkbenchServiceOptions) {
     this.workspaces = options.workspaces;
+    this.roles = options.roles;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -90,7 +95,7 @@ export class WorkbenchService {
     if (!workspace) throw new Error("Unknown workspace: " + workspaceId);
     const docs = new DocsService(workspace.rootPath);
     await docs.ensureRepo();
-    const context: WorkspaceContext = { store: new WorkspaceStore(workspace.rootPath), docs };
+    const context: WorkspaceContext = { rootPath: workspace.rootPath, store: new WorkspaceStore(workspace.rootPath), docs };
     try {
       context.watcher = docs.watch((area) => {
         const type = watchedAreas[area];
@@ -122,6 +127,26 @@ export class WorkbenchService {
 
   async docDiff(workspaceId: string, path: string): Promise<string> {
     return (await this.context(workspaceId)).docs.diff(path);
+  }
+
+  // ---- roles ----
+
+  async listRoles(workspaceId: string): Promise<RoleFile[]> {
+    return this.roles.list((await this.context(workspaceId)).rootPath);
+  }
+
+  async readRole(workspaceId: string, roleId: string): Promise<{ content: string; source: RoleFile["source"] }> {
+    return this.roles.read((await this.context(workspaceId)).rootPath, roleId);
+  }
+
+  async writeRoleOverride(workspaceId: string, roleId: string, content: string): Promise<void> {
+    await this.roles.writeOverride((await this.context(workspaceId)).rootPath, roleId, content);
+    this.emit({ type: "roles.changed", workspaceId });
+  }
+
+  async resetRoleOverride(workspaceId: string, roleId: string): Promise<void> {
+    await this.roles.removeOverride((await this.context(workspaceId)).rootPath, roleId);
+    this.emit({ type: "roles.changed", workspaceId });
   }
 
   // ---- missions ----
@@ -340,6 +365,7 @@ const isLowRisk = (risk: Risk): boolean => risk === "R0" || risk === "R1";
 
 const watchedAreas: Record<string, Extract<WorkbenchEvent, { workspaceId: string }>["type"] | undefined> = {
   docs: "docs.changed",
+  roles: "roles.changed",
   missions: "missions.changed",
   workitems: "workItems.changed",
   decisions: "decisions.changed"

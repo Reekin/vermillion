@@ -24,7 +24,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { WorkbenchService, createWorkbenchRpcHandler, startLocalEndpoint } from "@vermillion/workbench";
+import { RoleService, WorkbenchService, createWorkbenchRpcHandler, startLocalEndpoint } from "@vermillion/workbench";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
   resolveWillNavigate,
@@ -53,6 +53,8 @@ const currentDir = dirname(currentFilePath);
 const appRoot = resolve(currentDir, "..");
 const bundledPreloadPath = join(currentDir, "preload.cjs");
 const bundledRendererIndexPath = join(appRoot, "dist-web", "index.html");
+// Shipped role prompts: resources/app/roles in a release, packages/workbench/roles in the repo.
+const roleDefaultsDir = [join(appRoot, "roles"), resolve(appRoot, "../../packages/workbench/roles")].find((dir) => existsSync(dir));
 const defaultDevServerUrl = "http://127.0.0.1:4173/";
 const iconFileNames =
   process.platform === "win32"
@@ -718,7 +720,10 @@ const boot = async (): Promise<void> => {
   ipcMain.handle(SESSION_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     router.handleRequest(payload)
   );
+  const roleService = new RoleService({ globalDir: join(persistenceBaseDir, "roles"), defaultsDir: roleDefaultsDir });
+  await roleService.ensureGlobal();
   const workbenchService = new WorkbenchService({
+    roles: roleService,
     workspaces: {
       list: async () =>
         (await service.listWorkspaces()).workspaces.map((workspace) => ({

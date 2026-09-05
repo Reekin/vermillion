@@ -12,6 +12,7 @@ import {
   zMissionStatus,
   zReviewDisposition,
   zRisk,
+  zRoleFile,
   zRun,
   zScope,
   zVerifyResult,
@@ -36,6 +37,11 @@ export const workbenchRpc = {
   "docs.write": { params: zWs.extend({ path: z.string().min(1), content: z.string() }), result: zEmpty },
   "docs.pending": { params: zWs, result: z.array(zDocChange) },
   "docs.diff": { params: zWs.extend({ path: z.string().min(1) }), result: z.object({ diff: z.string() }) },
+
+  "role.list": { params: zWs, result: z.array(zRoleFile) },
+  "role.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string(), source: zRoleFile.shape.source }) },
+  "role.write": { params: zWs.extend({ roleId: z.string().min(1), content: z.string() }), result: zEmpty },
+  "role.reset": { params: zWs.extend({ roleId: z.string().min(1) }), result: zEmpty },
 
   "mission.list": { params: zWs, result: z.array(zMission) },
   "mission.create": {

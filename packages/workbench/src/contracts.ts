@@ -146,6 +146,14 @@ export const zDocFile = z.object({
 });
 export type DocFile = z.infer<typeof zDocFile>;
 
+export const zRoleFile = z.object({
+  roleId: z.string().min(1),
+  title: z.string(),
+  /** Which layer the effective prompt comes from. */
+  source: z.enum(["global", "workspace"])
+});
+export type RoleFile = z.infer<typeof zRoleFile>;
+
 export const zDocChange = z.object({
   path: z.string().min(1),
   status: z.enum(["added", "modified", "deleted"])
@@ -164,6 +172,7 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("docs.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("missions.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),
-  z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() })
+  z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("roles.changed"), workspaceId: z.string() })
 ]);
 export type WorkbenchEvent = z.infer<typeof zWorkbenchEvent>;

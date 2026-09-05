@@ -88,7 +88,8 @@ const zSendUserMessageCommand = z.object({
   content: z.string(),
   attachments: z.array(zAttachmentSchema).default([]),
   execution: zTurnExecutionOptionsSchema.optional(),
-  cwd: z.string().min(1).optional()
+  cwd: z.string().min(1).optional(),
+  developerInstructions: z.string().min(1).optional()
 });
 
 const zSteerTurnCommand = z.object({
