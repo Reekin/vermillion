@@ -79,16 +79,13 @@ const renderController = (
   controller: SessionOpenController;
   open: ReturnType<typeof vi.fn>;
   activate: ReturnType<typeof vi.fn>;
-  refreshSessionBrowser: ReturnType<typeof vi.fn>;
   openRequests: Map<
     string,
     Array<ReturnType<typeof deferred<{ page: SessionWindowRpc }>>>
   >;
   sessionWindows: () => Record<string, SessionWindowRpc | undefined>;
   viewportDisplayedSessionIdRef: { current: string | undefined };
-  setBrowserSelectedSessionId: ReturnType<typeof vi.fn>;
   setOpeningSessionId: ReturnType<typeof vi.fn>;
-  onSessionRead: ReturnType<typeof vi.fn>;
 } => {
   const store = createRendererStore();
   if (cachedSessionId) {
@@ -111,10 +108,7 @@ const renderController = (
     return request.promise;
   });
   const activate = vi.fn(async (sessionId: string) => ({ sessionId }));
-  const refreshSessionBrowser = vi.fn(async () => {});
-  const setBrowserSelectedSessionId = vi.fn();
   const setOpeningSessionId = vi.fn();
-  const onSessionRead = vi.fn();
   let sessionWindows: Record<string, SessionWindowRpc | undefined> =
     cachedSessionId
       ? {
@@ -149,22 +143,18 @@ const renderController = (
         loadOlder: vi.fn()
       }
     } as unknown as SessionOpenControllerInput["transport"],
-    workspaceTree: [],
     sessionWindows,
     setSessionWindows: ((updater) => {
       sessionWindows =
         typeof updater === "function" ? updater(sessionWindows) : updater;
     }) as SessionOpenControllerInput["setSessionWindows"],
     setLoadingOlderSessionId: vi.fn(),
-    setBrowserSelectedSessionId,
     setOpeningSessionId,
     displayedSessionId,
     viewport,
     isOpeningSelectedSession: false,
     onResetSessionSwitchState: vi.fn(),
-    onSessionRead,
-    onStatusNotice: vi.fn() as SessionOpenControllerInput["onStatusNotice"],
-    refreshSessionBrowser
+    onStatusNotice: vi.fn() as SessionOpenControllerInput["onStatusNotice"]
   };
 
   const Harness = (): ReturnType<typeof createElement> => {
@@ -180,13 +170,10 @@ const renderController = (
     controller,
     open,
     activate,
-    refreshSessionBrowser,
     openRequests,
     sessionWindows: () => sessionWindows,
     viewportDisplayedSessionIdRef,
-    setBrowserSelectedSessionId,
-    setOpeningSessionId,
-    onSessionRead
+    setOpeningSessionId
   };
 };
 
@@ -196,12 +183,10 @@ describe("useSessionOpenController background refresh", () => {
       controller,
       open,
       openRequests,
-      sessionWindows,
-      refreshSessionBrowser,
-      onSessionRead
+      sessionWindows
     } = renderController("session-a");
 
-    const manualOpen = controller.onOpenSession("session-b");
+    const manualOpen = controller.openSession("session-b");
     await controller.refreshDisplayedSessionWindow("session-a", {
       forceProviderHydration: true
     });
@@ -219,25 +204,15 @@ describe("useSessionOpenController background refresh", () => {
 
     expect(sessionWindows()["session-b"]?.cursor).toBe("cursor-b");
     expect(sessionWindows()["session-a"]).toBeUndefined();
-    expect(refreshSessionBrowser).not.toHaveBeenCalled();
-    expect(onSessionRead).toHaveBeenCalledWith("session-b");
   });
 
-  it("opens a cached session without refreshing or resetting the browser page", async () => {
-    const {
-      controller,
-      open,
-      activate,
-      refreshSessionBrowser,
-      onSessionRead
-    } = renderController("session-a", "session-b");
+  it("activates a cached session without reopening it", async () => {
+    const { controller, open, activate } = renderController("session-a", "session-b");
 
-    await controller.onOpenSession("session-b");
+    await controller.openSession("session-b");
 
     expect(open).not.toHaveBeenCalled();
     expect(activate).toHaveBeenCalledWith("session-b");
-    expect(refreshSessionBrowser).not.toHaveBeenCalled();
-    expect(onSessionRead).toHaveBeenCalledWith("session-b");
   });
 
   it("does not let an in-flight background refresh cancel or apply over a manual switch", async () => {
@@ -257,7 +232,7 @@ describe("useSessionOpenController background refresh", () => {
     });
 
     viewportDisplayedSessionIdRef.current = "session-b";
-    const manualOpen = controller.onOpenSession("session-b");
+    const manualOpen = controller.openSession("session-b");
     openRequests.get("session-a")?.[0]?.resolve({
       page: sessionWindowFor("session-a", "cursor-a")
     });
@@ -290,7 +265,7 @@ describe("useSessionOpenController background refresh", () => {
     });
 
     viewportDisplayedSessionIdRef.current = "session-b";
-    const openSessionB = controller.onOpenSession("session-b");
+    const openSessionB = controller.openSession("session-b");
     openRequests.get("session-b")?.[0]?.resolve({
       page: sessionWindowFor("session-b", "cursor-b")
     });
@@ -298,7 +273,7 @@ describe("useSessionOpenController background refresh", () => {
     expect(sessionWindows()["session-b"]?.cursor).toBe("cursor-b");
 
     viewportDisplayedSessionIdRef.current = "session-a";
-    const openSessionA = controller.onOpenSession("session-a");
+    const openSessionA = controller.openSession("session-a");
     openRequests.get("session-a")?.[1]?.resolve({
       page: sessionWindowFor("session-a", "cursor-a-manual")
     });
@@ -313,27 +288,18 @@ describe("useSessionOpenController background refresh", () => {
     expect(sessionWindows()["session-a"]?.cursor).toBe("cursor-a-manual");
   });
 
-  it("rolls the optimistic selection back when opening the target fails", async () => {
-    const {
-      controller,
-      openRequests,
-      setBrowserSelectedSessionId,
-      setOpeningSessionId,
-      onSessionRead
-    } = renderController("session-a");
+  it("clears the opening marker when opening the target fails", async () => {
+    const { controller, openRequests, setOpeningSessionId } = renderController("session-a");
 
-    const opening = controller.onOpenSession("session-b");
+    const opening = controller.openSession("session-b");
 
-    expect(setBrowserSelectedSessionId).toHaveBeenCalledWith("session-b");
     expect(setOpeningSessionId).toHaveBeenCalledWith("session-b");
 
     await flushMicrotasks();
     openRequests.get("session-b")?.[0]?.reject(new Error("provider unavailable"));
     await opening;
 
-    expect(setBrowserSelectedSessionId).toHaveBeenLastCalledWith("session-a");
     expect(setOpeningSessionId).toHaveBeenLastCalledWith(undefined);
-    expect(onSessionRead).not.toHaveBeenCalled();
   });
 });
 

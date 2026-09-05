@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  createWorkbenchRuntimeService
+  createSessionRuntimeService
 } from "../src/prod-service.js";
 
 const codexFixturePath = fileURLToPath(
@@ -58,7 +58,7 @@ describe("prod runtime service", () => {
   it("reports the same configured program path used by the runtime", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "awb-program-resolution-"));
     tempDirs.push(baseDir);
-    const service = createWorkbenchRuntimeService({
+    const service = createSessionRuntimeService({
       codexCommandPath: "C:\\configured\\codex.exe",
       persistenceBaseDir: baseDir
     });
@@ -89,7 +89,7 @@ describe("prod runtime service", () => {
   });
 
   it("uses the real Codex runtime composition instead of demo placeholder text", async () => {
-    const service = createWorkbenchRuntimeService({
+    const service = createSessionRuntimeService({
       codexCommandPath: process.execPath,
       codexCommandArgs: [codexFixturePath],
     });
@@ -178,7 +178,7 @@ describe("prod runtime service", () => {
     vi.stubGlobal("fetch", fetchImpl);
 
     try {
-      const service = createWorkbenchRuntimeService({
+      const service = createSessionRuntimeService({
         codexCommandPath: process.execPath,
         codexCommandArgs: [codexFixturePath],
       });
@@ -244,7 +244,7 @@ describe("prod runtime service", () => {
     tempDirs.push(tempDir);
     const requestLogPath = join(tempDir, "requests.jsonl");
     vi.stubEnv("FAKE_CODEX_REQUEST_LOG", requestLogPath);
-    const service = createWorkbenchRuntimeService({
+    const service = createSessionRuntimeService({
       codexCommandPath: process.execPath,
       codexCommandArgs: [codexFixturePath],
     });

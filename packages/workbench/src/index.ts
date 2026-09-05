@@ -4,5 +4,7 @@ export * from "./rpc-handler.js";
 export * from "./docs.js";
 export * from "./workspace-store.js";
 export * from "./workbench-service.js";
+export * from "./file-workspace-source.js";
 export * from "./memory-workspace-source.js";
 export * from "./design-partner-instructions.js";
+export * from "./cli.js";

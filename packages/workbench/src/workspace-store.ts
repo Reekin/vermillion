@@ -1,18 +1,15 @@
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { STATE_DIR } from "./docs.js";
 import type { z } from "zod";
 import {
   zDecisionCard,
-  zIssue,
   zMission,
   zWorkItem,
   type DecisionCard,
-  type Issue,
   type Mission,
   type WorkItem
 } from "./contracts.js";
-
-export const WORKSPACE_STATE_DIR = ".vermillion";
 
 type Collection<T> = {
   list: () => Promise<T[]>;
@@ -70,15 +67,13 @@ export class WorkspaceStore {
   readonly missions: Collection<Mission>;
   readonly workItems: Collection<WorkItem>;
   readonly decisions: Collection<DecisionCard>;
-  readonly issues: Collection<Issue>;
 
   constructor(rootPath: string) {
     this.rootPath = rootPath;
-    this.stateDir = join(rootPath, WORKSPACE_STATE_DIR);
+    this.stateDir = join(rootPath, STATE_DIR);
     this.missions = createCollection(join(this.stateDir, "missions"), zMission, "missionId");
     this.workItems = createCollection(join(this.stateDir, "workitems"), zWorkItem, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
-    this.issues = createCollection(join(this.stateDir, "issues"), zIssue, "issueId");
   }
 
   async exists(): Promise<boolean> {

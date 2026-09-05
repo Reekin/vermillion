@@ -9,14 +9,14 @@ import {
 } from "./capability-registry.js";
 import type { SessionIndexStore } from "./session-index.js";
 import { SessionIdentityRegistry } from "./session-identity-registry.js";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
 
 type SessionActionsProviderOptions =
   | {
       capabilities: CapabilityRegistry;
     }
   | {
-      runtimeService: WorkbenchRuntimeService;
+      runtimeService: SessionRuntimeService;
       sessionIndexStore: SessionIndexStore;
       providers?: SessionAgentActionsProvider[];
     };

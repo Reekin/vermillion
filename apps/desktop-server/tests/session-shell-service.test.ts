@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExecutionPreferencesByEngineId } from "@vermillion/shared";
-import { WorkbenchShellService } from "../src/workbench-shell-service.js";
+import { SessionShellService } from "../src/session-shell-service.js";
 
 const savedExecutionPreferences: ExecutionPreferencesByEngineId = {
   codex: {
@@ -106,7 +106,7 @@ const buildProjectedProviderOpenHarness = (
   };
   const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
   const markSessionRead = vi.fn().mockResolvedValue(undefined);
-  const service = new WorkbenchShellService({
+  const service = new SessionShellService({
     runtimeService: {
       listSessions: () => [providerSession],
       getSnapshot: () => ({
@@ -148,9 +148,9 @@ const buildProjectedProviderOpenHarness = (
   };
 };
 
-describe("WorkbenchShellService", () => {
+describe("SessionShellService", () => {
   it("serves engine registry and surface from injected engine-control services", () => {
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
@@ -201,7 +201,7 @@ describe("WorkbenchShellService", () => {
     const selectEngine = vi.fn().mockReturnValue({
       selectedEngineId: "codex"
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getWorkspaceRegistry: () => ({
           ready,
@@ -268,7 +268,7 @@ describe("WorkbenchShellService", () => {
         enabled: true
       }
     ]);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getSession: (sessionId: string) =>
           sessionId === "session-1"
@@ -356,7 +356,7 @@ describe("WorkbenchShellService", () => {
       accepted: true
     });
     const ensureSessionLoaded = vi.fn().mockResolvedValue(false);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getSession: () => ({
           sessionId: "session-1",
@@ -406,7 +406,7 @@ describe("WorkbenchShellService", () => {
   it("blocks stateful non-send commands when a partial session cannot be fully hydrated", async () => {
     const executeCommand = vi.fn();
     const ensureSessionLoaded = vi.fn().mockResolvedValue(false);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getSession: () => ({
           sessionId: "session-1",
@@ -453,7 +453,7 @@ describe("WorkbenchShellService", () => {
   it("blocks interaction responses when a partial session cannot be fully hydrated", async () => {
     const executeCommand = vi.fn();
     const ensureSessionLoaded = vi.fn().mockResolvedValue(false);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getSession: () => ({
           sessionId: "session-1",
@@ -500,7 +500,7 @@ describe("WorkbenchShellService", () => {
 
   it("clears partial hydration state when read-session full hydration succeeds", async () => {
     const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
@@ -530,7 +530,7 @@ describe("WorkbenchShellService", () => {
       canceled: false,
       rootPath: "I:\\repo"
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
@@ -555,7 +555,7 @@ describe("WorkbenchShellService", () => {
     };
     const registerWorkspace = vi.fn().mockResolvedValue(workspace);
     const repairWorkspaces = vi.fn().mockRejectedValue(new Error("scan failed"));
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getWorkspaceRegistry: () => ({ registerWorkspace })
       } as never,
@@ -578,7 +578,7 @@ describe("WorkbenchShellService", () => {
   it("removes workspaces from both registry and persisted session index", async () => {
     const removeWorkspace = vi.fn().mockResolvedValue(true);
     const removeIndexedWorkspace = vi.fn().mockResolvedValue(undefined);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getWorkspaceRegistry: () => ({
           removeWorkspace
@@ -608,7 +608,7 @@ describe("WorkbenchShellService", () => {
       lastActiveSessionId: "session-1",
       expandedWorkspaceIds: ["workspace-1", "workspace-2"]
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getWorkspaceRegistry: () => ({ ready, getState })
       } as never,
@@ -632,7 +632,7 @@ describe("WorkbenchShellService", () => {
       lastActiveSessionId: "session-1"
     });
     const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getWorkspaceRegistry: () => ({
           ready,
@@ -682,7 +682,7 @@ describe("WorkbenchShellService", () => {
       ],
       fetchedAt: "2026-04-19T00:00:00.000Z"
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [
           {
@@ -746,7 +746,7 @@ describe("WorkbenchShellService", () => {
     const listActions = vi.fn().mockResolvedValue([
       { action: "refresh", label: "Refresh" }
     ]);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getWorkspaceRegistry: () => ({
           ready,
@@ -839,7 +839,7 @@ describe("WorkbenchShellService", () => {
   it("marks a cached browser session as active and read without reopening its window", async () => {
     const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [
           {
@@ -888,7 +888,7 @@ describe("WorkbenchShellService", () => {
           : Promise.resolve()
     );
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [
           {
@@ -971,7 +971,7 @@ describe("WorkbenchShellService", () => {
         providerSessionId: "thread-1"
       }
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [],
         getSnapshot: () => buildSessionSnapshot(),
@@ -1070,7 +1070,7 @@ describe("WorkbenchShellService", () => {
       hasNewer: false,
       olderCursor: "older-branch"
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => snapshot.sessions,
         getSnapshot: () => snapshot,
@@ -1148,7 +1148,7 @@ describe("WorkbenchShellService", () => {
       hasOlder: false,
       hasNewer: false
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [emptyProviderSession],
         getSnapshot: () => ({
@@ -1215,7 +1215,7 @@ describe("WorkbenchShellService", () => {
       hasOlder: false,
       hasNewer: false
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [providerSession],
         getSnapshot: () => ({
@@ -1294,7 +1294,7 @@ describe("WorkbenchShellService", () => {
       hasOlder: true,
       hasNewer: false
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [],
         getSession: (sessionId: string) =>
@@ -1367,7 +1367,7 @@ describe("WorkbenchShellService", () => {
           resolveHydration = resolve;
         })
     );
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [
           {
@@ -1435,7 +1435,7 @@ describe("WorkbenchShellService", () => {
       conversationId: "conversation-created"
     });
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         createSession,
         getWorkspaceRegistry: () =>
@@ -1494,7 +1494,7 @@ describe("WorkbenchShellService", () => {
       sessionId: "session-created",
       conversationId: "conversation-created"
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         createSession,
         getWorkspaceRegistry: () =>
@@ -1560,7 +1560,7 @@ describe("WorkbenchShellService", () => {
       })),
       fetchedAt: "2026-04-19T00:00:00.000Z"
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [
           {
@@ -1619,7 +1619,7 @@ describe("WorkbenchShellService", () => {
 
   it("loads older turns using the paged window contract", async () => {
     const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getSnapshot: () => ({
           ...buildSessionSnapshot(),
@@ -1714,7 +1714,7 @@ describe("WorkbenchShellService", () => {
         providerSessionId: "thread-1"
       }
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         getSnapshot: () => buildSessionSnapshot(),
         getWorkspaceRegistry: () => ({
@@ -1760,7 +1760,7 @@ describe("WorkbenchShellService", () => {
       conversationId: "conversation-new"
     });
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         createSession,
         getWorkspaceRegistry: () => buildWorkspaceRegistry("I:/repo")
@@ -1795,7 +1795,7 @@ describe("WorkbenchShellService", () => {
 
   it("rejects opening a stale session entry that has no loadable provider identity", async () => {
     const ensureSessionLoaded = vi.fn().mockResolvedValue(false);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [],
         getWorkspaceRegistry: () => ({
@@ -1827,7 +1827,7 @@ describe("WorkbenchShellService", () => {
     const listWorkspaceTree = vi
       .fn()
       .mockResolvedValue([{ workspaceId: "workspace-1", sessions: [] }]);
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {
         listWorkspaceTree
@@ -1848,7 +1848,7 @@ describe("WorkbenchShellService", () => {
       sessions: 3,
       relations: 1
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
@@ -1875,7 +1875,7 @@ describe("WorkbenchShellService", () => {
       displayPath: "I:\\repo\\docs\\README.md",
       fileUrl: "file:///I:/repo/docs/README.md"
     });
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
@@ -1940,7 +1940,7 @@ describe("WorkbenchShellService", () => {
       displayPath: "I:\\repo"
     });
 
-    const service = new WorkbenchShellService({
+    const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,

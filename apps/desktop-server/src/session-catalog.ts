@@ -10,7 +10,7 @@ import {
   SessionBrowserReadModel,
   type SessionBrowserReadModelSeed
 } from "./session-browser-read-model.js";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
 import type {
   SessionIndexEntry,
   SessionIndexStore,
@@ -54,7 +54,7 @@ export type WorkspaceBrowserNode = {
 };
 
 type SessionCatalogServiceOptions = {
-  runtimeService: WorkbenchRuntimeService;
+  runtimeService: SessionRuntimeService;
   workspaceRegistry: WorkspaceRegistryService;
   sessionIndexStore: SessionIndexStore;
 };
@@ -167,7 +167,7 @@ const isBrowserVisibleSeed = (
   (runtimeSessionIds.has(seed.sessionId) || Boolean(seed.providerSessionId));
 
 export class SessionCatalogService {
-  private readonly runtimeService: WorkbenchRuntimeService;
+  private readonly runtimeService: SessionRuntimeService;
   private readonly workspaceRegistry: WorkspaceRegistryService;
   private readonly sessionIndexStore: SessionIndexStore;
   private catalogRevision = 0;

@@ -20,8 +20,8 @@ import type { SessionRelationIndex } from "./session-index.js";
 import {
   type EngineSelectionInput,
   type CommandReceipt,
-  type WorkbenchAgentBinding,
-  type WorkbenchEngineDescriptor
+  type SessionAgentBinding,
+  type SessionEngineDescriptor
 } from "./runtime-types.js";
 import type { SessionTitleGenerator } from "./title-generation-service.js";
 import { WorkspaceSelectionService } from "./workspace-selection-service.js";
@@ -40,8 +40,8 @@ export type RuntimeOrchestratorOptions = {
   sessionIndexSyncService: SessionIndexSyncService;
   workspaceSelectionService: WorkspaceSelectionService;
   publishRuntimeEvent: (event: EventEnvelope["event"]) => void;
-  engines?: WorkbenchEngineDescriptor[];
-  agentBindings?: WorkbenchAgentBinding[];
+  engines?: SessionEngineDescriptor[];
+  agentBindings?: SessionAgentBinding[];
   titleGenerator?: SessionTitleGenerator;
   now?: Clock;
   createConversationId?: IdFactory;
@@ -52,7 +52,7 @@ const createOpaqueId = (prefix: string): string =>
     .toString(36)
     .slice(2, 10)}`;
 
-const cloneAgentBinding = (binding: WorkbenchAgentBinding): WorkbenchAgentBinding => ({
+const cloneAgentBinding = (binding: SessionAgentBinding): SessionAgentBinding => ({
   descriptor: {
     ...binding.descriptor,
     capabilities: [...binding.descriptor.capabilities]
@@ -73,7 +73,7 @@ const cloneAgentBinding = (binding: WorkbenchAgentBinding): WorkbenchAgentBindin
 });
 
 export class RuntimeOrchestrator {
-  private readonly bindings = new Map<string, WorkbenchAgentBinding>();
+  private readonly bindings = new Map<string, SessionAgentBinding>();
   private readonly engineSelections = new Map<string, Record<string, unknown> | undefined>();
   private readonly adapterUnsubscribeByEngineId = new Map<string, () => void>();
   private readonly adapterLifecycleGateByEngineId = new Map<string, LifecycleGate>();
@@ -126,7 +126,7 @@ export class RuntimeOrchestrator {
       options.engines?.[0]?.engineId;
   }
 
-  public registerEngine(engine: WorkbenchEngineDescriptor): void {
+  public registerEngine(engine: SessionEngineDescriptor): void {
     const existing = this.bindings.get(engine.engineId);
     this.bindings.set(engine.engineId, {
       descriptor: {
@@ -152,7 +152,7 @@ export class RuntimeOrchestrator {
     }
   }
 
-  public registerAgentBinding(binding: WorkbenchAgentBinding): void {
+  public registerAgentBinding(binding: SessionAgentBinding): void {
     this.bindings.set(binding.descriptor.engineId, cloneAgentBinding(binding));
     if (!this.selectedEngineId) {
       this.selectedEngineId = binding.descriptor.engineId;
@@ -662,7 +662,7 @@ export class RuntimeOrchestrator {
   private withSessionRuntimeContext(
     envelope: CommandEnvelope,
     session: ReturnType<DomainService["requireSession"]>,
-    binding: WorkbenchAgentBinding
+    binding: SessionAgentBinding
   ): CommandEnvelope {
     if (!("sessionId" in envelope.command)) {
       return envelope;
@@ -1015,7 +1015,7 @@ export class RuntimeOrchestrator {
     console.warn("[vermillion] Timed out while draining runtime background work.");
   }
 
-  private requireBinding(engineId: string): WorkbenchAgentBinding {
+  private requireBinding(engineId: string): SessionAgentBinding {
     const binding = this.bindings.get(engineId);
     if (!binding) {
       throw new Error(`Unknown engine: ${engineId}`);

@@ -8,18 +8,20 @@ type WorkspacePickerProps = {
   store: WorkbenchStore;
   /** Opens the native directory dialog; resolves to the chosen root or undefined. */
   pickDirectory: () => Promise<string | undefined>;
-  disabled?: boolean;
+  /** When an open session pins the workspace, the picker is locked and shows that workspace. */
+  lockedWorkspaceId?: string;
 };
 
 const rowClass = "flex h-8 w-full items-center gap-2 px-2.5 text-left text-label text-foreground outline-none hover:bg-surface-hover data-[highlighted]:bg-surface-hover";
 
-/** Sits in the composer's configuration row; decides where New Chat lands. */
-export const WorkspacePicker = ({ store, pickDirectory, disabled }: WorkspacePickerProps) => {
+/** Sits in the composer's configuration row; decides where the next new chat is created. */
+export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: WorkspacePickerProps) => {
+  const disabled = lockedWorkspaceId !== undefined;
   const client = store((s) => s.client);
   const workspaces = store((s) => s.workspaces);
-  const activeWorkspaceId = store((s) => s.activeWorkspaceId);
-  const selectWorkspace = store((s) => s.selectWorkspace);
-  const refreshWorkspaces = store((s) => s.refreshWorkspaces);
+  const draftWorkspaceId = store((s) => s.draftWorkspaceId);
+  const activeWorkspaceId = lockedWorkspaceId ?? draftWorkspaceId;
+  const selectWorkspace = store((s) => s.setDraftWorkspace);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -31,7 +33,7 @@ export const WorkspacePicker = ({ store, pickDirectory, disabled }: WorkspacePic
 
   const choose = async (workspaceId: string | undefined) => {
     setOpen(false);
-    await selectWorkspace(workspaceId);
+    selectWorkspace(workspaceId);
   };
 
   const addNew = async () => {
@@ -39,8 +41,7 @@ export const WorkspacePicker = ({ store, pickDirectory, disabled }: WorkspacePic
     const rootPath = await pickDirectory();
     if (!rootPath) return;
     const workspace = await client.request("workspace.add", { rootPath });
-    await refreshWorkspaces();
-    await selectWorkspace(workspace.workspaceId);
+    selectWorkspace(workspace.workspaceId);
   };
 
   return (

@@ -1,6 +1,6 @@
 import type { ChatSession } from "@vermillion/shared";
 import { describe, expect, it, vi } from "vitest";
-import type { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import type { SessionRuntimeService } from "../src/runtime-service.js";
 import { SessionActionsProvider } from "../src/session-actions.js";
 
 const createSession = (input: {
@@ -28,7 +28,7 @@ describe("SessionActionsProvider", () => {
           archivedAt: "2026-04-18T00:01:00Z"
         })
       ])
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const provider = new SessionActionsProvider({
       runtimeService,
       sessionIndexStore: {
@@ -81,7 +81,7 @@ describe("SessionActionsProvider", () => {
           engineId: "custom"
         })
       ])
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const provider = new SessionActionsProvider({
       runtimeService,
       sessionIndexStore: {
@@ -166,7 +166,7 @@ describe("SessionActionsProvider", () => {
           : undefined
       ),
       executeCommand
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const provider = new SessionActionsProvider({
       runtimeService,
       sessionIndexStore: {
@@ -263,7 +263,7 @@ describe("SessionActionsProvider", () => {
           engineId: "custom"
         })
       ])
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const provider = new SessionActionsProvider({
       runtimeService,
       sessionIndexStore: {

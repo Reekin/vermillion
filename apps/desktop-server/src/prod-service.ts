@@ -1,6 +1,6 @@
 import { createCodexAdapter } from "@vermillion/adapters";
 import { createCodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
-import { WorkbenchRuntimeService } from "./runtime-service.js";
+import { SessionRuntimeService } from "./runtime-service.js";
 import { SessionIndexStore } from "./session-index.js";
 import { SessionCatalogService } from "./session-catalog.js";
 import { CapabilityRegistry } from "./capability-registry.js";
@@ -8,7 +8,7 @@ import {
   CodexSessionDiscoveryProvider,
   SessionReconciliationService
 } from "./session-discovery.js";
-import { WorkbenchShellService } from "./workbench-shell-service.js";
+import { SessionShellService } from "./session-shell-service.js";
 import { WorkspaceRegistryService } from "./workspace-registry.js";
 import { CodexSessionActionsProvider } from "./codex-session-actions-provider.js";
 import { CodexChatTreeAgentProvider } from "./codex-chat-tree-provider.js";
@@ -46,11 +46,11 @@ export type CreateWorkbenchRuntimeServiceOptions = {
   now?: () => string;
 };
 
-export const createWorkbenchRuntimeService = (
+export const createSessionRuntimeService = (
   options: CreateWorkbenchRuntimeServiceOptions = {}
 ) => {
   const codexAgentId = "codex";
-  let service: WorkbenchRuntimeService | undefined;
+  let service: SessionRuntimeService | undefined;
   const workspaceRegistry = new WorkspaceRegistryService({
     baseDir: options.persistenceBaseDir,
     now: options.now
@@ -156,7 +156,7 @@ export const createWorkbenchRuntimeService = (
     ]
   });
 
-  const runtimeService = new WorkbenchRuntimeService({
+  const runtimeService = new SessionRuntimeService({
     now: options.now,
     workspaceRegistry,
     sessionIndexStore,
@@ -241,7 +241,7 @@ export const createWorkbenchRuntimeService = (
     capabilityRegistry: capabilities
   });
 
-  const shellService = new WorkbenchShellService({
+  const shellService = new SessionShellService({
     runtimeService,
     sessionCatalog,
     capabilities,
@@ -295,6 +295,6 @@ export const createWorkbenchRuntimeService = (
   return shellService;
 };
 
-export const createCodexWorkbenchRuntimeService = (
+export const createCodexSessionRuntimeService = (
   options: CreateWorkbenchRuntimeServiceOptions = {}
-) => createWorkbenchRuntimeService(options);
+) => createSessionRuntimeService(options);

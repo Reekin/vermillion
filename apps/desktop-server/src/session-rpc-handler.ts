@@ -1,21 +1,21 @@
 import type {
-  WorkbenchEventPush,
-  WorkbenchRpcRequest,
-  WorkbenchRpcResponse
+  SessionEventPush,
+  SessionRpcRequest,
+  SessionRpcResponse
 } from "@vermillion/shared";
 import {
-  parseWorkbenchEventPush,
-  parseWorkbenchRpcRequest,
-  parseWorkbenchRpcResponse
+  parseSessionEventPush,
+  parseSessionRpcRequest,
+  parseSessionRpcResponse
 } from "@vermillion/shared";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
-import type { WorkbenchShellService } from "./workbench-shell-service.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
+import type { SessionShellService } from "./session-shell-service.js";
 import { SessionBrowserCursorStaleError } from "./session-browser-read-model.js";
 
 type Clock = () => string;
 type IdFactory = () => string;
 
-export type WorkbenchRpcHandlerOptions = {
+export type SessionRpcHandlerOptions = {
   now?: Clock;
   createSubscriptionId?: IdFactory;
 };
@@ -26,12 +26,12 @@ const createOpaqueId = (): string =>
     .slice(2, 10)}`;
 
 const toErrorResponse = (
-  request: WorkbenchRpcRequest,
+  request: SessionRpcRequest,
   code: string,
   message: string,
   details?: Record<string, unknown>
-): WorkbenchRpcResponse =>
-  parseWorkbenchRpcResponse({
+): SessionRpcResponse =>
+  parseSessionRpcResponse({
     id: request.id,
     method: request.method,
     ok: false,
@@ -43,19 +43,19 @@ const toErrorResponse = (
   });
 
 export const createWorkbenchRpcHandler = (
-  service: WorkbenchRuntimeService | WorkbenchShellService,
-  options: WorkbenchRpcHandlerOptions = {}
+  service: SessionRuntimeService | SessionShellService,
+  options: SessionRpcHandlerOptions = {}
 ) => {
   const now = options.now ?? (() => new Date().toISOString());
   const createSubscriptionId =
     options.createSubscriptionId ?? createOpaqueId;
   const shellService = (
     "listWorkspaces" in service ? service : undefined
-  ) as WorkbenchShellService | undefined;
+  ) as SessionShellService | undefined;
 
   return {
-    async handleRequest(input: WorkbenchRpcRequest): Promise<WorkbenchRpcResponse> {
-      const request = parseWorkbenchRpcRequest(input);
+    async handleRequest(input: SessionRpcRequest): Promise<SessionRpcResponse> {
+      const request = parseSessionRpcRequest(input);
       try {
         switch (request.method) {
           case "engine.list":
@@ -66,7 +66,7 @@ export const createWorkbenchRpcHandler = (
                 "Engine APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -82,7 +82,7 @@ export const createWorkbenchRpcHandler = (
                 "Engine surface APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -98,7 +98,7 @@ export const createWorkbenchRpcHandler = (
                 "Engine model catalog APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -107,7 +107,7 @@ export const createWorkbenchRpcHandler = (
               }
             });
           case "engine.select":
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -121,7 +121,7 @@ export const createWorkbenchRpcHandler = (
                 "Settings APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -135,21 +135,21 @@ export const createWorkbenchRpcHandler = (
                 "Settings APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
               result: await shellService.updateSettings(request.params)
             });
           case "domain.snapshot":
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
               result: service.getSnapshotResult()
             });
           case "session.list":
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -166,7 +166,7 @@ export const createWorkbenchRpcHandler = (
               );
             }
             const result = await shellService.listWorkspaces();
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -181,7 +181,7 @@ export const createWorkbenchRpcHandler = (
                 "Workspace browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -197,7 +197,7 @@ export const createWorkbenchRpcHandler = (
               );
             }
             const workspace = await shellService.addWorkspace(request.params);
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -214,7 +214,7 @@ export const createWorkbenchRpcHandler = (
                 "Workspace browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -229,7 +229,7 @@ export const createWorkbenchRpcHandler = (
                 "Workspace browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -246,7 +246,7 @@ export const createWorkbenchRpcHandler = (
                 "Workspace browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -260,7 +260,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -274,7 +274,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -288,7 +288,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -302,7 +302,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -316,7 +316,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -330,7 +330,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -344,7 +344,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -358,7 +358,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -376,7 +376,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -390,7 +390,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -404,7 +404,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -418,7 +418,7 @@ export const createWorkbenchRpcHandler = (
                 "Session browser APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -432,7 +432,7 @@ export const createWorkbenchRpcHandler = (
                 "Chat capability APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -450,7 +450,7 @@ export const createWorkbenchRpcHandler = (
                 "Skills APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -466,7 +466,7 @@ export const createWorkbenchRpcHandler = (
                 "Chat tree APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -482,7 +482,7 @@ export const createWorkbenchRpcHandler = (
                 "Chat tree APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -496,7 +496,7 @@ export const createWorkbenchRpcHandler = (
                 "Delegation APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -512,7 +512,7 @@ export const createWorkbenchRpcHandler = (
                 "Worktree APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -528,7 +528,7 @@ export const createWorkbenchRpcHandler = (
                 "Checkpoint APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -544,7 +544,7 @@ export const createWorkbenchRpcHandler = (
                 "Diagnostics APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -560,7 +560,7 @@ export const createWorkbenchRpcHandler = (
                 "Diagnostic log APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -574,7 +574,7 @@ export const createWorkbenchRpcHandler = (
                 "Background run APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -590,7 +590,7 @@ export const createWorkbenchRpcHandler = (
                 "Error log APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -604,7 +604,7 @@ export const createWorkbenchRpcHandler = (
                 "File action APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -618,7 +618,7 @@ export const createWorkbenchRpcHandler = (
                 "Codex hook activity APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -632,7 +632,7 @@ export const createWorkbenchRpcHandler = (
                 "Codex turn-change APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -646,7 +646,7 @@ export const createWorkbenchRpcHandler = (
                 "Codex turn-change APIs are unavailable for this runtime service."
               );
             }
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -654,7 +654,7 @@ export const createWorkbenchRpcHandler = (
             });
           case "runtime.command": {
             const receipt = await service.executeCommand(request.params.envelope);
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -667,7 +667,7 @@ export const createWorkbenchRpcHandler = (
               toCursor: request.params.toCursor,
               filter: request.params.filter
             });
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -682,7 +682,7 @@ export const createWorkbenchRpcHandler = (
             });
           }
           case "events.subscribe":
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -694,7 +694,7 @@ export const createWorkbenchRpcHandler = (
               }
             });
           case "events.unsubscribe":
-            return parseWorkbenchRpcResponse({
+            return parseSessionRpcResponse({
               id: request.id,
               method: request.method,
               ok: true,
@@ -728,10 +728,10 @@ export const createWorkbenchRpcHandler = (
 
     createEventPush(
       subscriptionId: string,
-      envelope: WorkbenchEventPush["envelope"]
-    ): WorkbenchEventPush {
-      return parseWorkbenchEventPush({
-        channel: "workbench.events",
+      envelope: SessionEventPush["envelope"]
+    ): SessionEventPush {
+      return parseSessionEventPush({
+        channel: "session.events",
         subscriptionId,
         envelope
       });

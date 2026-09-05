@@ -1,7 +1,7 @@
-import type { WorkbenchSettingsRpc } from "@vermillion/shared";
+import type { SessionSettingsRpc } from "@vermillion/shared";
 
 type ModelSettings = Pick<
-  WorkbenchSettingsRpc,
+  SessionSettingsRpc,
   | "allowedModelIdsByEngineId"
   | "customModelReasoningOptionIdsByEngineId"
   | "executionPreferencesByEngineId"

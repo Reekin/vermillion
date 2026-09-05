@@ -27,7 +27,6 @@ describe("resolveSlashSuggestionItems", () => {
           ]
         },
         query: "",
-        canCreateSession: true,
         canResumeSession: true,
         canInterrupt: true
       })
@@ -38,13 +37,6 @@ describe("resolveSlashSuggestionItems", () => {
         label: "/resume",
         detail: "Reload the current thread window",
         action: "resume-session"
-      },
-      {
-        id: "slash:create-session",
-        kind: "slash",
-        label: "/new",
-        detail: "Create a new session in the active workspace",
-        action: "create-session"
       },
       {
         id: "slash:status",
@@ -101,7 +93,6 @@ describe("resolveSlashSuggestionItems", () => {
           ]
         },
         query: "wor",
-        canCreateSession: false,
         canResumeSession: false,
         canInterrupt: false
       })

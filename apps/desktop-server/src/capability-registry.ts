@@ -5,7 +5,7 @@ import {
   type ResolvedSessionContext
 } from "./session-identity-registry.js";
 import type { SessionDiscoveryProvider } from "./session-discovery.js";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
 
 export type SessionActionKind =
   | "archive"
@@ -174,7 +174,7 @@ export type CapabilityOperationGuards = Partial<
 >;
 
 export type SessionCapabilityContext = ResolvedSessionContext & {
-  runtimeService: WorkbenchRuntimeService;
+  runtimeService: SessionRuntimeService;
   sessionIndexStore: SessionIndexStore;
   sessionIdentity: SessionIdentityRegistry;
 };
@@ -233,7 +233,7 @@ export type AgentWorkbenchCapabilities = {
 };
 
 type CapabilityRegistryOptions = {
-  runtimeService: WorkbenchRuntimeService;
+  runtimeService: SessionRuntimeService;
   sessionIndexStore: SessionIndexStore;
   sessionIdentity: SessionIdentityRegistry;
   capabilities?: AgentWorkbenchCapabilities[];
@@ -315,7 +315,7 @@ const unsupportedBackgroundRun = (
 });
 
 export class CapabilityRegistry {
-  private readonly runtimeService: WorkbenchRuntimeService;
+  private readonly runtimeService: SessionRuntimeService;
   private readonly sessionIndexStore: SessionIndexStore;
   private readonly sessionIdentity: SessionIdentityRegistry;
   private readonly capabilitiesByEngineId: Map<string, AgentWorkbenchCapabilities>;

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkbenchRpcHandler } from "../src/workbench-rpc-handler.js";
-import { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import { createWorkbenchRpcHandler } from "../src/session-rpc-handler.js";
+import { SessionRuntimeService } from "../src/runtime-service.js";
 
 const createService = () =>
-  new WorkbenchRuntimeService({
+  new SessionRuntimeService({
     now: (() => {
       let tick = 0;
       return () => `2026-04-18T00:10:${String(++tick).padStart(2, "0")}Z`;
@@ -911,7 +911,7 @@ describe("createWorkbenchRpcHandler", () => {
         status: "unsupported",
         fetchedAt: "2026-04-18T00:00:00Z"
       })
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
 
     const handler = createWorkbenchRpcHandler(shellService);
 

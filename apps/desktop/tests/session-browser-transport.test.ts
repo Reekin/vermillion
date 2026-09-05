@@ -1,18 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
-  WorkbenchClientApi,
-  WorkbenchRpcRequest,
-  WorkbenchRpcResponse
+  SessionClientApi,
+  SessionRpcRequest,
+  SessionRpcResponse
 } from "@vermillion/shared";
 import { createDesktopTransport } from "../src/transport/desktop-transport.js";
 
 type PreloadMock = {
-  api: WorkbenchClientApi;
+  api: SessionClientApi;
   request: ReturnType<typeof vi.fn>;
 };
 
 const createPreloadMock = (
-  onRequest: (request: WorkbenchRpcRequest) => Promise<WorkbenchRpcResponse>
+  onRequest: (request: SessionRpcRequest) => Promise<SessionRpcResponse>
 ): PreloadMock => {
   const request = vi.fn(onRequest);
   return {
@@ -22,7 +22,7 @@ const createPreloadMock = (
         subscriptionId: "sub-1",
         unsubscribe: async () => {}
       }))
-    } satisfies WorkbenchClientApi,
+    } satisfies SessionClientApi,
     request
   };
 };
@@ -323,7 +323,7 @@ describe("session browser transport contracts", () => {
     });
 
     const methods = preload.request.mock.calls.map(
-      ([request]) => (request as WorkbenchRpcRequest).method
+      ([request]) => (request as SessionRpcRequest).method
     );
     expect(methods).toEqual([
       "workspace.pickDirectory",
@@ -551,7 +551,7 @@ describe("session browser transport contracts", () => {
     });
 
     const runActionRequests = preload.request.mock.calls
-      .map(([request]) => request as WorkbenchRpcRequest)
+      .map(([request]) => request as SessionRpcRequest)
       .filter((request) => request.method === "sessionBrowser.runAction");
     expect(runActionRequests.map((request) => request.params.action)).toEqual([
       "archive",

@@ -2,7 +2,10 @@ import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
+import type { Mission } from "@vermillion/workbench/client";
 import { Badge, Button, Empty, SectionLabel } from "./ui.js";
+
+const EMPTY_MISSIONS: Mission[] = [];
 
 type WorkspacesPanelProps = {
   store: WorkbenchStore;
@@ -12,10 +15,9 @@ type WorkspacesPanelProps = {
 export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
   const workspaces = store((s) => s.workspaces);
-  const activeWorkspaceId = store((s) => s.activeWorkspaceId);
-  const missions = store((s) => s.missions);
-  const selectWorkspace = store((s) => s.selectWorkspace);
-  const refreshWorkspaces = store((s) => s.refreshWorkspaces);
+  const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
+  const missions = store((s) => s.view?.missions ?? EMPTY_MISSIONS);
+  const selectWorkspace = store((s) => s.browseWorkspace);
   const [error, setError] = useState<string | undefined>();
 
   const add = async () => {
@@ -24,8 +26,7 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
     if (!rootPath) return;
     try {
       const workspace = await client.request("workspace.add", { rootPath });
-      await refreshWorkspaces();
-      await selectWorkspace(workspace.workspaceId);
+      selectWorkspace(workspace.workspaceId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -33,7 +34,6 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
 
   const remove = async (workspaceId: string) => {
     await client.request("workspace.remove", { workspaceId });
-    await refreshWorkspaces();
   };
 
   return (
@@ -49,7 +49,7 @@ export const WorkspacesPanel = ({ store, pickDirectory }: WorkspacesPanelProps) 
             <li key={workspace.workspaceId} className="group flex items-center">
               <button
                 type="button"
-                onClick={() => void selectWorkspace(workspace.workspaceId)}
+                onClick={() => selectWorkspace(workspace.workspaceId)}
                 className={cn(
                   "flex min-w-0 flex-1 flex-col px-4 py-1.5 text-left hover:bg-surface-hover",
                   activeWorkspaceId === workspace.workspaceId && "bg-surface-selected"

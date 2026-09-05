@@ -27,9 +27,9 @@ import type {
   EventReplayResult,
   CommandReceipt,
   SnapshotResult,
-  WorkbenchAgentBinding,
-  WorkbenchEngineDescriptor,
-  WorkbenchSessionListOptions
+  SessionAgentBinding,
+  SessionEngineDescriptor,
+  SessionListOptions
 } from "./runtime-types.js";
 import { WorkspaceSelectionService } from "./workspace-selection-service.js";
 import type { WorkspaceRegistryService } from "./workspace-registry.js";
@@ -42,14 +42,14 @@ export type {
   EventReplayResult,
   CommandReceipt,
   SnapshotResult,
-  WorkbenchAgentBinding,
-  WorkbenchEngineDescriptor,
-  WorkbenchSessionListOptions
+  SessionAgentBinding,
+  SessionEngineDescriptor,
+  SessionListOptions
 } from "./runtime-types.js";
 
-export type WorkbenchRuntimeServiceOptions = {
-  engines?: WorkbenchEngineDescriptor[];
-  agentBindings?: WorkbenchAgentBinding[];
+export type SessionRuntimeServiceOptions = {
+  engines?: SessionEngineDescriptor[];
+  agentBindings?: SessionAgentBinding[];
   workspaceRegistry?: WorkspaceRegistryService;
   sessionIndexStore?: SessionIndexStore;
   now?: Clock;
@@ -60,7 +60,7 @@ export type WorkbenchRuntimeServiceOptions = {
   titleGenerator?: SessionTitleGenerator;
 };
 
-export class WorkbenchRuntimeService {
+export class SessionRuntimeService {
   private readonly workspaceRegistry?: WorkspaceRegistryService;
   private readonly sessionIndexStore?: SessionIndexStore;
   private readonly eventBus: RuntimeEventBus;
@@ -69,7 +69,7 @@ export class WorkbenchRuntimeService {
   private readonly sessionIndexTasks = new Set<Promise<void>>();
   private sessionBrowserRevision = 0;
 
-  public constructor(options: WorkbenchRuntimeServiceOptions = {}) {
+  public constructor(options: SessionRuntimeServiceOptions = {}) {
     this.workspaceRegistry = options.workspaceRegistry;
     this.sessionIndexStore = options.sessionIndexStore;
     this.domainService = new DomainService({
@@ -116,11 +116,11 @@ export class WorkbenchRuntimeService {
     });
   }
 
-  public registerEngine(engine: WorkbenchEngineDescriptor): void {
+  public registerEngine(engine: SessionEngineDescriptor): void {
     this.runtimeOrchestrator.registerEngine(engine);
   }
 
-  public registerAgentBinding(binding: WorkbenchAgentBinding): void {
+  public registerAgentBinding(binding: SessionAgentBinding): void {
     this.runtimeOrchestrator.registerAgentBinding(binding);
   }
 
@@ -157,7 +157,7 @@ export class WorkbenchRuntimeService {
     return this.runtimeOrchestrator.executeCommand(input);
   }
 
-  public listSessions(options: WorkbenchSessionListOptions = {}): ChatSession[] {
+  public listSessions(options: SessionListOptions = {}): ChatSession[] {
     return this.domainService.listSessions(options);
   }
 

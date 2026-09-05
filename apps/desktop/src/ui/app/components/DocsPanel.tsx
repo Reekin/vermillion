@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import type { DocChange } from "@vermillion/workbench/client";
+import type { DocChange, DocFile } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Button, Empty, SectionLabel } from "./ui.js";
@@ -43,25 +43,21 @@ const buildTree = (paths: string[]): TreeNode[] => {
 };
 
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
+const EMPTY_DOCS: DocFile[] = [];
+const EMPTY_CHANGES: DocChange[] = [];
 
 export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelProps) => {
   const client = store((s) => s.client);
-  const workspace = store((s) => s.workspaces.find((w) => w.workspaceId === s.activeWorkspaceId));
-  const docs = store((s) => s.docs);
-  const pending = store((s) => s.pendingDocChanges);
+  const workspace = store((s) => s.workspaces.find((w) => w.workspaceId === s.browsingWorkspaceId));
+  const view = store((s) => s.view);
+  const docs = view?.docs ?? EMPTY_DOCS;
+  const pending = view?.pendingDocChanges ?? EMPTY_CHANGES;
   const openDocPath = store((s) => s.openDocPath);
   const setOpenDocPath = store((s) => s.setOpenDocPath);
-  const refreshWorkspaceData = store((s) => s.refreshWorkspaceData);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
   const [missionOpen, setMissionOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
-
-  useEffect(() => {
-    if (!workspace) return;
-    const timer = setInterval(() => void refreshWorkspaceData(), 4000);
-    return () => clearInterval(timer);
-  }, [workspace, refreshWorkspaceData]);
 
   useEffect(() => {
     if (!menu) return;
@@ -188,7 +184,6 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
             setError(undefined);
             try {
               await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
-              await refreshWorkspaceData();
               setMissionOpen(false);
             } catch (caught) {
               setError(caught instanceof Error ? caught.message : String(caught));

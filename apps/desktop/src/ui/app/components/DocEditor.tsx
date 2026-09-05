@@ -6,10 +6,9 @@ import { Button } from "./ui.js";
 /** Plain-text editor for one doc; saves to disk, commit happens in the mission flow. */
 export const DocEditor = ({ store }: { store: WorkbenchStore }) => {
   const client = store((s) => s.client);
-  const workspaceId = store((s) => s.activeWorkspaceId);
+  const workspaceId = store((s) => s.browsingWorkspaceId);
   const path = store((s) => s.openDocPath);
   const setOpenDocPath = store((s) => s.setOpenDocPath);
-  const refreshWorkspaceData = store((s) => s.refreshWorkspaceData);
   const close = useCallback(() => setOpenDocPath(undefined), [setOpenDocPath]);
   const [content, setContent] = useState<string | undefined>();
   const [dirty, setDirty] = useState(false);
@@ -35,7 +34,6 @@ export const DocEditor = ({ store }: { store: WorkbenchStore }) => {
     try {
       await client.request("docs.write", { workspaceId, path, content });
       setDirty(false);
-      await refreshWorkspaceData();
     } finally {
       setSaving(false);
     }

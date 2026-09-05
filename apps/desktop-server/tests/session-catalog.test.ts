@@ -5,7 +5,7 @@ import type { DomainSnapshot } from "@vermillion/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionCatalogService } from "../src/session-catalog.js";
 import { SessionIndexStore } from "../src/session-index.js";
-import type { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import type { SessionRuntimeService } from "../src/runtime-service.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";
 
 const tempDirs: string[] = [];
@@ -188,7 +188,7 @@ describe("SessionCatalogService", () => {
     };
     const runtimeService = {
       getSnapshot: () => snapshot
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
 
     const service = new SessionCatalogService({
       runtimeService,
@@ -295,7 +295,7 @@ describe("SessionCatalogService", () => {
           }
         ]
       })
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
       workspaceRegistry,
@@ -398,7 +398,7 @@ describe("SessionCatalogService", () => {
           }
         ]
       })
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
       workspaceRegistry,
@@ -458,7 +458,7 @@ describe("SessionCatalogService", () => {
 
     const runtimeService = {
       getSnapshot: () => emptySnapshot()
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
       workspaceRegistry,
@@ -511,7 +511,7 @@ describe("SessionCatalogService", () => {
       runtimeService: {
         getSnapshot: () => emptySnapshot(),
         getSessionBrowserRevision: () => 0
-      } as unknown as WorkbenchRuntimeService,
+      } as unknown as SessionRuntimeService,
       workspaceRegistry,
       sessionIndexStore: indexStore
     });
@@ -584,7 +584,7 @@ describe("SessionCatalogService", () => {
           }
         ]
       })
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
       workspaceRegistry,
@@ -638,7 +638,7 @@ describe("SessionCatalogService", () => {
         getSnapshot,
         getRevision: () => runtimeRevision,
         getSessionBrowserRevision: () => runtimeBrowserRevision
-      } as unknown as WorkbenchRuntimeService,
+      } as unknown as SessionRuntimeService,
       workspaceRegistry,
       sessionIndexStore: indexStore
     });

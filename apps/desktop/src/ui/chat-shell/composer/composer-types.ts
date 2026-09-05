@@ -56,7 +56,7 @@ export type SlashSuggestionItem = {
   label: string;
   detail: string;
   replacement?: string;
-  action?: "create-session" | "resume-session" | "interrupt";
+  action?: "resume-session" | "interrupt";
 };
 
 export type SkillSuggestionItem = {

@@ -700,7 +700,7 @@ export const MessageMarkdownView = memo(({
               void writeClipboardText(copyText)
                 .then(showCopiedFeedback)
                 .catch((error) => {
-                  if (!window.workbenchDesktop) {
+                  if (!window.sessionDesktop) {
                     console.error("Message clipboard write failed.", error);
                   }
                 });

@@ -1,4 +1,4 @@
-export * from "./ChatShellApp.js";
+export * from "./SessionPane.js";
 export * from "./ApprovalFlowView.js";
 export * from "./InteractionFlowView.js";
 export * from "./MessageMarkdownView.js";
@@ -7,9 +7,6 @@ export * from "./ProcessActivityView.js";
 export * from "./TerminalStreamView.js";
 export * from "./ToolTimelineView.js";
 export * from "./TurnProcessPanel.js";
-export * from "./ChatTreePanel.js";
-export * from "./DelegationPanel.js";
-export * from "./SessionSummaryPanel.js";
 export * from "./participant-directory.js";
 export * from "./transcript-view-model.js";
 export * from "./terminal-output.js";

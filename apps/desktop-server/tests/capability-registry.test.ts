@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CapabilityRegistry } from "../src/capability-registry.js";
 import { SessionIdentityRegistry } from "../src/session-identity-registry.js";
-import type { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import type { SessionRuntimeService } from "../src/runtime-service.js";
 
 const createRuntimeService = () =>
   ({
@@ -38,7 +38,7 @@ const createRuntimeService = () =>
           }
         : undefined
     )
-  }) as unknown as WorkbenchRuntimeService;
+  }) as unknown as SessionRuntimeService;
 
 describe("CapabilityRegistry", () => {
   it("returns unsupported snapshots for agents without optional capabilities", async () => {
@@ -393,7 +393,7 @@ describe("CapabilityRegistry", () => {
             }
           : undefined;
       })
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const archiveSessions = vi.fn().mockResolvedValue(
       entries.filter((entry) => entry.sessionId !== "session-fork")
     );

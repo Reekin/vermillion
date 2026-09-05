@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
-  WorkbenchClientApi,
-  WorkbenchEventPush,
-  WorkbenchRpcRequest,
-  WorkbenchRpcResponse
+  SessionClientApi,
+  SessionEventPush,
+  SessionRpcRequest,
+  SessionRpcResponse
 } from "@vermillion/shared";
 import {
-  safeParseWorkbenchRpcRequest,
-  safeParseWorkbenchRpcResponse
+  safeParseSessionRpcRequest,
+  safeParseSessionRpcResponse
 } from "@vermillion/shared";
 import {
-  WorkbenchRuntimeService,
+  SessionRuntimeService,
   createLocalDesktopPreloadApi
 } from "@vermillion/desktop-server";
 import {
@@ -21,23 +21,23 @@ import { connectDesktopTransportToStore } from "../src/transport/store-bridge.js
 import { createRendererStore } from "../src/store/store.js";
 
 type PreloadMock = {
-  api: WorkbenchClientApi;
+  api: SessionClientApi;
   request: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
-  emitPush: (push: WorkbenchEventPush) => void;
+  emitPush: (push: SessionEventPush) => void;
 };
 
 const createPreloadMock = (config?: {
-  onRequest?: (request: WorkbenchRpcRequest) => Promise<WorkbenchRpcResponse>;
-  onUnsubscribe?: (emitPush: (push: WorkbenchEventPush) => void) => Promise<void> | void;
+  onRequest?: (request: SessionRpcRequest) => Promise<SessionRpcResponse>;
+  onUnsubscribe?: (emitPush: (push: SessionEventPush) => void) => Promise<void> | void;
 }): PreloadMock => {
-  let subscribedHandler: ((push: WorkbenchEventPush) => void) | undefined;
+  let subscribedHandler: ((push: SessionEventPush) => void) | undefined;
   const unsubscribe = vi.fn(async () => {
     await config?.onUnsubscribe?.((push) => {
       subscribedHandler?.(push);
     });
   });
-  const request = vi.fn(async (payload: WorkbenchRpcRequest) => {
+  const request = vi.fn(async (payload: SessionRpcRequest) => {
     if (config?.onRequest) {
       return config.onRequest(payload);
     }
@@ -225,10 +225,10 @@ const createPreloadMock = (config?: {
     api: {
       request,
       subscribe
-    } satisfies WorkbenchClientApi,
+    } satisfies SessionClientApi,
     request,
     subscribe,
-    emitPush: (push: WorkbenchEventPush) => {
+    emitPush: (push: SessionEventPush) => {
       subscribedHandler?.(push);
     }
   };
@@ -236,7 +236,7 @@ const createPreloadMock = (config?: {
 
 describe("Desktop transport facade", () => {
   it("keeps session.list as typed read contract with default includeArchived", () => {
-    const parsedRequest = safeParseWorkbenchRpcRequest({
+    const parsedRequest = safeParseSessionRpcRequest({
       id: "req-session-list",
       method: "session.list",
       params: {}
@@ -248,7 +248,7 @@ describe("Desktop transport facade", () => {
     }
     expect(parsedRequest.data.params.includeArchived).toBe(false);
 
-    const parsedResponse = safeParseWorkbenchRpcResponse({
+    const parsedResponse = safeParseSessionRpcResponse({
       id: "req-session-list",
       method: "session.list",
       ok: true,
@@ -281,7 +281,7 @@ describe("Desktop transport facade", () => {
     });
 
     expect(receipt.commandType).toBe("createSession");
-    const request = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
+    const request = preload.request.mock.calls[0][0] as SessionRpcRequest;
     expect(request.method).toBe("runtime.command");
     if (request.method !== "runtime.command") {
       throw new Error("Expected runtime.command request.");
@@ -425,7 +425,7 @@ describe("Desktop transport facade", () => {
       selectedEngineId: "codex"
     });
 
-    const request = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
+    const request = preload.request.mock.calls[0][0] as SessionRpcRequest;
     expect(request).toMatchObject({
       method: "engine.select",
       params: {
@@ -602,7 +602,7 @@ describe("Desktop transport facade", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.sessionId).toBe("session-1");
 
-    const request = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
+    const request = preload.request.mock.calls[0][0] as SessionRpcRequest;
     expect(request.method).toBe("session.list");
     if (request.method !== "session.list") {
       throw new Error("Expected session.list request.");
@@ -652,8 +652,8 @@ describe("Desktop transport facade", () => {
       }
     });
 
-    const getRequest = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
-    const updateRequest = preload.request.mock.calls[1][0] as WorkbenchRpcRequest;
+    const getRequest = preload.request.mock.calls[0][0] as SessionRpcRequest;
+    const updateRequest = preload.request.mock.calls[1][0] as SessionRpcRequest;
     expect(getRequest.method).toBe("settings.get");
     expect(updateRequest.method).toBe("settings.update");
     if (updateRequest.method !== "settings.update") {
@@ -769,7 +769,7 @@ describe("Desktop transport facade", () => {
       })
     ]);
 
-    const steerRequest = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
+    const steerRequest = preload.request.mock.calls[0][0] as SessionRpcRequest;
     expect(steerRequest.method).toBe("runtime.command");
     if (steerRequest.method !== "runtime.command") {
       throw new Error("Expected runtime.command request.");
@@ -781,7 +781,7 @@ describe("Desktop transport facade", () => {
       content: "Focus on the failing test"
     });
 
-    const capabilitiesRequest = preload.request.mock.calls[1][0] as WorkbenchRpcRequest;
+    const capabilitiesRequest = preload.request.mock.calls[1][0] as SessionRpcRequest;
     expect(capabilitiesRequest).toMatchObject({
       method: "chat.getCapabilities",
       params: {
@@ -789,7 +789,7 @@ describe("Desktop transport facade", () => {
       }
     });
 
-    const skillsRequest = preload.request.mock.calls[2][0] as WorkbenchRpcRequest;
+    const skillsRequest = preload.request.mock.calls[2][0] as SessionRpcRequest;
     expect(skillsRequest).toMatchObject({
       method: "skills.list",
       params: {
@@ -834,9 +834,9 @@ describe("Desktop transport facade", () => {
       accepted: true
     });
 
-    const setRequest = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
-    const pauseRequest = preload.request.mock.calls[1][0] as WorkbenchRpcRequest;
-    const clearRequest = preload.request.mock.calls[2][0] as WorkbenchRpcRequest;
+    const setRequest = preload.request.mock.calls[0][0] as SessionRpcRequest;
+    const pauseRequest = preload.request.mock.calls[1][0] as SessionRpcRequest;
+    const clearRequest = preload.request.mock.calls[2][0] as SessionRpcRequest;
     expect(setRequest.method).toBe("runtime.command");
     expect(pauseRequest.method).toBe("runtime.command");
     expect(clearRequest.method).toBe("runtime.command");
@@ -919,7 +919,7 @@ describe("Desktop transport facade", () => {
     expect(preload.subscribe.mock.calls[0][0].fromCursor).toBe("cursor-0");
 
     preload.emitPush({
-      channel: "workbench.events",
+      channel: "session.events",
       subscriptionId: "sub-1",
       envelope: {
         eventId: "evt-1",
@@ -984,7 +984,7 @@ describe("Desktop transport facade", () => {
     expect(replay.fromCursor).toBe("cursor-20");
     expect(replay.status).toBe("ok");
     expect(replay.envelopes).toEqual([]);
-    const request = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
+    const request = preload.request.mock.calls[0][0] as SessionRpcRequest;
     expect(request.method).toBe("events.replay");
   });
 
@@ -1023,7 +1023,7 @@ describe("Desktop transport facade", () => {
       fileUrl: "file:///I:/repo/docs/README.md"
     });
 
-    const actionRequest = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
+    const actionRequest = preload.request.mock.calls[0][0] as SessionRpcRequest;
     expect(actionRequest.method).toBe("file.runAction");
     if (actionRequest.method === "file.runAction") {
       expect(actionRequest.params).toEqual({
@@ -1071,7 +1071,7 @@ describe("Desktop transport facade", () => {
     expect(preload.subscribe.mock.calls[0][0].fromCursor).toBe("cursor-10");
 
     preload.emitPush({
-      channel: "workbench.events",
+      channel: "session.events",
       subscriptionId: "sub-1",
       envelope: {
         eventId: "evt-live-1",
@@ -1185,7 +1185,7 @@ describe("Desktop transport facade", () => {
   });
 
   it("recovers a stale cursor through local runtime snapshot fallback", async () => {
-    const service = new WorkbenchRuntimeService({
+    const service = new SessionRuntimeService({
       now: (() => {
         let tick = 0;
         return () => `2026-04-17T00:00:${String(++tick).padStart(2, "0")}Z`;
@@ -1276,7 +1276,7 @@ describe("Desktop transport facade", () => {
     });
 
     preload.emitPush({
-      channel: "workbench.events",
+      channel: "session.events",
       subscriptionId: "sub-1",
       envelope: {
         eventId: "evt-session-created",
@@ -1294,7 +1294,7 @@ describe("Desktop transport facade", () => {
 
     for (let index = 1; index <= 3; index += 1) {
       preload.emitPush({
-        channel: "workbench.events",
+        channel: "session.events",
         subscriptionId: "sub-1",
         envelope: {
           eventId: `evt-${index}`,
@@ -1342,8 +1342,8 @@ describe("Desktop transport facade", () => {
       content: "Keep going"
     });
 
-    const sendRequest = preload.request.mock.calls[0][0] as WorkbenchRpcRequest;
-    const steerRequest = preload.request.mock.calls[1][0] as WorkbenchRpcRequest;
+    const sendRequest = preload.request.mock.calls[0][0] as SessionRpcRequest;
+    const steerRequest = preload.request.mock.calls[1][0] as SessionRpcRequest;
     if (
       sendRequest.method !== "runtime.command" ||
       steerRequest.method !== "runtime.command"
@@ -1384,7 +1384,7 @@ describe("Desktop transport facade", () => {
     });
     for (let index = 1; index <= 3; index += 1) {
       preload.emitPush({
-        channel: "workbench.events",
+        channel: "session.events",
         subscriptionId: "sub-1",
         envelope: {
           eventId: `evt-byte-${index}`,
@@ -1428,7 +1428,7 @@ describe("Desktop transport facade", () => {
 
     for (let index = 1; index <= 2; index += 1) {
       preload.emitPush({
-        channel: "workbench.events",
+        channel: "session.events",
         subscriptionId: "sub-1",
         envelope: {
           eventId: `evt-pressure-${index}`,
@@ -1467,7 +1467,7 @@ describe("Desktop transport facade", () => {
     const preload = createPreloadMock({
       onUnsubscribe: (emitPush) => {
         emitPush({
-          channel: "workbench.events",
+          channel: "session.events",
           subscriptionId: "sub-1",
           envelope: {
             eventId: "evt-unsubscribe-2",
@@ -1506,7 +1506,7 @@ describe("Desktop transport facade", () => {
     });
 
     preload.emitPush({
-      channel: "workbench.events",
+      channel: "session.events",
       subscriptionId: "sub-1",
       envelope: {
         eventId: "evt-session-created",
@@ -1523,7 +1523,7 @@ describe("Desktop transport facade", () => {
     });
 
     preload.emitPush({
-      channel: "workbench.events",
+      channel: "session.events",
       subscriptionId: "sub-1",
       envelope: {
         eventId: "evt-unsubscribe-1",

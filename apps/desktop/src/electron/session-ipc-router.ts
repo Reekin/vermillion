@@ -1,14 +1,14 @@
 import {
   createWorkbenchRpcHandler,
-  type WorkbenchShellService
+  type SessionShellService
 } from "@vermillion/desktop-server";
 import type {
-  WorkbenchEventPushBatch,
-  WorkbenchEventPush,
-  WorkbenchRpcRequest,
-  WorkbenchRpcResponse
+  SessionEventPushBatch,
+  SessionEventPush,
+  SessionRpcRequest,
+  SessionRpcResponse
 } from "@vermillion/shared";
-import { parseWorkbenchRpcResponse, safeParseWorkbenchRpcRequest } from "@vermillion/shared";
+import { parseSessionRpcResponse, safeParseSessionRpcRequest } from "@vermillion/shared";
 
 type SubscriptionRecord = {
   subscriptionId: string;
@@ -18,19 +18,19 @@ type SubscriptionRecord = {
 type CancelScheduledPushDrain = () => void;
 type PushDrainScheduler = (callback: () => void) => CancelScheduledPushDrain;
 type QueuedPush = {
-  push: WorkbenchEventPush;
+  push: SessionEventPush;
   bytes: number;
 };
 
-export type WorkbenchIpcRouter = {
-  handleRequest: (rawRequest: unknown) => Promise<WorkbenchRpcResponse>;
+export type SessionIpcRouter = {
+  handleRequest: (rawRequest: unknown) => Promise<SessionRpcResponse>;
   dispose: () => Promise<void>;
 };
 
 export type CreateWorkbenchIpcRouterOptions = {
-  service: WorkbenchShellService;
-  onPush: (push: WorkbenchEventPush) => void;
-  onPushBatch?: (batch: WorkbenchEventPushBatch) => void;
+  service: SessionShellService;
+  onPush: (push: SessionEventPush) => void;
+  onPushBatch?: (batch: SessionEventPushBatch) => void;
   createSubscriptionId?: () => string;
   pushBatchMaxSize?: number;
   pushBatchMaxBytes?: number;
@@ -55,12 +55,12 @@ const createOpaqueSubscriptionId = (): string =>
     .slice(2, 10)}`;
 
 const toErrorResponse = (
-  request: { id: string; method: WorkbenchRpcRequest["method"] } | undefined,
+  request: { id: string; method: SessionRpcRequest["method"] } | undefined,
   code: string,
   message: string,
   details?: Record<string, unknown>
-): WorkbenchRpcResponse =>
-  parseWorkbenchRpcResponse({
+): SessionRpcResponse =>
+  parseSessionRpcResponse({
     id: request?.id ?? "unknown-request",
     method: request?.method ?? "engine.list",
     ok: false,
@@ -69,11 +69,11 @@ const toErrorResponse = (
       message,
       details
     }
-  } as WorkbenchRpcResponse);
+  } as SessionRpcResponse);
 
-export const createWorkbenchIpcRouter = (
+export const createSessionIpcRouter = (
   options: CreateWorkbenchIpcRouterOptions
-): WorkbenchIpcRouter => {
+): SessionIpcRouter => {
   const createSubscriptionId =
     options.createSubscriptionId ?? createOpaqueSubscriptionId;
   const rpc = createWorkbenchRpcHandler(options.service, {
@@ -89,13 +89,13 @@ export const createWorkbenchIpcRouter = (
   let pushQueueHead = 0;
   let cancelScheduledPushDrain: CancelScheduledPushDrain | undefined;
 
-  const deliverPushes = (pushes: WorkbenchEventPush[]): void => {
+  const deliverPushes = (pushes: SessionEventPush[]): void => {
     if (pushes.length === 0) {
       return;
     }
     if (options.onPushBatch) {
       options.onPushBatch({
-        channel: "workbench.events.batch",
+        channel: "session.events.batch",
         pushes
       });
       return;
@@ -112,7 +112,7 @@ export const createWorkbenchIpcRouter = (
     cancelScheduledPushDrain = schedulePushDrain(() => {
       cancelScheduledPushDrain = undefined;
       const startedAt = performance.now();
-      const pushes: WorkbenchEventPush[] = [];
+      const pushes: SessionEventPush[] = [];
       let batchBytes = 0;
       while (pushQueueHead < pushQueue.length && pushes.length < pushBatchMaxSize) {
         const queued = pushQueue[pushQueueHead];
@@ -142,7 +142,7 @@ export const createWorkbenchIpcRouter = (
     });
   };
 
-  const enqueuePush = (push: WorkbenchEventPush): void => {
+  const enqueuePush = (push: SessionEventPush): void => {
     pushQueue.push({
       push,
       bytes: utf8ByteLength(push)
@@ -172,8 +172,8 @@ export const createWorkbenchIpcRouter = (
     // It does not promise global FIFO across multiple subscriptions; consumers
     // that share a single cursor should use the desktop shell's single
     // full-domain subscription rather than merging independent subscriptions.
-    const pendingForSubscription: WorkbenchEventPush[] = [];
-    const retainedPushes: WorkbenchEventPush[] = [];
+    const pendingForSubscription: SessionEventPush[] = [];
+    const retainedPushes: SessionEventPush[] = [];
     for (let index = pushQueueHead; index < pushQueue.length; index += 1) {
       const queued = pushQueue[index];
       if (!queued) {
@@ -210,12 +210,12 @@ export const createWorkbenchIpcRouter = (
   };
 
   const handleSubscribe = async (
-    request: Extract<WorkbenchRpcRequest, { method: "events.subscribe" }>
-  ): Promise<WorkbenchRpcResponse> => {
+    request: Extract<SessionRpcRequest, { method: "events.subscribe" }>
+  ): Promise<SessionRpcResponse> => {
     const subscriptionId = request.params.subscriptionId ?? createSubscriptionId();
     const existing = subscriptions.get(subscriptionId);
     if (existing) {
-      return parseWorkbenchRpcResponse({
+      return parseSessionRpcResponse({
         id: request.id,
         method: request.method,
         ok: true,
@@ -238,7 +238,7 @@ export const createWorkbenchIpcRouter = (
 
     subscriptions.set(subscriptionId, { subscriptionId, unsubscribe });
 
-    return parseWorkbenchRpcResponse({
+    return parseSessionRpcResponse({
       id: request.id,
       method: request.method,
       ok: true,
@@ -250,13 +250,13 @@ export const createWorkbenchIpcRouter = (
   };
 
   const handleUnsubscribe = async (
-    request: Extract<WorkbenchRpcRequest, { method: "events.unsubscribe" }>
-  ): Promise<WorkbenchRpcResponse> => {
+    request: Extract<SessionRpcRequest, { method: "events.unsubscribe" }>
+  ): Promise<SessionRpcResponse> => {
     const record = subscriptions.get(request.params.subscriptionId);
     if (record) {
       unsubscribeRecord(record);
     }
-    return parseWorkbenchRpcResponse({
+    return parseSessionRpcResponse({
       id: request.id,
       method: request.method,
       ok: true,
@@ -268,12 +268,12 @@ export const createWorkbenchIpcRouter = (
 
   return {
     handleRequest: async (rawRequest: unknown) => {
-      const parsed = safeParseWorkbenchRpcRequest(rawRequest);
+      const parsed = safeParseSessionRpcRequest(rawRequest);
       if (!parsed.success) {
         return toErrorResponse(
           undefined,
           "ELECTRON_BAD_REQUEST",
-          "Invalid WorkbenchRpcRequest payload."
+          "Invalid SessionRpcRequest payload."
         );
       }
 

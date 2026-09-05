@@ -21,7 +21,7 @@ import type {
   SessionBrowserPageRpc,
   SessionBrowserPathRpc,
   SkillDescriptorRpc,
-  WorkbenchSettingsRpc,
+  SessionSettingsRpc,
 } from "@vermillion/shared";
 import { resolveEngineExecutionPreference } from "@vermillion/shared";
 import type { RuntimeEventFilter, RuntimeEventReplayInput } from "@vermillion/core";
@@ -49,7 +49,7 @@ import { SessionIdentityRegistry } from "./session-identity-registry.js";
 import { SessionActionsProvider } from "./session-actions.js";
 import type {
   EventReplayResult,
-  WorkbenchRuntimeService
+  SessionRuntimeService
 } from "./runtime-service.js";
 import type { WorkspaceRecord } from "./workspace-registry.js";
 import { WorkspaceSelectionService } from "./workspace-selection-service.js";
@@ -144,8 +144,8 @@ const resolveComposerSlashSuggestions = (
   return items;
 };
 
-export type WorkbenchShellServiceOptions = {
-  runtimeService: WorkbenchRuntimeService;
+export type SessionShellServiceOptions = {
+  runtimeService: SessionRuntimeService;
   sessionCatalog: SessionCatalogService;
   capabilities?: CapabilityRegistry;
   skillsProvider?: {
@@ -176,12 +176,12 @@ export type WorkbenchShellServiceOptions = {
   codexTurnChangesService?: CodexTurnChangesService;
 };
 
-export class WorkbenchShellService {
-  private readonly runtimeService: WorkbenchRuntimeService;
+export class SessionShellService {
+  private readonly runtimeService: SessionRuntimeService;
   private readonly sessionCatalog: SessionCatalogService;
   private readonly capabilities: CapabilityRegistry | undefined;
   private readonly skillsProvider:
-    | WorkbenchShellServiceOptions["skillsProvider"]
+    | SessionShellServiceOptions["skillsProvider"]
     | undefined;
   private readonly sessionActions: SessionActionsProvider | undefined;
   private readonly chatTreeProvider: ChatTreeProvider | undefined;
@@ -193,7 +193,7 @@ export class WorkbenchShellService {
     | (() => Promise<{ canceled: boolean; rootPath?: string }>)
     | undefined;
   private readonly resolveEngineProgram: NonNullable<
-    WorkbenchShellServiceOptions["resolveEngineProgram"]
+    SessionShellServiceOptions["resolveEngineProgram"]
   >;
   private readonly fileActionService: FileActionService;
   private readonly errorLogService: ErrorLogService;
@@ -205,7 +205,7 @@ export class WorkbenchShellService {
   private activationQueue: Promise<void> = Promise.resolve();
   private readonly partiallyHydratedSessionIds = new Set<string>();
 
-  public constructor(options: WorkbenchShellServiceOptions) {
+  public constructor(options: SessionShellServiceOptions) {
     this.runtimeService = options.runtimeService;
     this.sessionCatalog = options.sessionCatalog;
     this.capabilities = options.capabilities;
@@ -299,7 +299,7 @@ export class WorkbenchShellService {
     );
   }
 
-  public async getSettings(): Promise<WorkbenchSettingsRpc> {
+  public async getSettings(): Promise<SessionSettingsRpc> {
     const registry = this.requireWorkspaceRegistry();
     await registry.ready();
     const state = registry.getState();
@@ -320,8 +320,8 @@ export class WorkbenchShellService {
   }
 
   public async updateSettings(
-    input: Partial<WorkbenchSettingsRpc>
-  ): Promise<WorkbenchSettingsRpc> {
+    input: Partial<SessionSettingsRpc>
+  ): Promise<SessionSettingsRpc> {
     const registry = this.requireWorkspaceRegistry();
     await registry.updateSettings(input);
     if (input.defaultNewSessionEngineId) {
@@ -1229,12 +1229,12 @@ export class WorkbenchShellService {
   }
 
   private getRuntimeSnapshotResult(): {
-    snapshot: ReturnType<WorkbenchRuntimeService["getSnapshot"]>;
+    snapshot: ReturnType<SessionRuntimeService["getSnapshot"]>;
     cursor?: string;
   } {
-    const runtimeService = this.runtimeService as WorkbenchRuntimeService & {
+    const runtimeService = this.runtimeService as SessionRuntimeService & {
       getSnapshotResult?: () => {
-        snapshot: ReturnType<WorkbenchRuntimeService["getSnapshot"]>;
+        snapshot: ReturnType<SessionRuntimeService["getSnapshot"]>;
         cursor?: string;
       };
     };

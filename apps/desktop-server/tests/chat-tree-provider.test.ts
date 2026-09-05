@@ -1,7 +1,7 @@
 import type { ChatSession } from "@vermillion/shared";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTreeProvider } from "../src/chat-tree-provider.js";
-import type { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import type { SessionRuntimeService } from "../src/runtime-service.js";
 
 const createSession = (input: {
   sessionId: string;
@@ -21,7 +21,7 @@ describe("ChatTreeProvider", () => {
     const provider = new ChatTreeProvider({
       runtimeService: {
         listSessions: vi.fn().mockReturnValue([])
-      } as unknown as WorkbenchRuntimeService,
+      } as unknown as SessionRuntimeService,
       sessionIndexStore: {
         getEntry: vi.fn().mockReturnValue(undefined)
       } as never
@@ -44,7 +44,7 @@ describe("ChatTreeProvider", () => {
             engineId: "acp"
           })
         ])
-      } as unknown as WorkbenchRuntimeService,
+      } as unknown as SessionRuntimeService,
       sessionIndexStore: {
         getEntry: vi.fn().mockReturnValue(undefined)
       } as never,
@@ -88,7 +88,7 @@ describe("ChatTreeProvider", () => {
             engineId: "custom"
           })
         ])
-      } as unknown as WorkbenchRuntimeService,
+      } as unknown as SessionRuntimeService,
       sessionIndexStore: {
         getEntry: vi.fn().mockReturnValue(undefined)
       } as never,

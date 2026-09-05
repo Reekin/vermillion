@@ -5,11 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentAdapter } from "@vermillion/adapters";
 import { MAX_STREAM_EVENT_CHUNK_LENGTH } from "@vermillion/shared";
 import { SessionIndexStore } from "../src/session-index.js";
-import { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import { SessionRuntimeService } from "../src/runtime-service.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";
 
 const tempDirs: string[] = [];
-const services = new Set<WorkbenchRuntimeService>();
+const services = new Set<SessionRuntimeService>();
 
 const createTempDir = async (): Promise<string> => {
   const dir = await mkdtemp(join(tmpdir(), "awb-runtime-service-"));
@@ -23,9 +23,9 @@ const flushAsyncEffects = async (): Promise<void> => {
 
 const createService = (options: {
   persistenceBaseDir?: string;
-  agentBindings?: ConstructorParameters<typeof WorkbenchRuntimeService>[0]["agentBindings"];
+  agentBindings?: ConstructorParameters<typeof SessionRuntimeService>[0]["agentBindings"];
 } = {}) => {
-  const service = new WorkbenchRuntimeService({
+  const service = new SessionRuntimeService({
     now: (() => {
       let tick = 0;
       return () => `2026-04-18T00:00:${String(++tick).padStart(2, "0")}Z`;
@@ -92,7 +92,7 @@ afterEach(async () => {
   }
 });
 
-describe("WorkbenchRuntimeService", () => {
+describe("SessionRuntimeService", () => {
   it("returns model catalogs from engine bindings and empty catalogs otherwise", async () => {
     const service = createService({
       agentBindings: [

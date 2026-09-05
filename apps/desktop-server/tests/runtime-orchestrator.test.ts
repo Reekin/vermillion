@@ -4,7 +4,7 @@ import type { RuntimeEvent } from "@vermillion/shared";
 import { readSessionExecutionProfile } from "@vermillion/shared";
 import { DomainService } from "../src/domain-service.js";
 import { RuntimeOrchestrator } from "../src/runtime-orchestrator.js";
-import type { WorkbenchAgentBinding } from "../src/runtime-types.js";
+import type { SessionAgentBinding } from "../src/runtime-types.js";
 
 const flushAsyncWork = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -97,7 +97,7 @@ describe("RuntimeOrchestrator", () => {
     ]);
     const binding = (
       orchestrator as unknown as {
-        bindings: Map<string, WorkbenchAgentBinding>;
+        bindings: Map<string, SessionAgentBinding>;
       }
     ).bindings.get("codex");
     expect(binding).toMatchObject({

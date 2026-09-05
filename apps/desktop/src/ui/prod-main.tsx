@@ -54,12 +54,12 @@ const installRendererErrorLogging = (transport: DesktopTransport): void => {
 
 let transport: ReturnType<typeof createDesktopTransport> | undefined;
 try {
-  if (!window.workbench) {
+  if (!window.session) {
     throw new Error(
       "The Electron preload API is missing. Launch Vermillion through the desktop application."
     );
   }
-  transport = createDesktopTransport(window.workbench);
+  transport = createDesktopTransport(window.session);
   installRendererErrorLogging(transport);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

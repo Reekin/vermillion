@@ -1,11 +1,11 @@
 import type {
-  WorkbenchClientApi,
-  WorkbenchRpcRequest,
-  WorkbenchRpcResponse
+  SessionClientApi,
+  SessionRpcRequest,
+  SessionRpcResponse
 } from "@vermillion/shared";
-import { createWorkbenchRpcHandler } from "./workbench-rpc-handler.js";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
-import type { WorkbenchShellService } from "./workbench-shell-service.js";
+import { createWorkbenchRpcHandler } from "./session-rpc-handler.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
+import type { SessionShellService } from "./session-shell-service.js";
 
 type IdFactory = () => string;
 
@@ -19,9 +19,9 @@ const createOpaqueId = (): string =>
     .slice(2, 10)}`;
 
 export const createLocalDesktopPreloadApi = (
-  service: WorkbenchRuntimeService | WorkbenchShellService,
+  service: SessionRuntimeService | SessionShellService,
   options: LocalDesktopPreloadOptions = {}
-): WorkbenchClientApi => {
+): SessionClientApi => {
   const createSubscriptionId =
     options.createSubscriptionId ?? createOpaqueId;
   const rpc = createWorkbenchRpcHandler(service, {
@@ -29,7 +29,7 @@ export const createLocalDesktopPreloadApi = (
   });
 
   return {
-    request: async (request: WorkbenchRpcRequest): Promise<WorkbenchRpcResponse> =>
+    request: async (request: SessionRpcRequest): Promise<SessionRpcResponse> =>
       rpc.handleRequest(request),
     subscribe: async (params, handler) => {
       const subscriptionId = params.subscriptionId ?? createSubscriptionId();

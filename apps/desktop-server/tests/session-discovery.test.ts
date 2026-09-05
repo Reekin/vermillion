@@ -12,7 +12,7 @@ import {
   getRecordedCodexTurnChanges
 } from "../src/engine-extensions/codex/turn-changes-store.js";
 import { SessionIndexStore } from "../src/session-index.js";
-import { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import { SessionRuntimeService } from "../src/runtime-service.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";
 import {
   consumeCodexRolloutTimestampForItem,
@@ -918,7 +918,7 @@ describe("Session discovery and reconciliation", () => {
     const sessionIndexStore = new SessionIndexStore({
       baseDir
     });
-    const runtimeService = new WorkbenchRuntimeService({
+    const runtimeService = new SessionRuntimeService({
       engines: [
         {
           engineId: "codex",
@@ -1159,7 +1159,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const runtimeService = new WorkbenchRuntimeService({
+    const runtimeService = new SessionRuntimeService({
       engines: [
         {
           engineId: "codex",
@@ -1322,7 +1322,7 @@ describe("Session discovery and reconciliation", () => {
     const sessionIndexStore = new SessionIndexStore({
       baseDir
     });
-    const runtimeService = new WorkbenchRuntimeService({
+    const runtimeService = new SessionRuntimeService({
       engines: [
         {
           engineId: "codex",
@@ -1409,7 +1409,7 @@ describe("Session discovery and reconciliation", () => {
     const sessionIndexStore = new SessionIndexStore({
       baseDir
     });
-    const runtimeService = new WorkbenchRuntimeService({
+    const runtimeService = new SessionRuntimeService({
       engines: [
         {
           engineId: "codex",
@@ -2491,7 +2491,7 @@ describe("Session discovery and reconciliation", () => {
     const reconciliation = new SessionReconciliationService({
       workspaceRegistry,
       sessionIndexStore,
-      runtimeService: new WorkbenchRuntimeService({
+      runtimeService: new SessionRuntimeService({
         engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
       }),
       providers: [{ engineId: "codex", discoverWorkspaces }] as never
@@ -2552,7 +2552,7 @@ describe("Session discovery and reconciliation", () => {
         })
       } as never
     });
-    const runtimeService = new WorkbenchRuntimeService({
+    const runtimeService = new SessionRuntimeService({
       engines: [
         {
           engineId: "codex",

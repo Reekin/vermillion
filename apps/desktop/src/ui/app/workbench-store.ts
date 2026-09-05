@@ -3,70 +3,59 @@ import type { DocChange, DocFile, InboxItem, Mission, Workspace, WorkbenchClient
 
 export type Panel = "think" | "inbox" | "workspaces";
 
-const LAST_WORKSPACE_KEY = "vermillion.lastWorkspaceId";
+/** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
+export type WorkspaceView = {
+  workspaceId: string;
+  missions: Mission[];
+  docs: DocFile[];
+  pendingDocChanges: DocChange[];
+};
 
 export type WorkbenchState = {
   client: WorkbenchClient;
   panel: Panel;
   overlay: Panel | undefined;
   workspaces: Workspace[];
-  workspaceRevision: number;
-  activeWorkspaceId: string | undefined;
+  /** Workspace a new chat will be created in. Chosen in the composer; remembered across restarts. */
+  draftWorkspaceId: string | undefined;
+  /** Workspace whose docs and missions are shown. Follows the open session, or the draft when none. */
+  browsingWorkspaceId: string | undefined;
+  view: WorkspaceView | undefined;
   inbox: InboxItem[];
-  missions: Mission[];
-  docs: DocFile[];
-  pendingDocChanges: DocChange[];
   openDocPath: string | undefined;
+
   setPanel: (panel: Panel) => void;
   openOverlay: (panel: Panel) => void;
   closeOverlay: () => void;
-  refreshWorkspaces: () => Promise<void>;
-  selectWorkspace: (workspaceId: string | undefined) => Promise<void>;
-  refreshInbox: () => Promise<void>;
-  refreshWorkspaceData: () => Promise<void>;
+  setDraftWorkspace: (workspaceId: string | undefined) => void;
+  browseWorkspace: (workspaceId: string | undefined) => void;
   setOpenDocPath: (path: string | undefined) => void;
+  /** Subscribes to workbench events and loads initial state. Returns an unsubscribe. */
+  connect: () => () => void;
 };
 
+const LAST_WORKSPACE_KEY = "vermillion.draftWorkspaceId";
+
 export const createWorkbenchStore = (client: WorkbenchClient) =>
-  create<WorkbenchState>((set, get) => ({
-    client,
-    panel: "think",
-    overlay: undefined,
-    workspaces: [],
-    workspaceRevision: 0,
-    activeWorkspaceId: undefined,
-    inbox: [],
-    missions: [],
-    docs: [],
-    pendingDocChanges: [],
-    openDocPath: undefined,
-    setPanel: (panel) => set({ panel, overlay: undefined }),
-    openOverlay: (panel) => set({ overlay: panel }),
-    closeOverlay: () => set({ overlay: undefined }),
-    refreshWorkspaces: async () => {
+  create<WorkbenchState>((set, get) => {
+    let viewGeneration = 0;
+
+    const loadWorkspaces = async () => {
       const workspaces = await client.request("workspace.list", {});
-      const previous = get().workspaces;
-      const changed = previous.length !== workspaces.length || workspaces.some((w, i) => previous[i]?.workspaceId !== w.workspaceId);
-      const remembered = get().activeWorkspaceId ?? localStorage.getItem(LAST_WORKSPACE_KEY) ?? undefined;
-      const stillExists = workspaces.some((w) => w.workspaceId === remembered);
-      const activeWorkspaceId = stillExists ? remembered : workspaces[0]?.workspaceId;
-      if (activeWorkspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, activeWorkspaceId);
-      if (!changed && activeWorkspaceId === get().activeWorkspaceId) return;
-      set({ workspaces, workspaceRevision: get().workspaceRevision + (changed ? 1 : 0), activeWorkspaceId });
-      await get().refreshWorkspaceData();
-    },
-    selectWorkspace: async (workspaceId) => {
-      if (workspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, workspaceId);
-      set({ activeWorkspaceId: workspaceId, openDocPath: undefined });
-      await get().refreshWorkspaceData();
-    },
-    refreshInbox: async () => {
-      set({ inbox: await client.request("inbox.list", {}) });
-    },
-    refreshWorkspaceData: async () => {
-      const workspaceId = get().activeWorkspaceId;
+      const remembered = get().draftWorkspaceId ?? localStorage.getItem(LAST_WORKSPACE_KEY) ?? undefined;
+      const draftWorkspaceId = workspaces.some((w) => w.workspaceId === remembered) ? remembered : workspaces[0]?.workspaceId;
+      const browsing = get().browsingWorkspaceId;
+      const browsingWorkspaceId = workspaces.some((w) => w.workspaceId === browsing) ? browsing : draftWorkspaceId;
+      set({ workspaces, draftWorkspaceId, browsingWorkspaceId });
+      if (draftWorkspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, draftWorkspaceId);
+      await loadView();
+    };
+
+    const loadView = async () => {
+      const workspaceId = get().browsingWorkspaceId;
+      const generation = ++viewGeneration;
       if (!workspaceId) {
-        set({ missions: [], docs: [], pendingDocChanges: [] });
+        set({ view: undefined });
         return;
       }
       const [missions, docs, pendingDocChanges] = await Promise.all([
@@ -74,9 +63,60 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         client.request("docs.list", { workspaceId }),
         client.request("docs.pending", { workspaceId })
       ]);
-      set({ missions, docs, pendingDocChanges });
-    },
-    setOpenDocPath: (path) => set({ openDocPath: path })
-  }));
+      if (generation !== viewGeneration) return;
+      set({ view: { workspaceId, missions, docs, pendingDocChanges } });
+    };
+
+    const loadInbox = async () => {
+      set({ inbox: await client.request("inbox.list", {}) });
+    };
+
+    return {
+      client,
+      panel: "think",
+      overlay: undefined,
+      workspaces: [],
+      draftWorkspaceId: undefined,
+      browsingWorkspaceId: undefined,
+      view: undefined,
+      inbox: [],
+      openDocPath: undefined,
+
+      setPanel: (panel) => set({ panel, overlay: undefined }),
+      openOverlay: (panel) => set({ overlay: panel }),
+      closeOverlay: () => set({ overlay: undefined }),
+      setDraftWorkspace: (workspaceId) => {
+        if (workspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, workspaceId);
+        set({ draftWorkspaceId: workspaceId });
+        get().browseWorkspace(workspaceId);
+      },
+      browseWorkspace: (workspaceId) => {
+        if (workspaceId === get().browsingWorkspaceId) return;
+        set({ browsingWorkspaceId: workspaceId, openDocPath: undefined, view: undefined });
+        void loadView();
+      },
+      setOpenDocPath: (path) => set({ openDocPath: path }),
+
+      connect: () => {
+        void loadWorkspaces();
+        void loadInbox();
+        return client.subscribe((event) => {
+          switch (event.type) {
+            case "workspaces.changed":
+              void loadWorkspaces();
+              return;
+            case "docs.changed":
+            case "missions.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
+              return;
+            case "workItems.changed":
+            case "decisions.changed":
+              void loadInbox();
+              return;
+          }
+        });
+      }
+    };
+  });
 
 export type WorkbenchStore = ReturnType<typeof createWorkbenchStore>;

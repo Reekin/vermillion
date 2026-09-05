@@ -1,26 +1,27 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
-  WorkbenchClientApi,
-  WorkbenchEventHandler,
-  WorkbenchEventPush,
-  WorkbenchRpcRequest,
-  WorkbenchRpcResponse
+  SessionClientApi,
+  SessionEventHandler,
+  SessionEventPush,
+  SessionRpcRequest,
+  SessionRpcResponse
 } from "@vermillion/shared";
 import {
-  safeParseWorkbenchEventPushBatch,
-  safeParseWorkbenchEventPush,
-  safeParseWorkbenchRpcResponse
+  safeParseSessionEventPushBatch,
+  safeParseSessionEventPush,
+  safeParseSessionRpcResponse
 } from "@vermillion/shared";
 import {
-  WORKBENCH_IPC_EVENTS_PUSH_CHANNEL,
-  WORKBENCH_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
-  WORKBENCH_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
-  WORKBENCH_IPC_REQUEST_CHANNEL,
-  WORKBENCH_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
-  VERMILLION_IPC_REQUEST_CHANNEL
+  SESSION_IPC_EVENTS_PUSH_CHANNEL,
+  SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
+  SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
+  SESSION_IPC_REQUEST_CHANNEL,
+  SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
+  WORKBENCH_IPC_EVENT_CHANNEL,
+  WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 
-type WorkbenchLocalAssetsApi = {
+type SessionLocalAssetsApi = {
   materializeAttachmentDataUri: (input: {
     attachmentId: string;
     dataUri: string;
@@ -33,7 +34,7 @@ type WorkbenchLocalAssetsApi = {
   }>;
 };
 
-type WorkbenchDesktopApi = {
+type SessionDesktopApi = {
   pickEngineProgramPath: (engineId: string) => Promise<{
     canceled: boolean;
     path?: string;
@@ -41,9 +42,9 @@ type WorkbenchDesktopApi = {
   writeClipboardText: (text: string) => Promise<void>;
 };
 
-const handlersBySubscriptionId = new Map<string, Set<WorkbenchEventHandler>>();
+const handlersBySubscriptionId = new Map<string, Set<SessionEventHandler>>();
 
-const deliverPush = (push: WorkbenchEventPush): void => {
+const deliverPush = (push: SessionEventPush): void => {
   const handlers = handlersBySubscriptionId.get(push.subscriptionId);
   if (!handlers || handlers.size === 0) {
     return;
@@ -53,13 +54,13 @@ const deliverPush = (push: WorkbenchEventPush): void => {
   }
 };
 
-ipcRenderer.on(WORKBENCH_IPC_EVENTS_PUSH_CHANNEL, (_event, payload: unknown) => {
+ipcRenderer.on(SESSION_IPC_EVENTS_PUSH_CHANNEL, (_event, payload: unknown) => {
   const channel =
     typeof payload === "object" && payload !== null
       ? (payload as { channel?: unknown }).channel
       : undefined;
-  if (channel === "workbench.events.batch") {
-    const parsedBatch = safeParseWorkbenchEventPushBatch(payload);
+  if (channel === "session.events.batch") {
+    const parsedBatch = safeParseSessionEventPushBatch(payload);
     if (!parsedBatch.success) {
       return;
     }
@@ -68,27 +69,27 @@ ipcRenderer.on(WORKBENCH_IPC_EVENTS_PUSH_CHANNEL, (_event, payload: unknown) => 
     }
     return;
   }
-  const parsed = safeParseWorkbenchEventPush(payload);
+  const parsed = safeParseSessionEventPush(payload);
   if (parsed.success) {
     deliverPush(parsed.data);
   }
 });
 
-const request = async (payload: WorkbenchRpcRequest): Promise<WorkbenchRpcResponse> => {
+const request = async (payload: SessionRpcRequest): Promise<SessionRpcResponse> => {
   const raw = (await ipcRenderer.invoke(
-    WORKBENCH_IPC_REQUEST_CHANNEL,
+    SESSION_IPC_REQUEST_CHANNEL,
     payload
   )) as unknown;
-  const parsed = safeParseWorkbenchRpcResponse(raw);
+  const parsed = safeParseSessionRpcResponse(raw);
   if (!parsed.success) {
-    throw new Error("Electron IPC returned an invalid WorkbenchRpcResponse payload.");
+    throw new Error("Electron IPC returned an invalid SessionRpcResponse payload.");
   }
   return parsed.data;
 };
 
-const ensureOk = <T extends WorkbenchRpcResponse>(
+const ensureOk = <T extends SessionRpcResponse>(
   response: T,
-  expectedMethod: WorkbenchRpcRequest["method"]
+  expectedMethod: SessionRpcRequest["method"]
 ): T => {
   if (response.method !== expectedMethod) {
     throw new Error(
@@ -101,12 +102,12 @@ const ensureOk = <T extends WorkbenchRpcResponse>(
   return response;
 };
 
-const subscribe: WorkbenchClientApi["subscribe"] = async (params, handler) => {
+const subscribe: SessionClientApi["subscribe"] = async (params, handler) => {
   const response = ensureOk(await request({
     id: `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     method: "events.subscribe",
     params
-  }), "events.subscribe") as Extract<WorkbenchRpcResponse, { method: "events.subscribe"; ok: true }>;
+  }), "events.subscribe") as Extract<SessionRpcResponse, { method: "events.subscribe"; ok: true }>;
 
   const subscriptionId = response.result.subscriptionId;
   const handlerSet = handlersBySubscriptionId.get(subscriptionId) ?? new Set();
@@ -138,34 +139,45 @@ const subscribe: WorkbenchClientApi["subscribe"] = async (params, handler) => {
   };
 };
 
-const api: WorkbenchClientApi = {
+const api: SessionClientApi = {
   request,
   subscribe
 };
 
-const localAssetsApi: WorkbenchLocalAssetsApi = {
+const localAssetsApi: SessionLocalAssetsApi = {
   materializeAttachmentDataUri: async (input) =>
     (await ipcRenderer.invoke(
-      WORKBENCH_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
+      SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
       input
-    )) as Awaited<ReturnType<WorkbenchLocalAssetsApi["materializeAttachmentDataUri"]>>
+    )) as Awaited<ReturnType<SessionLocalAssetsApi["materializeAttachmentDataUri"]>>
 };
 
-const desktopApi: WorkbenchDesktopApi = {
+const desktopApi: SessionDesktopApi = {
   pickEngineProgramPath: async (engineId) =>
     (await ipcRenderer.invoke(
-      WORKBENCH_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
+      SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
       engineId
-    )) as Awaited<ReturnType<WorkbenchDesktopApi["pickEngineProgramPath"]>>,
+    )) as Awaited<ReturnType<SessionDesktopApi["pickEngineProgramPath"]>>,
   writeClipboardText: async (text) => {
-    await ipcRenderer.invoke(WORKBENCH_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL, text);
+    await ipcRenderer.invoke(SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL, text);
   }
 };
 
-contextBridge.exposeInMainWorld("workbench", api);
-contextBridge.exposeInMainWorld("workbenchLocalAssets", localAssetsApi);
-contextBridge.exposeInMainWorld("workbenchDesktop", desktopApi);
+contextBridge.exposeInMainWorld("session", api);
+contextBridge.exposeInMainWorld("sessionLocalAssets", localAssetsApi);
+contextBridge.exposeInMainWorld("sessionDesktop", desktopApi);
+const domainEventListeners = new Set<(event: unknown) => void>();
+ipcRenderer.on(WORKBENCH_IPC_EVENT_CHANNEL, (_event, payload: unknown) => {
+  for (const listener of domainEventListeners) listener(payload);
+});
+
 contextBridge.exposeInMainWorld("vermillion", {
   request: (payload: { method: string; params: unknown }) =>
-    ipcRenderer.invoke(VERMILLION_IPC_REQUEST_CHANNEL, payload)
+    ipcRenderer.invoke(WORKBENCH_IPC_REQUEST_CHANNEL, payload),
+  onEvent: (listener: (event: unknown) => void) => {
+    domainEventListeners.add(listener);
+    return () => {
+      domainEventListeners.delete(listener);
+    };
+  }
 });

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkbenchRpcHandler } from "../src/workbench-rpc-handler.js";
+import { createWorkbenchRpcHandler } from "../src/session-rpc-handler.js";
 import { SessionBrowserCursorStaleError } from "../src/session-browser-read-model.js";
-import type { WorkbenchShellService } from "../src/workbench-shell-service.js";
+import type { SessionShellService } from "../src/session-shell-service.js";
 
-const createShell = (overrides: Record<string, unknown> = {}): WorkbenchShellService => ({
+const createShell = (overrides: Record<string, unknown> = {}): SessionShellService => ({
   listWorkspaces: vi.fn(),
   listSessionRoots: vi.fn(async () => ({
     workspaceId: "workspace-1",
@@ -26,7 +26,7 @@ const createShell = (overrides: Record<string, unknown> = {}): WorkbenchShellSer
     items: []
   })),
   ...overrides
-} as unknown as WorkbenchShellService);
+} as unknown as SessionShellService);
 
 describe("session browser workbench RPC handler", () => {
   it("routes bounded roots, children, and selected path requests", async () => {

@@ -30,7 +30,6 @@ export const statusNoticeErrorDetails = (
 });
 
 export type ResolveComposerStatusInput = {
-  transportAvailable: boolean;
   selectedEngineId?: string;
   activeSession?: ChatSession;
   approvals?: ApprovalRequest[];
@@ -41,7 +40,6 @@ export type ResolveComposerStatusInput = {
 
 export type ComposerStatusModel = {
   kind:
-    | "transport_unavailable"
     | "no_session"
     | "idle"
     | "running"
@@ -60,13 +58,6 @@ const firstPendingApproval = (
 export const resolveComposerStatusModel = (
   input: ResolveComposerStatusInput
 ): ComposerStatusModel => {
-  if (!input.transportAvailable) {
-    return {
-      kind: "transport_unavailable",
-      label: "Transport unavailable"
-    };
-  }
-
   const pendingApproval = firstPendingApproval(input.approvals);
   if (input.activeSession?.status === "awaiting_approval" && pendingApproval) {
     return {

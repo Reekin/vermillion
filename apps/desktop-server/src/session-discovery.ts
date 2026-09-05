@@ -35,7 +35,7 @@ import type {
   UpsertSessionRelationInput
 } from "./session-index.js";
 import type { WorkspaceRecord, WorkspaceRegistryService } from "./workspace-registry.js";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
 import { CapabilityRegistry } from "./capability-registry.js";
 import {
   CodexTurnChangesStore,
@@ -1276,7 +1276,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
 export class SessionReconciliationService {
   private readonly workspaceRegistry: WorkspaceRegistryService;
   private readonly sessionIndexStore: SessionIndexStore;
-  private readonly runtimeService: WorkbenchRuntimeService;
+  private readonly runtimeService: SessionRuntimeService;
   private readonly providersByEngineId: Map<string, SessionDiscoveryProvider>;
   private readonly sessionIdentity: SessionIdentityRegistry;
   private readonly hydrationBySessionId = new Map<
@@ -1292,7 +1292,7 @@ export class SessionReconciliationService {
   public constructor(options: {
     workspaceRegistry: WorkspaceRegistryService;
     sessionIndexStore: SessionIndexStore;
-    runtimeService: WorkbenchRuntimeService;
+    runtimeService: SessionRuntimeService;
     sessionIdentity?: SessionIdentityRegistry;
     capabilityRegistry?: CapabilityRegistry;
     providers?: SessionDiscoveryProvider[];

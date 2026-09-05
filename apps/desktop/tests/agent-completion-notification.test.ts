@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   EventEnvelope,
   SessionBrowserPathRpc,
-  WorkbenchEventPush,
-  WorkbenchEventPushBatch
+  SessionEventPush,
+  SessionEventPushBatch
 } from "@vermillion/shared";
 import {
   createAgentCompletionNotifier,
@@ -25,8 +25,8 @@ const completionEnvelope = (
   }
 });
 
-const push = (envelope: EventEnvelope): WorkbenchEventPush => ({
-  channel: "workbench.events",
+const push = (envelope: EventEnvelope): SessionEventPush => ({
+  channel: "session.events",
   subscriptionId: "subscription-1",
   envelope
 });
@@ -96,8 +96,8 @@ describe("agent completion notifications", () => {
   it("handles batched pushes and ignores unrelated events", () => {
     const notify = vi.fn();
     const notifier = createAgentCompletionNotifier({ notify });
-    const batch: WorkbenchEventPushBatch = {
-      channel: "workbench.events.batch",
+    const batch: SessionEventPushBatch = {
+      channel: "session.events.batch",
       pushes: [
         push({
           eventId: "event-message",

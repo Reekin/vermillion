@@ -4,7 +4,7 @@ import {
   createHydrateSnapshotAction,
   createIngestEventAction
 } from "./intake.js";
-import { rendererMetaReducer } from "./reducer.js";
+import { rendererMetaReducer } from "./meta-reducer.js";
 import {
   createInitialRendererStoreState,
   normalizeRendererDomainSnapshot

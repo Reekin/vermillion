@@ -17,5 +17,8 @@
   },
   "dependencies": {
     "zod": "^3.25.76"
+  },
+  "bin": {
+    "vermillion": "./bin/vermillion.mjs"
   }
 }

@@ -14,13 +14,13 @@ import type {
 } from "@vermillion/shared";
 import type { RuntimeCommandReceiptRpc } from "@vermillion/shared";
 
-export type WorkbenchEngineDescriptor = {
+export type SessionEngineDescriptor = {
   engineId: string;
   displayName: string;
   capabilities: string[];
 };
 
-export type WorkbenchSessionListOptions = {
+export type SessionListOptions = {
   conversationId?: string;
   includeArchived?: boolean;
 };
@@ -48,8 +48,8 @@ export type EventReplayResult = {
   envelopes: EventEnvelope[];
 };
 
-export type WorkbenchAgentBinding = {
-  descriptor: WorkbenchEngineDescriptor;
+export type SessionAgentBinding = {
+  descriptor: SessionEngineDescriptor;
   integrationTier?: EngineIntegrationTierRpc;
   transportKind?: string;
   adapter?: AgentAdapter;

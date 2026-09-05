@@ -1,5 +1,5 @@
 export const writeClipboardText = async (text: string): Promise<void> => {
-  const desktopWriter = window.workbenchDesktop?.writeClipboardText;
+  const desktopWriter = window.sessionDesktop?.writeClipboardText;
   if (desktopWriter) {
     await desktopWriter(text);
     return;

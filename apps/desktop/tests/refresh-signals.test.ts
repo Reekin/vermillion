@@ -5,7 +5,7 @@ import {
   createInitialRendererRefreshSignals
 } from "../src/store/refresh-signals.js";
 import { parseIngestEnvelopeAction } from "../src/store/intake.js";
-import { rendererStoreReducer } from "../src/store/reducer.js";
+import { rendererMetaReducer } from "../src/store/meta-reducer.js";
 import { createInitialRendererStoreState } from "../src/store/state.js";
 
 const advance = (events: RuntimeEvent[]) =>
@@ -204,7 +204,7 @@ describe("renderer refresh signals", () => {
   it("preserves relevant invalidations even when a streaming event arrives last", () => {
     let state = createInitialRendererStoreState();
 
-    state = rendererStoreReducer(
+    state = rendererMetaReducer(
       state,
       parseIngestEnvelopeAction({
         eventId: "event-session",
@@ -219,7 +219,7 @@ describe("renderer refresh signals", () => {
         }
       })
     );
-    state = rendererStoreReducer(
+    state = rendererMetaReducer(
       state,
       parseIngestEnvelopeAction({
         eventId: "event-output",

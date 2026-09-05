@@ -7,20 +7,32 @@
 - `start.bat`：构建并启动桌面应用
 - `dev.bat`：开发模式（Vite HMR + Electron）
 
-需要 Node >= 22、pnpm 10、以及 PATH 里能找到 `codex`（也可通过 `VERMILLION_CODEX_BIN` 指定）。
+需要 Node >= 22、pnpm 10、PATH 里的 `git` 和 `codex`（也可用 `VERMILLION_CODEX_BIN` 指定）。
 
 ## 使用
 
-1. 左侧 rail 点 **Workspaces**，用 + 添加一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并写入 `.vermillion/AGENTS.md`（设计伙伴的工作规则）。
-2. 回到 **思考**，点 New Chat，在 Composer 里选 workspace（默认上次的），和设计伙伴聊需求。它的 cwd 是 `<root>/.vermillion`，只会改 `docs/` 下的文件。
-3. 右栏 **待确认变更** 会列出 `.vermillion/docs/` 的改动；点文件名可直接编辑并保存。
-4. 点 **创建任务**：docs/ 改动被提交为一个 commit，任务绑定该 commit 与当前会话。
-5. **Inbox** 汇总所有 workspace 的决策卡（选一个选项即回答）和待验收工单（通过 / 打回）。
+1. 思考页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并写入 `.vermillion/AGENTS.md`。
+2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 `<root>/.vermillion`，设计伙伴只会改 `docs/` 下的文件。
+3. 右栏 Docs 树按文件夹显示 `.vermillion/docs/`；有改动的文件带 M/U/D 标记，点击可编辑，右键可在文件管理器或默认编辑器中打开。
+4. 点 **创建任务**：docs 改动提交为一个 commit，任务绑定该 commit 与当前会话。
+5. **Inbox** 汇总所有 workspace 的决策卡（选一个选项即回答）和待验收工单（通过 / 打回并写原因 / 不做），并展示证据包与验收结果。
+6. 左栏 **New Chat** 回到草稿态；会话列表按最近完成的 turn 排序，可切换为按 workspace 分组，可加载更多。
+
+## CLI
+
+```
+pnpm --filter @vermillion/workbench build
+node packages/workbench/bin/vermillion.mjs --help
+node packages/workbench/bin/vermillion.mjs workspace.list
+node packages/workbench/bin/vermillion.mjs workItem.submit '{"workspaceId":"...","workItemId":"...","evidence":{...},"review":[],"verify":{...}}'
+```
+
+CLI 与桌面共用同一个服务和方法表；CLI 的写入会通过文件监听实时反映到桌面。
 
 ## 数据位置
 
 - 全局：`~/.vermillion/`（workspace 注册表、会话索引）
-- 每个 workspace：`<root>/.vermillion/`（missions / workitems / decisions / issues，一条一个 JSON），`<root>/.vermillion/docs/`（真相源文档，走 git）
+- 每个 workspace：`<root>/.vermillion/`：`AGENTS.md`、`docs/`（真相源，走 git）、`missions/` `workitems/` `decisions/`（一条一 JSON）
 
 ## 结构
 
@@ -28,15 +40,7 @@
 packages/shared        会话引擎契约（zod）
 packages/core          会话领域存储与投影
 packages/adapters      运行时适配（codex app-server）
-packages/workbench     工作台领域：Workspace / Doc / Mission / WorkItem / DecisionCard / Inbox，文件持久化，typed RPC
+packages/workbench     工作台领域 + typed RPC + CLI
 apps/desktop-server    会话引擎宿主（Electron main 进程内）
-apps/desktop           Electron 壳 + renderer（思考页内嵌会话工作台，Inbox / Workspaces 面板）
-```
-
-## 命令
-
-```
-pnpm typecheck      # 全部包类型检查
-pnpm test           # 全部包单测
-pnpm dev            # 开发模式
+apps/desktop           Electron 壳：SessionPane（会话）+ 应用壳（侧栏 / Docs / Inbox / Workspaces）
 ```

@@ -1,28 +1,28 @@
 import type {
-  WorkbenchClientApi,
-  WorkbenchRpcMethod,
-  WorkbenchRpcRequest,
-  WorkbenchRpcResponse
+  SessionClientApi,
+  SessionRpcMethod,
+  SessionRpcRequest,
+  SessionRpcResponse
 } from "@vermillion/shared";
 
 type IdFactory = () => string;
 
-type RpcRequestFor<M extends WorkbenchRpcMethod> = Extract<
-  WorkbenchRpcRequest,
+type RpcRequestFor<M extends SessionRpcMethod> = Extract<
+  SessionRpcRequest,
   { method: M }
 >;
 
-type RpcResponseFor<M extends WorkbenchRpcMethod> = Extract<
-  WorkbenchRpcResponse,
+type RpcResponseFor<M extends SessionRpcMethod> = Extract<
+  SessionRpcResponse,
   { method: M }
 >;
 
-type RpcSuccessResponseFor<M extends WorkbenchRpcMethod> = Extract<
+type RpcSuccessResponseFor<M extends SessionRpcMethod> = Extract<
   RpcResponseFor<M>,
   { ok: true }
 >;
 
-type RpcErrorResponseFor<M extends WorkbenchRpcMethod> = Extract<
+type RpcErrorResponseFor<M extends SessionRpcMethod> = Extract<
   RpcResponseFor<M>,
   { ok: false }
 >;
@@ -61,12 +61,12 @@ const estimateJsonBytes = (value: unknown): number | undefined => {
 };
 
 export const createTransportRpcHelper = (
-  preloadApi: WorkbenchClientApi,
+  preloadApi: SessionClientApi,
   createId: IdFactory,
   buildError: (input: TransportRpcError) => Error,
   options: TransportRpcHelperOptions = {}
 ) => ({
-  async request<M extends WorkbenchRpcMethod>(
+  async request<M extends SessionRpcMethod>(
     method: M,
     params: RpcRequestFor<M>["params"]
   ): Promise<RpcSuccessResponseFor<M>["result"]> {
@@ -101,7 +101,7 @@ export const createTransportRpcHelper = (
     };
 
     let response: RpcResponseFor<M> & {
-      method: WorkbenchRpcMethod;
+      method: SessionRpcMethod;
       ok: boolean;
       error?: {
         code: string;

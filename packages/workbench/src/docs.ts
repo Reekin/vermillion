@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -27,6 +28,7 @@ const assertDocPath = (path: string): void => {
   }
 };
 
+/** Git-backed document store rooted at <workspace>/.vermillion/docs. */
 export class DocsService {
   constructor(private readonly rootPath: string) {}
 
@@ -63,11 +65,7 @@ export class DocsService {
           await walk(full);
         } else if (entry.isFile()) {
           const info = await stat(full);
-          out.push({
-            path: toPosix(relative(this.rootPath, full)),
-            size: info.size,
-            modifiedAt: info.mtime.toISOString()
-          });
+          out.push({ path: toPosix(relative(this.rootPath, full)), size: info.size, modifiedAt: info.mtime.toISOString() });
         }
       }
     };
@@ -87,27 +85,32 @@ export class DocsService {
     await writeFile(full, content, "utf8");
   }
 
+  /** Read-only: does not touch the index. Untracked files count as added. */
   async pendingChanges(): Promise<DocChange[]> {
-    await this.ensureRepo();
-    await git(this.rootPath, ["add", "-N", "--", DOCS_DIR]);
-    const status = await git(this.rootPath, ["status", "--porcelain", "--", DOCS_DIR]);
+    const status = await git(this.rootPath, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", DOCS_DIR]);
     const changes: DocChange[] = [];
-    for (const line of status.split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      const code = line.slice(0, 2);
-      const path = line.slice(3).trim();
-      const kind: DocChange["status"] = code.includes("D") ? "deleted" : code.includes("A") || code.includes("?") ? "added" : "modified";
-      let diff = "";
-      try {
-        diff = await git(this.rootPath, ["diff", "--", path]);
-      } catch {}
-      changes.push({ path, status: kind, diff });
+    const entries = status.split("\0").filter(Boolean);
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i]!;
+      const code = entry.slice(0, 2);
+      const path = entry.slice(3);
+      if (code[0] === "R" || code[0] === "C") i += 1;
+      const kind: DocChange["status"] = code.includes("D") ? "deleted" : code === "??" || code.includes("A") ? "added" : "modified";
+      changes.push({ path, status: kind });
     }
-    return changes;
+    return changes.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  async diff(path: string): Promise<string> {
+    assertDocPath(path);
+    try {
+      return await git(this.rootPath, ["diff", "--no-color", "--", path]);
+    } catch {
+      return "";
+    }
   }
 
   async commit(message: string): Promise<string> {
-    await this.ensureRepo();
     await git(this.rootPath, ["add", "-A", "--", DOCS_DIR]);
     await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message, "--", DOCS_DIR]);
     return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
@@ -119,5 +122,19 @@ export class DocsService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Recursive watcher over .vermillion; reports which area changed ("docs", "missions", "workitems", "decisions")
+   * so out-of-process writers (CLI, agents) surface as the same events as in-process writes. Debounced per area.
+   */
+  watch(onChange: (area: string) => void): FSWatcher {
+    const timers = new Map<string, NodeJS.Timeout>();
+    return watch(join(this.rootPath, STATE_DIR), { recursive: true }, (_event, filename) => {
+      const area = String(filename ?? "").split(/[\\/]/)[0] ?? "";
+      if (!area || area.endsWith(".tmp")) return;
+      clearTimeout(timers.get(area));
+      timers.set(area, setTimeout(() => onChange(area), 150));
+    });
   }
 }

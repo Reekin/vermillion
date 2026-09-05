@@ -18,7 +18,7 @@ import {
 import type { SessionRelationIndex } from "./session-index.js";
 import type { HydratedSessionSnapshot } from "./session-discovery.js";
 import { buildLocalEchoMessageText } from "./attachment-inputs.js";
-import type { WorkbenchSessionListOptions } from "./runtime-types.js";
+import type { SessionListOptions } from "./runtime-types.js";
 
 type Clock = () => string;
 type IdFactory = () => string;
@@ -162,7 +162,7 @@ export class DomainService {
     return session;
   }
 
-  public listSessions(options: WorkbenchSessionListOptions = {}): ChatSession[] {
+  public listSessions(options: SessionListOptions = {}): ChatSession[] {
     return this.domainReplica.listSessions(options);
   }
 

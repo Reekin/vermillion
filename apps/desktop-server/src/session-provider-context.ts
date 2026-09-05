@@ -1,5 +1,5 @@
 import type { SessionIndexStore } from "./session-index.js";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
 import {
   SessionIdentityRegistry,
   type ResolvedSessionContext
@@ -8,7 +8,7 @@ import {
 export type { ResolvedSessionContext } from "./session-identity-registry.js";
 
 export const findRuntimeSession = (
-  runtimeService: WorkbenchRuntimeService,
+  runtimeService: SessionRuntimeService,
   sessionId: string
 ) =>
   runtimeService
@@ -18,7 +18,7 @@ export const findRuntimeSession = (
     .find((session) => session.sessionId === sessionId);
 
 export const resolveSessionContext = (
-  runtimeService: WorkbenchRuntimeService,
+  runtimeService: SessionRuntimeService,
   sessionIndexStore: SessionIndexStore,
   sessionId: string
 ): ResolvedSessionContext =>

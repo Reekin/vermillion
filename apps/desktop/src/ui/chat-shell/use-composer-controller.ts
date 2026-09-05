@@ -11,6 +11,7 @@ import {
 } from "react";
 import type {
   ApprovalRequest,
+  Attachment,
   ChatInteractionCapabilitiesRpc,
   ChatSession,
   EngineModelCatalogRpc,
@@ -343,19 +344,18 @@ export const resolveInterruptTurnId = (input: {
 };
 
 type UseComposerControllerInput = {
-  transport?: DesktopTransport;
+  transport: DesktopTransport;
   activeSession?: ChatSession;
   activeSessionId?: string;
   threadGoal?: ThreadGoal;
-  displayedSessionId?: string;
   selectedEngineId: string;
   engineSurface?: EngineSurfaceRpc;
   allowedModelIds?: string[];
   customModelReasoningOptionIds?: Record<string, string[]>;
   modelExecutionPreferences?: ComposerModelExecutionPreferences;
   lastExecution?: ComposerExecutionSelection;
-  activeWorkspaceId?: string;
-  activeWorkspaceRootPath?: string;
+  /** Working directory used to resolve project-scoped skills. */
+  skillsCwd?: string;
   turns: Turn[];
   interruptTurns: Turn[];
   allowSessionLastTurnFallback?: boolean;
@@ -363,8 +363,9 @@ type UseComposerControllerInput = {
   isOpeningSelectedSession: boolean;
   statusNotice?: ComposerStatusNotice;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
-  onCreateSession?: (workspaceId: string, engineId: string) => Promise<void>;
-  onOpenSession?: (sessionId: string) => Promise<void>;
+  /** Draft state only: creates the session for the first message and returns its id. */
+  createSession?: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
+  onResumeSession?: () => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
     engineId: string,
@@ -524,7 +525,6 @@ export const useComposerController = (
   });
 
   const status = resolveComposerStatusModel({
-    transportAvailable: Boolean(input.transport),
     selectedEngineId: input.selectedEngineId,
     activeSession: input.activeSession,
     approvals: input.approvals,
@@ -543,7 +543,7 @@ export const useComposerController = (
   );
   const canSubmit =
     hasComposedInput &&
-    Boolean(input.transport && input.activeSessionId) &&
+    Boolean(input.activeSessionId || input.createSession) &&
     !input.isOpeningSelectedSession &&
     !isDispatching;
   const canQueue =
@@ -555,7 +555,7 @@ export const useComposerController = (
       attachments.length > 0) &&
     isTurnActive;
   const canStop =
-    Boolean(input.transport && input.activeSessionId && interruptTurnId) &&
+    Boolean(input.activeSessionId && interruptTurnId) &&
     isTurnActive;
 
   useEffect(() => {
@@ -592,7 +592,7 @@ export const useComposerController = (
   }, [input.activeSessionId]);
 
   useEffect(() => {
-    if (!input.transport || !input.selectedEngineId || !supportsTurnConfiguration) {
+    if (!input.selectedEngineId || !supportsTurnConfiguration) {
       setModelCatalog(undefined);
       setIsExecutionLoading(false);
       return;
@@ -630,7 +630,7 @@ export const useComposerController = (
   ]);
 
   useEffect(() => {
-    if (!input.transport || !input.activeSessionId) {
+    if (!input.activeSessionId) {
       setCapabilities({
         supportsSteer: false,
         supportsAttachments: false,
@@ -666,19 +666,11 @@ export const useComposerController = (
   }, [input.activeSessionId, input.onStatusNotice, input.transport]);
 
   useEffect(() => {
-    if (!input.transport) {
-      setAvailableSkills([]);
-      setIsSkillsLoading(false);
-      return;
-    }
-
     let cancelled = false;
     setIsSkillsLoading(true);
     void input.transport.skills
       .list({
-        cwds: input.activeWorkspaceRootPath
-          ? [input.activeWorkspaceRootPath]
-          : undefined
+        cwds: input.skillsCwd ? [input.skillsCwd] : undefined
       })
       .then((skills) => {
         if (cancelled) {
@@ -704,7 +696,7 @@ export const useComposerController = (
     return () => {
       cancelled = true;
     };
-  }, [input.activeWorkspaceRootPath, input.onStatusNotice, input.transport]);
+  }, [input.skillsCwd, input.onStatusNotice, input.transport]);
 
   const setDraft = (value: string): void => {
     if (input.activeSessionId) {
@@ -750,10 +742,7 @@ export const useComposerController = (
       const items: ComposerSuggestionItem[] = resolveSlashSuggestionItems({
         capabilities,
         query: suggestionQuery.query,
-        canCreateSession: Boolean(
-          input.activeWorkspaceId && input.selectedEngineId && input.onCreateSession
-        ),
-        canResumeSession: Boolean(input.displayedSessionId && input.onOpenSession),
+        canResumeSession: Boolean(input.onResumeSession),
         canInterrupt: canStop
       });
       return {
@@ -793,11 +782,7 @@ export const useComposerController = (
     capabilities,
     canStop,
     highlightedSuggestionIndex,
-    input.activeWorkspaceId,
-    input.displayedSessionId,
-    input.onCreateSession,
-    input.onOpenSession,
-    input.selectedEngineId,
+    input.onResumeSession,
     isSkillsLoading,
     suggestionQuery
   ]);
@@ -922,13 +907,14 @@ export const useComposerController = (
     turnId?: string;
     execution?: ComposerExecutionSelection;
   }): Promise<boolean> => {
-    if (!input.transport || !input.activeSessionId) {
+    if (!input.activeSessionId && !input.createSession) {
       return false;
     }
     const content = serializeComposerContent(payload.text, payload.payloadSkills);
     if (!content && payload.payloadAttachments.length === 0) {
       return false;
     }
+    const attachments = payload.payloadAttachments.map((item) => item.attachment);
     setIsDispatching(true);
     input.onStatusNotice({
       message:
@@ -937,21 +923,25 @@ export const useComposerController = (
       source: "send"
     });
     try {
+      // Draft state: the first message creates the session, then becomes its first turn.
+      const sessionId =
+        input.activeSessionId ??
+        (await input.createSession!({ content, attachments }));
       if (payload.mode === "steer" && payload.turnId) {
         const receipt = await input.transport.chat.steer({
-          sessionId: input.activeSessionId,
+          sessionId,
           turnId: payload.turnId,
           content,
-          attachments: payload.payloadAttachments.map((item) => item.attachment)
+          attachments
         });
         if (!receipt.accepted) {
           throw new Error("The current runtime does not accept steer requests.");
         }
       } else {
         const receipt = await input.transport.chat.send({
-          sessionId: input.activeSessionId,
+          sessionId,
           content,
-          attachments: payload.payloadAttachments.map((item) => item.attachment),
+          attachments,
           execution: payload.execution
         });
         if (!receipt.accepted) {
@@ -962,7 +952,7 @@ export const useComposerController = (
         message: payload.mode === "steer" ? "Steer sent." : "Message sent.",
         source: "send"
       });
-      input.onRequestTranscriptBottom?.(input.activeSessionId);
+      input.onRequestTranscriptBottom?.(sessionId);
       return true;
     } catch (error) {
       input.onStatusNotice({
@@ -984,7 +974,7 @@ export const useComposerController = (
       | { kind: "pause" }
       | { kind: "resume" }
   ): Promise<boolean> => {
-    if (!input.transport || !input.activeSessionId) {
+    if (!input.activeSessionId) {
       return false;
     }
     const actionLabel =
@@ -1118,7 +1108,7 @@ export const useComposerController = (
   };
 
   const onStop = async (): Promise<void> => {
-    if (!input.transport || !input.activeSessionId || !interruptTurnId || !canStop) {
+    if (!input.activeSessionId || !interruptTurnId || !canStop) {
       return;
     }
     setIsDispatching(true);
@@ -1172,16 +1162,8 @@ export const useComposerController = (
       );
       return;
     }
-    if (item.action === "create-session") {
-      if (input.activeWorkspaceId && input.selectedEngineId && input.onCreateSession) {
-        await input.onCreateSession(input.activeWorkspaceId, input.selectedEngineId);
-      }
-      return;
-    }
     if (item.action === "resume-session") {
-      if (input.displayedSessionId && input.onOpenSession) {
-        await input.onOpenSession(input.displayedSessionId);
-      }
+      await input.onResumeSession?.();
       return;
     }
     if (item.action === "interrupt") {
@@ -1447,7 +1429,6 @@ export const useComposerController = (
   useEffect(() => {
     if (
       !input.activeSessionId ||
-      !input.transport ||
       isDispatching ||
       input.activeSession?.status !== "idle" ||
       queue.length === 0

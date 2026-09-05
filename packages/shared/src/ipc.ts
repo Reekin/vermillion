@@ -24,7 +24,7 @@ import {
   zSessionExecutionProfileSchema
 } from "./session-profile.js";
 
-export const workbenchRpcMethods = [
+export const sessionRpcMethods = [
   "engine.list",
   "engine.getSurface",
   "engine.listModels",
@@ -72,10 +72,10 @@ export const workbenchRpcMethods = [
   "events.replay"
 ] as const;
 
-export type WorkbenchRpcMethod = (typeof workbenchRpcMethods)[number];
+export type SessionRpcMethod = (typeof sessionRpcMethods)[number];
 
-const zWorkbenchEventType = z.enum(eventTypes);
-const zWorkbenchCommandType = z.enum(commandTypes);
+const zSessionEventType = z.enum(eventTypes);
+const zSessionCommandType = z.enum(commandTypes);
 
 const zWorkspaceRecordSchema = z.object({
   workspaceId: z.string().min(1),
@@ -85,7 +85,7 @@ const zWorkspaceRecordSchema = z.object({
   updatedAt: z.string().min(1)
 });
 
-const zWorkbenchSettingsSchema = z.object({
+const zSessionSettingsSchema = z.object({
   defaultNewSessionEngineId: z.string().min(1).optional(),
   engineProgramPathsByEngineId: z.record(z.string(), z.string().min(1)).default({}),
   engineProgramResolutionsByEngineId: z
@@ -949,7 +949,7 @@ const zCodexTurnChangesUndoRequestSchema = z.object({
 export const zWorkbenchEventSubscriptionFilterSchema = z.object({
   sessionId: zSessionId.optional(),
   conversationId: zConversationId.optional(),
-  eventTypes: z.array(zWorkbenchEventType).optional()
+  eventTypes: z.array(zSessionEventType).optional()
 });
 
 const zEventsSubscribeRequestSchema = z.object({
@@ -980,7 +980,7 @@ const zEventsReplayRequestSchema = z.object({
   })
 });
 
-export const zWorkbenchRpcRequestSchema = z.discriminatedUnion("method", [
+export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zEngineListRequestSchema,
   zEngineGetSurfaceRequestSchema,
   zEngineListModelsRequestSchema,
@@ -1078,14 +1078,14 @@ const zSettingsGetResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("settings.get"),
   ok: z.literal(true),
-  result: zWorkbenchSettingsSchema
+  result: zSessionSettingsSchema
 });
 
 const zSettingsUpdateResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("settings.update"),
   ok: z.literal(true),
-  result: zWorkbenchSettingsSchema
+  result: zSessionSettingsSchema
 });
 
 const zSessionListResponseSchema = z.object({
@@ -1419,7 +1419,7 @@ const zRuntimeCommandResponseSchema = z.object({
   ok: z.literal(true),
   result: z.object({
     commandId: zRequestId,
-    commandType: zWorkbenchCommandType,
+    commandType: zSessionCommandType,
     accepted: z.boolean().default(true),
     sessionId: zSessionId.optional(),
     turnId: zTurnId.optional(),
@@ -1462,7 +1462,7 @@ const zEventsReplayResponseSchema = z.object({
 
 const zWorkbenchRpcErrorResponseSchema = z.object({
   id: zRequestId,
-  method: z.enum(workbenchRpcMethods),
+  method: z.enum(sessionRpcMethods),
   ok: z.literal(false),
   error: z.object({
     code: z.string().min(1),
@@ -1471,7 +1471,7 @@ const zWorkbenchRpcErrorResponseSchema = z.object({
   })
 });
 
-export const zWorkbenchRpcResponseSchema = z.union([
+export const zSessionRpcResponseSchema = z.union([
   zEngineListResponseSchema,
   zEngineGetSurfaceResponseSchema,
   zEngineListModelsResponseSchema,
@@ -1520,30 +1520,30 @@ export const zWorkbenchRpcResponseSchema = z.union([
   zWorkbenchRpcErrorResponseSchema
 ]);
 
-export const zWorkbenchEventPushSchema = z.object({
-  channel: z.literal("workbench.events"),
+export const zSessionEventPushSchema = z.object({
+  channel: z.literal("session.events"),
   subscriptionId: z.string().min(1),
   envelope: zEventEnvelopeSchema
 });
 
-export const zWorkbenchEventPushBatchSchema = z.object({
-  channel: z.literal("workbench.events.batch"),
-  pushes: z.array(zWorkbenchEventPushSchema).min(1)
+export const zSessionEventPushBatchSchema = z.object({
+  channel: z.literal("session.events.batch"),
+  pushes: z.array(zSessionEventPushSchema).min(1)
 });
 
-export type WorkbenchSettingsRpc = z.infer<typeof zWorkbenchSettingsSchema>;
+export type SessionSettingsRpc = z.infer<typeof zSessionSettingsSchema>;
 export type EngineProgramResolutionRpc =
-  WorkbenchSettingsRpc["engineProgramResolutionsByEngineId"][string];
-export type WorkbenchEventSubscriptionFilter = z.infer<
+  SessionSettingsRpc["engineProgramResolutionsByEngineId"][string];
+export type SessionEventSubscriptionFilter = z.infer<
   typeof zWorkbenchEventSubscriptionFilterSchema
 >;
-export type WorkbenchRpcRequest = z.infer<typeof zWorkbenchRpcRequestSchema>;
-export type WorkbenchRpcResponse = z.infer<typeof zWorkbenchRpcResponseSchema>;
+export type SessionRpcRequest = z.infer<typeof zSessionRpcRequestSchema>;
+export type SessionRpcResponse = z.infer<typeof zSessionRpcResponseSchema>;
 export type RuntimeCommandReceiptRpc = z.infer<
   typeof zRuntimeCommandResponseSchema
 >["result"];
-export type WorkbenchEventPush = z.infer<typeof zWorkbenchEventPushSchema>;
-export type WorkbenchEventPushBatch = z.infer<typeof zWorkbenchEventPushBatchSchema>;
+export type SessionEventPush = z.infer<typeof zSessionEventPushSchema>;
+export type SessionEventPushBatch = z.infer<typeof zSessionEventPushBatchSchema>;
 export type WorkspaceRecordRpc = z.infer<typeof zWorkspaceRecordSchema>;
 export type SessionActionKindRpc = z.infer<typeof zSessionActionKindSchema>;
 export type SessionActionDescriptorRpc = z.infer<typeof zSessionActionDescriptorSchema>;
@@ -1598,33 +1598,33 @@ export type CodexTurnChangesUndoResultRpc = z.infer<
   typeof zCodexTurnChangesUndoResponseSchema
 >["result"];
 
-export type WorkbenchEventHandler = (event: WorkbenchEventPush) => void;
+export type SessionEventHandler = (event: SessionEventPush) => void;
 
-export type WorkbenchClientApi = {
-  request: (request: WorkbenchRpcRequest) => Promise<WorkbenchRpcResponse>;
+export type SessionClientApi = {
+  request: (request: SessionRpcRequest) => Promise<SessionRpcResponse>;
   subscribe: (
-    params: Extract<WorkbenchRpcRequest, { method: "events.subscribe" }>["params"],
-    handler: WorkbenchEventHandler
+    params: Extract<SessionRpcRequest, { method: "events.subscribe" }>["params"],
+    handler: SessionEventHandler
   ) => Promise<{ subscriptionId: string; unsubscribe: () => Promise<void> }>;
 };
 
-export const parseWorkbenchRpcRequest = (value: unknown): WorkbenchRpcRequest =>
-  zWorkbenchRpcRequestSchema.parse(value);
+export const parseSessionRpcRequest = (value: unknown): SessionRpcRequest =>
+  zSessionRpcRequestSchema.parse(value);
 
-export const parseWorkbenchRpcResponse = (value: unknown): WorkbenchRpcResponse =>
-  zWorkbenchRpcResponseSchema.parse(value);
+export const parseSessionRpcResponse = (value: unknown): SessionRpcResponse =>
+  zSessionRpcResponseSchema.parse(value);
 
-export const parseWorkbenchEventPush = (value: unknown): WorkbenchEventPush =>
-  zWorkbenchEventPushSchema.parse(value);
+export const parseSessionEventPush = (value: unknown): SessionEventPush =>
+  zSessionEventPushSchema.parse(value);
 
-export const safeParseWorkbenchRpcRequest = (value: unknown) =>
-  zWorkbenchRpcRequestSchema.safeParse(value);
+export const safeParseSessionRpcRequest = (value: unknown) =>
+  zSessionRpcRequestSchema.safeParse(value);
 
-export const safeParseWorkbenchRpcResponse = (value: unknown) =>
-  zWorkbenchRpcResponseSchema.safeParse(value);
+export const safeParseSessionRpcResponse = (value: unknown) =>
+  zSessionRpcResponseSchema.safeParse(value);
 
-export const safeParseWorkbenchEventPush = (value: unknown) =>
-  zWorkbenchEventPushSchema.safeParse(value);
+export const safeParseSessionEventPush = (value: unknown) =>
+  zSessionEventPushSchema.safeParse(value);
 
-export const safeParseWorkbenchEventPushBatch = (value: unknown) =>
-  zWorkbenchEventPushBatchSchema.safeParse(value);
+export const safeParseSessionEventPushBatch = (value: unknown) =>
+  zSessionEventPushBatchSchema.safeParse(value);

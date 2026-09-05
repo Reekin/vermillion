@@ -20,7 +20,6 @@ const toSlashSuggestionItem = (
 export const resolveSlashSuggestionItems = (input: {
   capabilities: ChatInteractionCapabilitiesRpc;
   query: string;
-  canCreateSession: boolean;
   canResumeSession: boolean;
   canInterrupt: boolean;
 }): SlashSuggestionItem[] => {
@@ -43,16 +42,6 @@ export const resolveSlashSuggestionItems = (input: {
       label: "/resume",
       detail: "Reload the current thread window",
       action: "resume-session"
-    });
-  }
-
-  if (input.canCreateSession) {
-    append({
-      id: "slash:create-session",
-      kind: "slash",
-      label: "/new",
-      detail: "Create a new session in the active workspace",
-      action: "create-session"
     });
   }
 

@@ -25,18 +25,82 @@ export const zMission = z.object({
 });
 export type Mission = z.infer<typeof zMission>;
 
-export const workItemStatuses = ["queued", "running", "review", "closed"] as const;
+/** queued -> running -> review -> closed; decision parks a work item until the user answers. */
+export const workItemStatuses = ["queued", "running", "review", "decision", "closed"] as const;
 export const zWorkItemStatus = z.enum(workItemStatuses);
 export type WorkItemStatus = z.infer<typeof zWorkItemStatus>;
+
+export const zRisk = z.enum(["R0", "R1", "R2", "R3"]);
+export type Risk = z.infer<typeof zRisk>;
+
+export const zDocRef = z.object({
+  path: z.string().min(1),
+  section: z.string().optional(),
+  commit: z.string().min(1)
+});
+
+export const zAcceptanceItem = z.object({
+  given: z.string(),
+  when: z.string(),
+  then: z.string()
+});
+
+export const zScope = z.object({
+  inScope: z.array(z.string()),
+  outOfScope: z.array(z.string()),
+  allowedPaths: z.array(z.string())
+});
+
+export const zEvidence = z.object({
+  summary: z.string(),
+  commands: z.array(z.object({ command: z.string(), output: z.string() })),
+  assumptions: z.array(z.string()),
+  untested: z.array(z.string()),
+  outOfScopeFindings: z.array(z.string()),
+  attachments: z.array(z.string()),
+  submittedAt: z.string()
+});
+
+export const zReviewDisposition = z.object({
+  comment: z.string(),
+  decision: z.enum(["accepted", "rejected"]),
+  reason: z.string()
+});
+
+export const zVerifyResult = z.object({
+  items: z.array(z.object({ index: z.number().int().nonnegative(), pass: z.boolean(), evidence: z.string() })),
+  verdict: z.enum(["pass", "rework"]),
+  verifiedAt: z.string()
+});
+
+export const zRejection = z.object({ reason: z.string().min(1), at: z.string() });
+
+export const zRun = z.object({
+  sessionId: z.string().optional(),
+  lastTurnId: z.string().optional(),
+  heartbeatAt: z.string().optional(),
+  worktreePath: z.string().optional(),
+  branch: z.string().optional()
+});
 
 export const zWorkItem = z.object({
   workItemId: z.string().min(1),
   missionId: z.string().min(1),
   title: z.string().min(1),
+  objective: z.string(),
   status: zWorkItemStatus,
-  risk: z.enum(["R0", "R1", "R2", "R3"]),
+  risk: zRisk,
   autoClose: z.boolean(),
-  sessionId: z.string().optional(),
+  needs: z.array(z.string()),
+  refs: z.array(zDocRef),
+  scope: zScope,
+  acceptance: z.array(zAcceptanceItem),
+  evidence: zEvidence.optional(),
+  review: z.array(zReviewDisposition),
+  verify: zVerifyResult.optional(),
+  rejections: z.array(zRejection),
+  decisions: z.array(z.string()),
+  run: zRun,
   createdAt: z.string(),
   updatedAt: z.string()
 });
@@ -62,18 +126,6 @@ export const zDecisionCard = z.object({
 });
 export type DecisionCard = z.infer<typeof zDecisionCard>;
 
-export const issueStatuses = ["open", "adopted", "closed", "duplicate"] as const;
-export const zIssue = z.object({
-  issueId: z.string().min(1),
-  title: z.string().min(1),
-  body: z.string(),
-  status: z.enum(issueStatuses),
-  source: z.string(),
-  createdAt: z.string(),
-  updatedAt: z.string()
-});
-export type Issue = z.infer<typeof zIssue>;
-
 export const zDocFile = z.object({
   path: z.string().min(1),
   size: z.number().int().nonnegative(),
@@ -83,8 +135,7 @@ export type DocFile = z.infer<typeof zDocFile>;
 
 export const zDocChange = z.object({
   path: z.string().min(1),
-  status: z.enum(["added", "modified", "deleted"]),
-  diff: z.string()
+  status: z.enum(["added", "modified", "deleted"])
 });
 export type DocChange = z.infer<typeof zDocChange>;
 
@@ -93,3 +144,13 @@ export const zInboxItem = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("review"), workspaceId: z.string(), workItem: zWorkItem, mission: zMission })
 ]);
 export type InboxItem = z.infer<typeof zInboxItem>;
+
+/** Change notifications emitted by the workbench service after every write, and by the docs watcher. */
+export const zWorkbenchEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("workspaces.changed") }),
+  z.object({ type: z.literal("docs.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("missions.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() })
+]);
+export type WorkbenchEvent = z.infer<typeof zWorkbenchEvent>;

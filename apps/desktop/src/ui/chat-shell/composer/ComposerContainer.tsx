@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import type {
   ApprovalRequest,
+  Attachment,
   ChatSession,
   EngineSurfaceRpc,
   RuntimeInteraction,
@@ -20,20 +21,18 @@ import type {
 } from "./composer-types.js";
 
 export type ComposerContainerProps = {
-  transport?: DesktopTransport;
+  transport: DesktopTransport;
   extraExecutionControls?: ReactNode;
   activeSession?: ChatSession;
   activeSessionId?: string;
   threadGoal?: ThreadGoal;
-  displayedSessionId?: string;
   selectedEngineId: string;
   engineSurface?: EngineSurfaceRpc;
   allowedModelIds?: string[];
   customModelReasoningOptionIds?: Record<string, string[]>;
   modelExecutionPreferences?: ComposerModelExecutionPreferences;
   lastExecution?: ComposerExecutionSelection;
-  activeWorkspaceId?: string;
-  activeWorkspaceRootPath?: string;
+  skillsCwd?: string;
   turns: Turn[];
   interruptTurns: Turn[];
   allowSessionLastTurnFallback?: boolean;
@@ -43,8 +42,8 @@ export type ComposerContainerProps = {
   statusNotice?: ComposerStatusNotice;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   onPreviewImage?: (input: ImageLightboxState) => void;
-  onCreateSession?: (workspaceId: string, engineId: string) => Promise<void>;
-  onOpenSession?: (sessionId: string) => Promise<void>;
+  createSession?: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
+  onResumeSession?: () => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
     engineId: string,
@@ -60,15 +59,13 @@ export const ComposerContainer = ({
   activeSession,
   activeSessionId,
   threadGoal,
-  displayedSessionId,
   selectedEngineId,
   engineSurface,
   allowedModelIds,
   customModelReasoningOptionIds,
   modelExecutionPreferences,
   lastExecution,
-  activeWorkspaceId,
-  activeWorkspaceRootPath,
+  skillsCwd,
   turns,
   interruptTurns,
   allowSessionLastTurnFallback,
@@ -78,8 +75,8 @@ export const ComposerContainer = ({
   statusNotice,
   onStatusNotice,
   onPreviewImage,
-  onCreateSession,
-  onOpenSession,
+  createSession,
+  onResumeSession,
   onRequestTranscriptBottom,
   onExecutionPreferenceChange,
   onRespondApproval,
@@ -90,15 +87,13 @@ export const ComposerContainer = ({
     activeSession,
     activeSessionId,
     threadGoal,
-    displayedSessionId,
     selectedEngineId,
     engineSurface,
     allowedModelIds,
     customModelReasoningOptionIds,
     modelExecutionPreferences,
     lastExecution,
-    activeWorkspaceId,
-    activeWorkspaceRootPath,
+    skillsCwd,
     turns,
     interruptTurns,
     allowSessionLastTurnFallback,
@@ -106,8 +101,8 @@ export const ComposerContainer = ({
     isOpeningSelectedSession,
     statusNotice,
     onStatusNotice,
-    onCreateSession,
-    onOpenSession,
+    createSession,
+    onResumeSession,
     onRequestTranscriptBottom,
     onExecutionPreferenceChange
   });

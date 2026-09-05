@@ -1,4 +1,4 @@
-import type { WorkbenchEventSubscriptionFilter } from "@vermillion/shared";
+import type { SessionEventSubscriptionFilter } from "@vermillion/shared";
 import type { RendererStore } from "../store/store.js";
 import type {
   DesktopTransport,
@@ -11,7 +11,7 @@ export type ConnectDesktopTransportToStoreInput = {
   // Filters are reserved for specialized consumers. The desktop shell keeps a
   // single full-domain mirror and applies conversation/session selection in
   // selectors rather than by rescoping the subscription.
-  filter?: WorkbenchEventSubscriptionFilter;
+  filter?: SessionEventSubscriptionFilter;
   fromCursor?: string;
   subscriptionId?: string;
   hydrateSnapshot?: boolean;

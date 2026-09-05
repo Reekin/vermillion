@@ -152,7 +152,7 @@ const resolveNativeFilePath = (file: File): string | undefined => {
 const resolveDefaultMaterializer = (): AttachmentDisplayMaterializer | undefined =>
   typeof window === "undefined"
     ? undefined
-    : window.workbenchLocalAssets?.materializeAttachmentDataUri;
+    : window.sessionLocalAssets?.materializeAttachmentDataUri;
 
 const tryMaterializeDisplayUri = async (
   input: Parameters<AttachmentDisplayMaterializer>[0],

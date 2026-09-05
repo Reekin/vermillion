@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionIdentityRegistry } from "../src/session-identity-registry.js";
-import type { WorkbenchRuntimeService } from "../src/runtime-service.js";
+import type { SessionRuntimeService } from "../src/runtime-service.js";
 
 describe("SessionIdentityRegistry", () => {
   it("prefers runtime provider handles and falls back to indexed identity", () => {
@@ -24,7 +24,7 @@ describe("SessionIdentityRegistry", () => {
             }
           : undefined
       )
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const registry = new SessionIdentityRegistry({
       runtimeService,
       sessionIndexStore: {
@@ -86,7 +86,7 @@ describe("SessionIdentityRegistry", () => {
           }
         }
       ])
-    } as unknown as WorkbenchRuntimeService;
+    } as unknown as SessionRuntimeService;
     const registry = new SessionIdentityRegistry({
       runtimeService,
       sessionIndexStore: {

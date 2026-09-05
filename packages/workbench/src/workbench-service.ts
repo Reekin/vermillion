@@ -1,3 +1,4 @@
+import type { FSWatcher } from "node:fs";
 import { basename, resolve } from "node:path";
 import type {
   DecisionCard,
@@ -5,7 +6,9 @@ import type {
   DocFile,
   InboxItem,
   Mission,
+  Risk,
   WorkItem,
+  WorkbenchEvent,
   Workspace
 } from "./contracts.js";
 import { DocsService } from "./docs.js";
@@ -26,14 +29,34 @@ export type WorkbenchServiceOptions = {
   now?: () => string;
 };
 
+type WorkspaceContext = { store: WorkspaceStore; docs: DocsService; watcher?: FSWatcher };
+
 export class WorkbenchService {
   private readonly workspaces: WorkspaceSource;
   private readonly now: () => string;
+  private readonly contexts = new Map<string, WorkspaceContext>();
+  private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
 
   constructor(options: WorkbenchServiceOptions) {
     this.workspaces = options.workspaces;
     this.now = options.now ?? (() => new Date().toISOString());
   }
+
+  subscribe(listener: (event: WorkbenchEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private emit(event: WorkbenchEvent): void {
+    for (const listener of this.listeners) listener(event);
+  }
+
+  dispose(): void {
+    for (const context of this.contexts.values()) context.watcher?.close();
+    this.contexts.clear();
+  }
+
+  // ---- workspaces ----
 
   async listWorkspaces(): Promise<Workspace[]> {
     const list = await this.workspaces.list();
@@ -49,63 +72,75 @@ export class WorkbenchService {
     }
     await new DocsService(rootPath).ensureRepo();
     const record = await this.workspaces.register({ rootPath, label: input.label?.trim() || basename(rootPath) });
+    this.emit({ type: "workspaces.changed" });
     return { workspaceId: record.workspaceId, rootPath: record.rootPath, label: record.label, createdAt: record.createdAt, lastActiveAt: record.updatedAt };
   }
 
   async removeWorkspace(workspaceId: string): Promise<void> {
     await this.workspaces.remove(workspaceId);
+    this.contexts.get(workspaceId)?.watcher?.close();
+    this.contexts.delete(workspaceId);
+    this.emit({ type: "workspaces.changed" });
   }
 
-  private async requireWorkspace(workspaceId: string): Promise<Workspace> {
+  private async context(workspaceId: string): Promise<WorkspaceContext> {
+    const cached = this.contexts.get(workspaceId);
+    if (cached) return cached;
     const workspace = (await this.listWorkspaces()).find((w) => w.workspaceId === workspaceId);
     if (!workspace) throw new Error("Unknown workspace: " + workspaceId);
-    return workspace;
+    const docs = new DocsService(workspace.rootPath);
+    await docs.ensureRepo();
+    const context: WorkspaceContext = { store: new WorkspaceStore(workspace.rootPath), docs };
+    try {
+      context.watcher = docs.watch((area) => {
+        const type = watchedAreas[area];
+        if (type) this.emit({ type, workspaceId });
+      });
+    } catch {}
+    this.contexts.set(workspaceId, context);
+    return context;
   }
 
-  private async store(workspaceId: string): Promise<WorkspaceStore> {
-    return new WorkspaceStore((await this.requireWorkspace(workspaceId)).rootPath);
-  }
-
-  private async docs(workspaceId: string): Promise<DocsService> {
-    return new DocsService((await this.requireWorkspace(workspaceId)).rootPath);
-  }
+  // ---- docs ----
 
   async listDocs(workspaceId: string): Promise<DocFile[]> {
-    return (await this.docs(workspaceId)).list();
+    return (await this.context(workspaceId)).docs.list();
   }
 
   async readDoc(workspaceId: string, path: string): Promise<string> {
-    return (await this.docs(workspaceId)).read(path);
+    return (await this.context(workspaceId)).docs.read(path);
   }
 
   async writeDoc(workspaceId: string, path: string, content: string): Promise<void> {
-    await (await this.docs(workspaceId)).write(path, content);
+    await (await this.context(workspaceId)).docs.write(path, content);
+    this.emit({ type: "docs.changed", workspaceId });
   }
 
   async pendingDocChanges(workspaceId: string): Promise<DocChange[]> {
-    return (await this.docs(workspaceId)).pendingChanges();
+    return (await this.context(workspaceId)).docs.pendingChanges();
   }
 
-  async commitDocs(workspaceId: string, message: string): Promise<string> {
-    return (await this.docs(workspaceId)).commit(message);
+  async docDiff(workspaceId: string, path: string): Promise<string> {
+    return (await this.context(workspaceId)).docs.diff(path);
   }
+
+  // ---- missions ----
 
   async listMissions(workspaceId: string): Promise<Mission[]> {
-    const list = await (await this.store(workspaceId)).missions.list();
+    const list = await (await this.context(workspaceId)).store.missions.list();
     return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
+  /** Commits pending doc changes (if any) and binds the mission to the resulting commit. */
   async createMission(
     workspaceId: string,
     input: { title: string; summary: string; sessionId?: string; commitMessage?: string }
   ): Promise<Mission> {
-    const docs = await this.docs(workspaceId);
+    const { docs, store } = await this.context(workspaceId);
     const pending = await docs.pendingChanges();
-    const docCommit = pending.length > 0
-      ? await docs.commit(input.commitMessage ?? "Mission: " + input.title)
-      : (await docs.head()) ?? "";
+    const docCommit = pending.length > 0 ? await docs.commit(input.commitMessage ?? "Mission: " + input.title) : (await docs.head()) ?? "";
     const now = this.now();
-    const mission: Mission = {
+    const mission = await store.missions.put({
       missionId: createId("m"),
       title: input.title.trim(),
       status: "active",
@@ -114,82 +149,155 @@ export class WorkbenchService {
       sessionId: input.sessionId,
       createdAt: now,
       updatedAt: now
-    };
-    await (await this.store(workspaceId)).missions.put(mission);
+    });
+    this.emit({ type: "docs.changed", workspaceId });
+    this.emit({ type: "missions.changed", workspaceId });
     return mission;
   }
 
-  async updateMissionStatus(workspaceId: string, missionId: string, status: Mission["status"]): Promise<Mission> {
-    const store = await this.store(workspaceId);
+  async setMissionStatus(workspaceId: string, missionId: string, status: Mission["status"]): Promise<Mission> {
+    const { store } = await this.context(workspaceId);
     const mission = await store.missions.get(missionId);
     if (!mission) throw new Error("Unknown mission: " + missionId);
-    return store.missions.put({ ...mission, status, updatedAt: this.now() });
+    const updated = await store.missions.put({ ...mission, status, updatedAt: this.now() });
+    this.emit({ type: "missions.changed", workspaceId });
+    return updated;
   }
 
+  // ---- work items ----
+
   async listWorkItems(workspaceId: string, missionId?: string): Promise<WorkItem[]> {
-    const list = await (await this.store(workspaceId)).workItems.list();
+    const list = await (await this.context(workspaceId)).store.workItems.list();
     return list.filter((w) => !missionId || w.missionId === missionId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async getWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    const item = await (await this.context(workspaceId)).store.workItems.get(workItemId);
+    if (!item) throw new Error("Unknown work item: " + workItemId);
+    return item;
   }
 
   async createWorkItem(
     workspaceId: string,
-    input: { missionId: string; title: string; risk: WorkItem["risk"]; autoClose?: boolean }
+    input: Pick<WorkItem, "missionId" | "title" | "objective" | "risk" | "refs" | "scope" | "acceptance"> & { needs?: string[]; autoClose?: boolean }
   ): Promise<WorkItem> {
     const now = this.now();
-    const item: WorkItem = {
+    const item = await (await this.context(workspaceId)).store.workItems.put({
       workItemId: createId("wi"),
       missionId: input.missionId,
       title: input.title.trim(),
+      objective: input.objective,
       status: "queued",
       risk: input.risk,
-      autoClose: input.autoClose ?? (input.risk === "R0" || input.risk === "R1"),
+      autoClose: input.autoClose ?? isLowRisk(input.risk),
+      needs: input.needs ?? [],
+      refs: input.refs,
+      scope: input.scope,
+      acceptance: input.acceptance,
+      review: [],
+      rejections: [],
+      decisions: [],
+      run: {},
       createdAt: now,
       updatedAt: now
-    };
-    return (await this.store(workspaceId)).workItems.put(item);
+    });
+    this.emit({ type: "workItems.changed", workspaceId });
+    return item;
   }
 
-  async updateWorkItem(
+  private async updateWorkItem(workspaceId: string, workItemId: string, mutate: (item: WorkItem) => WorkItem): Promise<WorkItem> {
+    const { store } = await this.context(workspaceId);
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    const updated = await store.workItems.put({ ...mutate(item), updatedAt: this.now() });
+    this.emit({ type: "workItems.changed", workspaceId });
+    return updated;
+  }
+
+  /** Worker claimed the item; records the session and worktree it runs in. */
+  async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
+    return this.updateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run } }));
+  }
+
+  async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
+    return this.updateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, lastTurnId: lastTurnId ?? item.run.lastTurnId, heartbeatAt: this.now() } }));
+  }
+
+  /** Worker finished: evidence + review dispositions + verify report. Auto-close only when verify passed and item allows it. */
+  async submitWorkItem(
     workspaceId: string,
     workItemId: string,
-    patch: Partial<Pick<WorkItem, "status" | "sessionId" | "risk" | "autoClose">>
+    input: { evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
   ): Promise<WorkItem> {
-    const store = await this.store(workspaceId);
-    const item = await store.workItems.get(workItemId);
-    if (!item) throw new Error("Unknown work item: " + workItemId);
-    return store.workItems.put({ ...item, ...patch, updatedAt: this.now() });
-  }
-
-  async listDecisions(workspaceId: string): Promise<DecisionCard[]> {
-    return (await this.store(workspaceId)).decisions.list();
-  }
-
-  async createDecision(
-    workspaceId: string,
-    input: Omit<DecisionCard, "decisionId" | "createdAt" | "answer">
-  ): Promise<DecisionCard> {
-    return (await this.store(workspaceId)).decisions.put({
-      ...input,
-      decisionId: createId("d"),
-      createdAt: this.now()
+    const now = this.now();
+    return this.updateWorkItem(workspaceId, workItemId, (item) => {
+      const verify = { ...input.verify, verifiedAt: now };
+      const closes = verify.verdict === "pass" && item.autoClose;
+      return {
+        ...item,
+        evidence: { ...input.evidence, submittedAt: now },
+        review: input.review,
+        verify,
+        status: verify.verdict === "rework" ? "queued" : closes ? "closed" : "review"
+      };
     });
   }
 
-  async answerDecision(
-    workspaceId: string,
-    decisionId: string,
-    answer: { key: string; note?: string }
-  ): Promise<DecisionCard> {
-    const store = await this.store(workspaceId);
+  async approveWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.updateWorkItem(workspaceId, workItemId, (item) => {
+      if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
+      return { ...item, status: "closed" };
+    });
+  }
+
+  async rejectWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
+    return this.updateWorkItem(workspaceId, workItemId, (item) => {
+      if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
+      return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }] };
+    });
+  }
+
+  async cancelWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.updateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "closed" }));
+  }
+
+  // ---- decisions ----
+
+  async listDecisions(workspaceId: string): Promise<DecisionCard[]> {
+    return (await this.context(workspaceId)).store.decisions.list();
+  }
+
+  /** Parks the linked work item (if any) until the user answers. */
+  async createDecision(workspaceId: string, input: Omit<DecisionCard, "decisionId" | "createdAt" | "answer">): Promise<DecisionCard> {
+    const { store } = await this.context(workspaceId);
+    const card = await store.decisions.put({ ...input, decisionId: createId("d"), createdAt: this.now() });
+    if (input.workItemId) {
+      await this.updateWorkItem(workspaceId, input.workItemId, (item) => ({ ...item, status: "decision" }));
+    }
+    this.emit({ type: "decisions.changed", workspaceId });
+    return card;
+  }
+
+  /** Records the answer on the card and on the work item, which goes back to the queue. */
+  async answerDecision(workspaceId: string, decisionId: string, answer: { key: string; note?: string }): Promise<DecisionCard> {
+    const { store } = await this.context(workspaceId);
     const card = await store.decisions.get(decisionId);
     if (!card) throw new Error("Unknown decision: " + decisionId);
-    return store.decisions.put({ ...card, answer: { ...answer, at: this.now() } });
+    const answered = await store.decisions.put({ ...card, answer: { ...answer, at: this.now() } });
+    if (card.workItemId) {
+      const option = card.options.find((o) => o.key === answer.key);
+      const line = card.question + " -> " + (option?.label ?? answer.key) + (answer.note ? " (" + answer.note + ")" : "");
+      await this.updateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, status: "queued", decisions: [...item.decisions, line] }));
+    }
+    this.emit({ type: "decisions.changed", workspaceId });
+    return answered;
   }
+
+  // ---- inbox ----
 
   async listInbox(): Promise<InboxItem[]> {
     const items: InboxItem[] = [];
     for (const workspace of await this.listWorkspaces()) {
-      const store = new WorkspaceStore(workspace.rootPath);
+      const { store } = await this.context(workspace.workspaceId);
       for (const card of await store.decisions.list()) {
         if (!card.answer) items.push({ kind: "decision", workspaceId: workspace.workspaceId, card });
       }
@@ -203,3 +311,12 @@ export class WorkbenchService {
     return items;
   }
 }
+
+const isLowRisk = (risk: Risk): boolean => risk === "R0" || risk === "R1";
+
+const watchedAreas: Record<string, Extract<WorkbenchEvent, { workspaceId: string }>["type"] | undefined> = {
+  docs: "docs.changed",
+  missions: "missions.changed",
+  workitems: "workItems.changed",
+  decisions: "decisions.changed"
+};

@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { WorkbenchShellService } from "@vermillion/desktop-server";
+import type { SessionShellService } from "@vermillion/desktop-server";
 import type {
   EventEnvelope,
-  WorkbenchEventPush,
-  WorkbenchEventPushBatch,
-  WorkbenchRpcRequest
+  SessionEventPush,
+  SessionEventPushBatch,
+  SessionRpcRequest
 } from "@vermillion/shared";
-import { createWorkbenchIpcRouter } from "../src/electron/workbench-ipc-router.js";
+import { createSessionIpcRouter } from "../src/electron/session-ipc-router.js";
 
 const now = "2026-05-26T00:00:00.000Z";
 
@@ -38,10 +38,10 @@ describe("Workbench IPC router", () => {
         return unsubscribe;
       }),
       dispose: vi.fn(async () => {})
-    } as unknown as WorkbenchShellService;
-    const onPush = vi.fn<(push: WorkbenchEventPush) => void>();
-    const onPushBatch = vi.fn<(batch: WorkbenchEventPushBatch) => void>();
-    const router = createWorkbenchIpcRouter({
+    } as unknown as SessionShellService;
+    const onPush = vi.fn<(push: SessionEventPush) => void>();
+    const onPushBatch = vi.fn<(batch: SessionEventPushBatch) => void>();
+    const router = createSessionIpcRouter({
       service,
       onPush,
       onPushBatch,
@@ -59,7 +59,7 @@ describe("Workbench IPC router", () => {
       id: "req-subscribe",
       method: "events.subscribe",
       params: {}
-    } satisfies WorkbenchRpcRequest;
+    } satisfies SessionRpcRequest;
     const response = await router.handleRequest(request);
 
     expect(response.ok).toBe(true);
@@ -75,7 +75,7 @@ describe("Workbench IPC router", () => {
     expect(onPush).not.toHaveBeenCalled();
     expect(onPushBatch).toHaveBeenCalledTimes(1);
     expect(onPushBatch.mock.calls[0]?.[0]).toMatchObject({
-      channel: "workbench.events.batch",
+      channel: "session.events.batch",
       pushes: [
         { subscriptionId: "sub-fixed", envelope: { eventId: "evt-1" } },
         { subscriptionId: "sub-fixed", envelope: { eventId: "evt-2" } }
@@ -113,10 +113,10 @@ describe("Workbench IPC router", () => {
         }
       ),
       dispose: vi.fn(async () => {})
-    } as unknown as WorkbenchShellService;
-    const onPush = vi.fn<(push: WorkbenchEventPush) => void>();
-    const onPushBatch = vi.fn<(batch: WorkbenchEventPushBatch) => void>();
-    const router = createWorkbenchIpcRouter({
+    } as unknown as SessionShellService;
+    const onPush = vi.fn<(push: SessionEventPush) => void>();
+    const onPushBatch = vi.fn<(batch: SessionEventPushBatch) => void>();
+    const router = createSessionIpcRouter({
       service,
       onPush,
       onPushBatch,
@@ -133,12 +133,12 @@ describe("Workbench IPC router", () => {
       id: "req-subscribe-a",
       method: "events.subscribe",
       params: { subscriptionId: "sub-a" }
-    } satisfies WorkbenchRpcRequest);
+    } satisfies SessionRpcRequest);
     await router.handleRequest({
       id: "req-subscribe-b",
       method: "events.subscribe",
       params: { subscriptionId: "sub-b" }
-    } satisfies WorkbenchRpcRequest);
+    } satisfies SessionRpcRequest);
 
     handlers.get("sub-a")?.(createEnvelope(1));
     handlers.get("sub-b")?.(createEnvelope(2));
@@ -149,7 +149,7 @@ describe("Workbench IPC router", () => {
       id: "req-unsubscribe-a",
       method: "events.unsubscribe",
       params: { subscriptionId: "sub-a" }
-    } satisfies WorkbenchRpcRequest);
+    } satisfies SessionRpcRequest);
 
     expect(response.ok).toBe(true);
     expect(unsubscribeBySubscriptionId.get("sub-a")).toHaveBeenCalledTimes(1);
@@ -174,9 +174,9 @@ describe("Workbench IPC router", () => {
         return vi.fn();
       }),
       dispose: vi.fn(async () => {})
-    } as unknown as WorkbenchShellService;
-    const onPushBatch = vi.fn<(batch: WorkbenchEventPushBatch) => void>();
-    const router = createWorkbenchIpcRouter({
+    } as unknown as SessionShellService;
+    const onPushBatch = vi.fn<(batch: SessionEventPushBatch) => void>();
+    const router = createSessionIpcRouter({
       service,
       onPush: vi.fn(),
       onPushBatch,
@@ -192,7 +192,7 @@ describe("Workbench IPC router", () => {
       id: "req-subscribe",
       method: "events.subscribe",
       params: {}
-    } satisfies WorkbenchRpcRequest);
+    } satisfies SessionRpcRequest);
     for (let index = 1; index <= 3; index += 1) {
       const envelope = createEnvelope(index);
       subscribed?.({

@@ -1,6 +1,6 @@
 import type { ChatSession, ProviderSessionHandle } from "@vermillion/shared";
 import type { SessionIndexEntry, SessionIndexStore } from "./session-index.js";
-import type { WorkbenchRuntimeService } from "./runtime-service.js";
+import type { SessionRuntimeService } from "./runtime-service.js";
 
 const trimToUndefined = (value: string | undefined): string | undefined => {
   const normalized = value?.trim();
@@ -49,11 +49,11 @@ export type ResolvedSessionContext = {
 };
 
 export class SessionIdentityRegistry {
-  private readonly runtimeService: WorkbenchRuntimeService;
+  private readonly runtimeService: SessionRuntimeService;
   private readonly sessionIndexStore: SessionIndexStore;
 
   public constructor(options: {
-    runtimeService: WorkbenchRuntimeService;
+    runtimeService: SessionRuntimeService;
     sessionIndexStore: SessionIndexStore;
   }) {
     this.runtimeService = options.runtimeService;

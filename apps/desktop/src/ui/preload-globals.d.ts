@@ -1,8 +1,8 @@
-import type { WorkbenchClientApi } from "@vermillion/shared";
-import type { WorkbenchRpcRequest, WorkbenchRpcResponse } from "@vermillion/workbench/client";
+import type { SessionClientApi } from "@vermillion/shared";
+import type { SessionRpcRequest, SessionRpcResponse } from "@vermillion/workbench/client";
 
 declare global {
-  type WorkbenchLocalAssetsApi = {
+  type SessionLocalAssetsApi = {
     materializeAttachmentDataUri: (input: {
       attachmentId: string;
       dataUri: string;
@@ -15,7 +15,7 @@ declare global {
     }>;
   };
 
-  type WorkbenchDesktopApi = {
+  type SessionDesktopApi = {
     pickEngineProgramPath: (engineId: string) => Promise<{
       canceled: boolean;
       path?: string;
@@ -24,10 +24,13 @@ declare global {
   };
 
   interface Window {
-    workbench?: WorkbenchClientApi;
-    workbenchLocalAssets?: WorkbenchLocalAssetsApi;
-    workbenchDesktop?: WorkbenchDesktopApi;
-    vermillion?: { request: (payload: WorkbenchRpcRequest) => Promise<WorkbenchRpcResponse> };
+    session?: SessionClientApi;
+    sessionLocalAssets?: SessionLocalAssetsApi;
+    sessionDesktop?: SessionDesktopApi;
+    vermillion?: {
+      request: (payload: SessionRpcRequest) => Promise<SessionRpcResponse>;
+      onEvent: (listener: (event: unknown) => void) => () => void;
+    };
   }
 }
 

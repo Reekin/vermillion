@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionBrowserNodeRpc, WorkspaceBrowserNodeRpc } from "./ipc.js";
-import { parseWorkbenchRpcRequest, safeParseWorkbenchRpcResponse } from "./ipc.js";
+import { parseSessionRpcRequest, safeParseSessionRpcResponse } from "./ipc.js";
 
 describe("IPC schemas", () => {
   it("parses recursive session browser nodes with typed child defaults", () => {
@@ -48,7 +48,7 @@ describe("IPC schemas", () => {
       ]
     };
 
-    const parsed = safeParseWorkbenchRpcResponse({
+    const parsed = safeParseSessionRpcResponse({
       id: "req-tree",
       method: "sessionBrowser.listTree",
       ok: true,
@@ -87,14 +87,14 @@ describe("IPC schemas", () => {
   });
 
   it("parses bounded session browser pages without transcript metadata", () => {
-    const request = parseWorkbenchRpcRequest({
+    const request = parseSessionRpcRequest({
       id: "req-roots",
       method: "sessionBrowser.listRoots",
       params: { workspaceId: "workspace-1" }
     });
     expect(request.params).toMatchObject({ limit: 20 });
 
-    const parsed = safeParseWorkbenchRpcResponse({
+    const parsed = safeParseSessionRpcResponse({
       id: "req-roots",
       method: "sessionBrowser.listRoots",
       ok: true,
@@ -118,7 +118,7 @@ describe("IPC schemas", () => {
   });
 
   it("parses persisted workspace expansion state", () => {
-    const parsed = safeParseWorkbenchRpcResponse({
+    const parsed = safeParseSessionRpcResponse({
       id: "req-workspaces",
       method: "workspace.list",
       ok: true,
@@ -134,7 +134,7 @@ describe("IPC schemas", () => {
 
   it("requires an explicit non-empty workspace batch for repair", () => {
     expect(
-      parseWorkbenchRpcRequest({
+      parseSessionRpcRequest({
         id: "req-repair",
         method: "sessionBrowser.repair",
         params: { workspaceIds: ["workspace-1", "workspace-2"] }
@@ -142,28 +142,28 @@ describe("IPC schemas", () => {
     ).toEqual({ workspaceIds: ["workspace-1", "workspace-2"] });
 
     expect(() =>
-      parseWorkbenchRpcRequest({
+      parseSessionRpcRequest({
         id: "req-repair-missing",
         method: "sessionBrowser.repair",
         params: {}
       })
     ).toThrow();
     expect(() =>
-      parseWorkbenchRpcRequest({
+      parseSessionRpcRequest({
         id: "req-repair-empty",
         method: "sessionBrowser.repair",
         params: { workspaceIds: [] }
       })
     ).toThrow();
     expect(() =>
-      parseWorkbenchRpcRequest({
+      parseSessionRpcRequest({
         id: "req-repair-legacy",
         method: "sessionBrowser.repair",
         params: { workspaceId: "workspace-1" }
       })
     ).toThrow();
     expect(() =>
-      parseWorkbenchRpcRequest({
+      parseSessionRpcRequest({
         id: "req-reconcile-removed",
         method: "sessionBrowser.reconcile",
         params: { workspaceIds: ["workspace-1"] }

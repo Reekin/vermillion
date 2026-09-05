@@ -30,18 +30,18 @@ import type {
   SessionExecutionProfileInput,
   SessionWindowRpc,
   ThreadGoalStatus,
-  WorkbenchClientApi,
+  SessionClientApi,
   EventEnvelope,
-  WorkbenchEventPush,
-  WorkbenchEventSubscriptionFilter,
-  WorkbenchSettingsRpc,
+  SessionEventPush,
+  SessionEventSubscriptionFilter,
+  SessionSettingsRpc,
   WorktreeSnapshotRpc,
   WorkspaceBrowserNodeRpc,
   WorkspaceRecordRpc,
-  WorkbenchRpcResponse
+  SessionRpcResponse
 } from "@vermillion/shared";
 import type { RuntimeCommandReceiptRpc } from "@vermillion/shared";
-import { safeParseWorkbenchRpcResponse } from "@vermillion/shared";
+import { safeParseSessionRpcResponse } from "@vermillion/shared";
 import { createTransportRpcHelper } from "./transport-rpc-helper.js";
 
 const createOpaqueId = (): string =>
@@ -148,19 +148,19 @@ export type InteractionRespondInput = {
 };
 
 export type EventSubscribeInput = {
-  filter?: WorkbenchEventSubscriptionFilter;
+  filter?: SessionEventSubscriptionFilter;
   fromCursor?: string;
   subscriptionId?: string;
-  onEnvelope: (push: WorkbenchEventPush["envelope"]) => void;
-  onEnvelopes?: (envelopes: WorkbenchEventPush["envelope"][]) => void;
-  onPush?: (push: WorkbenchEventPush) => void;
+  onEnvelope: (push: SessionEventPush["envelope"]) => void;
+  onEnvelopes?: (envelopes: SessionEventPush["envelope"][]) => void;
+  onPush?: (push: SessionEventPush) => void;
   onBacklogPressure?: (pressure: EventBacklogPressure) => void;
 };
 
 export type EventReplayInput = {
   fromCursor: string;
   toCursor?: string;
-  filter?: WorkbenchEventSubscriptionFilter;
+  filter?: SessionEventSubscriptionFilter;
 };
 
 export type EventReplayResult = {
@@ -169,7 +169,7 @@ export type EventReplayResult = {
   replayed: number;
   fromCursor: string;
   toCursor?: string;
-  envelopes: WorkbenchEventPush["envelope"][];
+  envelopes: SessionEventPush["envelope"][];
 };
 
 export type EventBacklogPressure = {
@@ -225,14 +225,14 @@ export type DesktopTransport = {
     select: (input: EngineSelectInput) => Promise<{ selectedEngineId: string }>;
   };
   settings: {
-    get: () => Promise<WorkbenchSettingsRpc>;
+    get: () => Promise<SessionSettingsRpc>;
     update: (input: {
       defaultNewSessionEngineId?: string;
       allowedModelIdsByEngineId?: Record<string, string[]>;
       customModelReasoningOptionIdsByEngineId?: Record<string, Record<string, string[]>>;
-      executionPreferencesByEngineId?: WorkbenchSettingsRpc["executionPreferencesByEngineId"];
+      executionPreferencesByEngineId?: SessionSettingsRpc["executionPreferencesByEngineId"];
       engineProgramPathsByEngineId?: Record<string, string>;
-    }) => Promise<WorkbenchSettingsRpc>;
+    }) => Promise<SessionSettingsRpc>;
   };
   domain: {
     snapshot: () => Promise<{ snapshot: DomainSnapshot; cursor?: string }>;
@@ -464,7 +464,7 @@ const toTransportError = (
   });
 
 export const createDesktopTransport = (
-  preloadApi: WorkbenchClientApi,
+  preloadApi: SessionClientApi,
   options: DesktopTransportOptions = {}
 ): DesktopTransport => {
   const createId = options.createId ?? createOpaqueId;
@@ -611,7 +611,7 @@ export const createDesktopTransport = (
       method: "domain.snapshot",
       params: {}
     });
-    const parsed = safeParseWorkbenchRpcResponse(rawResponse);
+    const parsed = safeParseSessionRpcResponse(rawResponse);
     if (!parsed.success) {
       throw new DesktopTransportError({
         method: "domain.snapshot",
@@ -659,7 +659,7 @@ export const createDesktopTransport = (
     return response.result;
   };
 
-  const requestSettingsGet = async (): Promise<WorkbenchSettingsRpc> => {
+  const requestSettingsGet = async (): Promise<SessionSettingsRpc> => {
     return rpc.request("settings.get", {});
   };
 
@@ -668,8 +668,8 @@ export const createDesktopTransport = (
     engineProgramPathsByEngineId?: Record<string, string>;
     allowedModelIdsByEngineId?: Record<string, string[]>;
     customModelReasoningOptionIdsByEngineId?: Record<string, Record<string, string[]>>;
-    executionPreferencesByEngineId?: WorkbenchSettingsRpc["executionPreferencesByEngineId"];
-  }): Promise<WorkbenchSettingsRpc> => {
+    executionPreferencesByEngineId?: SessionSettingsRpc["executionPreferencesByEngineId"];
+  }): Promise<SessionSettingsRpc> => {
     return rpc.request("settings.update", input);
   };
 
@@ -701,7 +701,7 @@ export const createDesktopTransport = (
       throw toTransportError("runtime.command", requestId, response.error);
     }
     return response.result as Extract<
-      WorkbenchRpcResponse,
+      SessionRpcResponse,
       { method: "runtime.command"; ok: true }
     >["result"];
   };

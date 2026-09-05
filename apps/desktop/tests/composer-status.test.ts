@@ -7,7 +7,6 @@ import {
 describe("resolveComposerStatus", () => {
   it("prefers pending approval state over generic session readiness", () => {
     const status = resolveComposerStatusModel({
-      transportAvailable: true,
       selectedEngineId: "codex",
       activeSession: {
         sessionId: "session-1",
@@ -36,7 +35,6 @@ describe("resolveComposerStatus", () => {
       detail: "Approval requested for 0"
     });
     expect(resolveComposerStatus({
-      transportAvailable: true,
       selectedEngineId: "codex",
       activeSession: {
         sessionId: "session-1",
@@ -63,8 +61,7 @@ describe("resolveComposerStatus", () => {
   it("falls back to active-session readiness after approval is resolved", () => {
     expect(
       resolveComposerStatus({
-        transportAvailable: true,
-        selectedEngineId: "codex",
+          selectedEngineId: "codex",
         activeSession: {
           sessionId: "session-1",
           conversationId: "conversation-1",
@@ -92,8 +89,7 @@ describe("resolveComposerStatus", () => {
   it("keeps explicit notices separate from the derived baseline", () => {
     expect(
       resolveComposerStatus({
-        transportAvailable: true,
-        selectedEngineId: "codex",
+          selectedEngineId: "codex",
         activeSession: {
           sessionId: "session-1",
           conversationId: "conversation-1",
@@ -114,8 +110,7 @@ describe("resolveComposerStatus", () => {
   it("surfaces queued follow-ups when the session is otherwise idle", () => {
     expect(
       resolveComposerStatusModel({
-        transportAvailable: true,
-        selectedEngineId: "codex",
+          selectedEngineId: "codex",
         activeSession: {
           sessionId: "session-1",
           conversationId: "conversation-1",
@@ -136,8 +131,7 @@ describe("resolveComposerStatus", () => {
   it("describes steer capability while a session is running", () => {
     expect(
       resolveComposerStatusModel({
-        transportAvailable: true,
-        selectedEngineId: "codex",
+          selectedEngineId: "codex",
         activeSession: {
           sessionId: "session-1",
           conversationId: "conversation-1",

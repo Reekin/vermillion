@@ -5,5 +5,5 @@ export const createRendererWorkbenchClient = (): WorkbenchClient => {
   if (!bridge) {
     throw new Error("The Vermillion preload bridge is missing.");
   }
-  return createWorkbenchClient((request) => bridge.request(request));
+  return createWorkbenchClient(bridge);
 };

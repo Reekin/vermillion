@@ -1,0 +1,29 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { runCli } from "../src/cli.js";
+
+const dirs: string[] = [];
+afterEach(async () => {
+  vi.restoreAllMocks();
+  delete process.env.VERMILLION_PERSISTENCE_BASE_DIR;
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe("vermillion cli", () => {
+  it("runs registry methods against the persistence dir and prints JSON", async () => {
+    const base = await mkdtemp(join(tmpdir(), "verm-cli-"));
+    const root = await mkdtemp(join(tmpdir(), "verm-cli-ws-"));
+    dirs.push(base, root);
+    process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+    const out: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+    expect(await runCli(["workspace.add", JSON.stringify({ rootPath: root, label: "X" })])).toBe(0);
+    const added = JSON.parse(out.pop()!);
+    expect(added.label).toBe("X");
+    expect(await runCli(["workspace.list"])).toBe(0);
+    expect(JSON.parse(out.pop()!).map((w: { workspaceId: string }) => w.workspaceId)).toEqual([added.workspaceId]);
+    expect(await runCli(["nope"])).toBe(1);
+  });
+});
