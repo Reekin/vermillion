@@ -182,7 +182,8 @@ describe("WorkbenchService", () => {
   it("parks a work item on a decision card and resumes it with the answer recorded", async () => {
     const { service, ws, events } = await setup();
     const mission = await seedMission(service, ws.workspaceId);
-    const item = await service.createWorkItem(ws.workspaceId, baseWorkItem(mission.missionId));
+    const created = await service.createWorkItem(ws.workspaceId, baseWorkItem(mission.missionId));
+    const item = await service.startWorkItem(ws.workspaceId, created.workItemId, { sessionId: "s1" });
     const card = await service.createDecision(ws.workspaceId, {
       question: "A or B?",
       context: "",

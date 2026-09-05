@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, Automation, DecisionCard, DocChange, DocFile, InboxItem, Mission, RoleFile, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
 
 export type Panel = "think" | "inbox" | "workspaces";
 
@@ -12,7 +12,7 @@ export type WorkspaceView = {
   docs: DocFile[];
   pendingDocChanges: DocChange[];
   roles: RoleFile[];
-  automation: Automation;
+  scheduler: Scheduler;
   runs: AgentRun[];
 };
 
@@ -66,18 +66,18 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         set({ view: undefined });
         return;
       }
-      const [missions, workItems, decisions, docs, pendingDocChanges, roles, automation, runs] = await Promise.all([
+      const [missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs] = await Promise.all([
         client.request("mission.list", { workspaceId }),
         client.request("workItem.list", { workspaceId }),
         client.request("decision.list", { workspaceId }),
         client.request("docs.list", { workspaceId }),
         client.request("docs.pending", { workspaceId }),
         client.request("role.list", { workspaceId }),
-        client.request("automation.get", { workspaceId }),
+        client.request("scheduler.get", { workspaceId }),
         client.request("run.list", { workspaceId })
       ]);
       if (generation !== viewGeneration) return;
-      set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges, roles, automation, runs } });
+      set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs } });
     };
 
     const loadInbox = async () => {
@@ -120,7 +120,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
               return;
             case "docs.changed":
             case "roles.changed":
-            case "automation.changed":
+            case "scheduler.changed":
             case "runs.changed":
             case "missions.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();

@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   zAcceptanceItem,
   zAgentRun,
-  zAutomation,
+  zScheduler,
   zDecisionCard,
   zDecisionOption,
   zDocChange,
@@ -81,9 +81,21 @@ export const workbenchRpc = {
   "workItem.approve": { params: zWi, result: zWorkItem },
   "workItem.reject": { params: zWi.extend({ reason: z.string().min(1) }), result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
+  "workItem.update": {
+    params: zWi.extend({
+      note: z.string().min(1),
+      title: z.string().min(1).optional(),
+      objective: z.string().optional(),
+      risk: zRisk.optional(),
+      refs: z.array(zDocRef).optional(),
+      scope: zScope.optional(),
+      acceptance: z.array(zAcceptanceItem).optional()
+    }),
+    result: zWorkItem
+  },
 
-  "automation.get": { params: zWs, result: zAutomation },
-  "automation.set": { params: zWs.extend({ value: zAutomation }), result: zAutomation },
+  "scheduler.get": { params: zWs, result: zScheduler },
+  "scheduler.set": { params: zWs.extend({ value: zScheduler }), result: zScheduler },
   "run.list": { params: zWs, result: z.array(zAgentRun) },
 
   "decision.list": { params: zWs, result: z.array(zDecisionCard) },

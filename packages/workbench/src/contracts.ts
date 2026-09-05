@@ -96,6 +96,8 @@ export const zRun = z.object({
   branch: z.string().optional(),
   /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
+  /** Contract changed while a worker holds the item; cleared once the worker has been told. A submit before that is void. */
+  pendingUpdate: z.string().optional(),
   attempts: z.number().int().nonnegative().optional()
 });
 
@@ -170,12 +172,12 @@ export const zInboxItem = z.discriminatedUnion("kind", [
 ]);
 export type InboxItem = z.infer<typeof zInboxItem>;
 
-/** Per-workspace automation switch; stored at .vermillion/automation.json. */
-export const zAutomation = z.object({
+/** Per-workspace scheduler switch for the steward/worker/supervisor loop; stored at .vermillion/scheduler.json. */
+export const zScheduler = z.object({
   enabled: z.boolean(),
   maxWorkers: z.number().int().min(1).max(8)
 });
-export type Automation = z.infer<typeof zAutomation>;
+export type Scheduler = z.infer<typeof zScheduler>;
 
 export const agentRoles = ["steward", "worker", "supervisor"] as const;
 export const zAgentRole = z.enum(agentRoles);
@@ -206,7 +208,9 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("roles.changed"), workspaceId: z.string() }),
-  z.object({ type: z.literal("automation.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("scheduler.changed"), workspaceId: z.string() }),
+  /** A work item was cancelled while a worker held it; the orchestrator interrupts that worker. */
+  z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal("runs.changed"), workspaceId: z.string() })
 ]);
 export type WorkbenchEvent = z.infer<typeof zWorkbenchEvent>;

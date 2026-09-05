@@ -34,9 +34,10 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workItem.approve": (p) => service.approveWorkItem(p.workspaceId, p.workItemId),
     "workItem.reject": (p) => service.rejectWorkItem(p.workspaceId, p.workItemId, p.reason),
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
+    "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
-    "automation.get": (p) => service.getAutomation(p.workspaceId),
-    "automation.set": (p) => service.setAutomation(p.workspaceId, p.value),
+    "scheduler.get": (p) => service.getScheduler(p.workspaceId),
+    "scheduler.set": (p) => service.setScheduler(p.workspaceId, p.value),
     "run.list": (p) => service.listRuns(p.workspaceId),
 
     "decision.list": (p) => service.listDecisions(p.workspaceId),

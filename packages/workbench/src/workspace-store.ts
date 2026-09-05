@@ -4,12 +4,12 @@ import { STATE_DIR } from "./docs.js";
 import type { z } from "zod";
 import {
   zAgentRun,
-  zAutomation,
+  zScheduler,
   zDecisionCard,
   zMission,
   zWorkItem,
   type AgentRun,
-  type Automation,
+  type Scheduler,
   type DecisionCard,
   type Mission,
   type WorkItem
@@ -72,7 +72,7 @@ export class WorkspaceStore {
   readonly workItems: Collection<WorkItem>;
   readonly decisions: Collection<DecisionCard>;
   readonly runs: Collection<AgentRun>;
-  private readonly automationPath: string;
+  private readonly schedulerPath: string;
 
   constructor(rootPath: string) {
     this.rootPath = rootPath;
@@ -81,21 +81,21 @@ export class WorkspaceStore {
     this.workItems = createCollection(join(this.stateDir, "workitems"), zWorkItem, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
     this.runs = createCollection(join(this.stateDir, "runs"), zAgentRun, "runId");
-    this.automationPath = join(this.stateDir, "automation.json");
+    this.schedulerPath = join(this.stateDir, "scheduler.json");
   }
 
-  async readAutomation(): Promise<Automation> {
+  async readScheduler(): Promise<Scheduler> {
     try {
-      return zAutomation.parse(JSON.parse(await readFile(this.automationPath, "utf8")));
+      return zScheduler.parse(JSON.parse(await readFile(this.schedulerPath, "utf8")));
     } catch {
       return { enabled: false, maxWorkers: 2 };
     }
   }
 
-  async writeAutomation(value: Automation): Promise<Automation> {
-    const parsed = zAutomation.parse(value);
+  async writeScheduler(value: Scheduler): Promise<Scheduler> {
+    const parsed = zScheduler.parse(value);
     await mkdir(this.stateDir, { recursive: true });
-    await writeJsonAtomic(this.automationPath, parsed);
+    await writeJsonAtomic(this.schedulerPath, parsed);
     return parsed;
   }
 

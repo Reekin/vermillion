@@ -2,7 +2,7 @@ import type { FSWatcher } from "node:fs";
 import { basename, resolve } from "node:path";
 import type {
   AgentRun,
-  Automation,
+  Scheduler,
   DecisionCard,
   DocChange,
   DocFile,
@@ -258,7 +258,7 @@ export class WorkbenchService {
     return item;
   }
 
-  private async updateWorkItem(workspaceId: string, workItemId: string, mutate: (item: WorkItem) => WorkItem): Promise<WorkItem> {
+  private async mutateWorkItem(workspaceId: string, workItemId: string, mutate: (item: WorkItem) => WorkItem): Promise<WorkItem> {
     const { store } = await this.context(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
     const updated = await store.workItems.put({ ...mutate(item), updatedAt: this.now() });
@@ -268,11 +268,11 @@ export class WorkbenchService {
 
   /** Worker claimed the item; records the session and worktree it runs in. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
-    return this.updateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run } }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
-    return this.updateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, lastTurnId: lastTurnId ?? item.run.lastTurnId, heartbeatAt: this.now() } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, lastTurnId: lastTurnId ?? item.run.lastTurnId, heartbeatAt: this.now() } }));
   }
 
   /** Worker finished: evidence + review dispositions + verify report. Auto-close only when verify passed and item allows it. */
@@ -282,17 +282,21 @@ export class WorkbenchService {
     input: { evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
   ): Promise<WorkItem> {
     const now = this.now();
-    return this.updateWorkItem(workspaceId, workItemId, (item) => {
+    const submitted = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
+      if (item.run.pendingUpdate) {
+        // Submitted against a contract that changed mid-turn: void it, back to the queue, same worktree.
+        return { ...item, status: "queued", decisions: [...item.decisions, "提交作废：合同已变更（" + item.run.pendingUpdate + "）"], run: { ...item.run, sessionId: undefined, pendingUpdate: undefined } };
+      }
       const verify = { ...input.verify, verifiedAt: now };
-      const closes = verify.verdict === "pass" && item.autoClose;
       return {
         ...item,
         evidence: { ...input.evidence, submittedAt: now },
         review: input.review,
         verify,
-        status: verify.verdict === "rework" ? "queued" : closes ? "closed" : "review"
+        status: verify.verdict === "rework" ? "queued" : "review"
       };
     });
+    return submitted.status === "review" && submitted.autoClose ? this.approveWorkItem(workspaceId, workItemId) : submitted;
   }
 
   /** Accepts the work: merges the worker's branch into the workspace (when it ran in a worktree) and closes the item. */
@@ -301,11 +305,11 @@ export class WorkbenchService {
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
     if (item.run.worktreePath && item.run.branch) await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
-    return this.updateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
   }
 
   async rejectWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
-    return this.updateWorkItem(workspaceId, workItemId, (item) => {
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
       return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }] };
     });
@@ -315,27 +319,53 @@ export class WorkbenchService {
     const { docs } = await this.context(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch);
-    return this.updateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
+    const closed = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
+    if (item.status === "running" && item.run.sessionId) this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId });
+    return closed;
+  }
+
+  /**
+   * Steward adjusts a contract after a new revision. A running item keeps its session and worktree; the change is
+   * relayed to the worker as its next message. Anything else just gets the new contract for its next run.
+   */
+  async updateWorkItem(
+    workspaceId: string,
+    workItemId: string,
+    input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk">> & { note: string }
+  ): Promise<WorkItem> {
+    const { note, ...changes } = input;
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
+      if (item.status === "closed") throw new Error("Work item is closed: " + workItemId);
+      // A submission awaiting the user was made against the old contract; it goes back to the queue.
+      const status = item.status === "review" ? "queued" : item.status;
+      const pendingUpdate = item.status === "running" ? [item.run.pendingUpdate, note].filter(Boolean).join("；") : undefined;
+      return { ...item, ...changes, status, decisions: [...item.decisions, "工单调整：" + note], run: { ...item.run, pendingUpdate } };
+    });
+  }
+
+  /** Orchestrator: the worker has received the changed contract. */
+  async ackWorkItemUpdate(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, pendingUpdate: undefined } }));
   }
 
   /** Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted. */
   async requeueWorkItem(workspaceId: string, workItemId: string, failure: string): Promise<WorkItem> {
-    return this.updateWorkItem(workspaceId, workItemId, (item) => ({
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({
       ...item,
       status: "queued",
       run: { ...item.run, sessionId: undefined, lastFailure: failure, attempts: (item.run.attempts ?? 0) + 1 }
     }));
   }
 
-  // ---- automation ----
+  // ---- scheduler ----
 
-  async getAutomation(workspaceId: string): Promise<Automation> {
-    return (await this.context(workspaceId)).store.readAutomation();
+  async getScheduler(workspaceId: string): Promise<Scheduler> {
+    return (await this.context(workspaceId)).store.readScheduler();
   }
 
-  async setAutomation(workspaceId: string, value: Automation): Promise<Automation> {
-    const saved = await (await this.context(workspaceId)).store.writeAutomation(value);
-    this.emit({ type: "automation.changed", workspaceId });
+  async setScheduler(workspaceId: string, value: Scheduler): Promise<Scheduler> {
+    const saved = await (await this.context(workspaceId)).store.writeScheduler(value);
+    this.emit({ type: "scheduler.changed", workspaceId });
     return saved;
   }
 
@@ -365,7 +395,7 @@ export class WorkbenchService {
     const { store } = await this.context(workspaceId);
     const card = await store.decisions.put({ ...input, decisionId: createId("d"), createdAt: this.now() });
     if (input.workItemId) {
-      await this.updateWorkItem(workspaceId, input.workItemId, (item) => ({ ...item, status: "decision" }));
+      await this.mutateWorkItem(workspaceId, input.workItemId, (item) => (item.status === "running" ? { ...item, status: "decision" } : item));
     }
     this.emit({ type: "decisions.changed", workspaceId });
     return card;
@@ -380,7 +410,7 @@ export class WorkbenchService {
     if (card.workItemId) {
       const option = card.options.find((o) => o.key === answer.key);
       const line = card.question + " -> " + (option?.label ?? answer.key) + (answer.note ? " (" + answer.note + ")" : "");
-      await this.updateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, status: "queued", decisions: [...item.decisions, line] }));
+      await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, status: item.status === "decision" ? "queued" : item.status, decisions: [...item.decisions, line] }));
     }
     this.emit({ type: "decisions.changed", workspaceId });
     return answered;
@@ -407,12 +437,12 @@ export class WorkbenchService {
 
 const isLowRisk = (risk: Risk): boolean => risk === "R0" || risk === "R1";
 
-const watchedAreas: Record<string, Extract<WorkbenchEvent, { workspaceId: string }>["type"] | undefined> = {
+const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { workItemId: string }>["type"] | undefined> = {
   docs: "docs.changed",
   roles: "roles.changed",
   missions: "missions.changed",
   workitems: "workItems.changed",
   decisions: "decisions.changed",
   runs: "runs.changed",
-  "automation.json": "automation.changed"
+  "scheduler.json": "scheduler.changed"
 };

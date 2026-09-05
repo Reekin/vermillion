@@ -18,7 +18,7 @@ afterEach(async () => {
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
 const until = async (check: () => Promise<boolean>) => {
-  for (let i = 0; i < 100; i += 1) {
+  for (let i = 0; i < 400; i += 1) {
     if (await check()) return;
     await tick();
   }
@@ -56,7 +56,7 @@ const setup = async () => {
   const service = new WorkbenchService({ workspaces: createMemoryWorkspaceSource(), roles });
   cleanup.push(() => service.dispose());
   const ws = await service.addWorkspace({ rootPath: root, label: "O" });
-  await service.setAutomation(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+  await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
   const fake = createFakeRunner();
   const orchestrator = new Orchestrator({ service, roles, runner: fake.runner, maxIdleTurns: 1 });
   orchestrator.start();
@@ -64,7 +64,7 @@ const setup = async () => {
   return { service, ws, ...fake };
 };
 
-describe("Orchestrator", () => {
+describe("Orchestrator", { timeout: 20000 }, () => {
   it("opens a steward per new revision and a worker per queued item, then closes the run on submit", async () => {
     const { service, ws, sessions, complete } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n- login\n");
@@ -95,6 +95,39 @@ describe("Orchestrator", () => {
     complete(worker.sessionId, "done");
     await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("review");
+  });
+
+  it("relays a steward contract change to the running worker once its turn ends", async () => {
+    const { service, ws, sessions, complete } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Op", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] });
+    await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
+    const worker = sessions.find((s) => s.metadata.role === "worker")!;
+    await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v2", note: "范围收窄" });
+    await tick();
+    expect(worker.messages).toHaveLength(1); // nothing mid-turn
+    complete(worker.sessionId, "working");
+    await until(async () => worker.messages.length === 2);
+    expect(worker.messages[1]).toContain("工单已调整：范围收窄");
+    expect(sessions.some((s) => s.metadata.role === "supervisor")).toBe(false);
+    const after = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    expect(after.decisions).toEqual(["工单调整：范围收窄"]);
+    expect(after.run.pendingUpdate).toBeUndefined();
+
+    // a submit that lands before the worker was told is void: back to queued, no evidence kept
+    await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v3", note: "再改" });
+    const voided = await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "old", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+    expect(voided.status).toBe("queued");
+    expect(voided.evidence).toBeUndefined();
+    expect(voided.decisions.at(-1)).toContain("提交作废");
+    complete(worker.sessionId, "submitted");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.note === "提交作废：合同已变更"));
+    // the item is queued again and picked up by a new worker in the same worktree-less cwd
+    await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2);
+
+    // cancelling the item interrupts its worker and closes the run as failed
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "running");
+    await service.cancelWorkItem(ws.workspaceId, item.workItemId);
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.status === "failed" && r.note === "工单已取消"));
   });
 
   it("runs the supervisor after an unfinished worker turn and requeues after too many idle turns", async () => {

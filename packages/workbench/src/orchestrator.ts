@@ -30,6 +30,8 @@ export type OrchestratorOptions = {
   maxIdleTurns?: number;
 };
 
+type WorkerBinding = { workspaceId: string; run: AgentRun; idleTurns: number };
+
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
 /**
@@ -47,7 +49,7 @@ export class Orchestrator {
   /** Serializes work per workspace so two events do not schedule the same item twice. */
   private readonly queues = new Map<string, Promise<void>>();
   /** sessionId -> run, for sessions opened in this process. */
-  private readonly runsBySession = new Map<string, { workspaceId: string; run: AgentRun; idleTurns: number }>();
+  private readonly runsBySession = new Map<string, WorkerBinding>();
   private readonly supervisorSessionByMission = new Map<string, string>();
 
   constructor(options: OrchestratorOptions) {
@@ -62,8 +64,9 @@ export class Orchestrator {
     this.disposers.push(
       this.service.subscribe((event) => {
         if (!("workspaceId" in event)) return;
-        if (event.type === "missions.changed" || event.type === "automation.changed") this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
+        if (event.type === "missions.changed" || event.type === "scheduler.changed") this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
         else if (event.type === "workItems.changed" || event.type === "decisions.changed") this.enqueue(event.workspaceId, () => this.schedule(event.workspaceId));
+        else if (event.type === "workItem.cancelled") this.enqueue(event.workspaceId, () => this.cancelWorker(event.workspaceId, event.sessionId));
       }),
       this.runner.onTurnCompleted((event) => {
         const bound = this.runsBySession.get(event.sessionId);
@@ -89,8 +92,8 @@ export class Orchestrator {
 
   /** Runs whatever the files say is pending: unprocessed revisions, then queued items. Also the restart entry point. */
   private async reconcile(workspaceId: string): Promise<void> {
-    const automation = await this.service.getAutomation(workspaceId);
-    if (!automation.enabled) return;
+    const scheduler = await this.service.getScheduler(workspaceId);
+    if (!scheduler.enabled) return;
     await this.recoverStaleRuns(workspaceId);
     await this.steward(workspaceId);
     await this.schedule(workspaceId);
@@ -170,15 +173,24 @@ export class Orchestrator {
   // ---- scheduler ----
 
   private async schedule(workspaceId: string): Promise<void> {
-    const automation = await this.service.getAutomation(workspaceId);
-    if (!automation.enabled) return;
-    const [items, decisions] = await Promise.all([this.service.listWorkItems(workspaceId), this.service.listDecisions(workspaceId)]);
-    if (decisions.some((d) => !d.answer)) return; // inbox has open questions: do not pile on more work
+    const scheduler = await this.service.getScheduler(workspaceId);
+    if (!scheduler.enabled) return;
+    const items = await this.service.listWorkItems(workspaceId);
     const running = items.filter((i) => i.status === "running").length;
-    const capacity = automation.maxWorkers - running;
+    const capacity = scheduler.maxWorkers - running;
     if (capacity <= 0) return;
+    // Items parked on a decision keep their slot semantics out of the queue; everything else queued is fair game.
     const queued = items.filter((i) => i.status === "queued" && (i.run.attempts ?? 0) < 3);
     for (const item of queued.slice(0, capacity)) await this.openWorker(workspaceId, item);
+  }
+
+  /** The item a worker holds was cancelled: interrupt the session and close the run. */
+  private async cancelWorker(workspaceId: string, sessionId: string): Promise<void> {
+    const bound = this.runsBySession.get(sessionId);
+    if (!bound) return;
+    this.runsBySession.delete(sessionId);
+    await this.runner.interrupt(sessionId).catch(() => undefined);
+    await this.service.putRun(workspaceId, { ...bound.run, status: "failed", note: "工单已取消", endedAt: this.now() });
   }
 
   private async openWorker(workspaceId: string, item: WorkItem): Promise<void> {
@@ -257,13 +269,14 @@ export class Orchestrator {
     await this.schedule(workspaceId);
   }
 
-  private async onWorkerTurn(workspaceId: string, bound: { workspaceId: string; run: AgentRun; idleTurns: number }, finishReason: string): Promise<void> {
+  private async onWorkerTurn(workspaceId: string, bound: WorkerBinding, finishReason: string): Promise<void> {
     const run = bound.run;
     const item = await this.service.getWorkItem(workspaceId, run.workItemId!);
-    const ended = item.status !== "running";
-    if (ended) {
+    // The item left this session: submitted, parked on a decision, voided (and possibly already re-assigned).
+    if (item.status !== "running" || item.run.sessionId !== run.sessionId) {
       this.runsBySession.delete(run.sessionId);
-      await this.service.putRun(workspaceId, { ...run, status: "done", note: item.status === "decision" ? "等待决策" : "已提交 (" + item.status + ")", endedAt: this.now() });
+      const note = item.run.sessionId !== run.sessionId && item.status !== "review" && item.status !== "closed" ? "提交作废：合同已变更" : item.status === "decision" ? "等待决策" : "已提交 (" + item.status + ")";
+      await this.service.putRun(workspaceId, { ...run, status: "done", note, endedAt: this.now() });
       await this.schedule(workspaceId);
       return;
     }
@@ -272,6 +285,16 @@ export class Orchestrator {
       return;
     }
     await this.service.heartbeatWorkItem(workspaceId, item.workItemId);
+    if (item.run.pendingUpdate) {
+      await this.service.ackWorkItemUpdate(workspaceId, item.workItemId);
+      bound.idleTurns = 0; // a new contract restarts the progress budget
+      await this.runner.send(run.sessionId, [
+        "工单已调整：" + item.run.pendingUpdate,
+        "重新执行 vermillion workItem.get 读取最新合同（objective / scope / acceptance 可能已变），按新合同继续；已完成但不再需要的部分回退。",
+        "完成后仍然调用 workItem.submit。"
+      ].join("\n"));
+      return;
+    }
     const verdict = await this.supervise(workspaceId, item, run);
     if (verdict.kind === "interrupt") {
       await this.runner.interrupt(run.sessionId).catch(() => undefined);
