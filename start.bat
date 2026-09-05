@@ -6,6 +6,6 @@ if not exist node_modules (
   call pnpm install || exit /b 1
 )
 if not exist apps\desktop\dist-electron\main.js (
-  call pnpm --filter @vermillion/desktop build || exit /b 1
+  call pnpm -r --workspace-concurrency=1 build || exit /b 1
 )
 call pnpm --filter @vermillion/desktop start
