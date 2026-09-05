@@ -11,7 +11,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "dev": "pnpm --filter @vermillion/desktop dev",
-    "start": "pnpm --filter @vermillion/desktop start"
+    "start": "pnpm --filter @vermillion/desktop start",
+    "package": "pnpm -r --workspace-concurrency=1 build && node ./scripts/package-unpack.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

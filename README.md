@@ -44,3 +44,11 @@ packages/workbench     工作台领域 + typed RPC + CLI
 apps/desktop-server    会话引擎宿主（Electron main 进程内）
 apps/desktop           Electron 壳：SessionPane（会话）+ 应用壳（侧栏 / Docs / Inbox / Workspaces）
 ```
+
+## 打包
+
+```
+pnpm package
+```
+
+产物在 `release/vermillion-<version>-<时间戳>/`：`Vermillion.exe`、`vermillion-cli.cmd`、`resources/app/`（main/preload 与 renderer 构建、单文件 CLI）。目录可整体拷走运行，不需要 node_modules；CLI 需要 PATH 里有 node。

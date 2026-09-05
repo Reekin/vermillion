@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli } from "../src/cli.js";
+import { startLocalEndpoint } from "../src/local-endpoint.js";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -25,5 +26,25 @@ describe("vermillion cli", () => {
     expect(await runCli(["workspace.list"])).toBe(0);
     expect(JSON.parse(out.pop()!).map((w: { workspaceId: string }) => w.workspaceId)).toEqual([added.workspaceId]);
     expect(await runCli(["nope"])).toBe(1);
+  });
+
+  it("routes to the running desktop endpoint when one is published", async () => {
+    const base = await mkdtemp(join(tmpdir(), "verm-cli-ep-"));
+    dirs.push(base);
+    process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+    const seen: string[] = [];
+    const endpoint = await startLocalEndpoint(base, async (request) => {
+      seen.push(request.method);
+      return { ok: true, result: [{ workspaceId: "ws-remote", rootPath: "X:/r", label: "Remote", createdAt: "t", lastActiveAt: "t" }] };
+    });
+    try {
+      const out: string[] = [];
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+      expect(await runCli(["workspace.list"])).toBe(0);
+      expect(JSON.parse(out.pop()!)[0].label).toBe("Remote");
+      expect(seen).toContain("workspace.list");
+    } finally {
+      await endpoint.close();
+    }
   });
 });

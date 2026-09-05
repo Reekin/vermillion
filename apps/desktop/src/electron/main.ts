@@ -12,6 +12,7 @@ import {
 import { createSessionRuntimeService } from "@vermillion/desktop-server";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   SESSION_IPC_EVENTS_PUSH_CHANNEL,
@@ -23,7 +24,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { WorkbenchService, createWorkbenchRpcHandler } from "@vermillion/workbench";
+import { WorkbenchService, createWorkbenchRpcHandler, startLocalEndpoint } from "@vermillion/workbench";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
   resolveWillNavigate,
@@ -603,9 +604,11 @@ const boot = async (): Promise<void> => {
     throw new Error(`Missing bundled preload asset: ${bundledPreloadPath}`);
   }
 
+  const persistenceBaseDir =
+    process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion");
+
   const service = createSessionRuntimeService({
-    persistenceBaseDir:
-      process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || undefined,
+    persistenceBaseDir,
     pickWorkspaceDirectory: async () => {
       const result = await dialog.showOpenDialog(window, {
         title: "Add workspace",
@@ -749,9 +752,11 @@ const boot = async (): Promise<void> => {
       window.webContents.send(WORKBENCH_IPC_EVENT_CHANNEL, event);
     }
   });
+  const localEndpoint = await startLocalEndpoint(persistenceBaseDir, workbenchRpc);
   app.on("before-quit", () => {
     unsubscribeWorkbench();
     workbenchService.dispose();
+    void localEndpoint.close();
   });
   ipcMain.handle(SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL, (_event, payload: unknown) =>
     materializeAttachmentDataUri(
