@@ -1,32 +1,23 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "sm" | "md" };
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "accent" | "secondary" | "ghost";
+  size?: "sm" | "md";
+};
 
-export const Button = ({ variant = "secondary", size = "md", className, ...rest }: ButtonProps) => (
-  <button
-    type="button"
-    className={cn(
-      "inline-flex items-center justify-center gap-1.5 rounded-md border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-      size === "sm" ? "h-7 px-2.5 text-caption" : "h-8 px-3 text-label",
-      variant === "primary" && "border-transparent bg-brand text-brand-foreground hover:brightness-110",
-      variant === "secondary" && "border-input bg-surface text-foreground hover:bg-surface-hover",
-      variant === "ghost" && "border-transparent text-muted-foreground hover:bg-surface-hover hover:text-foreground",
-      variant === "danger" && "border-transparent bg-destructive/15 text-destructive hover:bg-destructive/25",
-      className
-    )}
-    {...rest}
-  />
+/** Thin wrapper over the session shell's button so both layers render identical controls. */
+export const Button = ({ variant = "secondary", size = "md", ...rest }: ButtonProps) => (
+  <ShellButton variant={variant} size={size} {...rest} />
 );
 
-export const Badge = ({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "brand" | "success" | "warning" }) => (
+export const Badge = ({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" }) => (
   <span
     className={cn(
-      "inline-flex items-center rounded-sm px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide",
-      tone === "neutral" && "bg-muted text-muted-foreground",
-      tone === "brand" && "bg-brand/15 text-brand",
-      tone === "success" && "bg-success/15 text-success",
-      tone === "warning" && "bg-warning/15 text-warning"
+      "inline-flex items-center rounded-sm border px-1.5 py-0.5 font-mono text-micro uppercase tracking-[0.12em]",
+      tone === "neutral" && "border-border-strong text-muted-foreground",
+      tone === "accent" && "border-control-border-hover bg-accent-soft text-strong"
     )}
   >
     {children}
@@ -35,11 +26,11 @@ export const Badge = ({ children, tone = "neutral" }: { children: ReactNode; ton
 
 export const Empty = ({ title, hint }: { title: string; hint?: string }) => (
   <div className="flex flex-col items-center justify-center gap-1 px-6 py-14 text-center">
-    <p className="text-body font-medium text-foreground">{title}</p>
+    <p className="text-body text-foreground">{title}</p>
     {hint && <p className="max-w-sm text-caption text-muted-foreground">{hint}</p>}
   </div>
 );
 
 export const SectionLabel = ({ children }: { children: ReactNode }) => (
-  <div className="px-3 pb-1 pt-3 text-micro font-semibold uppercase tracking-[0.14em] text-faint-foreground">{children}</div>
+  <div className="eyebrow px-4 pb-1.5 pt-3">{children}</div>
 );

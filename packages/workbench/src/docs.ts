@@ -7,7 +7,8 @@ import { DESIGN_PARTNER_INSTRUCTIONS } from "./design-partner-instructions.js";
 
 const execFileAsync = promisify(execFile);
 
-export const DOCS_DIR = "docs";
+export const STATE_DIR = ".vermillion";
+export const DOCS_DIR = STATE_DIR + "/docs";
 
 const git = async (cwd: string, args: string[]): Promise<string> => {
   const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
@@ -38,7 +39,7 @@ export class DocsService {
       await git(this.rootPath, ["init", "-q"]);
     }
     await mkdir(join(this.rootPath, DOCS_DIR), { recursive: true });
-    const instructionsPath = join(this.rootPath, DOCS_DIR, "AGENTS.md");
+    const instructionsPath = join(this.rootPath, STATE_DIR, "AGENTS.md");
     try {
       await stat(instructionsPath);
     } catch {

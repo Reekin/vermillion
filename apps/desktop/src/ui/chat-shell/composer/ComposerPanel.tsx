@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   ChangeEvent as ReactChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -109,6 +109,7 @@ export const ComposerPanel = ({
   pendingInteractions = [],
   contextUsage,
   threadGoal,
+  extraExecutionControls,
   intent,
   supportsSteer,
   supportsAttachments,
@@ -164,6 +165,8 @@ export const ComposerPanel = ({
   pendingInteractions?: RuntimeInteraction[];
   contextUsage?: ContextUsage;
   threadGoal?: ThreadGoal;
+  /** Rendered before the Model select inside the turn-configuration group. */
+  extraExecutionControls?: ReactNode;
   intent: ComposerIntent;
   supportsSteer: boolean;
   supportsAttachments: boolean;
@@ -439,8 +442,9 @@ export const ComposerPanel = ({
         ) : null}
       </div>
       <div className="awb-composer__right-rail">
-        {isExecutionLoading || models.length > 0 ? (
+        {isExecutionLoading || models.length > 0 || extraExecutionControls ? (
           <div className="awb-composer-execution" aria-label="Turn configuration">
+            {extraExecutionControls}
             <label>
               <span>Model</span>
               <select

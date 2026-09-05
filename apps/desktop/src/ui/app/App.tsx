@@ -5,8 +5,9 @@ import { ChatShellApp } from "../chat-shell/ChatShellApp.js";
 import { DocEditor } from "./components/DocEditor.js";
 import { DocsPanel } from "./components/DocsPanel.js";
 import { InboxPanel } from "./components/InboxPanel.js";
-import { Overlay } from "./components/Overlay.js";
+import { Modal } from "./components/Modal.js";
 import { Rail } from "./components/Rail.js";
+import { SessionList } from "./components/SessionList.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { WorkspacesPanel } from "./components/WorkspacesPanel.js";
 import { createWorkbenchStore, type Panel } from "./workbench-store.js";
@@ -25,18 +26,23 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const panel = store((s) => s.panel);
   const overlay = store((s) => s.overlay);
   const inboxCount = store((s) => s.inbox.length);
+  const workspaces = store((s) => s.workspaces);
   const activeWorkspaceId = store((s) => s.activeWorkspaceId);
   const workspaceRevision = store((s) => s.workspaceRevision);
   const setPanel = store((s) => s.setPanel);
   const openOverlay = store((s) => s.openOverlay);
   const closeOverlay = store((s) => s.closeOverlay);
+  const selectWorkspace = store((s) => s.selectWorkspace);
   const refreshWorkspaces = store((s) => s.refreshWorkspaces);
   const refreshInbox = store((s) => s.refreshInbox);
 
   useEffect(() => {
     void refreshWorkspaces();
     void refreshInbox();
-    const timer = setInterval(() => void refreshInbox(), 5000);
+    const timer = setInterval(() => {
+      void refreshWorkspaces();
+      void refreshInbox();
+    }, 4000);
     return () => clearInterval(timer);
   }, [refreshWorkspaces, refreshInbox]);
 
@@ -55,6 +61,16 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     return result.canceled ? undefined : result.rootPath;
   }, [transport]);
 
+  const onFileAction = useCallback(
+    async (path: string, action: "open" | "reveal") => {
+      await transport.file.runAction({ path, action });
+    },
+    [transport]
+  );
+
+  const workspaceLabelById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w.label])), [workspaces]);
+  const workspaceRootById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w.rootPath])), [workspaces]);
+
   const renderPanel = (target: Panel) =>
     target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} />;
 
@@ -68,28 +84,33 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             store={sessionStore}
             transport={transport}
             hideSettings
-            visibleWorkspaceId={activeWorkspaceId}
             externalRefreshSignal={workspaceRevision}
-            sidebarHeader={
-              <header className="px-3 pt-1">
-                <div className="mb-2 text-micro font-semibold uppercase tracking-[0.14em] text-faint-foreground">思考</div>
-                <WorkspacePicker store={store} />
-              </header>
-            }
-            renderDetail={({ activeSessionId }) => <DocsPanel store={store} activeSessionId={activeSessionId} />}
+            sidebarHeader={<header className="px-4 pt-3"><span className="eyebrow">思考</span></header>}
+            renderSidebarBody={(context) => (
+              <SessionList {...context} activeWorkspaceId={activeWorkspaceId} workspaceLabelById={workspaceLabelById} />
+            )}
+            composerExtras={<WorkspacePicker store={store} pickDirectory={pickDirectory} />}
+            createSessionMetadata={(workspaceId) => {
+              const root = workspaceRootById.get(workspaceId);
+              return root ? { cwd: root.replace(/[\\/]+$/, "") + "/.vermillion" } : undefined;
+            }}
+            onDisplayedWorkspaceChange={(workspaceId) => {
+              if (workspaceId && workspaceId !== activeWorkspaceId) void selectWorkspace(workspaceId);
+            }}
+            renderDetail={({ activeSessionId }) => <DocsPanel store={store} activeSessionId={activeSessionId} onFileAction={onFileAction} />}
           />
         </div>
         {panel !== "think" && (
           <div className="flex h-full flex-col">
-            <header className="flex h-11 items-center border-b border-border px-4"><h1 className="text-title-sm font-semibold">{panelTitles[panel]}</h1></header>
+            <header className="flex h-10 items-center border-b border-border px-4"><h1 className="text-title-sm font-medium text-strong">{panelTitles[panel]}</h1></header>
             <div className="min-h-0 flex-1 overflow-auto">{renderPanel(panel)}</div>
           </div>
         )}
       </div>
       {overlay && (
-        <Overlay title={panelTitles[overlay]} onClose={closeOverlay} onExpand={() => setPanel(overlay)}>
+        <Modal title={panelTitles[overlay]} onClose={closeOverlay} onExpand={() => setPanel(overlay)}>
           {renderPanel(overlay)}
-        </Overlay>
+        </Modal>
       )}
       <DocEditor store={store} />
     </div>

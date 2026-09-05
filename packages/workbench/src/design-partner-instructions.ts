@@ -1,4 +1,4 @@
-/** Instructions the design partner reads at the start of every思考 session. Written to <workspace>/docs/AGENTS.md. */
+/** Instructions the design partner reads at the start of every思考 session. Written to <workspace>/.vermillion/AGENTS.md; sessions run with cwd = <workspace>/.vermillion. */
 export const DESIGN_PARTNER_INSTRUCTIONS = `# Design partner
 
 You are the design partner for this workspace. Your job is to turn conversation into

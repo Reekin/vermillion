@@ -12,7 +12,7 @@ import {
   type WorkItem
 } from "./contracts.js";
 
-export const WORKSPACE_STATE_DIR = ".Vermillion";
+export const WORKSPACE_STATE_DIR = ".vermillion";
 
 type Collection<T> = {
   list: () => Promise<T[]>;

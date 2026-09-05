@@ -70,6 +70,7 @@ export const useSessionOpenController = (input: {
   viewport: TranscriptViewportController;
   onResetSessionSwitchState: () => void;
   beforeCreateSession?: () => Promise<void>;
+  createSessionMetadata?: (workspaceId: string) => Record<string, unknown> | undefined;
   onSessionRead?: (sessionId: string) => void;
   onStatusNotice: StatusNoticeSetter;
   refreshSessionBrowser: (input?: SessionBrowserRefreshInput) => Promise<void>;
@@ -325,7 +326,8 @@ export const useSessionOpenController = (input: {
         input.onResetSessionSwitchState();
         const created = await input.transport.sessionBrowser.create({
           workspaceId,
-          engineId
+          engineId,
+          metadata: input.createSessionMetadata?.(workspaceId)
         });
         requestId = ++openSessionRequestIdRef.current;
         input.setBrowserSelectedSessionId(created.sessionId);

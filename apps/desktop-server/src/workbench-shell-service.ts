@@ -546,8 +546,8 @@ export class WorkbenchShellService {
       throw new Error(`Workspace not found: ${input.workspaceId}`);
     }
     const metadata = {
-      ...(input.metadata ?? {}),
-      cwd: workspace.absolutePath
+      cwd: workspace.absolutePath,
+      ...(input.metadata ?? {})
     };
     const registryState = registry.getState();
     const sessionProfile =

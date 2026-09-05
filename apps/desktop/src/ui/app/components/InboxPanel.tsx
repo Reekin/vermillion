@@ -34,7 +34,7 @@ const DecisionRow = ({ store, item }: { store: WorkbenchStore; item: Extract<Inb
   };
   return (
     <div>
-      <div className="flex items-center gap-2"><Badge tone="warning">决策</Badge><span className="text-body font-medium">{item.card.question}</span></div>
+      <div className="flex items-center gap-2"><Badge tone="accent">决策</Badge><span className="text-body text-strong">{item.card.question}</span></div>
       {item.card.context && <p className="mt-1 whitespace-pre-wrap text-caption text-muted-foreground">{item.card.context}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         {item.card.options.map((option) => (
@@ -62,7 +62,7 @@ const ReviewRow = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbox
   };
   return (
     <div>
-      <div className="flex items-center gap-2"><Badge tone="brand">验收</Badge><span className="text-body font-medium">{item.workItem.title}</span><Badge>{item.workItem.risk}</Badge></div>
+      <div className="flex items-center gap-2"><Badge tone="accent">验收</Badge><span className="text-body text-strong">{item.workItem.title}</span><Badge>{item.workItem.risk}</Badge></div>
       <p className="mt-1 text-caption text-muted-foreground">任务：{item.mission.title}</p>
       <div className="mt-2 flex gap-2">
         <Button size="sm" variant="primary" disabled={busy} onClick={() => void setStatus("closed")}>通过</Button>

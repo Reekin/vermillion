@@ -24,7 +24,7 @@ describe("WorkbenchService", () => {
     const ws = await service.addWorkspace({ rootPath: wsRoot, label: "Demo" });
     expect(ws.label).toBe("Demo");
     expect((await service.listWorkspaces()).map((w) => w.workspaceId)).toEqual([ws.workspaceId]);
-    expect((await service.listDocs(ws.workspaceId)).map((d) => d.path)).toEqual(["docs/AGENTS.md"]);
+    expect(await service.listDocs(ws.workspaceId)).toEqual([]);
   });
 
   it("rejects doc paths outside docs/", async () => {
@@ -32,7 +32,7 @@ describe("WorkbenchService", () => {
     const wsRoot = await scratch("verm-ws-");
     const service = new WorkbenchService({ workspaces: source });
     const ws = await service.addWorkspace({ rootPath: wsRoot });
-    await expect(service.writeDoc(ws.workspaceId, "src/x.md", "x")).rejects.toThrow(/docs\//);
+    await expect(service.writeDoc(ws.workspaceId, "docs/x.md", "x")).rejects.toThrow(/\.vermillion\/docs/);
   });
 
   it("creates a mission by committing pending doc changes and binds the commit", async () => {
@@ -40,9 +40,9 @@ describe("WorkbenchService", () => {
     const wsRoot = await scratch("verm-ws-");
     const service = new WorkbenchService({ workspaces: source });
     const ws = await service.addWorkspace({ rootPath: wsRoot });
-    await service.writeDoc(ws.workspaceId, "docs/specs/login.md", "# Login\n");
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/specs/login.md", "# Login\n");
     const pending = await service.pendingDocChanges(ws.workspaceId);
-    expect(pending.map((c) => [c.path, c.status])).toEqual([["docs/AGENTS.md", "added"], ["docs/specs/login.md", "added"]]);
+    expect(pending.map((c) => [c.path, c.status])).toEqual([[".vermillion/docs/specs/login.md", "added"]]);
     const mission = await service.createMission(ws.workspaceId, { title: "Login", summary: "Add login" });
     expect(mission.docCommit).toMatch(/^[0-9a-f]{40}$/);
     expect(await service.pendingDocChanges(ws.workspaceId)).toEqual([]);

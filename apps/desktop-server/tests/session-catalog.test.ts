@@ -307,7 +307,7 @@ describe("SessionCatalogService", () => {
     expect(indexStore.getEntry("session-1")?.unreadState).toBe("read");
   });
 
-  it("orders sessions by their latest completed or live activity time", async () => {
+  it("orders sessions by their last completed turn, ignoring live activity", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({
       baseDir
@@ -408,18 +408,18 @@ describe("SessionCatalogService", () => {
     const tree = await service.listWorkspaceTree("workspace-1");
 
     expect(tree[0]?.sessions.map((item) => item.sessionId)).toEqual([
-      "session-old",
-      "session-new"
+      "session-new",
+      "session-old"
     ]);
     expect(tree[0]?.sessions[0]?.lastCompletedTurnAt).toBe(
-      "2026-04-18T00:05:00Z"
+      "2026-04-18T00:15:00Z"
     );
     expect(tree[0]?.sessions[1]?.lastCompletedTurnAt).toBe(
-      "2026-04-18T00:15:00Z"
+      "2026-04-18T00:05:00Z"
     );
   });
 
-  it("falls back to updated time before created time when completed turn time is unknown", async () => {
+  it("falls back to created time when completed turn time is unknown", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({
       baseDir
@@ -468,12 +468,12 @@ describe("SessionCatalogService", () => {
     const tree = await service.listWorkspaceTree("workspace-1");
 
     expect(tree[0]?.sessions.map((item) => item.sessionId)).toEqual([
-      "session-recently-updated",
-      "session-newer-created"
+      "session-newer-created",
+      "session-recently-updated"
     ]);
   });
 
-  it("keeps newer live activity ahead of an older completed turn", async () => {
+  it("keeps a session with a completed turn ahead of one with only live activity", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
     const indexStore = new SessionIndexStore({ baseDir });
@@ -522,12 +522,12 @@ describe("SessionCatalogService", () => {
     });
 
     expect(page.items.map((item) => item.sessionId)).toEqual([
-      "session-running",
-      "session-yesterday"
+      "session-yesterday",
+      "session-running"
     ]);
     expect(page.items[0]).toMatchObject({
-      activityAt: "2026-08-15T11:20:21.561Z",
-      lastCompletedTurnAt: "2026-08-04T18:49:11.852Z"
+      activityAt: "2026-08-14T12:00:00.000Z",
+      lastCompletedTurnAt: "2026-08-14T12:00:00.000Z"
     });
   });
 

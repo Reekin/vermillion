@@ -1554,7 +1554,7 @@ button:disabled {
 
 .awb-composer-status__pill {
   padding: 4px 9px;
-  border-radius: 999px;
+  border-radius: var(--awb-radius-tight);
   font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;

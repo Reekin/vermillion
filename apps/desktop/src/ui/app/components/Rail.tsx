@@ -16,8 +16,7 @@ const items: Array<{ id: Panel; label: string; icon: typeof Inbox }> = [
 ];
 
 export const Rail = ({ panel, overlay, inboxCount, onSelect }: RailProps) => (
-  <nav className="flex h-full w-14 flex-col items-center gap-1 border-r border-border bg-app-shell py-3" aria-label="主导航">
-    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-brand text-brand-foreground font-semibold" title="Vermillion">朱</div>
+  <nav className="flex h-full w-12 flex-col items-center gap-1 border-r border-border-strong bg-app-shell pt-3" aria-label="主导航">
     {items.map(({ id, label, icon: Icon }) => {
       const active = overlay ? overlay === id : panel === id;
       return (
@@ -29,14 +28,14 @@ export const Rail = ({ panel, overlay, inboxCount, onSelect }: RailProps) => (
           aria-current={active ? "page" : undefined}
           onClick={() => onSelect(id)}
           className={cn(
-            "relative flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors",
+            "relative flex h-9 w-9 items-center justify-center rounded-lg text-faint-foreground transition-colors",
             "hover:bg-surface-hover hover:text-foreground",
-            active && "bg-surface-selected text-foreground"
+            active && "bg-surface-selected text-strong"
           )}
         >
-          <Icon size={18} strokeWidth={1.75} />
+          <Icon size={17} strokeWidth={1.6} />
           {id === "inbox" && inboxCount > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-brand px-1 text-center text-micro font-semibold text-brand-foreground">{inboxCount}</span>
+            <span className="absolute right-0.5 top-0.5 min-w-3.5 rounded-sm bg-accent-strong px-1 text-center font-mono text-[9px] leading-[14px] text-page-canvas">{inboxCount}</span>
           )}
         </button>
       );

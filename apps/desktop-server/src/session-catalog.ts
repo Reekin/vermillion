@@ -96,8 +96,7 @@ const latestSessionTimestamp = (
 };
 
 const resolveSeedActivityAt = (seed: SessionCatalogSeed): string =>
-  latestSessionTimestamp(seed.lastCompletedTurnAt, seed.updatedAt, seed.createdAt) ??
-  seed.createdAt;
+  seed.lastCompletedTurnAt ?? seed.createdAt;
 
 const compareSeedLastCompletedTurnAtDesc = (
   left: SessionCatalogSeed,

@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import type {
   ApprovalRequest,
   ChatSession,
@@ -21,6 +21,7 @@ import type {
 
 export type ComposerContainerProps = {
   transport?: DesktopTransport;
+  extraExecutionControls?: ReactNode;
   activeSession?: ChatSession;
   activeSessionId?: string;
   threadGoal?: ThreadGoal;
@@ -55,6 +56,7 @@ export type ComposerContainerProps = {
 
 export const ComposerContainer = ({
   transport,
+  extraExecutionControls,
   activeSession,
   activeSessionId,
   threadGoal,
@@ -112,6 +114,7 @@ export const ComposerContainer = ({
 
   return (
     <ComposerPanel
+      extraExecutionControls={extraExecutionControls}
       isDropTarget={composer.isDropTarget}
       fileInputRef={composer.composerFileInputRef}
       textareaRef={composer.composerTextareaRef}

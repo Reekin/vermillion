@@ -229,6 +229,22 @@ export type ChatShellAppProps = {
   hideSettings?: boolean;
   /** Increment to force a workspace/session tree reload from the host. */
   externalRefreshSignal?: number;
+  /** Extra metadata for new sessions (e.g. cwd override). */
+  createSessionMetadata?: (workspaceId: string) => Record<string, unknown> | undefined;
+  /** Extra controls rendered in the composer's turn-configuration group. */
+  composerExtras?: ReactNode;
+  /** Called with the current session tree so the host can render its own sidebar. */
+  renderSidebarBody?: (context: SidebarRenderContext) => ReactNode;
+  /** Fires when the displayed session belongs to a different workspace. */
+  onDisplayedWorkspaceChange?: (workspaceId: string | undefined) => void;
+};
+
+export type SidebarRenderContext = {
+  workspaceTree: WorkspaceBrowserViewNode[];
+  displayedSessionId?: string;
+  onOpenSession: (sessionId: string) => Promise<void>;
+  onCreateSession: (workspaceId: string) => Promise<void>;
+  selectedEngineId: string;
 };
 
 const uniqueByEngineId = (
@@ -1277,7 +1293,11 @@ export const ChatShellApp = ({
   renderDetail,
   visibleWorkspaceId,
   hideSettings = false,
-  externalRefreshSignal = 0
+  externalRefreshSignal = 0,
+  createSessionMetadata,
+  composerExtras,
+  renderSidebarBody,
+  onDisplayedWorkspaceChange
 }: ChatShellAppProps): ReactElement => {
   const state = useRendererStoreState(store);
   const [availableEngines, setAvailableEngines] = useState<EngineDefinitionRpc[]>([]);
@@ -1455,6 +1475,10 @@ export const ChatShellApp = ({
   const displayedSessionNode = displayedSessionId
     ? findSessionNode(workspaceTree, displayedSessionId)
     : activeSessionNode;
+  const displayedWorkspaceId = displayedSessionNode?.workspaceId;
+  useEffect(() => {
+    onDisplayedWorkspaceChange?.(displayedWorkspaceId);
+  }, [displayedWorkspaceId, onDisplayedWorkspaceChange]);
   const displayedSession = displayedSessionId
     ? domain.getSession(displayedSessionId)
     : undefined;
@@ -1549,6 +1573,7 @@ export const ChatShellApp = ({
     onCreateSession,
     onOpenSession
   } = useSessionOpenController({
+    createSessionMetadata,
     store,
     transport,
     workspaceTree,
@@ -2196,6 +2221,16 @@ export const ChatShellApp = ({
             </header>
           )}
 
+          {renderSidebarBody ? (
+            renderSidebarBody({
+              workspaceTree,
+              displayedSessionId,
+              onOpenSession,
+              onCreateSession: (workspaceId) => onCreateSession(workspaceId, selectedEngineId),
+              selectedEngineId
+            })
+          ) : (
+            <>
           <section className="awb-attention">
             <div className="awb-attention__header">
               <h2>Attention</h2>
@@ -2319,6 +2354,8 @@ export const ChatShellApp = ({
             </div>
           </section>
 
+            </>
+          )}
           {!hideSettings && <footer className="awb-sidebar__footer">
             <SettingsLauncher
               engines={engines}
@@ -2380,6 +2417,7 @@ export const ChatShellApp = ({
           </div>
 
           <ComposerContainer
+            extraExecutionControls={composerExtras}
             transport={transport}
             activeSession={activeSession}
             activeSessionId={activeSessionId}

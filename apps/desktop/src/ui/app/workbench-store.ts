@@ -3,6 +3,8 @@ import type { DocChange, DocFile, InboxItem, Mission, Workspace, WorkbenchClient
 
 export type Panel = "think" | "inbox" | "workspaces";
 
+const LAST_WORKSPACE_KEY = "vermillion.lastWorkspaceId";
+
 export type WorkbenchState = {
   client: WorkbenchClient;
   panel: Panel;
@@ -43,12 +45,18 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     closeOverlay: () => set({ overlay: undefined }),
     refreshWorkspaces: async () => {
       const workspaces = await client.request("workspace.list", {});
-      const activeWorkspaceId = get().activeWorkspaceId;
-      const stillExists = workspaces.some((w) => w.workspaceId === activeWorkspaceId);
-      set({ workspaces, workspaceRevision: get().workspaceRevision + 1, activeWorkspaceId: stillExists ? activeWorkspaceId : workspaces[0]?.workspaceId });
+      const previous = get().workspaces;
+      const changed = previous.length !== workspaces.length || workspaces.some((w, i) => previous[i]?.workspaceId !== w.workspaceId);
+      const remembered = get().activeWorkspaceId ?? localStorage.getItem(LAST_WORKSPACE_KEY) ?? undefined;
+      const stillExists = workspaces.some((w) => w.workspaceId === remembered);
+      const activeWorkspaceId = stillExists ? remembered : workspaces[0]?.workspaceId;
+      if (activeWorkspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, activeWorkspaceId);
+      if (!changed && activeWorkspaceId === get().activeWorkspaceId) return;
+      set({ workspaces, workspaceRevision: get().workspaceRevision + (changed ? 1 : 0), activeWorkspaceId });
       await get().refreshWorkspaceData();
     },
     selectWorkspace: async (workspaceId) => {
+      if (workspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, workspaceId);
       set({ activeWorkspaceId: workspaceId, openDocPath: undefined });
       await get().refreshWorkspaceData();
     },
