@@ -6,6 +6,7 @@ import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Button, Empty, SectionLabel } from "./ui.js";
 import { CommitDocsDialog } from "./CommitDocsDialog.js";
+import { DiffDialog } from "./DiffDialog.js";
 
 type DocsPanelProps = {
   store: WorkbenchStore;
@@ -59,6 +60,19 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
   const [missionOpen, setMissionOpen] = useState(false);
+  const [diffTarget, setDiffTarget] = useState<{ workspaceId: string; path: string }>();
+  const [diffResult, setDiffResult] = useState<{ diff?: string; error?: string }>();
+
+  useEffect(() => {
+    setDiffResult(undefined);
+    if (!diffTarget) return;
+    let active = true;
+    void client.request("docs.diff", diffTarget).then(
+      (result) => { if (active) setDiffResult(result); },
+      (error: Error) => { if (active) setDiffResult({ error: error.message }); }
+    );
+    return () => { active = false; };
+  }, [client, diffTarget]);
 
   useEffect(() => {
     if (!menu) return;
@@ -155,6 +169,16 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
             style={{ left: menu.x, top: menu.y }}
             onClick={(event) => event.stopPropagation()}
           >
+            {docs.some((doc) => doc.path === menu.path) && (
+              <li>
+                <button type="button" role="menuitem"
+                  className="block w-full px-3 py-1.5 text-left text-label text-foreground hover:bg-surface-hover hover:text-strong"
+                  onClick={() => {
+                    setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path });
+                    setMenu(undefined);
+                  }}>Diff</button>
+              </li>
+            )}
             {[
               { label: "在文件管理器中显示", action: "reveal" as const },
               { label: "用默认编辑器打开", action: "open" as const }
@@ -191,6 +215,15 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
             await client.request("mission.addRevision", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
             setMissionOpen(false);
           }}
+        />
+      )}
+      {diffTarget && (
+        <DiffDialog
+          key={diffTarget.workspaceId + ":" + diffTarget.path}
+          files={[{ path: diffTarget.path, diff: diffResult?.diff }]}
+          loading={!diffResult}
+          error={diffResult?.error}
+          onClose={() => setDiffTarget(undefined)}
         />
       )}
     </div>

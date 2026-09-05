@@ -114,12 +114,23 @@ export class DocsService {
     return changes.sort((a, b) => a.path.localeCompare(b.path));
   }
 
+  /** Current file against HEAD, including staged edits and untracked additions; never writes the index. */
   async diff(path: string): Promise<string> {
     assertDocPath(path);
+    const head = await this.head();
+    if (head) {
+      const diff = await git(this.rootPath, ["-c", "diff.autoRefreshIndex=false", "--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", head, "--", path]);
+      if (diff) return diff;
+      const untracked = await git(this.rootPath, ["--literal-pathspecs", "ls-files", "--others", "-z", "--", path]);
+      if (!untracked.split("\0").includes(toPosix(path))) return "";
+    }
     try {
-      return await git(this.rootPath, ["diff", "--no-color", "--", path]);
-    } catch {
-      return "";
+      return await git(this.rootPath, ["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", path]);
+    } catch (error) {
+      // --no-index exits 1 when it successfully produces a difference.
+      const result = error as { code?: number; stdout?: string };
+      if (result.code === 1 && typeof result.stdout === "string") return result.stdout;
+      throw error;
     }
   }
 

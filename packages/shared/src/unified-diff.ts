@@ -102,7 +102,7 @@ export const parseUnifiedDiff = (diff: string | undefined): UnifiedDiffFile[] =>
       continue;
     }
 
-    if (line.startsWith("--- ")) {
+    if (!currentHunk && line.startsWith("--- ")) {
       current ??= createMutableFile();
       current.oldPath = stripGitPrefix(line.slice(4).trim());
       if (!current.displayPath) {
@@ -111,7 +111,7 @@ export const parseUnifiedDiff = (diff: string | undefined): UnifiedDiffFile[] =>
       continue;
     }
 
-    if (line.startsWith("+++ ")) {
+    if (!currentHunk && line.startsWith("+++ ")) {
       current ??= createMutableFile();
       current.newPath = stripGitPrefix(line.slice(4).trim());
       current.displayPath = current.newPath ?? current.oldPath;
@@ -132,7 +132,7 @@ export const parseUnifiedDiff = (diff: string | undefined): UnifiedDiffFile[] =>
       continue;
     }
 
-    if (line.startsWith("+") && !line.startsWith("+++")) {
+    if (line.startsWith("+")) {
       current.linesAdded += 1;
       currentHunk.lines.push({
         kind: "add",
@@ -141,7 +141,7 @@ export const parseUnifiedDiff = (diff: string | undefined): UnifiedDiffFile[] =>
       continue;
     }
 
-    if (line.startsWith("-") && !line.startsWith("---")) {
+    if (line.startsWith("-")) {
       current.linesDeleted += 1;
       currentHunk.lines.push({
         kind: "delete",
