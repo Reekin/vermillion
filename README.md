@@ -12,7 +12,7 @@
 ## 使用
 
 1. 思考页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并创建 `.vermillion/docs/`。
-2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 `<root>/.vermillion`，设计伙伴的角色 prompt 作为 developer instructions 注入（追加在 codex config.toml 的 `developer_instructions` 之后），只会改 `docs/` 下的文件。
+2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 workspace 根（设计伙伴能读整个项目），角色 prompt 作为 developer instructions 注入（追加在 codex config.toml 的 `developer_instructions` 之后），只会改 `.vermillion/docs/` 下的文件。
 3. 右栏 Docs 树按文件夹显示 `.vermillion/docs/`；有改动的文件带 M/U/D 标记，点击可编辑，右键可在文件管理器或默认编辑器中打开。
 4. 点 **提交变更**：选「新任务」或「补充到现有任务」，勾选本次要提交的文件；每次提交是任务的一个 revision，管家据此判断拆单、调整还是重发。
 5. **Inbox** 汇总所有 workspace 的决策卡（选一个选项即回答）和待验收工单（通过 / 打回并写原因 / 不做），并展示证据包与验收结果。

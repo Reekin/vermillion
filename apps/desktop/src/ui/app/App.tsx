@@ -22,8 +22,6 @@ type AppProps = {
 
 const panelTitles: Record<Panel, string> = { think: "思考", inbox: "Inbox", workspaces: "Workspaces" };
 
-/** Session cwd is the workspace's .vermillion dir, so the design partner sees AGENTS.md and only docs/. */
-const sessionCwd = (rootPath: string): string => rootPath.replace(/[\\/]+$/, "") + "/.vermillion";
 
 export const App = ({ sessionStore, transport }: AppProps) => {
   const store = useMemo(() => createWorkbenchStore(createRendererWorkbenchClient()), []);
@@ -62,7 +60,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
         engineId,
-        metadata: { cwd: sessionCwd(workspace.rootPath), developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
+        metadata: { cwd: workspace.rootPath, developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
       });
       void content;
       void attachments;

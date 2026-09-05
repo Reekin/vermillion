@@ -21,7 +21,7 @@
 ## 持久化
 - 全局 `~/.vermillion/`：workspace 注册表（引擎的 `workspace-registry.json` 是唯一注册表）、会话索引、`roles/<role>.md`（角色 prompt 的全局版本）。
 - 每个 workspace `<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 的 workspace 覆盖）、`missions/` `workitems/` `decisions/`（一条一 JSON）。
-- 思考会话 cwd = `<root>/.vermillion`。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
+- 所有 agent 会话 cwd = workspace 根（Worker 在 worktree 时是 worktree 根）；写边界靠角色 prompt、`allowedPaths` 和 Supervisor，不靠 cwd。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
 
 ## 角色 prompt
 - 默认版本是 `packages/workbench/roles/<role>.md`（打包后在 `resources/app/roles/`）。启动时 `RoleService.ensureGlobal` 把缺失的角色补到 `~/.vermillion/roles/`；已存在的不覆盖。
