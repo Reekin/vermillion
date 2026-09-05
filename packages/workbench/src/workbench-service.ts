@@ -131,28 +131,52 @@ export class WorkbenchService {
     return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  /** Commits pending doc changes (if any) and binds the mission to the resulting commit. */
+  /** Commits the selected doc changes as the mission's first revision. */
   async createMission(
     workspaceId: string,
-    input: { title: string; summary: string; sessionId?: string; commitMessage?: string }
+    input: { title: string; summary: string; sessionId?: string; paths?: string[] }
   ): Promise<Mission> {
     const { docs, store } = await this.context(workspaceId);
-    const pending = await docs.pendingChanges();
-    const docCommit = pending.length > 0 ? await docs.commit(input.commitMessage ?? "Mission: " + input.title) : (await docs.head()) ?? "";
+    const revision = await this.commitRevision(docs, input.title.trim(), input.paths, input.sessionId);
     const now = this.now();
     const mission = await store.missions.put({
       missionId: createId("m"),
       title: input.title.trim(),
       status: "active",
       summary: input.summary,
-      docCommit,
       sessionId: input.sessionId,
+      revisions: [revision],
       createdAt: now,
       updatedAt: now
     });
     this.emit({ type: "docs.changed", workspaceId });
     this.emit({ type: "missions.changed", workspaceId });
     return mission;
+  }
+
+  /** Commits further doc changes onto an existing mission. The steward reads new revisions to adjust or re-issue work items. */
+  async addMissionRevision(
+    workspaceId: string,
+    input: { missionId: string; message: string; sessionId?: string; paths?: string[] }
+  ): Promise<Mission> {
+    const { docs, store } = await this.context(workspaceId);
+    const mission = await store.missions.get(input.missionId);
+    if (!mission) throw new Error("Unknown mission: " + input.missionId);
+    if (mission.status !== "active") throw new Error("Mission is not active: " + input.missionId);
+    const revision = await this.commitRevision(docs, input.message.trim() || mission.title, input.paths, input.sessionId);
+    const updated = await store.missions.put({ ...mission, revisions: [...mission.revisions, revision], updatedAt: this.now() });
+    this.emit({ type: "docs.changed", workspaceId });
+    this.emit({ type: "missions.changed", workspaceId });
+    return updated;
+  }
+
+  private async commitRevision(docs: DocsService, message: string, paths: string[] | undefined, sessionId: string | undefined) {
+    const pending = await docs.pendingChanges();
+    const selected = paths && paths.length > 0 ? pending.filter((c) => paths.includes(c.path)) : pending;
+    if (selected.length === 0) throw new Error("No pending doc changes to commit.");
+    const selectedPaths = selected.map((c) => c.path);
+    const commit = await docs.commit(message, selectedPaths);
+    return { commit, message, paths: selectedPaths, sessionId, at: this.now() };
   }
 
   async setMissionStatus(workspaceId: string, missionId: string, status: Mission["status"]): Promise<Mission> {

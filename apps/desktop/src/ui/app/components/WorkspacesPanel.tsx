@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import type { DecisionCard, Mission, WorkItem } from "@vermillion/workbench/client";
+import { latestRevision, type DecisionCard, type Mission, type WorkItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Badge, Button, Empty, SectionLabel } from "./ui.js";
@@ -126,7 +126,7 @@ const MissionsSection = ({ missions, workItems }: { missions: Mission[]; workIte
               <Badge tone={mission.status === "active" ? "accent" : "neutral"}>{mission.status}</Badge>
             </div>
             {mission.summary && <p className="mt-1 line-clamp-2 text-caption text-muted-foreground">{mission.summary}</p>}
-            <p className="mt-1 font-mono text-micro text-faint-foreground">doc {mission.docCommit.slice(0, 8)} · {new Date(mission.createdAt).toLocaleString()}</p>
+            <p className="mt-1 font-mono text-micro text-faint-foreground">{mission.revisions.length} 个 revision · 最新 {latestRevision(mission).commit.slice(0, 8)} · {new Date(mission.updatedAt).toLocaleString()}</p>
             {items.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {items.map((item) => (

@@ -21,6 +21,11 @@ const toPosix = (value: string): string => value.split(sep).join("/");
 const samePath = (a: string, b: string): boolean =>
   toPosix(resolve(a)).toLowerCase() === toPosix(resolve(b)).toLowerCase();
 
+const assertDocPathOrRoot = (path: string): void => {
+  if (toPosix(path) === DOCS_DIR) return;
+  assertDocPath(path);
+};
+
 const assertDocPath = (path: string): void => {
   const normalized = toPosix(path);
   if (!normalized.startsWith(DOCS_DIR + "/") || normalized.includes("..")) {
@@ -110,9 +115,12 @@ export class DocsService {
     }
   }
 
-  async commit(message: string): Promise<string> {
-    await git(this.rootPath, ["add", "-A", "--", DOCS_DIR]);
-    await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message, "--", DOCS_DIR]);
+  /** Commits the given doc paths (all pending when omitted). Returns the commit sha. */
+  async commit(message: string, paths?: string[]): Promise<string> {
+    const targets = paths && paths.length > 0 ? paths : [DOCS_DIR];
+    for (const path of targets) assertDocPathOrRoot(path);
+    await git(this.rootPath, ["add", "-A", "--", ...targets]);
+    await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message, "--", ...targets]);
     return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
   }
 

@@ -1,0 +1,159 @@
+import { useMemo, useState } from "react";
+import type { DocChange, Mission } from "@vermillion/workbench/client";
+import { cn } from "../lib/cn.js";
+import { Modal } from "./Modal.js";
+import { Button } from "./ui.js";
+
+type CommitDocsDialogProps = {
+  pending: DocChange[];
+  /** Active missions the changes may be appended to. */
+  missions: Mission[];
+  /** Mission created from the current session, preselected when present. */
+  defaultMissionId?: string;
+  onClose: () => void;
+  onCreate: (input: { title: string; summary: string; paths: string[] }) => Promise<void>;
+  onAppend: (input: { missionId: string; message: string; paths: string[] }) => Promise<void>;
+};
+
+const stripDocsPrefix = (path: string): string => path.replace(/^\.vermillion\/docs\//, "");
+
+/** Default title from what is being committed: the single file's name, or the deepest shared folder. */
+const inferTitle = (paths: string[]): string => {
+  if (paths.length === 0) return "";
+  const names = paths.map(stripDocsPrefix);
+  if (names.length === 1) return names[0]!.replace(/\.md$/, "").split("/").pop() ?? "";
+  const segments = names.map((n) => n.split("/").slice(0, -1));
+  const shared: string[] = [];
+  for (let i = 0; ; i += 1) {
+    const seg = segments[0]?.[i];
+    if (seg === undefined || segments.some((s) => s[i] !== seg)) break;
+    shared.push(seg);
+  }
+  // A top-level bucket like "specs" says nothing about the change; prefer the first file's name then.
+  return shared.length > 1 ? shared.at(-1)! : names[0]!.replace(/\.md$/, "").split("/").pop() ?? "";
+};
+
+const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
+
+export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose, onCreate, onAppend }: CommitDocsDialogProps) => {
+  const active = missions.filter((m) => m.status === "active");
+  const [mode, setMode] = useState<"create" | "append">(defaultMissionId && active.some((m) => m.missionId === defaultMissionId) ? "append" : "create");
+  const [missionId, setMissionId] = useState(defaultMissionId ?? active[0]?.missionId ?? "");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(pending.map((c) => c.path)));
+  const selectedPaths = useMemo(() => pending.map((c) => c.path).filter((p) => selected.has(p)), [pending, selected]);
+  const [title, setTitle] = useState(() => inferTitle(pending.map((c) => c.path)));
+  const [summary, setSummary] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const togglePath = (path: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+
+  const canSubmit = selectedPaths.length > 0 && (mode === "create" ? title.trim().length > 0 : missionId.length > 0);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      if (mode === "create") await onCreate({ title: title.trim(), summary: summary.trim(), paths: selectedPaths });
+      else await onAppend({ missionId, message: message.trim(), paths: selectedPaths });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fieldClass = "mt-1.5 w-full rounded-lg border border-control-border bg-input px-3 text-body text-foreground outline-none focus:border-control-border-hover";
+
+  return (
+    <Modal title="提交 Doc 变更" onClose={onClose} width={560}>
+      <form
+        className="p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSubmit && !busy) void submit();
+        }}
+      >
+        <div className="flex gap-1 rounded-lg border border-border p-0.5" role="radiogroup" aria-label="提交方式">
+          {[
+            { id: "create" as const, label: "新任务" },
+            { id: "append" as const, label: "补充到现有任务", disabled: active.length === 0 }
+          ].map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={mode === option.id}
+              disabled={option.disabled}
+              onClick={() => setMode(option.id)}
+              className={cn(
+                "flex-1 rounded-md py-1.5 text-label text-muted-foreground disabled:opacity-40",
+                mode === option.id && "bg-surface-selected text-strong"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "create" ? (
+          <>
+            <label className="mt-4 block">
+              <span className="eyebrow">标题</span>
+              <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} className={cn(fieldClass, "h-8")} placeholder="这次要做什么" />
+            </label>
+            <label className="mt-3 block">
+              <span className="eyebrow">摘要</span>
+              <textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} className={cn(fieldClass, "resize-none py-2")} placeholder="预期效果" />
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="mt-4 block">
+              <span className="eyebrow">任务</span>
+              <select value={missionId} onChange={(event) => setMissionId(event.target.value)} className={cn(fieldClass, "h-8")}>
+                {active.map((m) => (
+                  <option key={m.missionId} value={m.missionId}>{m.title}</option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-3 block">
+              <span className="eyebrow">变更说明</span>
+              <input autoFocus value={message} onChange={(event) => setMessage(event.target.value)} className={cn(fieldClass, "h-8")} placeholder="这次改了什么；管家据此判断调整还是重发工单" />
+            </label>
+          </>
+        )}
+
+        <div className="mt-4">
+          <span className="eyebrow">本次提交的文件 {selectedPaths.length}/{pending.length}</span>
+          <ul className="mt-1.5 max-h-44 overflow-auto rounded-lg border border-border">
+            {pending.map((change) => (
+              <li key={change.path}>
+                <label className="flex h-7 cursor-pointer items-center gap-2 px-2.5 text-label hover:bg-surface-hover">
+                  <input type="checkbox" checked={selected.has(change.path)} onChange={() => togglePath(change.path)} className="accent-[var(--awb-accent-strong)]" />
+                  <span className="w-3 font-mono text-micro text-accent-strong">{statusMark[change.status]}</span>
+                  <span className="truncate text-foreground">{stripDocsPrefix(change.path)}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {error && <p className="mt-3 text-caption text-muted-foreground">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button variant="primary" type="submit" disabled={busy || !canSubmit}>
+            {busy ? "提交中…" : mode === "create" ? "创建任务" : "补充任务"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+};

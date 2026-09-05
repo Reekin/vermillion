@@ -1,11 +1,11 @@
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import type { DocChange, DocFile } from "@vermillion/workbench/client";
+import type { DocChange, DocFile, Mission } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Button, Empty, SectionLabel } from "./ui.js";
-import { CreateMissionDialog } from "./CreateMissionDialog.js";
+import { CommitDocsDialog } from "./CommitDocsDialog.js";
 
 type DocsPanelProps = {
   store: WorkbenchStore;
@@ -45,6 +45,7 @@ const buildTree = (paths: string[]): TreeNode[] => {
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
 const EMPTY_DOCS: DocFile[] = [];
 const EMPTY_CHANGES: DocChange[] = [];
+const EMPTY_MISSIONS: Mission[] = [];
 
 export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelProps) => {
   const client = store((s) => s.client);
@@ -52,12 +53,12 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
   const view = store((s) => s.view);
   const docs = view?.docs ?? EMPTY_DOCS;
   const pending = view?.pendingDocChanges ?? EMPTY_CHANGES;
+  const missions = view?.missions ?? EMPTY_MISSIONS;
   const openDocPath = store((s) => s.openDocPath);
   const setOpenDocPath = store((s) => s.setOpenDocPath);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
   const [missionOpen, setMissionOpen] = useState(false);
-  const [error, setError] = useState<string | undefined>();
 
   useEffect(() => {
     if (!menu) return;
@@ -142,9 +143,8 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
         {tree.map((node) => renderNode(node, 0))}
       </ul>
       <div className="border-t border-border p-3">
-        {error && <p className="mb-2 text-caption text-muted-foreground">{error}</p>}
-        <Button variant="primary" className="w-full" disabled={pending.length === 0} onClick={() => setMissionOpen(true)}>创建任务</Button>
-        <p className="mt-2 text-caption text-faint-foreground">提交 docs 的全部变更，任务绑定该 commit。</p>
+        <Button variant="primary" className="w-full" disabled={pending.length === 0} onClick={() => setMissionOpen(true)}>提交变更</Button>
+        <p className="mt-2 text-caption text-faint-foreground">新建任务，或补充到现有任务。每次提交是任务的一个 revision。</p>
       </div>
 
       {menu &&
@@ -178,16 +178,18 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
         )}
 
       {missionOpen && (
-        <CreateMissionDialog
+        <CommitDocsDialog
+          pending={pending}
+          missions={missions}
+          defaultMissionId={activeSessionId ? missions.find((m) => m.status === "active" && m.sessionId === activeSessionId)?.missionId : undefined}
           onClose={() => setMissionOpen(false)}
-          onSubmit={async (input) => {
-            setError(undefined);
-            try {
-              await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
-              setMissionOpen(false);
-            } catch (caught) {
-              setError(caught instanceof Error ? caught.message : String(caught));
-            }
+          onCreate={async (input) => {
+            await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
+            setMissionOpen(false);
+          }}
+          onAppend={async (input) => {
+            await client.request("mission.addRevision", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
+            setMissionOpen(false);
           }}
         />
       )}

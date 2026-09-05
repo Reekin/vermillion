@@ -25,6 +25,11 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+const seedMission = async (service: WorkbenchService, workspaceId: string, name = "M") => {
+  await service.writeDoc(workspaceId, ".vermillion/docs/" + name + ".md", "# " + name + "\n");
+  return service.createMission(workspaceId, { title: name, summary: "" });
+};
+
 const baseWorkItem = (missionId: string) => ({
   missionId,
   title: "W",
@@ -60,14 +65,31 @@ describe("WorkbenchService", () => {
     const { service, ws, events } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/specs/login.md", "# Login\n");
     const mission = await service.createMission(ws.workspaceId, { title: "Login", summary: "Add login" });
-    expect(mission.docCommit).toMatch(/^[0-9a-f]{40}$/);
+    expect(mission.revisions).toHaveLength(1);
+    expect(mission.revisions[0]!.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(mission.revisions[0]!.paths).toEqual([".vermillion/docs/specs/login.md"]);
     expect(await service.pendingDocChanges(ws.workspaceId)).toEqual([]);
     expect(events.map((e) => e.type)).toContain("missions.changed");
+    await expect(service.createMission(ws.workspaceId, { title: "Empty", summary: "" })).rejects.toThrow(/No pending/);
+  });
+
+  it("commits only the selected paths and appends later changes as revisions", async () => {
+    const { service, ws } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/a.md", "a\n");
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/b.md", "b\n");
+    const mission = await service.createMission(ws.workspaceId, { title: "A", summary: "", paths: [".vermillion/docs/a.md"] });
+    expect(mission.revisions[0]!.paths).toEqual([".vermillion/docs/a.md"]);
+    expect((await service.pendingDocChanges(ws.workspaceId)).map((c) => c.path)).toEqual([".vermillion/docs/b.md"]);
+    const revised = await service.addMissionRevision(ws.workspaceId, { missionId: mission.missionId, message: "add b", sessionId: "s-2" });
+    expect(revised.revisions).toHaveLength(2);
+    expect(revised.revisions[1]).toMatchObject({ message: "add b", paths: [".vermillion/docs/b.md"], sessionId: "s-2" });
+    expect(revised.revisions[1]!.commit).not.toBe(revised.revisions[0]!.commit);
+    expect(await service.pendingDocChanges(ws.workspaceId)).toEqual([]);
   });
 
   it("walks a work item through start, submit, reject with reason, resubmit, approve", async () => {
     const { service, ws } = await setup();
-    const mission = await service.createMission(ws.workspaceId, { title: "M", summary: "" });
+    const mission = await seedMission(service, ws.workspaceId);
     const item = await service.createWorkItem(ws.workspaceId, baseWorkItem(mission.missionId));
     expect(item.status).toBe("queued");
     expect(item.autoClose).toBe(false);
@@ -103,7 +125,7 @@ describe("WorkbenchService", () => {
 
   it("auto-closes low-risk items on a passing verify and re-queues on rework", async () => {
     const { service, ws } = await setup();
-    const mission = await service.createMission(ws.workspaceId, { title: "M", summary: "" });
+    const mission = await seedMission(service, ws.workspaceId);
     const low = await service.createWorkItem(ws.workspaceId, { ...baseWorkItem(mission.missionId), risk: "R1" });
     const evidence = { summary: "", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] };
     const closed = await service.submitWorkItem(ws.workspaceId, low.workItemId, { evidence, review: [], verify: { items: [], verdict: "pass" } });
@@ -115,7 +137,7 @@ describe("WorkbenchService", () => {
 
   it("parks a work item on a decision card and resumes it with the answer recorded", async () => {
     const { service, ws, events } = await setup();
-    const mission = await service.createMission(ws.workspaceId, { title: "M", summary: "" });
+    const mission = await seedMission(service, ws.workspaceId);
     const item = await service.createWorkItem(ws.workspaceId, baseWorkItem(mission.missionId));
     const card = await service.createDecision(ws.workspaceId, {
       question: "A or B?",

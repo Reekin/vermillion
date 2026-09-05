@@ -23,6 +23,7 @@
 - 思考会话 cwd = `<root>/.vermillion`。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
 
 ## 工单
+- Mission 是 Doc revision 的序列；commit 只能通过 `mission.create` / `mission.addRevision` 产生，支持部分路径提交。一个会话可以产出多个任务或给已有任务补 revision。
 - 状态：queued → running → review → closed，decision 为挂起。写操作有业务含义：create / start / heartbeat / submit(evidence+review+verify) / approve / reject(reason) / cancel，不暴露裸 status 修改。
 - submit 时 verify 通过且 autoClose（R0/R1 默认）直接 closed；rework 回 queued；否则进 review。
 

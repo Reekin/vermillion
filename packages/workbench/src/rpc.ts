@@ -39,7 +39,11 @@ export const workbenchRpc = {
 
   "mission.list": { params: zWs, result: z.array(zMission) },
   "mission.create": {
-    params: zWs.extend({ title: z.string().min(1), summary: z.string(), sessionId: z.string().optional(), commitMessage: z.string().optional() }),
+    params: zWs.extend({ title: z.string().min(1), summary: z.string(), sessionId: z.string().optional(), paths: z.array(z.string()).optional() }),
+    result: zMission
+  },
+  "mission.addRevision": {
+    params: zWs.extend({ missionId: z.string().min(1), message: z.string(), sessionId: z.string().optional(), paths: z.array(z.string()).optional() }),
     result: zMission
   },
   "mission.setStatus": { params: zWs.extend({ missionId: z.string().min(1), status: zMissionStatus }), result: zMission },

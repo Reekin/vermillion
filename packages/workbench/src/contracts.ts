@@ -13,17 +13,30 @@ export const missionStatuses = ["active", "done", "cancelled"] as const;
 export const zMissionStatus = z.enum(missionStatuses);
 export type MissionStatus = z.infer<typeof zMissionStatus>;
 
+/** One doc commit attributed to a mission. A mission is the ordered sequence of these. */
+export const zMissionRevision = z.object({
+  commit: z.string().min(1),
+  message: z.string(),
+  paths: z.array(z.string()),
+  sessionId: z.string().optional(),
+  at: z.string()
+});
+export type MissionRevision = z.infer<typeof zMissionRevision>;
+
 export const zMission = z.object({
   missionId: z.string().min(1),
   title: z.string().min(1),
   status: zMissionStatus,
   summary: z.string(),
-  docCommit: z.string(),
+  /** Session the mission was first created from. */
   sessionId: z.string().optional(),
+  revisions: z.array(zMissionRevision).min(1),
   createdAt: z.string(),
   updatedAt: z.string()
 });
 export type Mission = z.infer<typeof zMission>;
+
+export const latestRevision = (mission: Mission): MissionRevision => mission.revisions[mission.revisions.length - 1]!;
 
 /** queued -> running -> review -> closed; decision parks a work item until the user answers. */
 export const workItemStatuses = ["queued", "running", "review", "decision", "closed"] as const;
