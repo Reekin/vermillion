@@ -44,7 +44,8 @@ export const CodexTurnChangesExtension = ({
   const [undoError, setUndoError] = useState<string | undefined>();
   const [isUndone, setIsUndone] = useState(false);
 
-  if (changedFiles.length === 0) {
+  // After a cold start, history restores file names without diff bodies; there is nothing worth showing then.
+  if (changedFiles.length === 0 || !mergedDiff) {
     return null;
   }
 
