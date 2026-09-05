@@ -1,7 +1,8 @@
 # Vermillion
 
 ## 运行与验证
-- 开发：`pnpm dev`（Vite 4193 + Electron）。验收用 `VERMILLION_REMOTE_DEBUGGING_PORT=9333` 启动后走 CDP；隔离数据用 `VERMILLION_PERSISTENCE_BASE_DIR`。
+- 开发：`pnpm dev`（Vite 4193 + Electron）。验收用 `VERMILLION_REMOTE_DEBUGGING_PORT=9333` 启动后走 CDP；隔离数据用 `VERMILLION_PERSISTENCE_BASE_DIR` + `VERMILLION_USER_DATA_DIR`（后者绕开 single-instance lock，允许与用户正在运行的实例并存）。
+- `start.bat` 会在源码比 `dist-web`/`dist-electron` 新时自动重新 build（`scripts/needs-build.mjs`）。交付前必须用 `start.bat` 而不是 dev 模式做最终验收。
 - 提交前：`pnpm -r --workspace-concurrency=1 typecheck` 与 `pnpm -r --workspace-concurrency=1 test` 全绿，并做一次真实冷启动跑通 New Chat → 发消息 → docs 树变化 → 创建任务。
 - CLI：`node packages/workbench/bin/vermillion.mjs <method> [json]`（需先 `pnpm --filter @vermillion/workbench build`）。桌面与 CLI 共用同一个 `WorkbenchService` 和同一张方法表。
 

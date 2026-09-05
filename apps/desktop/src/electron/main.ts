@@ -569,6 +569,10 @@ const boot = async (): Promise<void> => {
       details: describeError(error)
     });
   }
+  const userDataDir = process.env.VERMILLION_USER_DATA_DIR?.trim();
+  if (userDataDir) {
+    app.setPath("userData", userDataDir);
+  }
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return;
