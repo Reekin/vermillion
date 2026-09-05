@@ -132,7 +132,13 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
         )}
 
         <div className="mt-4">
-          <span className="eyebrow">本次提交的文件 {selectedPaths.length}/{pending.length}</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="eyebrow">本次提交的文件 {selectedPaths.length}/{pending.length}</span>
+            <div className="flex gap-1">
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(pending.map((change) => change.path)))}>全选</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected((current) => new Set(pending.map((change) => change.path).filter((path) => !current.has(path))))}>反选</Button>
+            </div>
+          </div>
           <ul className="mt-1.5 max-h-44 overflow-auto rounded-lg border border-border">
             {pending.map((change) => (
               <li key={change.path}>
