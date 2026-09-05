@@ -70,6 +70,20 @@ import "./chat-shell.css";
 
 const CHAT_TREE_VISIBLE_KEY = "vermillion.chatTreeVisible";
 
+/** True only once `value` has stayed true for `delayMs`; falls back to false immediately. */
+const useDelayedFlag = (value: boolean, delayMs: number): boolean => {
+  const [delayed, setDelayed] = useState(false);
+  useEffect(() => {
+    if (!value) {
+      setDelayed(false);
+      return;
+    }
+    const timer = setTimeout(() => setDelayed(true), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return value && delayed;
+};
+
 const autoRefreshBacklogCooldownMs = 30_000;
 const autoRefreshBacklogStreamThreshold = 500;
 
@@ -96,6 +110,8 @@ type TranscriptPaneProps = {
   activeSessionWindow?: Omit<SessionWindowRpc, "snapshot">;
   activeSessionId?: string;
   isOpeningSelectedSession: boolean;
+  /** A session switch is in flight; hold the empty state so it doesn't flash before content arrives. */
+  isSwitchPending: boolean;
   loadingOlderTurns: boolean;
   onLoadOlder: () => void;
   processVisibilityByTurnId: Readonly<Record<string, ProcessVisibilityOverride>>;
@@ -334,6 +350,7 @@ const TranscriptPane = memo(
     activeSessionWindow,
     activeSessionId,
     isOpeningSelectedSession,
+    isSwitchPending,
     loadingOlderTurns,
     onLoadOlder,
     processVisibilityByTurnId,
@@ -350,7 +367,7 @@ const TranscriptPane = memo(
       tabIndex={0}
     >
       <div className="awb-transcript__content" ref={transcriptContentRef}>
-        {renderedTranscriptRows.length === 0 && (
+        {renderedTranscriptRows.length === 0 && (isOpeningSelectedSession || !isSwitchPending) && (
           <div className="awb-transcript__empty">
             {isOpeningSelectedSession && <div className="awb-loading-spinner" aria-hidden="true" />}
             <h3>
@@ -535,6 +552,7 @@ const TranscriptPane = memo(
     previous.activeSessionWindow === next.activeSessionWindow &&
     previous.activeSessionId === next.activeSessionId &&
     previous.isOpeningSelectedSession === next.isOpeningSelectedSession &&
+    previous.isSwitchPending === next.isSwitchPending &&
     previous.loadingOlderTurns === next.loadingOlderTurns &&
     previous.processVisibilityByTurnId === next.processVisibilityByTurnId &&
     previous.transcriptRef === next.transcriptRef &&
@@ -679,6 +697,8 @@ export const SessionPane = ({
   );
   const isOpeningSelectedSession =
     Boolean(sessionId) && openingSessionId === sessionId;
+  // Most session switches resolve within a frame; only surface the loading state when a switch is genuinely slow.
+  const showOpeningIndicator = useDelayedFlag(isOpeningSelectedSession, 300);
   const browsedSessionId =
     sessionId && !isOpeningSelectedSession ? sessionId : undefined;
   const turns = useMemo(
@@ -1095,7 +1115,8 @@ export const SessionPane = ({
             engineExtensionRefreshSignal={state.refreshSignals.engineExtensions}
             activeSessionWindow={activeSessionWindow}
             activeSessionId={activeSessionId}
-            isOpeningSelectedSession={isOpeningSelectedSession}
+            isOpeningSelectedSession={showOpeningIndicator}
+            isSwitchPending={isOpeningSelectedSession}
             loadingOlderTurns={loadingOlderTurns}
             onLoadOlder={() => void onLoadOlder()}
             processVisibilityByTurnId={processVisibilityByTurnId}

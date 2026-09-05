@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { DocChange, DocFile, InboxItem, Mission, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
+import type { DecisionCard, DocChange, DocFile, InboxItem, Mission, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
 
 export type Panel = "think" | "inbox" | "workspaces";
 
@@ -7,6 +7,8 @@ export type Panel = "think" | "inbox" | "workspaces";
 export type WorkspaceView = {
   workspaceId: string;
   missions: Mission[];
+  workItems: WorkItem[];
+  decisions: DecisionCard[];
   docs: DocFile[];
   pendingDocChanges: DocChange[];
 };
@@ -58,13 +60,15 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         set({ view: undefined });
         return;
       }
-      const [missions, docs, pendingDocChanges] = await Promise.all([
+      const [missions, workItems, decisions, docs, pendingDocChanges] = await Promise.all([
         client.request("mission.list", { workspaceId }),
+        client.request("workItem.list", { workspaceId }),
+        client.request("decision.list", { workspaceId }),
         client.request("docs.list", { workspaceId }),
         client.request("docs.pending", { workspaceId })
       ]);
       if (generation !== viewGeneration) return;
-      set({ view: { workspaceId, missions, docs, pendingDocChanges } });
+      set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges } });
     };
 
     const loadInbox = async () => {
@@ -111,6 +115,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
               return;
             case "workItems.changed":
             case "decisions.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               void loadInbox();
               return;
           }
