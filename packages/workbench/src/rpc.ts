@@ -6,6 +6,7 @@ import {
   zDecisionCard,
   zDecisionOption,
   zDocChange,
+  zDocCommit,
   zDocFile,
   zDocRef,
   zEvidence,
@@ -35,10 +36,14 @@ export const workbenchRpc = {
   "workspace.remove": { params: zWs, result: zEmpty },
 
   "docs.list": { params: zWs, result: z.array(zDocFile) },
-  "docs.read": { params: zWs.extend({ path: z.string().min(1) }), result: z.object({ content: z.string() }) },
+  "docs.read": { params: zWs.extend({ path: z.string().min(1), commit: z.string().min(1).optional() }), result: z.object({ content: z.string() }) },
   "docs.write": { params: zWs.extend({ path: z.string().min(1), content: z.string() }), result: zEmpty },
   "docs.pending": { params: zWs, result: z.array(zDocChange) },
   "docs.diff": { params: zWs.extend({ path: z.string().min(1) }), result: z.object({ diff: z.string() }) },
+  "docs.commit": {
+    params: zWs.extend({ message: z.string().trim().min(1), paths: z.array(z.string()).min(1).optional() }),
+    result: zDocCommit
+  },
 
   "role.list": { params: zWs, result: z.array(zRoleFile) },
   "role.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string(), source: zRoleFile.shape.source }) },
@@ -47,11 +52,11 @@ export const workbenchRpc = {
 
   "mission.list": { params: zWs, result: z.array(zMission) },
   "mission.create": {
-    params: zWs.extend({ title: z.string().min(1), summary: z.string(), sessionId: z.string().optional(), paths: z.array(z.string()).optional() }),
+    params: zWs.extend({ title: z.string().min(1), summary: z.string(), sessionId: z.string().optional(), paths: z.array(z.string()).min(1).optional() }),
     result: zMission
   },
   "mission.addRevision": {
-    params: zWs.extend({ missionId: z.string().min(1), message: z.string(), sessionId: z.string().optional(), paths: z.array(z.string()).optional() }),
+    params: zWs.extend({ missionId: z.string().min(1), message: z.string(), sessionId: z.string().optional(), paths: z.array(z.string()).min(1).optional() }),
     result: zMission
   },
   "mission.setStatus": { params: zWs.extend({ missionId: z.string().min(1), status: zMissionStatus }), result: zMission },

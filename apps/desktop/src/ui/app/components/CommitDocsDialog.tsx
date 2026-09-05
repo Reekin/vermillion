@@ -13,6 +13,7 @@ type CommitDocsDialogProps = {
   onClose: () => void;
   onCreate: (input: { title: string; summary: string; paths: string[] }) => Promise<void>;
   onAppend: (input: { missionId: string; message: string; paths: string[] }) => Promise<void>;
+  onCommit: (input: { message: string; paths: string[] }) => Promise<void>;
 };
 
 const stripDocsPrefix = (path: string): string => path.replace(/^\.vermillion\/docs\//, "");
@@ -35,9 +36,9 @@ const inferTitle = (paths: string[]): string => {
 
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
 
-export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose, onCreate, onAppend }: CommitDocsDialogProps) => {
+export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose, onCreate, onAppend, onCommit }: CommitDocsDialogProps) => {
   const active = missions.filter((m) => m.status === "active");
-  const [mode, setMode] = useState<"create" | "append">(defaultMissionId && active.some((m) => m.missionId === defaultMissionId) ? "append" : "create");
+  const [mode, setMode] = useState<"create" | "append" | "commit">(defaultMissionId && active.some((m) => m.missionId === defaultMissionId) ? "append" : "create");
   const [missionId, setMissionId] = useState(defaultMissionId ?? active[0]?.missionId ?? "");
   const [selected, setSelected] = useState<Set<string>>(() => new Set(pending.map((c) => c.path)));
   const selectedPaths = useMemo(() => pending.map((c) => c.path).filter((p) => selected.has(p)), [pending, selected]);
@@ -55,14 +56,14 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
       return next;
     });
 
-  const canSubmit = selectedPaths.length > 0 && (mode === "create" ? title.trim().length > 0 : missionId.length > 0);
-
+  const canSubmit = selectedPaths.length > 0 && (mode === "create" ? title.trim().length > 0 : mode === "append" ? missionId.length > 0 : message.trim().length > 0);
   const submit = async () => {
     setBusy(true);
     setError(undefined);
     try {
       if (mode === "create") await onCreate({ title: title.trim(), summary: summary.trim(), paths: selectedPaths });
-      else await onAppend({ missionId, message: message.trim(), paths: selectedPaths });
+      else if (mode === "append") await onAppend({ missionId, message: message.trim(), paths: selectedPaths });
+      else await onCommit({ message: message.trim(), paths: selectedPaths });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -84,7 +85,8 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
         <div className="flex gap-1 rounded-lg border border-border p-0.5" role="radiogroup" aria-label="提交方式">
           {[
             { id: "create" as const, label: "新任务" },
-            { id: "append" as const, label: "补充到现有任务", disabled: active.length === 0 }
+            { id: "append" as const, label: "补充到现有任务", disabled: active.length === 0 },
+            { id: "commit" as const, label: "仅提交" }
           ].map((option) => (
             <button
               key={option.id}
@@ -116,6 +118,7 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
           </>
         ) : (
           <>
+            {mode === "append" && (
             <label className="mt-4 block">
               <span className="eyebrow">任务</span>
               <select value={missionId} onChange={(event) => setMissionId(event.target.value)} className={cn(fieldClass, "h-8")}>
@@ -124,9 +127,10 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
                 ))}
               </select>
             </label>
+            )}
             <label className="mt-3 block">
-              <span className="eyebrow">变更说明</span>
-              <input autoFocus value={message} onChange={(event) => setMessage(event.target.value)} className={cn(fieldClass, "h-8")} placeholder="这次改了什么；管家据此判断调整还是重发工单" />
+              <span className="eyebrow">{mode === "commit" ? "提交说明" : "变更说明"}</span>
+              <input autoFocus value={message} onChange={(event) => setMessage(event.target.value)} className={cn(fieldClass, "h-8")} placeholder="这次改了什么" />
             </label>
           </>
         )}
@@ -156,7 +160,7 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>取消</Button>
           <Button variant="primary" type="submit" disabled={busy || !canSubmit}>
-            {busy ? "提交中…" : mode === "create" ? "创建任务" : "补充任务"}
+            {busy ? "提交中…" : mode === "create" ? "创建任务" : mode === "append" ? "补充任务" : "提交"}
           </Button>
         </div>
       </form>

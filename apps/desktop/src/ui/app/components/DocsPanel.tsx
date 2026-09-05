@@ -59,6 +59,8 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
   const [missionOpen, setMissionOpen] = useState(false);
+  const result = store((s) => s.docCommit);
+  const setResult = store((s) => s.setDocCommit);
 
   useEffect(() => {
     if (!menu) return;
@@ -144,7 +146,17 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
       </ul>
       <div className="border-t border-border p-3">
         <Button variant="primary" className="w-full" disabled={pending.length === 0} onClick={() => setMissionOpen(true)}>提交变更</Button>
-        <p className="mt-2 text-caption text-faint-foreground">新建任务，或补充到现有任务。每次提交是任务的一个 revision。</p>
+        {result && (
+          <div role="status" className="mt-3 rounded-md border border-border p-2 text-caption">
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1 break-words text-foreground">
+                已提交文档 · {result.message}
+              </p>
+              <Button size="sm" variant="ghost" aria-label="关闭提交结果" onClick={() => setResult(undefined)}>关闭</Button>
+            </div>
+            <p className="mt-1 font-mono text-micro text-muted-foreground">{result.commit.slice(0, 8)}</p>
+          </div>
+        )}
       </div>
 
       {menu &&
@@ -185,10 +197,16 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
           onClose={() => setMissionOpen(false)}
           onCreate={async (input) => {
             await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
+            setResult(undefined);
             setMissionOpen(false);
           }}
           onAppend={async (input) => {
             await client.request("mission.addRevision", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
+            setResult(undefined);
+            setMissionOpen(false);
+          }}
+          onCommit={async (input) => {
+            setResult(await client.request("docs.commit", { workspaceId: workspace.workspaceId, ...input }));
             setMissionOpen(false);
           }}
         />

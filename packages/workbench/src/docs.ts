@@ -86,8 +86,12 @@ export class DocsService {
     return out.sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  async read(path: string): Promise<string> {
+  async read(path: string, commit?: string): Promise<string> {
     assertDocPath(path);
+    if (commit !== undefined) {
+      const revision = (await git(this.rootPath, ["rev-parse", "--verify", "--end-of-options", commit + "^{commit}"])).trim();
+      return git(this.rootPath, ["show", revision + ":" + toPosix(path)]);
+    }
     return readFile(join(this.rootPath, path), "utf8");
   }
 
@@ -125,7 +129,8 @@ export class DocsService {
 
   /** Commits the given doc paths (all pending when omitted). Returns the commit sha. */
   async commit(message: string, paths?: string[]): Promise<string> {
-    const targets = paths && paths.length > 0 ? paths : [DOCS_DIR];
+    if (paths?.length === 0) throw new Error("Select at least one doc path to commit.");
+    const targets = paths ?? [DOCS_DIR];
     for (const path of targets) assertDocPathOrRoot(path);
     await git(this.rootPath, ["add", "-A", "--", ...targets]);
     await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message, "--", ...targets]);

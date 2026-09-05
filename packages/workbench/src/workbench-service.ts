@@ -5,6 +5,7 @@ import type {
   Scheduler,
   DecisionCard,
   DocChange,
+  DocCommit,
   DocFile,
   InboxItem,
   Mission,
@@ -114,8 +115,8 @@ export class WorkbenchService {
     return (await this.context(workspaceId)).docs.list();
   }
 
-  async readDoc(workspaceId: string, path: string): Promise<string> {
-    return (await this.context(workspaceId)).docs.read(path);
+  async readDoc(workspaceId: string, path: string, commit?: string): Promise<string> {
+    return (await this.context(workspaceId)).docs.read(path, commit);
   }
 
   async writeDoc(workspaceId: string, path: string, content: string): Promise<void> {
@@ -129,6 +130,15 @@ export class WorkbenchService {
 
   async docDiff(workspaceId: string, path: string): Promise<string> {
     return (await this.context(workspaceId)).docs.diff(path);
+  }
+
+  async commitDocs(workspaceId: string, input: { message: string; paths?: string[] }): Promise<DocCommit> {
+    const message = input.message.trim();
+    if (!message) throw new Error("Commit message is required.");
+    const { docs } = await this.context(workspaceId);
+    const { commit } = await this.commitDocChanges(docs, message, input.paths);
+    this.emit({ type: "docs.changed", workspaceId });
+    return { commit, message };
   }
 
   // ---- roles ----
@@ -198,12 +208,17 @@ export class WorkbenchService {
   }
 
   private async commitRevision(docs: DocsService, message: string, paths: string[] | undefined, sessionId: string | undefined) {
+    return { ...await this.commitDocChanges(docs, message, paths), sessionId, at: this.now() };
+  }
+
+  private async commitDocChanges(docs: DocsService, message: string, paths: string[] | undefined) {
+    if (paths?.length === 0) throw new Error("Select at least one doc path to commit.");
     const pending = await docs.pendingChanges();
-    const selected = paths && paths.length > 0 ? pending.filter((c) => paths.includes(c.path)) : pending;
+    const selected = paths ? pending.filter((c) => paths.includes(c.path)) : pending;
     if (selected.length === 0) throw new Error("No pending doc changes to commit.");
     const selectedPaths = selected.map((c) => c.path);
     const commit = await docs.commit(message, selectedPaths);
-    return { commit, message, paths: selectedPaths, sessionId, at: this.now() };
+    return { commit, message, paths: selectedPaths };
   }
 
   async setMissionStatus(workspaceId: string, missionId: string, status: Mission["status"]): Promise<Mission> {
