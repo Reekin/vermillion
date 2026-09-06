@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 
 export class WorktreeMergeConflict extends Error {
   constructor(readonly files: string[]) {
-    super("合并冲突：\n" + files.map((file) => "- " + file).join("\n"));
+    super("merge conflict: " + files.join(", "));
   }
 }
 

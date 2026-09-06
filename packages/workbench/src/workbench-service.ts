@@ -380,7 +380,7 @@ export class WorkbenchService {
         await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
       } catch (error) {
         if (!(error instanceof WorktreeMergeConflict)) throw error;
-        return this.rejectWorkItem(workspaceId, workItemId, error.message + "\n在原 worktree 的工单分支上 rebase 到 workspace 当前主分支，解决冲突后重新 review、验收并提交；由用户再次验收，合并仍由工作台完成。");
+        return this.rejectWorkItem(workspaceId, workItemId, "合并冲突：\n" + error.files.map((file) => "- " + file).join("\n") + "\n在原 worktree 的工单分支上 rebase 到 workspace 当前主分支，解决冲突后重新 review、验收并提交；由用户再次验收，合并仍由工作台完成。");
       }
     }
     return this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
