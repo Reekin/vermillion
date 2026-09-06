@@ -1,5 +1,6 @@
 import type { createSessionRuntimeService } from "@vermillion/desktop-server";
 import type { AgentRunner, SessionAsk } from "@vermillion/workbench";
+import { mergeSessionExecutionProfile, resolveEngineExecutionPreference } from "@vermillion/shared";
 
 type SessionShell = ReturnType<typeof createSessionRuntimeService>;
 
@@ -54,9 +55,14 @@ export const createSessionAsk = (shell: SessionShell): SessionAsk => async ({ se
 /** Background agent sessions for the orchestrator: same engine and session list as the UI, opened headlessly. */
 export const createAgentRunner = (shell: SessionShell, engineId: string): AgentRunner => ({
   open: async (input) => {
+    const settings = await shell.getSettings();
     const { sessionId } = await shell.createBrowserSession({
       workspaceId: input.workspaceId,
       engineId,
+      sessionProfile: mergeSessionExecutionProfile(
+        resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]),
+        input.modelConfig
+      ),
       metadata: { ...input.metadata, cwd: input.cwd, developerInstructions: input.developerInstructions }
     });
     await shell.setSessionTitle(sessionId, input.title);

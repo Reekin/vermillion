@@ -48,6 +48,23 @@ export type ExecutionPreferencesByEngineId = z.infer<
   typeof zExecutionPreferencesByEngineIdSchema
 >;
 
+/** Apply only explicit fields, including an explicit Default reasoning selection. */
+export const mergeSessionExecutionProfile = (
+  base: SessionExecutionProfileInput | undefined,
+  overrides: (Omit<SessionExecutionProfileInput, "reasoningOptionId"> & {
+    reasoningOptionId?: string | null;
+  }) | undefined
+): SessionExecutionProfileInput => {
+  return {
+    modeId: overrides?.modeId ?? base?.modeId,
+    modelId: overrides?.modelId ?? base?.modelId,
+    reasoningOptionId: overrides?.reasoningOptionId === null
+      ? undefined : overrides?.reasoningOptionId ?? base?.reasoningOptionId,
+    serviceTierId: overrides?.serviceTierId !== undefined
+      ? overrides.serviceTierId : base?.serviceTierId
+  };
+};
+
 export const readSessionExecutionProfile = (
   metadata: Record<string, unknown> | undefined
 ): SessionExecutionProfile | undefined => {

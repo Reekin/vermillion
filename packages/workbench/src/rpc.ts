@@ -17,6 +17,7 @@ import {
   zReviewDisposition,
   zRisk,
   zRoleFile,
+  zResolvedRole,
   zRun,
   zScope,
   zVerifyResult,
@@ -50,7 +51,7 @@ export const workbenchRpc = {
   "role.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string(), source: zRoleFile.shape.source }) },
   "role.editor.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ document: zRoleDocument, source: zRoleFile.shape.source }) },
   "role.editor.write": { params: zWs.extend({ roleId: z.string().min(1), document: zRoleDocument }), result: zEmpty },
-  "role.resolve": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string() }) },
+  "role.resolve": { params: zWs.extend({ roleId: z.string().min(1) }), result: zResolvedRole },
   "role.write": { params: zWs.extend({ roleId: z.string().min(1), content: z.string() }), result: zEmpty },
   "role.reset": { params: zWs.extend({ roleId: z.string().min(1) }), result: zEmpty },
 

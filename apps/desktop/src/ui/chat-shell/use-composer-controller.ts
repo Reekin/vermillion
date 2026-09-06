@@ -510,7 +510,7 @@ export const useComposerController = (
         currentModelId,
         persistedProfile: readSessionExecutionProfile(input.activeSession?.metadata),
         lastExecution: input.lastExecution,
-        modelExecutionPreferences: input.modelExecutionPreferences
+        modelExecutionPreferences: currentModelId ? input.modelExecutionPreferences : undefined
       }),
     [
       currentModelId,
@@ -950,7 +950,8 @@ export const useComposerController = (
           sessionId,
           content,
           attachments,
-          execution: payload.execution
+          // New sessions already store the role's merged profile; the runtime uses it for this first turn.
+          execution: input.activeSessionId ? payload.execution : undefined
         });
         if (!receipt.accepted) {
           throw new Error("The current runtime rejected the send request.");

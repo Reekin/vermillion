@@ -173,6 +173,20 @@ export const zRoleFile = z.object({
 });
 export type RoleFile = z.infer<typeof zRoleFile>;
 
+/** Explicit role model fields; omitted fields inherit the composer's selection. */
+export const zRoleExecutionOverrides = z.object({
+  modelId: z.string().min(1).optional(),
+  reasoningOptionId: z.string().min(1).nullable().optional(),
+  serviceTierId: z.string().min(1).nullable().optional()
+});
+export type RoleExecutionOverrides = z.infer<typeof zRoleExecutionOverrides>;
+
+export const zResolvedRole = z.object({
+  content: z.string(),
+  modelConfig: zRoleExecutionOverrides.optional()
+});
+export type ResolvedRole = z.infer<typeof zResolvedRole>;
+
 export const zDocChange = z.object({
   path: z.string().min(1),
   status: z.enum(["added", "modified", "deleted"])

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { latestRevision, type AgentRun, type Mission, type WorkItem } from "./contracts.js";
+import { latestRevision, type AgentRun, type Mission, type WorkItem, type RoleExecutionOverrides } from "./contracts.js";
 import { DOCS_DIR, STATE_DIR } from "./docs.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
@@ -13,7 +13,7 @@ const git = async (cwd: string, args: string[]): Promise<string> =>
 
 /** What the orchestrator needs from the session engine. Implemented in Electron main over SessionShellService. */
 export type AgentRunner = {
-  open: (input: { workspaceId: string; cwd: string; developerInstructions: string; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
+  open: (input: { workspaceId: string; cwd: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
   send: (sessionId: string, content: string) => Promise<void>;
   /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
@@ -206,11 +206,12 @@ export class Orchestrator {
       return;
     }
     const root = await this.service.workspaceRoot(workspaceId);
-    const { content } = await this.roles.resolve(root, "steward");
+    const { content, modelConfig } = await this.roles.resolve(root, "steward");
     const { sessionId } = await this.runner.open({
       workspaceId,
       cwd: root,
       developerInstructions: content,
+      modelConfig,
       title: "管家 · " + mission.title,
       metadata: { role: "steward", missionId: mission.missionId }
     });
@@ -327,6 +328,7 @@ export class Orchestrator {
       workspaceId,
       cwd,
       developerInstructions,
+      modelConfig: worker.modelConfig,
       title: "Worker · " + item.title,
       metadata: { role: "worker", workItemId: item.workItemId, missionId: item.missionId }
     });
@@ -477,11 +479,12 @@ export class Orchestrator {
       }
       if (sections.length === 0) return;
       const mission = (await this.service.listMissions(workspaceId)).find((m) => m.missionId === groupId);
-      const { content } = await this.roles.resolve(root, "supervisor");
+      const { content, modelConfig } = await this.roles.resolve(root, "supervisor");
       const { sessionId } = await this.runner.open({
         workspaceId,
         cwd: root,
         developerInstructions: content,
+        modelConfig,
         title: "Supervisor · " + (mission?.title ?? groupId),
         metadata: { role: "supervisor", missionId: mission?.missionId }
       });
