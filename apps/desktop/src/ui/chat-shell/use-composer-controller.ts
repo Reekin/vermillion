@@ -415,6 +415,7 @@ export const useComposerController = (
 ): UseComposerControllerResult => {
   const [draftBySessionId, setDraftBySessionId] = useState<Record<string, string>>({});
   const [detachedDraft, setDetachedDraft] = useState("");
+  const [detachedAttachments, setDetachedAttachments] = useState<ComposerAttachment[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<ComposerSkillReference[]>([]);
   const [attachmentDrafts, setAttachmentDrafts] = useState<
     Record<string, ComposerAttachment[]>
@@ -442,6 +443,7 @@ export const useComposerController = (
   const mountedRef = useRef(true);
   const selectedSkillsRef = useRef<ComposerSkillReference[]>([]);
   const attachmentDraftsRef = useRef<Record<string, ComposerAttachment[]>>({});
+  const detachedAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
   const previousSessionIdRef = useRef<string | undefined>(undefined);
@@ -473,7 +475,7 @@ export const useComposerController = (
     : detachedDraft;
   const attachments = input.activeSessionId
     ? (attachmentDrafts[input.activeSessionId] ?? [])
-    : [];
+    : detachedAttachments;
   const queue = input.activeSessionId
     ? (queueBySessionId[input.activeSessionId] ?? [])
     : [];
@@ -482,6 +484,9 @@ export const useComposerController = (
     : detachedModelId;
   const supportsTurnConfiguration = Boolean(
     input.engineSurface?.sharedCapabilities.includes("turnConfiguration")
+  );
+  const supportsDraftAttachments = Boolean(
+    input.engineSurface?.sharedCapabilities.includes("attachments")
   );
   const models = useMemo<EngineModelRpc[]>(() => {
     if (!supportsTurnConfiguration || !modelCatalog) {
@@ -571,6 +576,7 @@ export const useComposerController = (
     return () => {
       mountedRef.current = false;
       selectedSkillsRef.current = [];
+      releaseComposerAttachments(detachedAttachmentsRef.current);
       for (const draftAttachments of Object.values(attachmentDraftsRef.current)) {
         releaseComposerAttachments(draftAttachments);
       }
@@ -633,7 +639,7 @@ export const useComposerController = (
     if (!input.activeSessionId) {
       setCapabilities({
         supportsSteer: false,
-        supportsAttachments: false,
+        supportsAttachments: supportsDraftAttachments,
         slashSuggestions: []
       });
       return;
@@ -663,7 +669,7 @@ export const useComposerController = (
     return () => {
       cancelled = true;
     };
-  }, [input.activeSessionId, input.onStatusNotice, input.transport]);
+  }, [input.activeSessionId, input.onStatusNotice, input.transport, supportsDraftAttachments]);
 
   useEffect(() => {
     let cancelled = false;
@@ -794,7 +800,7 @@ export const useComposerController = (
   const getAttachmentsForSession = (
     sessionId = input.activeSessionId
   ): ComposerAttachment[] =>
-    sessionId ? (attachmentDraftsRef.current[sessionId] ?? []) : [];
+    sessionId ? (attachmentDraftsRef.current[sessionId] ?? []) : detachedAttachmentsRef.current;
 
   const replaceAttachmentsForSession = (
     sessionId: string | undefined,
@@ -803,12 +809,14 @@ export const useComposerController = (
       releaseCurrent?: boolean;
     } = {}
   ): void => {
-    if (!sessionId) {
-      return;
-    }
     const currentAttachments = getAttachmentsForSession(sessionId);
     if (options.releaseCurrent ?? true) {
       releaseComposerAttachments(currentAttachments);
+    }
+    if (!sessionId) {
+      detachedAttachmentsRef.current = nextAttachments;
+      setDetachedAttachments(nextAttachments);
+      return;
     }
     const nextDrafts = writeComposerAttachmentDraft(
       attachmentDraftsRef.current,
@@ -1221,7 +1229,7 @@ export const useComposerController = (
     origin: "picker" | "drop" | "paste"
   ): Promise<void> => {
     const targetSessionId = input.activeSessionId;
-    if (!targetSessionId || input.isOpeningSelectedSession || isDispatching) {
+    if (input.isOpeningSelectedSession || isDispatching) {
       return;
     }
     if (!capabilities.supportsAttachments) {
@@ -1348,9 +1356,6 @@ export const useComposerController = (
   };
 
   const onRemoveAttachment = (attachmentId: string): void => {
-    if (!input.activeSessionId) {
-      return;
-    }
     const currentAttachments = getAttachmentsForSession();
     const removed = currentAttachments.find(
       (attachment) => attachment.attachment.attachmentId === attachmentId

@@ -355,9 +355,10 @@ export const ComposerPanel = ({
               variant="ghost"
               size="sm"
               className="awb-composer__attachment-remove"
+              aria-label={`Remove ${attachment.displayName}`}
               onClick={() => onRemoveAttachment(attachment.attachment.attachmentId)}
             >
-              Remove
+              ×
             </Button>
           </article>
         ))}
@@ -442,6 +443,16 @@ export const ComposerPanel = ({
         ) : null}
       </div>
       <div className="awb-composer__right-rail">
+        {supportsAttachments ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onPickAttachments}
+            disabled={isDispatching}
+          >
+            Attach files
+          </Button>
+        ) : null}
         {isExecutionLoading || models.length > 0 || extraExecutionControls ? (
           <div className="awb-composer-execution" aria-label="Turn configuration">
             {extraExecutionControls}

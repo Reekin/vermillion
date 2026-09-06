@@ -676,26 +676,13 @@ export const SessionPane = ({
   const displayedSessionRevision = useRendererSessionRevision(store, sessionId);
   const domain = store.getDomainReadModel();
   const displayedSession = sessionId ? domain.getSession(sessionId) : undefined;
-  // The composer binds to the session only once the store has activated it.
-  const activeSessionId =
-    sessionId !== undefined && state.activeSessionId === sessionId ? sessionId : undefined;
-  const activeSession = activeSessionId ? displayedSession : undefined;
   const activeSessionWindow = sessionId ? sessionWindows[sessionId] : undefined;
   const loadingOlderTurns = Boolean(sessionId) && loadingOlderSessionId === sessionId;
   const displayedEngineId = displayedSession?.engineId ?? selectedEngineId;
-  const activeThreadGoal = activeSessionId
-    ? domain.getThreadGoal(activeSessionId)
-    : undefined;
   const skillsCwd =
     typeof displayedSession?.metadata?.cwd === "string"
       ? displayedSession.metadata.cwd
       : undefined;
-
-  useRendererDiagnostics({
-    transport,
-    activeSessionId,
-    eventCursor: state.eventStream.lastCursor
-  });
 
   const displayedConversationId = displayedSession?.conversationId;
   const displayedConversationRevision = useRendererConversationRevision(
@@ -747,6 +734,7 @@ export const SessionPane = ({
   };
 
   const {
+    activatedSessionId,
     reloadSessionWindow,
     refreshDisplayedSessionWindow,
     onLoadOlder,
@@ -766,6 +754,19 @@ export const SessionPane = ({
     viewport,
     onResetSessionSwitchState: resetSessionSwitchState,
     onStatusNotice: setStatusNotice
+  });
+
+  // Each pane binds to the session activated by its own open controller.
+  const activeSessionId = sessionId === activatedSessionId ? sessionId : undefined;
+  const activeSession = activeSessionId ? displayedSession : undefined;
+  const activeThreadGoal = activeSessionId
+    ? domain.getThreadGoal(activeSessionId)
+    : undefined;
+
+  useRendererDiagnostics({
+    transport,
+    activeSessionId,
+    eventCursor: state.eventStream.lastCursor
   });
 
   useEffect(() => {

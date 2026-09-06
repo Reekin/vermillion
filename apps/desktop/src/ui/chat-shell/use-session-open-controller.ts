@@ -1,6 +1,7 @@
 import {
   useEffect,
   useRef,
+  useState,
   type Dispatch,
   type SetStateAction
 } from "react";
@@ -63,6 +64,7 @@ export const useSessionOpenController = (input: {
   onResetSessionSwitchState: () => void;
   onStatusNotice: StatusNoticeSetter;
 }): {
+  activatedSessionId?: string;
   reloadSessionWindow: (
     sessionId: string,
     options?: SessionWindowHydrationOptions
@@ -74,6 +76,7 @@ export const useSessionOpenController = (input: {
   onLoadOlder: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
 } => {
+  const [activatedSessionId, setActivatedSessionId] = useState<string>();
   const openSessionRequestIdRef = useRef(0);
   const backgroundRefreshRequestIdRef = useRef(0);
   const manualSessionOpenTokenRef = useRef(0);
@@ -105,6 +108,7 @@ export const useSessionOpenController = (input: {
       type: "store/setActiveSession",
       sessionId
     });
+    setActivatedSessionId(sessionId);
     return true;
   };
 
@@ -191,6 +195,7 @@ export const useSessionOpenController = (input: {
   ]);
 
   return {
+    activatedSessionId,
     reloadSessionWindow: async (
       sessionId: string,
       options: SessionWindowHydrationOptions = {}
