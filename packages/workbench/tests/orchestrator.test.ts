@@ -427,6 +427,27 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     complete(steward.sessionId, "done");
   });
 
+  it("delivers a free decision answer and the adjustments made while parked to the resuming worker", async () => {
+    const { service, ws, sessions, complete } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Op", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
+    await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
+    const worker = sessions.find((s) => s.metadata.role === "worker")!;
+    const card = await service.createDecision(ws.workspaceId, { question: "A or B?", context: "", options: [{ key: "a", label: "A" }], workItemId: item.workItemId, sessionId: worker.sessionId });
+    complete(worker.sessionId, "asked");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.note === "等待决策"));
+    // steward adjusts the parked item: nothing is steered, the card gets the note
+    await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v2", note: "范围收窄到 A" });
+    await tick();
+    expect(worker.messages.some((m) => m.includes("工单已调整"))).toBe(false);
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("decision");
+    // free answer: note only; the same worker session gets the note plus the adjustment as its next message
+    const messageCount = worker.messages.length;
+    await service.answerDecision(ws.workspaceId, card.decisionId, { note: "做 A，但别碰配置文件" });
+    await until(async () => worker.messages.length === messageCount + 1);
+    expect(worker.messages.at(-1)).toContain("用户决策答复：A or B? -> 备注：做 A，但别碰配置文件；挂起期间工单调整：范围收窄到 A");
+    expect(sessions.filter((s) => s.metadata.role === "worker")).toHaveLength(1);
+  });
+
   it("steers the running worker on a contract change and voids a submit from the turn the change landed in", async () => {
     const { service, ws, sessions, complete } = await setup();
     const item = await service.createWorkItem(ws.workspaceId, { title: "Op", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });

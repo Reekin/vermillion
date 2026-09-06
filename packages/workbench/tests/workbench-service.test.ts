@@ -228,4 +228,40 @@ describe("WorkbenchService", () => {
     expect(resumed.decisions).toEqual(["A or B? -> A (keep it simple)"]);
     expect(events.filter((e) => e.type === "decisions.changed")).toHaveLength(2);
   });
+
+  it("accepts a free answer (note only) and rejects an empty one", async () => {
+    const { service, ws } = await setup();
+    const mission = await seedMission(service, ws.workspaceId);
+    const created = await service.createWorkItem(ws.workspaceId, baseWorkItem(mission.missionId));
+    await service.startWorkItem(ws.workspaceId, created.workItemId, { sessionId: "s1" });
+    const card = await service.createDecision(ws.workspaceId, { question: "A or B?", context: "", options: [{ key: "a", label: "A" }], workItemId: created.workItemId });
+    await expect(service.answerDecision(ws.workspaceId, card.decisionId, { note: "  " })).rejects.toThrow(/option key or a note/);
+    await expect(service.answerDecision(ws.workspaceId, card.decisionId, { key: "zzz" })).rejects.toThrow(/Unknown option/);
+    const answered = await service.answerDecision(ws.workspaceId, card.decisionId, { note: "先做 A 的一半，B 不要" });
+    expect(answered.answer?.key).toBeUndefined();
+    const resumed = await service.getWorkItem(ws.workspaceId, created.workItemId);
+    expect(resumed.status).toBe("queued");
+    expect(resumed.decisions).toEqual(["A or B? -> 备注：先做 A 的一半，B 不要"]);
+    expect((await service.listInbox()).length).toBe(0);
+  });
+
+  it("appends contract adjustments to the unanswered card of a parked item and delivers them with the answer", async () => {
+    const { service, ws, events } = await setup();
+    const mission = await seedMission(service, ws.workspaceId);
+    const created = await service.createWorkItem(ws.workspaceId, baseWorkItem(mission.missionId));
+    await service.startWorkItem(ws.workspaceId, created.workItemId, { sessionId: "s1" });
+    const card = await service.createDecision(ws.workspaceId, { question: "A or B?", context: "", options: [{ key: "a", label: "A" }], workItemId: created.workItemId });
+    const before = events.length;
+    const updated = await service.updateWorkItem(ws.workspaceId, created.workItemId, { objective: "v2", note: "范围收窄到 A" });
+    expect(updated.status).toBe("decision"); // still waiting for the answer
+    expect(events.slice(before).map((e) => e.type)).toEqual(["workItems.changed", "decisions.changed"]);
+    expect(events.slice(before).some((e) => e.type === "workItem.updated")).toBe(false); // no worker to steer while parked
+    const parked = (await service.listDecisions(ws.workspaceId)).find((c) => c.decisionId === card.decisionId)!;
+    expect(parked.adjustments?.map((a) => a.note)).toEqual(["范围收窄到 A"]);
+    expect(parked.answer).toBeUndefined();
+    await service.answerDecision(ws.workspaceId, card.decisionId, { key: "a", note: "ok" });
+    const resumed = await service.getWorkItem(ws.workspaceId, created.workItemId);
+    expect(resumed.status).toBe("queued");
+    expect(resumed.decisions).toEqual(["A or B? -> A (ok)；挂起期间工单调整：范围收窄到 A"]); // recorded once, inside the answer
+  });
 });

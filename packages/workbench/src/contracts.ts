@@ -155,7 +155,10 @@ export const zDecisionCard = z.object({
   recommended: z.string().optional(),
   /** Why the recommended option. */
   recommendation: z.string().optional(),
-  answer: z.object({ key: z.string(), note: z.string().optional(), at: z.string() }).optional(),
+  /** Contract changes (workItem.update notes) that landed while the card was unanswered; shown after the context and delivered with the answer. */
+  adjustments: z.array(z.object({ note: z.string(), at: z.string() })).optional(),
+  /** key is absent for a free answer: the user wrote a note without picking an option. */
+  answer: z.object({ key: z.string().optional(), note: z.string().optional(), at: z.string() }).optional(),
   createdAt: z.string()
 });
 export type DecisionCard = z.infer<typeof zDecisionCard>;
