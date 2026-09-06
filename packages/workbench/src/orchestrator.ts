@@ -125,25 +125,28 @@ export class Orchestrator {
     const revision = latestRevision(mission);
     const previous = mission.revisions.length > 1 ? mission.revisions[mission.revisions.length - 2]!.commit : undefined;
     const root = await this.service.workspaceRoot(workspaceId);
-    const diff = previous
-      ? await git(root, ["diff", "--no-color", previous, revision.commit, "--", DOCS_DIR]).catch(() => "")
-      : await git(root, ["show", "--no-color", "--format=", revision.commit, "--", DOCS_DIR]).catch(() => "");
+    // Range is fixed here so the steward cannot diff the wrong pair; the full diff is left for it to pull on demand.
+    const range = previous ? previous + " " + revision.commit : revision.commit;
+    const diffCommand = previous ? "git diff " + range + " -- " + DOCS_DIR : "git show --format= " + revision.commit + " -- " + DOCS_DIR;
+    const stat = (previous
+      ? await git(root, ["diff", "--stat", previous, revision.commit, "--", DOCS_DIR]).catch(() => "")
+      : await git(root, ["show", "--stat", "--format=", revision.commit, "--", DOCS_DIR]).catch(() => "")).trim();
     const items = await this.service.listWorkItems(workspaceId, mission.missionId);
     const existing = items.length === 0 ? "（还没有工单）" : items.map((i) => "- " + i.workItemId + " [" + i.status + "] " + i.title + (i.refs.length ? " @ " + i.refs.map((r) => r.commit.slice(0, 8)).join(",") : "")).join("\n");
     const message = [
       "任务「" + mission.title + "」" + (previous ? "有了新的 revision" : "刚创建，这是首个 revision") + "。",
       "workspaceId: " + workspaceId,
       "missionId: " + mission.missionId,
+      ...(mission.summary.trim() ? ["任务摘要: " + mission.summary.trim()] : []),
       "revision: " + revision.commit + (revision.message ? "（变更说明：" + revision.message + "）" : ""),
       "涉及文件: " + revision.paths.join(", "),
+      ...(stat ? ["", stat] : []),
       "",
       "现有工单：",
       existing,
       "",
-      "本次 revision 的 diff：",
-      "----- diff begin -----",
-      diff.trim() || "(空)",
-      "----- diff end -----",
+      "完整 diff 用这条命令看：" + diffCommand,
+      previous ? "读某个文件在本 revision 的内容：git show " + revision.commit + ":<path>" : "这是首次入库：文档里的内容不一定都是新需求，以变更说明和任务摘要为准判断哪些要开单，其余先核对项目现状。",
       "",
       "请按你的规则处理：新建、调整或取消工单。用 CLI 完成所有写入；最后回复一行摘要说明做了什么。"
     ].join("\n");

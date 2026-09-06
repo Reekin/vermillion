@@ -73,7 +73,9 @@ describe("Orchestrator", { timeout: 20000 }, () => {
     await until(async () => sessions.some((s) => s.metadata.role === "steward" && s.messages.length > 0));
     const steward = sessions.find((s) => s.metadata.role === "steward")!;
     expect(steward.messages[0]).toContain("missionId: " + mission.missionId);
-    expect(steward.messages[0]).toContain("+- login");
+    expect(steward.messages[0]).toContain("spec.md |");
+    expect(steward.messages[0]).toContain("git show --format= " + mission.revisions[0]!.commit);
+    expect(steward.messages[0]).not.toContain("+- login");
 
     // steward creates a work item via the service (as the CLI would), then its turn ends
     const item = await service.createWorkItem(ws.workspaceId, {
