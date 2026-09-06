@@ -11,7 +11,7 @@
 - `packages/shared` / `core` / `adapters` / `apps/desktop-server`：会话引擎（codex app-server 适配、会话/turn 投影、会话浏览查询）。标识符前缀 `Session*`。
 - `packages/workbench`：工作台领域（Workspace / Doc / Mission / WorkItem / DecisionCard / Inbox）。标识符前缀 `Workbench*`。renderer 只能引用 `@vermillion/workbench/client`。
 - `apps/desktop/src/ui/chat-shell`：`SessionPane`（transcript + composer + 会话打开/切换/审批），props 只有 `store / transport / sessionId / createSession / composerExtras`。它不拥有侧栏和右栏。
-- `apps/desktop/src/ui/app`：应用壳。侧栏（会话分页查询）、Docs 树、Inbox、Workspaces、workspace 选择都在这里。
+- `apps/desktop/src/ui/app`：应用壳。侧栏（会话分页查询）、Docs 树、Inbox、Workspaces、workspace 选择都在这里。思考页只列用户自己的会话（`sessionBrowser.list` 的 `kind: "user"`，即会话 metadata 没有 `role`）；管家/Worker/Supervisor 会话在 Workspaces → 会话 分页里用同一个 `SessionPane` 阅读，Inbox 和任务看板的"会话"链接通过 store 的 `showAgentSession` 跳到那里。
 - 界面开发从 `apps/desktop/src/ui/app/components/ui.tsx`（组件入口）和 `app.css` 的 `@theme`（变量）开始，规则见 `.vermillion/docs/Foundation/UIUX/Standards.md`。`pnpm --filter @vermillion/desktop lint:ui` 拦硬编码颜色/任意字号/`awb-*`/裸表单控件；会话区 `ui/chat-shell` 保留 `awb-*`，turn 扩展块用 `app.css` 的 `vm-*`。
 
 ## 状态与事件

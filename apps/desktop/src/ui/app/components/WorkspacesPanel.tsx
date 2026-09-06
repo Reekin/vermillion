@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { latestRevision, type AgentRun, type DecisionCard, type Mission, type RoleFile, type Scheduler, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { RendererStore } from "../../../store/store.js";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
-import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
+import { SessionPane, formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { useSessionSidebar, type SidebarSession } from "../use-session-sidebar.js";
 import { cn } from "../lib/cn.js";
@@ -14,8 +14,6 @@ type WorkspacesPanelProps = {
   transport: DesktopTransport;
   sessionStore: RendererStore;
   pickDirectory: () => Promise<string | undefined>;
-  /** Opens a session in the think page (used to look into agent runs). */
-  onOpenSession: (sessionId: string, workspaceId?: string) => void;
   /** Overlay = quick look: the task board lists only active missions and open standalone items. */
   compact: boolean;
 };
@@ -35,14 +33,22 @@ const sections: Array<{ id: Section; label: string }> = [
 /** Domain definitions are plain docs under this folder; the steward reads them all when attaching standards to a work item. */
 const DOMAINS_DIR = ".vermillion/docs/domains/";
 
-export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory, onOpenSession, compact }: WorkspacesPanelProps) => {
+export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory, compact }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
+  const agentSessionId = store((s) => s.agentSessionId);
+  const showAgentSession = store((s) => s.showAgentSession);
   const workspaces = store((s) => s.workspaces);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
   const view = store((s) => s.view);
   const selectWorkspace = store((s) => s.browseWorkspace);
   const openEditor = store((s) => s.openEditor);
   const [section, setSection] = useState<Section>("missions");
+  // A "会话" link elsewhere lands here on the 会话 tab.
+  const [seenAgentSessionId, setSeenAgentSessionId] = useState(agentSessionId);
+  if (agentSessionId !== seenAgentSessionId) {
+    setSeenAgentSessionId(agentSessionId);
+    if (agentSessionId) setSection("sessions");
+  }
   const [error, setError] = useState<string | undefined>();
 
   const add = async () => {
@@ -106,9 +112,9 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
             </nav>
             <div className="min-h-0 flex-1 overflow-auto">
               {section === "missions" && view && (
-                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => onOpenSession(id, activeWorkspaceId)} compact={compact} />
+                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} />
               )}
-              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} onOpen={(id) => onOpenSession(id, activeWorkspaceId)} />}
+              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={(id) => showAgentSession(activeWorkspaceId, id)} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
                 <DomainsSection client={client} workspaceId={activeWorkspaceId} docs={view?.docs.map((d) => d.path) ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
@@ -133,15 +139,19 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
 
 const agentRoleLabel: Record<string, string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
 
-/** Sessions the workbench started in this workspace (steward / worker / supervisor), newest first, subagents nested. */
-const AgentSessionsSection = ({ transport, sessionStore, workspaceId, onOpen }: { transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; onOpen: (sessionId: string) => void }) => {
+/**
+ * Sessions the workbench started in this workspace (steward / worker / supervisor): a list on the left, the selected
+ * session's transcript and composer on the right. Same reading surface as Think, scoped to agents.
+ */
+const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, onSelect }: { transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; selected: string | undefined; onSelect: (sessionId: string) => void }) => {
   const workspaceIds = useMemo(() => [workspaceId], [workspaceId]);
   const { sessions, hasMore, loading, loadMore } = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "agent" });
   const renderRow = (session: SidebarSession, depth = 0) => (
     <li key={session.sessionId}>
       <ListRow
         depth={depth}
-        onClick={() => onOpen(session.sessionId)}
+        selected={selected === session.sessionId}
+        onClick={() => onSelect(session.sessionId)}
         leading={
           <>
             {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
@@ -155,12 +165,26 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, onOpen }: 
       {session.subagents.length > 0 && <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>}
     </li>
   );
-  if (sessions.length === 0 && !loading) return <EmptyState title="还没有 agent 会话" hint="管家、Worker 和 Supervisor 的会话会出现在这里。" />;
   return (
-    <ul className="py-1">
-      {sessions.map((session) => renderRow(session))}
-      {hasMore && <li className="px-3 py-2"><Button size="sm" variant="ghost" className="w-full" disabled={loading} onClick={() => void loadMore()}>{loading ? "加载中…" : "加载更多"}</Button></li>}
-    </ul>
+    <div className="flex h-full">
+      <aside className="flex w-[320px] shrink-0 flex-col border-r border-border">
+        {sessions.length === 0 && !loading ? (
+          <EmptyState title="还没有 agent 会话" hint="管家、Worker 和 Supervisor 的会话会出现在这里。" />
+        ) : (
+          <ul className="min-h-0 flex-1 overflow-auto py-1">
+            {sessions.map((session) => renderRow(session))}
+            {hasMore && <li className="px-3 py-2"><Button size="sm" variant="ghost" className="w-full" disabled={loading} onClick={() => void loadMore()}>{loading ? "加载中…" : "加载更多"}</Button></li>}
+          </ul>
+        )}
+      </aside>
+      <main className="relative min-w-0 flex-1">
+        {selected ? (
+          <SessionPane store={sessionStore} transport={transport} sessionId={selected} createSession={async () => { throw new Error("Agent sessions are started by the workbench."); }} />
+        ) : (
+          <EmptyState title="选择一个会话" hint="左侧是这个 workspace 里 agent 的会话。" />
+        )}
+      </main>
+    </div>
   );
 };
 

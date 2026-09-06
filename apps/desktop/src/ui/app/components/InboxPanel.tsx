@@ -4,9 +4,9 @@ import type { InboxItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { Badge, Button, Card, EmptyState, Field } from "./ui.js";
 
-type InboxPanelProps = { store: WorkbenchStore; onOpenSession: (sessionId: string) => void };
+type InboxPanelProps = { store: WorkbenchStore };
 
-export const InboxPanel = ({ store, onOpenSession }: InboxPanelProps) => {
+export const InboxPanel = ({ store }: InboxPanelProps) => {
   const inbox = store((s) => s.inbox);
   const inboxError = store((s) => s.inboxError);
   if (inboxError) {
@@ -19,15 +19,16 @@ export const InboxPanel = ({ store, onOpenSession }: InboxPanelProps) => {
     <ul className="space-y-3 p-4">
       {inbox.map((item) => (
         <li key={item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId}>
-          {item.kind === "decision" ? <DecisionCard store={store} item={item} onOpenSession={onOpenSession} /> : <ReviewCard store={store} item={item} />}
+          {item.kind === "decision" ? <DecisionCard store={store} item={item} /> : <ReviewCard store={store} item={item} />}
         </li>
       ))}
     </ul>
   );
 };
 
-const DecisionCard = ({ store, item, onOpenSession }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "decision" }>; onOpenSession: (sessionId: string) => void }) => {
+const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "decision" }> }) => {
   const client = store((s) => s.client);
+  const showAgentSession = store((s) => s.showAgentSession);
   const [busy, setBusy] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const missionTitle = store((s) => s.view?.workspaceId === item.workspaceId ? s.view.missions.find((m) => m.missionId === item.card.missionId)?.title : undefined);
@@ -46,7 +47,7 @@ const DecisionCard = ({ store, item, onOpenSession }: { store: WorkbenchStore; i
         <>
           <Badge tone="accent">决策</Badge>
           {missionTitle && <span className="truncate text-caption text-muted-foreground">{missionTitle}</span>}
-          {card.sessionId && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onOpenSession(card.sessionId!)}>进入会话</Button>}
+          {card.sessionId && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => showAgentSession(item.workspaceId, card.sessionId!)}>进入会话</Button>}
         </>
       }
     >

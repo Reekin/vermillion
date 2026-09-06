@@ -56,9 +56,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   });
 
   // Docs panel follows the open session's workspace; in draft it follows the picker.
-  // Agent sessions opened from Workspaces are not in the sidebar; ask the catalog for their workspace then.
-  const [openedAgentSession, setOpenedAgentSession] = useState<{ sessionId: string; workspaceId: string } | undefined>();
-  const openSession = sessionId ? (sidebar.findSession(sessionId) ?? (openedAgentSession?.sessionId === sessionId ? openedAgentSession : undefined)) : undefined;
+  const openSession = sessionId ? sidebar.findSession(sessionId) : undefined;
   useEffect(() => {
     browseWorkspace(sessionId ? openSession?.workspaceId : draftWorkspaceId);
   }, [sessionId, openSession?.workspaceId, draftWorkspaceId, browseWorkspace]);
@@ -96,15 +94,6 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     return result.canceled ? undefined : result.rootPath;
   }, [transport]);
 
-  const showSession = useCallback(
-    (id: string, workspaceId?: string) => {
-      setOpenedAgentSession(workspaceId ? { sessionId: id, workspaceId } : undefined);
-      setSessionId(id);
-      setPanel("think"); // also clears any overlay
-    },
-    [setPanel]
-  );
-
   const onFileAction = useCallback(
     async (path: string, action: "open" | "reveal") => {
       await transport.file.runAction({ path, action });
@@ -113,7 +102,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   );
 
   const renderPanel = (target: Panel, compact: boolean) =>
-    target === "inbox" ? <InboxPanel store={store} onOpenSession={showSession} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} onOpenSession={showSession} compact={compact} />;
+    target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} compact={compact} />;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-page-canvas text-foreground">

@@ -39,6 +39,8 @@ export type WorkbenchState = {
   inbox: InboxItem[];
   inboxError: string | undefined;
   editor: EditorTarget | undefined;
+  /** Agent session shown in Workspaces → 会话; set by "会话" links in Inbox and the task board. */
+  agentSessionId: string | undefined;
   /** Last "仅提交" result, shown under the Docs tree until dismissed or the workspace changes. */
   /** Outcome of the last commit dialog action, shown under the Docs tree until dismissed. */
   docCommit: CommitOutcome | undefined;
@@ -50,6 +52,8 @@ export type WorkbenchState = {
   setDraftWorkspace: (workspaceId: string | undefined) => void;
   browseWorkspace: (workspaceId: string | undefined) => void;
   openEditor: (target: EditorTarget | undefined) => void;
+  /** Switches to the Workspaces page, 会话 tab, showing this agent session in its workspace. */
+  showAgentSession: (workspaceId: string, sessionId: string) => void;
   /** Subscribes to workbench events and loads initial state. Returns an unsubscribe. */
   connect: () => () => void;
 };
@@ -117,6 +121,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       inbox: [],
       inboxError: undefined,
       editor: undefined,
+      agentSessionId: undefined,
       docCommit: undefined,
       setDocCommit: (result) => set({ docCommit: result }),
 
@@ -134,6 +139,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),
+      showAgentSession: (workspaceId, sessionId) => {
+        get().browseWorkspace(workspaceId);
+        set({ agentSessionId: sessionId, panel: "workspaces", overlay: undefined });
+      },
 
       connect: () => {
         void loadWorkspaces();
