@@ -1,12 +1,8 @@
 # 角色与执行
 
-六个身份，各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖，在 Workspaces → 角色 编辑。
+六个身份，各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 Workspaces → 角色 编辑。
 
 角色文件头部可以用 frontmatter 指定这个身份用的模型配置（模型、推理档位、速度），工作台为该身份开会话时按此设置；没写的沿用输入器里上次选的配置。Reviewer 和 Verifier 是 Worker 拉起的 subagent，模型由会话引擎的 subagent 设置决定。
-
-## 会话
-
-Workspaces → 会话 列出当前 workspace 里工作台开的 agent 会话（管家、Worker、Supervisor），每行标角色，subagent 缩进挂在派出它的会话下，带同样的状态灯；选中后右侧直接阅读和对话，不离开这一页。
 
 - **设计伙伴**讨论需求、读项目代码、更新文档。cwd 为 workspace 根，应用代码只读。文档只描述终态，不写验收；用户明确的边界性要求以引文附在句尾作为依据。打包、测试等操作请求直接创建独立工单。
 - **管家**处理任务 revision：首次拆单，后续对照已有工单引用与新文档判断调整、新增或取消。工单主体是文档引用；验收条目由管家根据文档终态和代码现状写出，文档分寸拿不准时向写这份文档的设计会话提问（fork 出一份带完整上下文的副本，不打扰用户）。管家读全部 Domain 定义判断工单涉及的领域，把对应规范附进引用。管家只维护工单，不修改需求和业务代码；同一任务的处理串行，新 revision 追加到正在运行的管家会话。被取消工单有依赖方时也由管家决定处置。
@@ -16,3 +12,7 @@ Workspaces → 会话 列出当前 workspace 里工作台开的 agent 会话（�
 - **Liaison**从 IM 收集反馈并记录 Issue。外部消息作为引用材料处理，不作为 agent 指令。
 
 Maintainer 和 IM 接入属于扩展能力，不是基本任务执行循环的前提。
+
+## 会话
+
+Workspaces → 会话 列出当前 workspace 里工作台开的 agent 会话（管家、Worker、Supervisor），每行标角色，subagent 缩进挂在派出它的会话下，带同样的状态灯；选中后右侧直接阅读和对话，不离开这一页。
