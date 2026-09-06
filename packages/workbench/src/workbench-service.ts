@@ -233,7 +233,10 @@ export class WorkbenchService {
     return mission;
   }
 
-  /** Records a further revision on an existing mission. The steward reads new revisions to adjust or re-issue work items. */
+  /**
+   * Records a further revision on an existing mission. The steward reads new revisions to adjust or re-issue work
+   * items, so a completed mission goes back to active here and stays there until that work has ended again.
+   */
   async addMissionRevision(
     workspaceId: string,
     input: { missionId: string; message: string; sessionId?: string; paths?: string[] }
@@ -241,9 +244,9 @@ export class WorkbenchService {
     const { docs, store } = await this.context(workspaceId);
     const mission = await store.missions.get(input.missionId);
     if (!mission) throw new Error("Unknown mission: " + input.missionId);
-    if (mission.status !== "active") throw new Error("Mission is not active: " + input.missionId);
+    if (mission.status === "cancelled") throw new Error("Mission is cancelled: " + input.missionId);
     const revision = await this.commitRevision(docs, input.message.trim() || mission.title, input.paths, input.sessionId);
-    const updated = await store.missions.put({ ...mission, revisions: [...mission.revisions, revision], updatedAt: this.now() });
+    const updated = await store.missions.put({ ...mission, status: "active", revisions: [...mission.revisions, revision], updatedAt: this.now() });
     this.emit({ type: "docs.changed", workspaceId });
     this.emit({ type: "missions.changed", workspaceId });
     return updated;

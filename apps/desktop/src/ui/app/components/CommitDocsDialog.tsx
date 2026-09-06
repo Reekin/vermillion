@@ -9,7 +9,7 @@ type CommitDocsDialogProps = {
   docs: string[];
   /** Docs with local changes; they get committed as part of the revision. */
   pending: DocChange[];
-  /** Active missions the changes may be appended to. */
+  /** Missions the changes may be appended to; a completed one goes back to active when it gets a revision. */
   missions: Mission[];
   /** Mission created from the current session, preselected when present. */
   defaultMissionId?: string;
@@ -40,9 +40,9 @@ const inferTitle = (paths: string[]): string => {
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
 
 export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, onClose, onCreate, onAppend, onCommit }: CommitDocsDialogProps) => {
-  const active = missions.filter((m) => m.status === "active");
-  const [mode, setMode] = useState<"create" | "append" | "commit">(defaultMissionId && active.some((m) => m.missionId === defaultMissionId) ? "append" : "create");
-  const [missionId, setMissionId] = useState(defaultMissionId ?? active[0]?.missionId ?? "");
+  const appendable = missions.filter((m) => m.status !== "cancelled");
+  const [mode, setMode] = useState<"create" | "append" | "commit">(defaultMissionId && appendable.some((m) => m.missionId === defaultMissionId) ? "append" : "create");
+  const [missionId, setMissionId] = useState(defaultMissionId ?? appendable[0]?.missionId ?? "");
   const changeByPath = useMemo(() => new Map(pending.map((c) => [c.path, c])), [pending]);
   // "仅提交" only makes sense for pending changes; missions may also reference docs that are already committed.
   const listed = useMemo(() => (mode === "commit" ? pending.map((c) => c.path) : [...new Set([...pending.map((c) => c.path), ...docs])].sort()), [mode, pending, docs]);
@@ -89,7 +89,7 @@ export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, on
         <div className="flex gap-1 rounded-lg border border-border p-0.5" role="radiogroup" aria-label="提交方式">
           {[
             { id: "create" as const, label: "新任务" },
-            { id: "append" as const, label: "补充到现有任务", disabled: active.length === 0 },
+            { id: "append" as const, label: "补充到现有任务", disabled: appendable.length === 0 },
             { id: "commit" as const, label: "仅提交", disabled: pending.length === 0 }
           ].map((option) => (
             <button
@@ -118,8 +118,8 @@ export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, on
           <>
             {mode === "append" && (
             <Field kind="select" label="任务" value={missionId} onChange={(event) => setMissionId(event.target.value)} className="mt-4">
-              {active.map((m) => (
-                <option key={m.missionId} value={m.missionId}>{m.title}</option>
+              {appendable.map((m) => (
+                <option key={m.missionId} value={m.missionId}>{m.title}{m.status === "done" ? "（已完成）" : ""}</option>
               ))}
             </Field>
             )}

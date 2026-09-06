@@ -171,7 +171,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
           docs={docs.map((doc) => doc.path)}
           pending={pending}
           missions={missions}
-          defaultMissionId={activeSessionId ? missions.find((m) => m.status === "active" && m.sessionId === activeSessionId)?.missionId : undefined}
+          defaultMissionId={activeSessionId ? missions.find((m) => m.status !== "cancelled" && m.sessionId === activeSessionId)?.missionId : undefined}
           onClose={() => setMissionOpen(false)}
           onCreate={async (input) => {
             const mission = await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
