@@ -472,6 +472,7 @@ export class SessionShellService {
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
+    kind?: "user" | "agent";
   }): Promise<SessionBrowserPageRpc> {
     return this.sessionCatalog.list(input);
   }

@@ -42,7 +42,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
   const workspaceIds = useMemo(() => workspaces.map((w) => w.workspaceId), [workspaces]);
-  const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds });
+  // Think shows only the user's own design sessions; agent sessions live under Workspaces → 会话.
+  const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "user" });
   const workspaceLabelById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w.label])), [workspaces]);
   const workspaceById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w])), [workspaces]);
   const [reloadSignal, setReloadSignal] = useState(0);
@@ -55,7 +56,9 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   });
 
   // Docs panel follows the open session's workspace; in draft it follows the picker.
-  const openSession = sessionId ? sidebar.findSession(sessionId) : undefined;
+  // Agent sessions opened from Workspaces are not in the sidebar; ask the catalog for their workspace then.
+  const [openedAgentSession, setOpenedAgentSession] = useState<{ sessionId: string; workspaceId: string } | undefined>();
+  const openSession = sessionId ? (sidebar.findSession(sessionId) ?? (openedAgentSession?.sessionId === sessionId ? openedAgentSession : undefined)) : undefined;
   useEffect(() => {
     browseWorkspace(sessionId ? openSession?.workspaceId : draftWorkspaceId);
   }, [sessionId, openSession?.workspaceId, draftWorkspaceId, browseWorkspace]);
@@ -94,7 +97,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   }, [transport]);
 
   const showSession = useCallback(
-    (id: string) => {
+    (id: string, workspaceId?: string) => {
+      setOpenedAgentSession(workspaceId ? { sessionId: id, workspaceId } : undefined);
       setSessionId(id);
       setPanel("think"); // also clears any overlay
     },
@@ -109,7 +113,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   );
 
   const renderPanel = (target: Panel, compact: boolean) =>
-    target === "inbox" ? <InboxPanel store={store} onOpenSession={showSession} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} onOpenSession={showSession} compact={compact} />;
+    target === "inbox" ? <InboxPanel store={store} onOpenSession={showSession} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} onOpenSession={showSession} compact={compact} />;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-page-canvas text-foreground">

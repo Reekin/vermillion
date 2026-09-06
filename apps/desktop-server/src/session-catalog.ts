@@ -113,6 +113,7 @@ export class SessionCatalogService {
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
+    kind?: "user" | "agent";
   }): Promise<SessionBrowserPageRpc> {
     return (await this.getReadModel()).list(input);
   }
@@ -241,6 +242,7 @@ export class SessionCatalogService {
                 : "none",
         isActive: registryState.lastActiveSessionId === seed.sessionId,
         isPinned: registryState.pinnedSessionIds.includes(seed.sessionId),
+        role: typeof seed.metadata?.role === "string" ? seed.metadata.role : undefined,
         activityAt,
         lastCompletedTurnAt: seed.lastCompletedTurnAt,
         sortAt: activityAt

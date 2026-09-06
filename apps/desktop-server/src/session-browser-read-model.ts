@@ -115,6 +115,7 @@ export class SessionBrowserReadModel {
           seed.statusDot,
           seed.isActive,
           seed.isPinned,
+          seed.role,
           seed.activityAt,
           seed.lastCompletedTurnAt,
           seed.sortAt
@@ -128,6 +129,7 @@ export class SessionBrowserReadModel {
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
+    kind?: "user" | "agent";
   }): SessionBrowserPageRpc {
     const revision = this.revisionFor(input.workspaceId);
     if (input.expectedRevision && input.expectedRevision !== revision) {
@@ -139,7 +141,8 @@ export class SessionBrowserReadModel {
       throw new SessionBrowserCursorStaleError();
     }
     const offset = cursor?.offset ?? 0;
-    const roots = this.rootsByWorkspaceId.get(input.workspaceId) ?? [];
+    const all = this.rootsByWorkspaceId.get(input.workspaceId) ?? [];
+    const roots = input.kind ? all.filter((item) => (item.role === undefined) === (input.kind === "user")) : all;
     const items = roots.slice(offset, offset + limit);
     const nextOffset = offset + items.length;
     const hasMore = nextOffset < roots.length;

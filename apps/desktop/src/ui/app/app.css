@@ -31,6 +31,7 @@
 
 @theme {
   --tracking-eyebrow: 0.12em;
+  --shadow-halo: 0 0 0 3px var(--awb-accent-soft);
   --text-micro: 0.7rem;
   --text-micro--line-height: 1;
   --text-caption: 0.76rem;

@@ -142,6 +142,8 @@ export type SessionBrowserItemRpc = {
   isPinned: boolean;
   activityAt?: string;
   lastCompletedTurnAt?: string;
+  /** Workbench agent role (steward / worker / supervisor) from session metadata; absent for the user's own design sessions. */
+  role?: string;
   /** Set when this session was spawned as a subagent of another session; such items are nested under it. */
   parentSessionId?: string;
   subagents: SessionBrowserItemRpc[];
@@ -174,6 +176,7 @@ const zSessionBrowserItemSchema: z.ZodType<
     isPinned: z.boolean(),
     activityAt: z.string().min(1).optional(),
     lastCompletedTurnAt: z.string().min(1).optional(),
+    role: z.string().min(1).optional(),
     parentSessionId: zSessionId.optional(),
     subagents: z.array(zSessionBrowserItemSchema).default([])
   })
@@ -591,7 +594,9 @@ const zSessionBrowserListRequestSchema = z.object({
     workspaceId: z.string().min(1),
     cursor: z.string().min(1).optional(),
     expectedRevision: z.string().min(1).optional(),
-    limit: z.number().int().positive().max(100).default(20)
+    limit: z.number().int().positive().max(100).default(20),
+    /** "user" = sessions the user opened themselves (no agent role); "agent" = steward/worker/supervisor sessions. */
+    kind: z.enum(["user", "agent"]).optional()
   })
 });
 

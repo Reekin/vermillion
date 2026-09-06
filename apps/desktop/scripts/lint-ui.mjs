@@ -26,7 +26,7 @@ const rules = [
   {
     id: "arbitrary-style",
     message: "arbitrary Tailwind value for color/size/font; use the scale (text-caption, rounded-md, tracking-eyebrow, ...)",
-    test: (line) => /\b(text|bg|border|rounded|font|leading|tracking)-\[/.test(stripTokens(line))
+    test: (line) => /\b(text|bg|border|rounded|font|leading|tracking|shadow)-\[/.test(stripTokens(line))
   },
   {
     // Opt out with data-ui-raw="reason" on the element (full-height editors, search boxes inside popovers).

@@ -5,7 +5,7 @@
  * primitives own layout, states and typography. See .vermillion/docs/Foundation/UIUX/Standards.md.
  *
  * Buttons       Button, IconButton
- * Text          Badge, SectionLabel, InlineNotice
+ * Text          Badge, SectionLabel, InlineNotice, StatusDot
  * Fields        Field (input / textarea / select / number)
  * Structure     PanelHeader, ListRow, Card, EmptyState
  * Overlays      Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
@@ -85,6 +85,23 @@ export const InlineNotice = ({ children, tone = "muted", className }: { children
     {children}
   </p>
 );
+
+/**
+ * Session activity marker. `running`: a turn is in progress (pulses). `unread_completed`: a turn finished while
+ * the session was not open (solid with halo); it clears once the session is opened. `none` renders nothing.
+ */
+export const StatusDot = ({ status }: { status: "none" | "running" | "unread_completed" }) => {
+  if (status === "none") return null;
+  return (
+    <span
+      aria-label={status === "running" ? "运行中" : "有新回复"}
+      className={cn(
+        "h-1.5 w-1.5 shrink-0 rounded-full bg-accent-strong",
+        status === "running" ? "animate-pulse" : "shadow-halo"
+      )}
+    />
+  );
+};
 
 // ---- Fields ----
 

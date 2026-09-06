@@ -267,6 +267,7 @@ export type DesktopTransport = {
       cursor?: string;
       limit?: number;
       expectedRevision?: string;
+      kind?: "user" | "agent";
     }) => Promise<SessionBrowserPageRpc>;
     repair: (workspaceIds: string[]) => Promise<{
       workspaces: number;

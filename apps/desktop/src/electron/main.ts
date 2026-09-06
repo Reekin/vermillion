@@ -24,7 +24,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, resolveAppCommand, startLocalEndpoint } from "@vermillion/workbench";
+import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, resolveAppCommand, startLocalEndpoint, type InboxItem } from "@vermillion/workbench";
 import { createAgentRunner, createSessionAsk } from "./agent-runner.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
@@ -656,9 +656,10 @@ const boot = async (): Promise<void> => {
     window.show();
     window.focus();
   };
-  const showAgentCompletionNotification = (sessionTitle: string): void => {
+  /** Desktop notifications only matter when the user is elsewhere; a focused window already shows the change. */
+  const isInBackground = (): boolean => window.isDestroyed() || !window.isFocused();
+  const showDesktopNotification = (body: string): void => {
     const title = "Vermillion";
-    const body = `「${sessionTitle}」会话已完成`;
     if (process.platform === "win32" && appIconPath) {
       if (!completionTray || completionTray.isDestroyed()) {
         completionTray = new Tray(appIconPath);
@@ -697,11 +698,16 @@ const boot = async (): Promise<void> => {
   };
   const completionNotifier = createAgentCompletionNotifier({
     notify: (completed) => {
+      if (!isInBackground()) {
+        return;
+      }
       void service
         .getSessionBrowserItem(completed.sessionId)
         .then((session) => {
-          if (session) {
-            showAgentCompletionNotification(session.title);
+          // Agent sessions (steward / worker / supervisor) finish turns all the time; only the user's own design
+          // sessions are worth a desktop notification. Their outcomes surface through the Inbox instead.
+          if (session && !session.role) {
+            showDesktopNotification(`「${session.title}」会话已完成`);
           }
         })
         .catch((error: unknown) => {
@@ -770,9 +776,21 @@ const boot = async (): Promise<void> => {
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     workbenchRpc(payload as { method: string; params: unknown })
   );
+  const inboxKey = (item: InboxItem): string => (item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId);
+  let knownInbox = new Set((await workbenchService.listInbox()).map(inboxKey));
   const unsubscribeWorkbench = workbenchService.subscribe((event) => {
     if (!window.isDestroyed()) {
       window.webContents.send(WORKBENCH_IPC_EVENT_CHANNEL, event);
+    }
+    if (event.type === "decisions.changed" || event.type === "workItems.changed") {
+      void workbenchService.listInbox().then((items) => {
+        const fresh = items.filter((item) => !knownInbox.has(inboxKey(item)));
+        knownInbox = new Set(items.map(inboxKey));
+        const item = fresh[0];
+        if (item && isInBackground()) {
+          showDesktopNotification(item.kind === "decision" ? `需要你决定：${item.card.question}` : `待验收：${item.workItem.title}`);
+        }
+      });
     }
   });
   const localEndpoint = await startLocalEndpoint(persistenceBaseDir, workbenchRpc);

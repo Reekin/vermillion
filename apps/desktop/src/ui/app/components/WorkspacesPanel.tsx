@@ -1,23 +1,30 @@
-import { Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { CornerDownRight, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { latestRevision, type AgentRun, type DecisionCard, type Mission, type RoleFile, type Scheduler, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
+import type { RendererStore } from "../../../store/store.js";
+import type { DesktopTransport } from "../../../transport/desktop-transport.js";
+import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { WorkbenchStore } from "../workbench-store.js";
+import { useSessionSidebar, type SidebarSession } from "../use-session-sidebar.js";
 import { cn } from "../lib/cn.js";
-import { Badge, Button, Card, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel } from "./ui.js";
+import { Badge, Button, Card, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, StatusDot } from "./ui.js";
 
 type WorkspacesPanelProps = {
   store: WorkbenchStore;
+  transport: DesktopTransport;
+  sessionStore: RendererStore;
   pickDirectory: () => Promise<string | undefined>;
   /** Opens a session in the think page (used to look into agent runs). */
-  onOpenSession: (sessionId: string) => void;
+  onOpenSession: (sessionId: string, workspaceId?: string) => void;
   /** Overlay = quick look: the task board lists only active missions and open standalone items. */
   compact: boolean;
 };
 
 /** Secondary navigation inside a workspace. Sections without a backing feature yet render a placeholder. */
-type Section = "missions" | "domains" | "docs" | "roles" | "issues" | "automation";
+type Section = "missions" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
 const sections: Array<{ id: Section; label: string }> = [
   { id: "missions", label: "任务" },
+  { id: "sessions", label: "会话" },
   { id: "domains", label: "Domain" },
   { id: "docs", label: "Docs" },
   { id: "roles", label: "角色" },
@@ -28,7 +35,7 @@ const sections: Array<{ id: Section; label: string }> = [
 /** Domain definitions are plain docs under this folder; the steward reads them all when attaching standards to a work item. */
 const DOMAINS_DIR = ".vermillion/docs/domains/";
 
-export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession, compact }: WorkspacesPanelProps) => {
+export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory, onOpenSession, compact }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
   const workspaces = store((s) => s.workspaces);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
@@ -99,8 +106,9 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession, compact }
             </nav>
             <div className="min-h-0 flex-1 overflow-auto">
               {section === "missions" && view && (
-                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={onOpenSession} compact={compact} />
+                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => onOpenSession(id, activeWorkspaceId)} compact={compact} />
               )}
+              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} onOpen={(id) => onOpenSession(id, activeWorkspaceId)} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
                 <DomainsSection client={client} workspaceId={activeWorkspaceId} docs={view?.docs.map((d) => d.path) ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
@@ -120,6 +128,39 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession, compact }
         )}
       </section>
     </div>
+  );
+};
+
+const agentRoleLabel: Record<string, string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
+
+/** Sessions the workbench started in this workspace (steward / worker / supervisor), newest first, subagents nested. */
+const AgentSessionsSection = ({ transport, sessionStore, workspaceId, onOpen }: { transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; onOpen: (sessionId: string) => void }) => {
+  const workspaceIds = useMemo(() => [workspaceId], [workspaceId]);
+  const { sessions, hasMore, loading, loadMore } = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "agent" });
+  const renderRow = (session: SidebarSession, depth = 0) => (
+    <li key={session.sessionId}>
+      <ListRow
+        depth={depth}
+        onClick={() => onOpen(session.sessionId)}
+        leading={
+          <>
+            {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
+            <StatusDot status={session.statusDot} />
+            {session.role && <Badge>{agentRoleLabel[session.role] ?? session.role}</Badge>}
+          </>
+        }
+        title={session.role ? session.title.replace(/^[^·]+ · /, "") : session.title}
+        trailing={formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}
+      />
+      {session.subagents.length > 0 && <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>}
+    </li>
+  );
+  if (sessions.length === 0 && !loading) return <EmptyState title="还没有 agent 会话" hint="管家、Worker 和 Supervisor 的会话会出现在这里。" />;
+  return (
+    <ul className="py-1">
+      {sessions.map((session) => renderRow(session))}
+      {hasMore && <li className="px-3 py-2"><Button size="sm" variant="ghost" className="w-full" disabled={loading} onClick={() => void loadMore()}>{loading ? "加载中…" : "加载更多"}</Button></li>}
+    </ul>
   );
 };
 

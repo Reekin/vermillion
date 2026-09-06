@@ -19,8 +19,8 @@ const toSidebar = (page: SessionBrowserPageRpc): SidebarSession[] =>
  * Sidebar query owned by the app: one page per workspace, merged and ordered pinned-first then by last completed turn.
  * "Load more" advances the workspace whose next page is most recent.
  */
-export const useSessionSidebar = (input: { transport: DesktopTransport; store: RendererStore; workspaceIds: string[] }) => {
-  const { transport, store, workspaceIds } = input;
+export const useSessionSidebar = (input: { transport: DesktopTransport; store: RendererStore; workspaceIds: string[]; kind: "user" | "agent" }) => {
+  const { transport, store, workspaceIds, kind } = input;
   const refreshSignal = useRendererStoreState(store).refreshSignals.sessionBrowser;
   const [pages, setPages] = useState<Record<string, WorkspacePage>>({});
   const [loading, setLoading] = useState(false);
@@ -32,7 +32,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     setLoading(true);
     const results = await Promise.all(
       workspaceIds.map(async (workspaceId) => {
-        const page = await transport.sessionBrowser.list({ workspaceId, limit: PAGE });
+        const page = await transport.sessionBrowser.list({ workspaceId, limit: PAGE, kind });
         return [workspaceId, { items: toSidebar(page), nextCursor: page.nextCursor, hasMore: page.hasMore, revision: page.revision }] as const;
       })
     );
@@ -40,7 +40,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     setPages(Object.fromEntries(results));
     setLoading(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transport, idsKey]);
+  }, [transport, idsKey, kind]);
 
   useEffect(() => {
     void loadFirstPages();
@@ -73,7 +73,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     const run = generation.current;
     setLoading(true);
     try {
-      const next = await transport.sessionBrowser.list({ workspaceId, cursor: page.nextCursor, expectedRevision: page.revision, limit: PAGE });
+      const next = await transport.sessionBrowser.list({ workspaceId, cursor: page.nextCursor, expectedRevision: page.revision, limit: PAGE, kind });
       if (run !== generation.current) return;
       setPages((current) => ({
         ...current,

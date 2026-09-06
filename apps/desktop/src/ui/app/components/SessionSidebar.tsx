@@ -5,7 +5,7 @@ import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { cn } from "../lib/cn.js";
-import { Button, IconButton, ListRow, SectionLabel } from "./ui.js";
+import { Button, IconButton, ListRow, SectionLabel, StatusDot } from "./ui.js";
 import { ContextMenu } from "./ContextMenu.js";
 
 type SessionSidebarProps = {
@@ -51,7 +51,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         leading={
           <>
             {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
-            {session.statusDot === "running" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-strong" aria-label="running" />}
+            <StatusDot status={session.statusDot} />
           </>
         }
         title={
