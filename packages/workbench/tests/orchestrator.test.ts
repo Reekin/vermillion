@@ -532,7 +532,8 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     expect(resumed.run.worktreePath).toBe(before.run.worktreePath);
     expect(sessions.filter((s) => s.metadata.workItemId === a.workItemId)).toHaveLength(1);
     await until(async () => workerA.messages.length === 2);
-    expect(workerA.messages[1]).toContain("你等待的工单「B」（" + b.workItemId + "）已关闭合入。退回原因：要用 B 的接口");
+    expect(workerA.messages[1]).toContain("对工单「B」（" + b.workItemId + "）的等待已结束。退回原因：要用 B 的接口");
+    await access(before.run.worktreePath!);
     expect(workerA.messages[1]).toContain("rebase");
     expect(resumed.run.resumeMessage).toBeUndefined();
     expect((await service.listRuns(ws.workspaceId)).filter((r) => r.workItemId === a.workItemId).map((r) => r.status).sort()).toEqual(["done", "running"]);

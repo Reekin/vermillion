@@ -453,7 +453,7 @@ export class WorkbenchService {
         status: "queued",
         dependsOn: item.dependsOn.includes(dependsOn) ? item.dependsOn : [...item.dependsOn, dependsOn],
         decisions: [...item.decisions, "等待工单 " + dependsOn + "：" + note],
-        run: { ...item.run, resumeMessage: "你等待的工单「" + prerequisite.title + "」（" + dependsOn + "）已关闭合入。退回原因：" + note + "。先把本分支 rebase 到主分支当前 HEAD，再接着做。" }
+        run: { ...item.run, resumeMessage: "对工单「" + prerequisite.title + "」（" + dependsOn + "）的等待已结束。退回原因：" + note + "。先用 workItem.get 确认它的最终状态（关闭合入或被管家改掉依赖），把本分支 rebase 到主分支当前 HEAD，再接着做。" }
       };
     });
   }
