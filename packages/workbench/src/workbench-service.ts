@@ -416,9 +416,20 @@ export class WorkbenchService {
     const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
       const status = item.status === "review" ? "queued" : item.status;
-      return { ...item, ...changes, status, decisions: [...item.decisions, "工单调整：" + note] };
+      // While parked the note lives on the decision card and reaches the worker inside the answer line.
+      const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
+      return { ...item, ...changes, status, decisions };
     });
     if (updated.status === "running" && updated.run.sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId, sessionId: updated.run.sessionId, note });
+    // Parked on a decision: the user reads the change on the card before answering; the answer carries it to the worker.
+    if (updated.status === "decision") {
+      const { store } = await this.context(workspaceId);
+      const card = (await store.decisions.list()).find((c) => c.workItemId === workItemId && !c.answer);
+      if (card) {
+        await store.decisions.put({ ...card, adjustments: [...(card.adjustments ?? []), { note, at: this.now() }] });
+        this.emit({ type: "decisions.changed", workspaceId });
+      }
+    }
     return updated;
   }
 
@@ -498,15 +509,20 @@ export class WorkbenchService {
     return card;
   }
 
-  /** Records the answer on the card and on the work item, which goes back to the queue. */
-  async answerDecision(workspaceId: string, decisionId: string, answer: { key: string; note?: string }): Promise<DecisionCard> {
+  /**
+   * Records the answer on the card and on the work item, which goes back to the queue. Either an option key, a free
+   * note, or both; the work item's decision line carries the answer plus any contract adjustments made while parked,
+   * so the worker's resume message has everything in one place.
+   */
+  async answerDecision(workspaceId: string, decisionId: string, answer: { key?: string; note?: string }): Promise<DecisionCard> {
     const { store } = await this.context(workspaceId);
     const card = await store.decisions.get(decisionId);
     if (!card) throw new Error("Unknown decision: " + decisionId);
+    if (!answer.key && !answer.note?.trim()) throw new Error("Answer needs an option key or a note");
+    if (answer.key && !card.options.some((o) => o.key === answer.key)) throw new Error("Unknown option: " + answer.key);
     const answered = await store.decisions.put({ ...card, answer: { ...answer, at: this.now() } });
     if (card.workItemId) {
-      const option = card.options.find((o) => o.key === answer.key);
-      const line = card.question + " -> " + (option?.label ?? answer.key) + (answer.note ? " (" + answer.note + ")" : "");
+      const line = describeAnswer(card, answer);
       if (card.kind === "attempts" && answer.key === "cancel") {
         await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, decisions: [...item.decisions, line] }));
         await this.cancelWorkItem(workspaceId, card.workItemId);
@@ -548,6 +564,15 @@ export class WorkbenchService {
 }
 
 const isLowRisk = (risk: Risk): boolean => risk === "R0" || risk === "R1";
+
+/** "question -> chosen option (note)" or "question -> 备注：note", followed by the contract changes made while the card waited. */
+const describeAnswer = (card: DecisionCard, answer: { key?: string; note?: string }): string => {
+  const option = card.options.find((o) => o.key === answer.key);
+  const note = answer.note?.trim();
+  const chosen = option ? option.label + (note ? " (" + note + ")" : "") : "备注：" + note;
+  const adjustments = (card.adjustments ?? []).map((a) => "；挂起期间工单调整：" + a.note).join("");
+  return card.question + " -> " + chosen + adjustments;
+};
 
 const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { workItemId: string }>["type"] | undefined> = {
   docs: "docs.changed",

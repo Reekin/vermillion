@@ -126,7 +126,8 @@ export const workbenchRpc = {
     }),
     result: zDecisionCard
   },
-  "decision.answer": { params: zWs.extend({ decisionId: z.string().min(1), key: z.string().min(1), note: z.string().optional() }), result: zDecisionCard },
+  /** Pick an option (key), write a free answer (note only), or both. */
+  "decision.answer": { params: zWs.extend({ decisionId: z.string().min(1), key: z.string().min(1).optional(), note: z.string().optional() }), result: zDecisionCard },
 
   "inbox.list": { params: zEmpty, result: z.array(zInboxItem) },
 
