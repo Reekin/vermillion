@@ -302,6 +302,11 @@ export const rendererMetaReducer = (
       return { ...state, activeConversationId: action.conversationId };
     case "store/setActiveSession":
       return { ...state, activeSessionId: action.sessionId };
+    case "store/sessionBrowserChanged":
+      return {
+        ...state,
+        refreshSignals: { ...state.refreshSignals, sessionBrowser: state.refreshSignals.sessionBrowser + 1 }
+      };
     default:
       return state;
   }

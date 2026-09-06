@@ -45,7 +45,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
     <li key={session.sessionId}>
       <ListRow
         depth={depth}
-        selected={selectedSessionId === session.sessionId}
+        selected={selectedSessionId === session.sessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))}
         onClick={() => onOpen(session.sessionId)}
         onContextMenu={(event) => onOpenMenu(event, session.sessionId)}
         leading={

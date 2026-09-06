@@ -50,6 +50,7 @@ export const sessionRpcMethods = [
   "skills.list",
   "chatTree.get",
   "chatTree.jump",
+  "chatTree.prepareSend",
   "delegation.get",
   "worktree.get",
   "checkpoint.get",
@@ -135,6 +136,8 @@ export type ProviderSessionHandle = z.infer<typeof zProviderSessionHandleSchema>
 
 export type SessionBrowserItemRpc = {
   sessionId: string;
+  /** Linear sessions in this fork tree, including its root (`sessionId`); excludes subagents. */
+  memberSessionIds?: string[];
   engineId: string;
   title: string;
   statusDot: z.infer<typeof zSessionStatusDotSchema>;
@@ -169,6 +172,7 @@ const zSessionBrowserItemSchema: z.ZodType<
 > = z.lazy(() =>
   z.object({
     sessionId: zSessionId,
+    memberSessionIds: z.array(zSessionId).optional(),
     engineId: zEngineId,
     title: z.string().min(1),
     statusDot: zSessionStatusDotSchema,
@@ -293,6 +297,10 @@ const zConversationGraphSnapshotSchema = z.object({
 
 const zChatTreeSnapshotSchema = z.object({
   sessionId: zSessionId,
+  treeId: zSessionId.optional(),
+  currentSessionId: zSessionId.optional(),
+  memberSessionIds: z.array(zSessionId).optional(),
+  windows: z.array(z.lazy(() => zSessionWindowSchema)).optional(),
   engineId: zEngineId,
   supportsJump: z.boolean(),
   version: z.number().int().nonnegative().optional(),
@@ -700,6 +708,12 @@ const zChatTreeJumpRequestSchema = z.object({
   })
 });
 
+const zChatTreePrepareSendRequestSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.prepareSend"),
+  params: z.object({ sessionId: zSessionId, nodeId: zTurnId.optional() })
+});
+
 const zDelegationGetRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("delegation.get"),
@@ -884,6 +898,7 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zSkillsListRequestSchema,
   zChatTreeGetRequestSchema,
   zChatTreeJumpRequestSchema,
+  zChatTreePrepareSendRequestSchema,
   zDelegationGetRequestSchema,
   zWorktreeGetRequestSchema,
   zCheckpointGetRequestSchema,
@@ -1127,6 +1142,13 @@ const zChatTreeJumpResponseSchema = z.object({
   })
 });
 
+const zChatTreePrepareSendResponseSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.prepareSend"),
+  ok: z.literal(true),
+  result: z.object({ sessionId: zSessionId })
+});
+
 const zDelegationGetResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("delegation.get"),
@@ -1326,6 +1348,7 @@ export const zSessionRpcResponseSchema = z.union([
   zSkillsListResponseSchema,
   zChatTreeGetResponseSchema,
   zChatTreeJumpResponseSchema,
+  zChatTreePrepareSendResponseSchema,
   zDelegationGetResponseSchema,
   zWorktreeGetResponseSchema,
   zCheckpointGetResponseSchema,

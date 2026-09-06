@@ -148,7 +148,7 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
     <li key={session.sessionId}>
       <ListRow
         depth={depth}
-        selected={selected === session.sessionId}
+        selected={selected === session.sessionId || Boolean(selected && session.memberSessionIds?.includes(selected))}
         onClick={() => onSelect(session.sessionId)}
         leading={
           <>

@@ -1,108 +1,109 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
+import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import {
   statusNoticeErrorDetails,
   type ComposerStatusNotice
 } from "./composer-status.js";
 
-type StatusNoticeSetter = (
-  notice: ComposerStatusNotice | undefined
-) => void;
-
 export const useChatTreeController = (input: {
-  transport?: DesktopTransport;
-  browsedSessionId?: string;
-  displayedSessionId?: string;
-  displayedSessionIdRef: RefObject<string | undefined>;
-  isOpeningSelectedSession: boolean;
+  store: RendererStore;
+  transport: DesktopTransport;
+  sessionId?: string;
   refreshSignal: number;
-  releasedSessionId?: string;
-  onStatusNotice: StatusNoticeSetter;
-  reloadSessionWindow: (
-    sessionId: string,
-    options?: {
-      forceProviderHydration?: boolean;
+  onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
+}) => {
+  const { store, transport, sessionId, onStatusNotice } = input;
+  const [loaded, setLoaded] = useState<{
+    entrySessionId: string;
+    tree: ChatTreeSnapshotRpc;
+  }>();
+  const [failedSessionId, setFailedSessionId] = useState<string>();
+  const sessionIdRef = useRef(sessionId);
+  const requestIdRef = useRef(0);
+  const activatedSessionIdRef = useRef<string | undefined>(undefined);
+  sessionIdRef.current = sessionId;
+
+  const refreshChatTree = useCallback(async (): Promise<void> => {
+    if (!sessionId || sessionIdRef.current !== sessionId) return;
+    const requestId = ++requestIdRef.current;
+    const tree = await transport.chatTree.get(sessionId);
+    if (sessionIdRef.current !== sessionId || requestId !== requestIdRef.current) return;
+    const viewedSessionId = tree.currentSessionId ?? sessionId;
+    if (activatedSessionIdRef.current !== viewedSessionId) {
+      await transport.sessionBrowser.activate(viewedSessionId);
+      if (sessionIdRef.current !== sessionId || requestId !== requestIdRef.current) return;
+      activatedSessionIdRef.current = viewedSessionId;
+      store.dispatch({ type: "store/sessionBrowserChanged" });
     }
-  ) => Promise<void>;
-}): {
-  chatTree: ChatTreeSnapshotRpc | undefined;
-  setChatTree: (next: ChatTreeSnapshotRpc | undefined) => void;
-  onJumpChatTree: (nodeId: string) => Promise<void>;
-} => {
-  const [chatTree, setChatTree] = useState<ChatTreeSnapshotRpc | undefined>();
+    for (const window of tree.windows ?? []) {
+      store.hydrateSessionWindow(window.sessionId, window.snapshot, "replace", window.cursor);
+    }
+    // The shell keeps selecting the tree entry; only this pane changes its viewed member.
+    const entry = store.getDomainReadModel().getSession(sessionId);
+    if (entry) {
+      store.dispatch({ type: "store/setActiveConversation", conversationId: entry.conversationId });
+      store.dispatch({ type: "store/setActiveSession", sessionId });
+    }
+    setLoaded({ entrySessionId: sessionId, tree });
+    setFailedSessionId(undefined);
+  }, [sessionId, store, transport]);
 
   useEffect(() => {
-    if (!input.releasedSessionId) {
-      return;
-    }
-    setChatTree((current) =>
-      current?.sessionId === input.releasedSessionId ? undefined : current
-    );
-  }, [input.releasedSessionId]);
+    activatedSessionIdRef.current = undefined;
+    setLoaded(undefined);
+    setFailedSessionId(undefined);
+    return () => { requestIdRef.current += 1; };
+  }, [sessionId]);
 
   useEffect(() => {
-    if (!input.transport || !input.browsedSessionId) {
-      setChatTree(undefined);
-      return;
-    }
-    let disposed = false;
-    void input.transport.chatTree
-      .get(input.browsedSessionId)
-      .then((nextTree) => {
-        if (!disposed && input.displayedSessionIdRef.current === input.browsedSessionId) {
-          setChatTree(nextTree);
-        }
-      })
-      .catch((error) => {
-        if (!disposed && input.displayedSessionIdRef.current === input.browsedSessionId) {
-          input.onStatusNotice({
-            message: `Chat tree refresh failed: ${(error as Error).message}`,
-            source: "chat-tree",
-            ...statusNoticeErrorDetails(error)
-          });
-        }
+    void refreshChatTree().catch((error) => {
+      if (sessionIdRef.current !== sessionId) return;
+      setFailedSessionId(sessionId);
+      onStatusNotice({
+        message: `Chat tree refresh failed: ${(error as Error).message}`,
+        source: "chat-tree",
+        ...statusNoticeErrorDetails(error)
       });
-    return () => {
-      disposed = true;
-    };
-  }, [input.transport, input.browsedSessionId, input.refreshSignal]);
+    });
+  }, [refreshChatTree, input.refreshSignal, onStatusNotice]);
+
+  const chatTree = loaded && loaded.entrySessionId === sessionId ? loaded.tree : undefined;
+  // A session the store already holds renders at once; the tree refresh then narrows the view to the saved position.
+  const isOpening = Boolean(
+    sessionId && !chatTree && failedSessionId !== sessionId && !store.getDomainReadModel().getSession(sessionId)
+  );
 
   return {
     chatTree,
-    setChatTree,
+    isOpening,
+    viewSessionId: chatTree?.currentSessionId ?? sessionId,
+    refreshChatTree,
     onJumpChatTree: async (nodeId: string): Promise<void> => {
-      if (!input.transport || !input.displayedSessionId || input.isOpeningSelectedSession) {
-        return;
-      }
+      if (!sessionId || isOpening) return;
+      requestIdRef.current += 1;
       try {
-        await input.transport.chatTree.jump({
-          sessionId: input.displayedSessionId,
-          nodeId,
-          expectedRevision: chatTree?.revision
-        });
-        const nextTree = await input.transport.chatTree.get(input.displayedSessionId);
-        setChatTree(nextTree);
-        const currentNode =
-          nextTree.nodes.find((node) => node.nodeId === nextTree.currentNodeId) ??
-          nextTree.nodes.find((node) => node.nodeId === nodeId);
-        if (currentNode?.turnId) {
-          await input.reloadSessionWindow(input.displayedSessionId, {
-            forceProviderHydration: true
-          });
-        }
-        input.onStatusNotice({
-          message: `Jumped to ${nodeId}`,
-          source: "chat-tree"
-        });
+        await transport.chatTree.jump({ sessionId, nodeId });
+        await refreshChatTree();
       } catch (error) {
-        input.onStatusNotice({
+        if (sessionIdRef.current !== sessionId) return;
+        onStatusNotice({
           message: `Chat tree jump failed: ${(error as Error).message}`,
           persistent: true,
           source: "chat-tree",
           ...statusNoticeErrorDetails(error)
         });
       }
+    },
+    prepareSend: async (): Promise<string> => {
+      if (!sessionId) throw new Error("Select a session before sending.");
+      const result = await transport.chatTree.prepareSend({
+        sessionId,
+        nodeId: chatTree?.currentNodeId
+      });
+      await refreshChatTree();
+      return result.sessionId;
     }
   };
 };

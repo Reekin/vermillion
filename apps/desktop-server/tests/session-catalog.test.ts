@@ -198,22 +198,18 @@ describe("SessionCatalogService", () => {
     const alpha = await service.list({ workspaceId: "workspace-1" });
     const beta = await service.list({ workspaceId: "workspace-2" });
 
-    expect(alpha.items.map((item) => item.sessionId)).toEqual(["session-root", "session-child"]);
+    expect(alpha.items.map((item) => item.sessionId)).toEqual(["session-root"]);
     expect(alpha.items[0]).toMatchObject({
       sessionId: "session-root",
       title: "Runtime Root",
-      statusDot: "unread_completed",
+      memberSessionIds: ["session-root", "session-child"],
+      statusDot: "running",
       isPinned: true,
-      isActive: false,
+      isActive: true,
       lastCompletedTurnAt: "2026-04-18T00:00:13Z"
     });
-    expect(alpha.items[1]).toMatchObject({
-      sessionId: "session-child",
-      statusDot: "running",
-      isPinned: false,
-      isActive: true
-    });
-    expect(alpha.items[1]?.parentSessionId).toBeUndefined();
+    expect(alpha.items[0]?.parentSessionId).toBeUndefined();
+    expect((await service.get("session-child"))?.sessionId).toBe("session-root");
     expect(JSON.stringify(alpha)).not.toContain("summary from index");
     expect(beta.items[0]).toMatchObject({ sessionId: "session-beta", statusDot: "none" });
     expect(await service.get("session-archived")).toBeUndefined();
@@ -238,9 +234,9 @@ describe("SessionCatalogService", () => {
       createdAt: "2026-04-18T00:00:20Z"
     });
     const nested = await service.list({ workspaceId: "workspace-1" });
-    expect(nested.items.map((item) => item.sessionId)).toEqual(["session-root", "session-child"]);
-    expect(nested.items[1]?.subagents.map((item) => item.sessionId)).toEqual(["session-reviewer"]);
-    expect((await service.get("session-reviewer"))?.parentSessionId).toBe("session-child");
+    expect(nested.items.map((item) => item.sessionId)).toEqual(["session-root"]);
+    expect(nested.items[0]?.subagents.map((item) => item.sessionId)).toEqual(["session-reviewer"]);
+    expect((await service.get("session-reviewer"))?.parentSessionId).toBe("session-root");
   });
 
   it("marks unread sessions as read through the backing index store", async () => {

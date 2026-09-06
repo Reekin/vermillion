@@ -33,13 +33,16 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + item.card.decisionId] ?? false);
   const toggleDetails = store((s) => s.toggleInboxDetails);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState("");
   const missionTitle = store((s) => s.view?.workspaceId === item.workspaceId ? s.view.missions.find((m) => m.missionId === item.card.missionId)?.title : undefined);
   const { card } = item;
-  const answer = async (key: string) => {
+  const adjustments = card.adjustments ?? [];
+  // An option with the note attached, or the note alone as a free answer; both reach the worker the same way.
+  const answer = async (key?: string) => {
     setBusy(true);
     setError(null);
     try {
-      await client.request("decision.answer", { workspaceId: item.workspaceId, decisionId: item.card.decisionId, key });
+      await client.request("decision.answer", { workspaceId: item.workspaceId, decisionId: item.card.decisionId, key, note: note.trim() || undefined });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -58,6 +61,16 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
     >
       <p className="text-title-sm font-medium text-strong">{card.question}</p>
       {card.context && <p className="mt-1.5 whitespace-pre-wrap text-body text-muted-foreground">{card.context}</p>}
+      {adjustments.length > 0 && (
+        <div className="mt-3 rounded-md border border-border bg-input px-3 py-2">
+          <div className="eyebrow mb-1">等待答复期间工单已调整</div>
+          <ul className="space-y-1">
+            {adjustments.map((a) => (
+              <li key={a.at} className="whitespace-pre-wrap text-label text-foreground">{a.note}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <ul className="mt-3 space-y-2">
         {card.options.map((option) => {
           const recommended = option.key === card.recommended;
@@ -74,6 +87,16 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
           );
         })}
       </ul>
+      <form
+        className="mt-3 flex items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (note.trim()) void answer();
+        }}
+      >
+        <Field kind="textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注" className="min-w-0 flex-1" />
+        <Button type="submit" disabled={busy || !note.trim()} className="shrink-0">仅以备注答复</Button>
+      </form>
       {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
       {card.details && (
         <div className="mt-3">

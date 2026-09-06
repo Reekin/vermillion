@@ -15,7 +15,7 @@ import type {
   WorkbenchEvent,
   Workspace
 } from "./contracts.js";
-import { DocsService } from "./docs.js";
+import { DocsService, WorktreeMergeConflict } from "./docs.js";
 import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -342,7 +342,7 @@ export class WorkbenchService {
 
   /** Worker claimed the item; records the session and worktree it runs in. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined } }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
@@ -378,14 +378,21 @@ export class WorkbenchService {
     const { docs } = await this.context(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
-    if (item.run.worktreePath && item.run.branch) await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
+    if (item.run.worktreePath && item.run.branch) {
+      try {
+        await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
+      } catch (error) {
+        if (!(error instanceof WorktreeMergeConflict)) throw error;
+        return this.rejectWorkItem(workspaceId, workItemId, "合并冲突：\n" + error.files.map((file) => "- " + file).join("\n") + "\n在原 worktree 的工单分支上 rebase 到 workspace 当前主分支，解决冲突后重新 review、验收并提交；由用户再次验收，合并仍由工作台完成。");
+      }
+    }
     return this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
   }
 
   async rejectWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
     return this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
-      return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }] };
+      return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }], run: { ...item.run, resumeMessage: "用户打回：" + reason } };
     });
   }
 
@@ -412,9 +419,20 @@ export class WorkbenchService {
     const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
       const status = item.status === "review" ? "queued" : item.status;
-      return { ...item, ...changes, status, decisions: [...item.decisions, "工单调整：" + note] };
+      // While parked the note lives on the decision card and reaches the worker inside the answer line.
+      const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
+      return { ...item, ...changes, status, decisions };
     });
     if (updated.status === "running" && updated.run.sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId, sessionId: updated.run.sessionId, note });
+    // Parked on a decision: the user reads the change on the card before answering; the answer carries it to the worker.
+    if (updated.status === "decision") {
+      const { store } = await this.context(workspaceId);
+      const card = (await store.decisions.list()).find((c) => c.workItemId === workItemId && !c.answer);
+      if (card) {
+        await store.decisions.put({ ...card, adjustments: [...(card.adjustments ?? []), { note, at: this.now() }] });
+        this.emit({ type: "decisions.changed", workspaceId });
+      }
+    }
     return updated;
   }
 
@@ -494,15 +512,20 @@ export class WorkbenchService {
     return card;
   }
 
-  /** Records the answer on the card and on the work item, which goes back to the queue. */
-  async answerDecision(workspaceId: string, decisionId: string, answer: { key: string; note?: string }): Promise<DecisionCard> {
+  /**
+   * Records the answer on the card and on the work item, which goes back to the queue. Either an option key, a free
+   * note, or both; the work item's decision line carries the answer plus any contract adjustments made while parked,
+   * so the worker's resume message has everything in one place.
+   */
+  async answerDecision(workspaceId: string, decisionId: string, answer: { key?: string; note?: string }): Promise<DecisionCard> {
     const { store } = await this.context(workspaceId);
     const card = await store.decisions.get(decisionId);
     if (!card) throw new Error("Unknown decision: " + decisionId);
+    if (!answer.key && !answer.note?.trim()) throw new Error("Answer needs an option key or a note");
+    if (answer.key && !card.options.some((o) => o.key === answer.key)) throw new Error("Unknown option: " + answer.key);
     const answered = await store.decisions.put({ ...card, answer: { ...answer, at: this.now() } });
     if (card.workItemId) {
-      const option = card.options.find((o) => o.key === answer.key);
-      const line = card.question + " -> " + (option?.label ?? answer.key) + (answer.note ? " (" + answer.note + ")" : "");
+      const line = describeAnswer(card, answer);
       if (card.kind === "attempts" && answer.key === "cancel") {
         await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, decisions: [...item.decisions, line] }));
         await this.cancelWorkItem(workspaceId, card.workItemId);
@@ -512,7 +535,11 @@ export class WorkbenchService {
           ...item,
           status: item.status === "decision" ? "queued" : item.status,
           decisions: [...item.decisions, line],
-          run: resetAttempts ? { ...item.run, attempts: 0, lastFailure: undefined } : item.run
+          run: resetAttempts
+            ? { ...item.run, sessionId: undefined, resumeMessage: undefined, attempts: 0, lastFailure: undefined }
+            : item.status === "decision"
+              ? { ...item.run, sessionId: card.sessionId ?? item.run.sessionId, resumeMessage: "用户决策答复：" + line }
+              : item.run
         }));
       }
     }
@@ -540,6 +567,15 @@ export class WorkbenchService {
 }
 
 const isLowRisk = (risk: Risk): boolean => risk === "R0" || risk === "R1";
+
+/** "question -> chosen option (note)" or "question -> 备注：note", followed by the contract changes made while the card waited. */
+const describeAnswer = (card: DecisionCard, answer: { key?: string; note?: string }): string => {
+  const option = card.options.find((o) => o.key === answer.key);
+  const note = answer.note?.trim();
+  const chosen = option ? option.label + (note ? " (" + note + ")" : "") : "备注：" + note;
+  const adjustments = (card.adjustments ?? []).map((a) => "；挂起期间工单调整：" + a.note).join("");
+  return card.question + " -> " + chosen + adjustments;
+};
 
 const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { workItemId: string }>["type"] | undefined> = {
   docs: "docs.changed",

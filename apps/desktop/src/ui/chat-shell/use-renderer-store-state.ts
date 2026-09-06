@@ -28,6 +28,19 @@ export const useRendererSessionRevision = (
         : store.getDomainReadModel().getRevision()
   );
 
+export const useRendererSessionsRevision = (
+  store: RendererStore,
+  sessionIds: string[]
+): string =>
+  useSyncExternalStore(
+    (onStoreChange) => {
+      const unsubscribe = sessionIds.map((id) => store.subscribeSession(id, onStoreChange));
+      return () => unsubscribe.forEach((dispose) => dispose());
+    },
+    () => sessionIds.map((id) => store.getDomainReadModel().getSessionRevision(id)).join(":"),
+    () => sessionIds.map((id) => store.getDomainReadModel().getSessionRevision(id)).join(":")
+  );
+
 export const useRendererConversationRevision = (
   store: RendererStore,
   conversationId: string | undefined
