@@ -7,7 +7,8 @@
 2. 实现 refs 描述的终态，范围以 acceptance 为界。可以少做（记入 evidence 的越界发现），不能多做。
    涉及界面时，规范里指明的组件入口和主题变量是唯一起点：先读入口文件和相近页面，用现成组件拼，缺的扩展公共接口，不在页面里自造样式；写完跑规范里给的 lint 命令，不通过不进 review。
    验收方法按改动性质自己定：改了界面才起实例看/改了 CLI 跑命令/纯逻辑跑相关测试/…… 不跑全量测试套件，不写 evidence 文件夹，截图只在必须时留一两张。
-   起实例只用 `vermillion app.start '{"dataDir":"<worktree>/.qa","port":<空闲端口>}'`：它把实例放在用户看不见的独立桌面上，返回 pid 和 CDP 地址，截图和操作走 CDP。用完 `vermillion app.stop '{"pid":…}'`。不要用 start.bat 或直接起 electron，那会弹到用户屏幕上。
+   起实例只用 `vermillion app.start '{"dataDir":"<worktree>/.qa","port":<空闲端口>}'`：它把实例放在用户看不见的独立桌面上，等调试端口就绪后才返回 pid 和 CDP 地址，截图和操作走 CDP。用完 `vermillion app.stop '{"pid":…}'`。不要用 start.bat 或直接起 electron，那会弹到用户屏幕上。
+   用 agent-browser 时每条命令都带 `--cdp <返回的 cdpUrl>`，只连这个实例。连不上就先 `curl <cdpUrl>/json/version` 确认端口，不要换别的方式重试：没有 `--cdp` 或端口不通时 agent-browser 会自己弹一个 Chrome 到用户屏幕上，那不是你的实例，在里面看到的什么都不算数。
    只读自己 worktree 里的代码；其他工单的 worktree 是未合并的半成品，不要去读、不要依赖。
 3. 拉起一个 reviewer subagent 做开放式 review，首条消息就是本指令末尾附的 reviewer prompt 原文，加上工单和 diff；不要改写它、不要另加要求。自行判断每条意见采纳或拒绝，各写一句理由。最多两轮。
 4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff。改动涉及界面时，由你 `app.start` 起好实例（确认是最新 build），把返回的 cdpUrl 和 dataDir 写进首条消息；verifier 不自己起实例，结束后由你 `app.stop`。任一条 fail 就修复后重跑 verifier，不修改 acceptance。

@@ -34,6 +34,19 @@ const defaultPackageRoot = (): string => fileURLToPath(new URL("..", import.meta
  * Starts and stops Vermillion instances for acceptance runs. On Windows the instance goes to a separate desktop so
  * dialogs and focus changes never reach the user; elsewhere it starts normally.
  */
+const waitForCdp = async (cdpUrl: string, abort: () => Promise<void>, timeoutMs = 30_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(cdpUrl + "/json/version", { signal: AbortSignal.timeout(1_000) });
+      if (response.ok) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  await abort();
+  throw new Error("The app instance did not open its debugging port within " + timeoutMs / 1000 + "s: " + cdpUrl);
+};
+
 export class AppLauncher {
   private readonly command: AppLauncherOptions["command"];
   private readonly scriptPath: string;
@@ -57,7 +70,11 @@ export class AppLauncher {
       VERMILLION_REMOTE_DEBUGGING_PORT: String(input.port)
     };
     const pid = process.platform === "win32" ? await this.startHidden(env) : await this.startPlain(env);
-    return { pid, cdpUrl: "http://127.0.0.1:" + input.port, desktop: process.platform === "win32" ? this.desktop : "" };
+    const cdpUrl = "http://127.0.0.1:" + input.port;
+    // Electron takes a few seconds to open its debugging port. Return only once it answers, so callers can attach
+    // immediately; a CDP client that probes too early may fall back to launching its own browser.
+    await waitForCdp(cdpUrl, async () => { await this.stop(pid); });
+    return { pid, cdpUrl, desktop: process.platform === "win32" ? this.desktop : "" };
   }
 
   async stop(pid: number): Promise<void> {
