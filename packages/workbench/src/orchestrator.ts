@@ -15,8 +15,8 @@ const git = async (cwd: string, args: string[]): Promise<string> =>
 export type AgentRunner = {
   open: (input: { workspaceId: string; cwd: string; developerInstructions: string; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
   send: (sessionId: string, content: string) => Promise<void>;
-  /** Delivers into the running turn when there is one, otherwise as the next message. */
-  steer: (sessionId: string, content: string) => Promise<void>;
+  /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
+  steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Text of the last assistant message in the session, if any. */
   lastReply: (sessionId: string) => string | undefined;
@@ -216,11 +216,12 @@ export class Orchestrator {
     const bound = this.runsBySession.get(sessionId);
     if (!bound) return;
     bound.idleTurns = 0; // a new contract restarts the progress budget
-    await this.runner.steer(sessionId, [
+    const { turnId } = await this.runner.steer(sessionId, [
       "工单已调整：" + note,
-      "立即重新执行 vermillion workItem.get 读取最新合同（objective / scope / acceptance / contractVersion 已变），按新合同继续；已完成但不再需要的部分回退。",
-      "submit 时带上最新的 contractVersion。"
+      "立即重新执行 vermillion workItem.get 读取最新合同（objective / scope / acceptance 已变），按新合同继续；已完成但不再需要的部分回退。"
     ].join("\n"));
+    // Landed mid-turn: a submit from this same turn was made against the old contract.
+    if (turnId) await this.service.setWorkItemStaleTurn(bound.workspaceId, bound.run.workItemId!, turnId);
   }
 
   /**
@@ -343,7 +344,10 @@ export class Orchestrator {
 
   private async onWorkerTurn(workspaceId: string, bound: WorkerBinding, finishReason: string): Promise<void> {
     const run = bound.run;
-    const item = await this.service.getWorkItem(workspaceId, run.workItemId!);
+    let item = await this.service.getWorkItem(workspaceId, run.workItemId!);
+    if (item.status === "running" && item.run.sessionId === run.sessionId && item.run.staleTurnId) {
+      item = await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, undefined); // next turn starts on the new contract
+    }
     // The item left this session: submitted, parked on a decision, voided (and possibly already re-assigned).
     if (item.status !== "running" || item.run.sessionId !== run.sessionId) {
       this.runsBySession.delete(run.sessionId);

@@ -28,7 +28,7 @@ const until = async (check: () => Promise<boolean>) => {
 
 /** Scripted runner: records opened sessions and messages; test completes turns by hand. */
 const createFakeRunner = () => {
-  const sessions: Array<{ sessionId: string; title: string; cwd: string; metadata: Record<string, unknown>; developerInstructions: string; messages: string[]; reply?: string }> = [];
+  const sessions: Array<{ sessionId: string; title: string; cwd: string; metadata: Record<string, unknown>; developerInstructions: string; messages: string[]; reply?: string; turnOpen?: boolean }> = [];
   const listeners = new Set<(e: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void>();
   const runner: AgentRunner = {
     open: async (input) => {
@@ -36,14 +36,16 @@ const createFakeRunner = () => {
       sessions.push({ sessionId, title: input.title, cwd: input.cwd, metadata: input.metadata, developerInstructions: input.developerInstructions, messages: [] });
       return { sessionId };
     },
-    send: async (sessionId, content) => { sessions.find((s) => s.sessionId === sessionId)!.messages.push(content); },
-    steer: async (sessionId, content) => { sessions.find((s) => s.sessionId === sessionId)!.messages.push("[steer] " + content); },
+    send: async (sessionId, content) => { const s = sessions.find((s) => s.sessionId === sessionId)!; s.messages.push(content); s.turnOpen = true; },
+    steer: async (sessionId, content) => { const s = sessions.find((s) => s.sessionId === sessionId)!; s.messages.push("[steer] " + content); return { turnId: s.turnOpen ? "t-" + s.messages.length : undefined }; },
     interrupt: async () => {},
     lastReply: (sessionId) => sessions.find((s) => s.sessionId === sessionId)?.reply,
     onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
   };
   const complete = (sessionId: string, reply: string) => {
-    sessions.find((s) => s.sessionId === sessionId)!.reply = reply;
+    const s = sessions.find((s) => s.sessionId === sessionId)!;
+    s.reply = reply;
+    s.turnOpen = false;
     for (const l of [...listeners]) l({ sessionId, turnId: "t", finishReason: "completed" });
   };
   return { runner, sessions, complete };
@@ -98,7 +100,7 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     expect(runs.map((r) => r.role + ":" + r.status).sort()).toEqual(["steward:done", "worker:running"]);
 
     // worker submits, then its turn ends -> run done, nothing else scheduled
-    await service.submitWorkItem(ws.workspaceId, item.workItemId, { contractVersion: 0, evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [{ index: 0, pass: true, evidence: "seen" }], verdict: "pass" } });
+    await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [{ index: 0, pass: true, evidence: "seen" }], verdict: "pass" } });
     complete(worker.sessionId, "done");
     await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("review");
@@ -145,31 +147,38 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     complete(steward.sessionId, "done");
   });
 
-  it("steers the running worker on a contract change and only voids submits made against an older version", async () => {
+  it("steers the running worker on a contract change and voids a submit from the turn the change landed in", async () => {
     const { service, ws, sessions, complete } = await setup();
     const item = await service.createWorkItem(ws.workspaceId, { title: "Op", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
     const worker = sessions.find((s) => s.metadata.role === "worker")!;
-    const v1 = await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v2", note: "范围收窄" });
-    expect(v1.contractVersion).toBe(1);
+    // update lands mid-turn (the worker's first turn is still open)
+    await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v2", note: "范围收窄" });
     await until(async () => worker.messages.length === 2);
-    expect(worker.messages[1]).toContain("[steer] 工单已调整：范围收窄"); // delivered mid-turn
-    expect(worker.messages[1]).toContain("contractVersion");
+    expect(worker.messages[1]).toContain("[steer] 工单已调整：范围收窄");
+    expect(worker.messages[1]).not.toContain("contractVersion");
     expect(sessions.some((s) => s.metadata.role === "supervisor")).toBe(false);
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.staleTurnId !== undefined);
 
-    // the worker re-read the contract (version 1) and submits against it: accepted even though a turn is still open
+    // that turn ends without a submit; the next turn starts on the new contract, so its submit is accepted
+    complete(worker.sessionId, "re-reading");
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.staleTurnId === undefined);
+    await until(async () => sessions.some((s) => s.metadata.role === "supervisor" && s.messages.length > 0));
+    complete(sessions.find((s) => s.metadata.role === "supervisor")!.sessionId, "none");
+    await until(async () => worker.messages.length === 3); // orchestrator's continue prompt opened a new turn
     const evidence = { summary: "done", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] };
-    const accepted = await service.submitWorkItem(ws.workspaceId, item.workItemId, { contractVersion: 1, evidence, review: [], verify: { items: [], verdict: "pass" } });
+    const accepted = await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence, review: [], verify: { items: [], verdict: "pass" } });
     expect(accepted.status).toBe("closed"); // R1 auto-closes
     complete(worker.sessionId, "submitted");
     await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.status === "done"));
 
-    // a second item: a submit quoting a stale version is void
+    // a second item: update lands mid-turn and the worker submits in that same turn -> void
     const item2 = await service.createWorkItem(ws.workspaceId, { title: "Op2", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2 && sessions[sessions.length - 1]!.messages.length > 0);
     const worker2 = sessions[sessions.length - 1]!;
     await service.updateWorkItem(ws.workspaceId, item2.workItemId, { objective: "v3", note: "再改" });
-    const voided = await service.submitWorkItem(ws.workspaceId, item2.workItemId, { contractVersion: 0, evidence, review: [], verify: { items: [], verdict: "pass" } });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item2.workItemId)).run.staleTurnId !== undefined);
+    const voided = await service.submitWorkItem(ws.workspaceId, item2.workItemId, { evidence, review: [], verify: { items: [], verdict: "pass" } });
     expect(voided.status).toBe("queued");
     expect(voided.evidence).toBeUndefined();
     expect(voided.decisions.at(-1)).toContain("提交作废");

@@ -74,6 +74,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
       : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
     const receipt = await shell.executeCommand({ commandId: createId(), command });
     if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
+    return { turnId: turn?.turnId };
   },
   interrupt: async (sessionId) => {
     const turn = shell

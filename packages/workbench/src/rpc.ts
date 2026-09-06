@@ -81,7 +81,7 @@ export const workbenchRpc = {
   "workItem.start": { params: zWi.extend({ run: zRun }), result: zWorkItem },
   "workItem.heartbeat": { params: zWi.extend({ lastTurnId: z.string().optional() }), result: zWorkItem },
   "workItem.submit": {
-    params: zWi.extend({ contractVersion: z.number().int().nonnegative(), evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifyResult.omit({ verifiedAt: true }) }),
+    params: zWi.extend({ evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifyResult.omit({ verifiedAt: true }) }),
     result: zWorkItem
   },
   "workItem.approve": { params: zWi, result: zWorkItem },

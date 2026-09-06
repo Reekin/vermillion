@@ -97,13 +97,13 @@ export const zRun = z.object({
   branch: z.string().optional(),
   /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
-  attempts: z.number().int().nonnegative().optional()
+  attempts: z.number().int().nonnegative().optional(),
+  /** Set when a contract change was steered into a turn already in progress; a submit from that same turn is void. Cleared when the turn ends. */
+  staleTurnId: z.string().optional()
 });
 
 export const zWorkItem = z.object({
   workItemId: z.string().min(1),
-  /** Bumped by every workItem.update; a submit must quote the version it was made against. */
-  contractVersion: z.number().int().nonnegative(),
   /** Absent for standalone operations (package, run tests, ...) that change no doc. */
   missionId: z.string().min(1).optional(),
   title: z.string().min(1),

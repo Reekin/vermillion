@@ -291,7 +291,6 @@ export class WorkbenchService {
     }
     const item = await store.workItems.put({
       workItemId: createId("wi"),
-      contractVersion: 0,
       missionId: input.missionId,
       title: input.title.trim(),
       objective: input.objective,
@@ -335,13 +334,13 @@ export class WorkbenchService {
   async submitWorkItem(
     workspaceId: string,
     workItemId: string,
-    input: { contractVersion: number; evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
+    input: { evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
   ): Promise<WorkItem> {
     const now = this.now();
     const submitted = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
-      if (input.contractVersion !== item.contractVersion) {
-        // Made against an older contract: void it, back to the queue, same worktree.
-        return { ...item, status: "queued", decisions: [...item.decisions, "提交作废：依据的合同版本 " + input.contractVersion + " 已被 " + item.contractVersion + " 取代"], run: { ...item.run, sessionId: undefined } };
+      if (item.run.staleTurnId) {
+        // The contract changed during the turn this submit came from: void it, back to the queue, same worktree.
+        return { ...item, status: "queued", decisions: [...item.decisions, "提交作废：合同在本轮进行中被调整"], run: { ...item.run, sessionId: undefined, staleTurnId: undefined } };
       }
       const verify = { ...input.verify, verifiedAt: now };
       return {
@@ -394,10 +393,15 @@ export class WorkbenchService {
     const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
       const status = item.status === "review" ? "queued" : item.status;
-      return { ...item, ...changes, status, contractVersion: item.contractVersion + 1, decisions: [...item.decisions, "工单调整：" + note] };
+      return { ...item, ...changes, status, decisions: [...item.decisions, "工单调整：" + note] };
     });
     if (updated.status === "running" && updated.run.sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId, sessionId: updated.run.sessionId, note });
     return updated;
+  }
+
+  /** Orchestrator: marks/clears the turn during which a contract change landed mid-flight. */
+  async setWorkItemStaleTurn(workspaceId: string, workItemId: string, staleTurnId: string | undefined): Promise<WorkItem> {
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, staleTurnId } }));
   }
 
   /** Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted. */
