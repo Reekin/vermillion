@@ -99,8 +99,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     [transport]
   );
 
-  const renderPanel = (target: Panel) =>
-    target === "inbox" ? <InboxPanel store={store} onOpenSession={showSession} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} onOpenSession={showSession} />;
+  const renderPanel = (target: Panel, compact: boolean) =>
+    target === "inbox" ? <InboxPanel store={store} onOpenSession={showSession} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} onOpenSession={showSession} compact={compact} />;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-page-canvas text-foreground">
@@ -132,13 +132,13 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         {panel !== "think" && (
           <div className="flex h-full flex-col">
             <header className="flex h-10 items-center border-b border-border px-4"><h1 className="text-title-sm font-medium text-strong">{panelTitles[panel]}</h1></header>
-            <div className="min-h-0 flex-1 overflow-auto">{renderPanel(panel)}</div>
+            <div className="min-h-0 flex-1 overflow-auto">{renderPanel(panel, false)}</div>
           </div>
         )}
       </div>
       {overlay && (
         <Modal title={panelTitles[overlay]} onClose={closeOverlay} onExpand={() => setPanel(overlay)}>
-          {renderPanel(overlay)}
+          {renderPanel(overlay, true)}
         </Modal>
       )}
       <TextEditor store={store} />

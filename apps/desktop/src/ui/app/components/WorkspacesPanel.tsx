@@ -10,6 +10,8 @@ type WorkspacesPanelProps = {
   pickDirectory: () => Promise<string | undefined>;
   /** Opens a session in the think page (used to look into agent runs). */
   onOpenSession: (sessionId: string) => void;
+  /** Overlay = quick look: the task board lists only active missions and open standalone items. */
+  compact: boolean;
 };
 
 /** Secondary navigation inside a workspace. Sections without a backing feature yet render a placeholder. */
@@ -26,7 +28,7 @@ const sections: Array<{ id: Section; label: string }> = [
 /** Domain definitions are plain docs under this folder; the steward reads them all when attaching standards to a work item. */
 const DOMAINS_DIR = ".vermillion/docs/domains/";
 
-export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession }: WorkspacesPanelProps) => {
+export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession, compact }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
   const workspaces = store((s) => s.workspaces);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
@@ -103,7 +105,7 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession }: Workspa
             </nav>
             <div className="min-h-0 flex-1 overflow-auto">
               {section === "missions" && view && (
-                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={onOpenSession} />
+                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={onOpenSession} compact={compact} />
               )}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
@@ -169,9 +171,10 @@ type MissionsSectionProps = {
   workItems: WorkItem[];
   runs: AgentRun[];
   onOpenSession: (sessionId: string) => void;
+  compact: boolean;
 };
 
-const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, onOpenSession }: MissionsSectionProps) => {
+const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, onOpenSession, compact }: MissionsSectionProps) => {
   const setScheduler = (value: Partial<Scheduler>) => void client.request("scheduler.set", { workspaceId, value: { ...scheduler, ...value } });
   const runsFor = (item: WorkItem) => runs.filter((r) => r.workItemId === item.workItemId);
   const titleById = new Map(workItems.map((w) => [w.workItemId, w.title]));
@@ -181,10 +184,9 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
       : [];
   const stewardRuns = (mission: Mission) => runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
   const standalone = workItems.filter((w) => !w.missionId);
-  const [showAll, setShowAll] = useState(false);
   const isOpen = (w: WorkItem) => w.status !== "closed" && w.status !== "cancelled";
-  const visibleMissions = showAll ? missions : missions.filter((m) => m.status === "active");
-  const visibleStandalone = showAll ? standalone : standalone.filter(isOpen);
+  const visibleMissions = compact ? missions.filter((m) => m.status === "active") : missions;
+  const visibleStandalone = compact ? standalone.filter(isOpen) : standalone;
   const hidden = missions.length - visibleMissions.length + (standalone.length - visibleStandalone.length);
   return (
     <div>
@@ -195,11 +197,7 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
           <input type="number" min={1} max={8} value={scheduler.maxWorkers} onChange={(e) => setScheduler({ maxWorkers: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} className="w-12 border border-border bg-input px-1.5 py-0.5 text-label text-foreground outline-none" />
         </label>
         <span className="truncate text-caption text-faint-foreground">开启后新 revision 触发管家拆单，排队工单由 Worker 接手。</span>
-        {(hidden > 0 || showAll) && (
-          <button type="button" className="ml-auto shrink-0 text-micro text-muted-foreground underline-offset-2 hover:text-strong hover:underline" onClick={() => setShowAll((v) => !v)}>
-            {showAll ? "只看进行中" : "全部 (+" + hidden + ")"}
-          </button>
-        )}
+        {hidden > 0 && <span className="ml-auto shrink-0 text-micro text-faint-foreground">另有 {hidden} 项已结束，展开为页面查看</span>}
       </div>
       {missions.length === 0 && standalone.length === 0 && <p className="px-4 py-3 text-caption text-muted-foreground">还没有任务。去「思考」里和设计伙伴聊出一个。</p>}
       <ul>
