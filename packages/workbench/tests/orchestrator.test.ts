@@ -109,15 +109,34 @@ describe("Orchestrator", { timeout: 20000 }, () => {
     await expect(service.createWorkItem(ws.workspaceId, { ...base, title: "X", dependsOn: ["nope"] })).rejects.toThrow(/dependsOn/);
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/d.md", "# d\n");
     const mission = await service.createMission(ws.workspaceId, { title: "D", summary: "" });
-    await until(async () => sessions.some((s) => s.metadata.role === "steward"));
+    await until(async () => sessions.some((s) => s.metadata.role === "steward" && s.messages.length > 0));
     complete(sessions.find((s) => s.metadata.role === "steward")!.sessionId, "no-op");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "steward" && r.status === "done"));
     const first = await service.createWorkItem(ws.workspaceId, { ...base, title: "first", missionId: mission.missionId });
     const second = await service.createWorkItem(ws.workspaceId, { ...base, title: "second", missionId: mission.missionId, dependsOn: [first.workItemId] });
     await until(async () => (await service.getWorkItem(ws.workspaceId, first.workItemId)).status === "running");
     await tick();
     expect((await service.getWorkItem(ws.workspaceId, second.workItemId)).status).toBe("queued");
+
+    // cancelling the prerequisite does not release the dependant; the mission's steward is asked instead
+    const stewardCount = sessions.filter((s) => s.metadata.role === "steward").length;
     await service.cancelWorkItem(ws.workspaceId, first.workItemId);
+    await until(async () => sessions.filter((s) => s.metadata.role === "steward").length === stewardCount + 1);
+    const steward = sessions.filter((s) => s.metadata.role === "steward").at(-1)!;
+    expect(steward.messages[0]).toContain("已取消");
+    expect(steward.messages[0]).toContain(second.workItemId);
+    expect((await service.getWorkItem(ws.workspaceId, first.workItemId)).status).toBe("cancelled");
+    expect((await service.getWorkItem(ws.workspaceId, second.workItemId)).status).toBe("queued");
+    // a second revision arriving while that steward runs is steered into the same session, not a new one
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/d.md", "# d2\n");
+    await service.addMissionRevision(ws.workspaceId, { missionId: mission.missionId, message: "more" });
+    await until(async () => steward.messages.length === 2);
+    expect(steward.messages[1]).toContain("（追加）");
+    expect(sessions.filter((s) => s.metadata.role === "steward")).toHaveLength(stewardCount + 1);
+    // steward drops the dependency; the dependant is scheduled
+    await service.updateWorkItem(ws.workspaceId, second.workItemId, { dependsOn: [], note: "前置已取消，独立继续" });
     await until(async () => (await service.getWorkItem(ws.workspaceId, second.workItemId)).status === "running");
+    complete(steward.sessionId, "done");
   });
 
   it("steers the running worker on a contract change and only voids submits made against an older version", async () => {

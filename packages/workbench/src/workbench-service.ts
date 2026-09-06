@@ -340,9 +340,10 @@ export class WorkbenchService {
     const { docs } = await this.context(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch);
-    const closed = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
-    if (item.status === "running" && item.run.sessionId) this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId });
-    return closed;
+    const cancelled = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "cancelled", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
+    const dependants = (await this.listWorkItems(workspaceId)).filter((w) => w.status === "queued" && w.dependsOn.includes(workItemId)).map((w) => w.workItemId);
+    this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.status === "running" ? item.run.sessionId : undefined, dependants });
+    return cancelled;
   }
 
   /**
@@ -352,11 +353,11 @@ export class WorkbenchService {
   async updateWorkItem(
     workspaceId: string,
     workItemId: string,
-    input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk">> & { note: string }
+    input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk" | "dependsOn">> & { note: string }
   ): Promise<WorkItem> {
     const { note, ...changes } = input;
     const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
-      if (item.status === "closed") throw new Error("Work item is closed: " + workItemId);
+      if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
       const status = item.status === "review" ? "queued" : item.status;
       return { ...item, ...changes, status, contractVersion: item.contractVersion + 1, decisions: [...item.decisions, "工单调整：" + note] };
     });

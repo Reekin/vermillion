@@ -38,8 +38,8 @@ export type Mission = z.infer<typeof zMission>;
 
 export const latestRevision = (mission: Mission): MissionRevision => mission.revisions[mission.revisions.length - 1]!;
 
-/** queued -> running -> review -> closed; decision parks a work item until the user answers. */
-export const workItemStatuses = ["queued", "running", "review", "decision", "closed"] as const;
+/** queued -> running -> review -> closed; decision parks a work item until the user answers; cancelled is the other terminal state. */
+export const workItemStatuses = ["queued", "running", "review", "decision", "closed", "cancelled"] as const;
 export const zWorkItemStatus = z.enum(workItemStatuses);
 export type WorkItemStatus = z.infer<typeof zWorkItemStatus>;
 
@@ -220,8 +220,8 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("scheduler.changed"), workspaceId: z.string() }),
   /** A running work item's contract changed; the orchestrator steers its worker right away. */
   z.object({ type: z.literal("workItem.updated"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string(), note: z.string() }),
-  /** A work item was cancelled while a worker held it; the orchestrator interrupts that worker. */
-  z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string() }),
+  /** A work item was cancelled. sessionId when a worker held it (interrupted); dependants are queued items that listed it in dependsOn. */
+  z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string().optional(), dependants: z.array(z.string()) }),
   z.object({ type: z.literal("runs.changed"), workspaceId: z.string() })
 ]);
 export type WorkbenchEvent = z.infer<typeof zWorkbenchEvent>;

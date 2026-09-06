@@ -120,7 +120,7 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession }: Workspa
   );
 };
 
-const statusLabel: Record<WorkItem["status"], string> = { queued: "排队中", running: "进行中", review: "待验收", decision: "待决策", closed: "已关闭" };
+const statusLabel: Record<WorkItem["status"], string> = { queued: "排队中", running: "进行中", review: "待验收", decision: "待决策", closed: "已关闭", cancelled: "已取消" };
 
 const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
 const runStatusLabel: Record<AgentRun["status"], string> = { running: "运行中", done: "完成", failed: "失败" };
@@ -168,7 +168,9 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
   const runsFor = (item: WorkItem) => runs.filter((r) => r.workItemId === item.workItemId);
   const titleById = new Map(workItems.map((w) => [w.workItemId, w.title]));
   const waitingFor = (item: WorkItem) =>
-    item.status === "queued" ? item.dependsOn.filter((id) => workItems.find((w) => w.workItemId === id)?.status !== "closed").map((id) => titleById.get(id) ?? id) : [];
+    item.status === "queued"
+      ? item.dependsOn.map((id) => workItems.find((w) => w.workItemId === id)).filter((w) => w?.status !== "closed").map((w, i) => (w ? w.title + (w.status === "cancelled" ? "（已取消）" : "") : item.dependsOn[i]!))
+      : [];
   const stewardRuns = (mission: Mission) => runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
   const standalone = workItems.filter((w) => !w.missionId);
   return (

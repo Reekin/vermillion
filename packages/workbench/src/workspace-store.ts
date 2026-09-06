@@ -41,10 +41,20 @@ const readJsonDir = async <T>(dir: string, schema: z.ZodType<T>): Promise<T[]> =
   return records;
 };
 
+/** Windows briefly locks a file while a watcher or reader has it open; rename then fails with EPERM. Retry a few times. */
 const writeJsonAtomic = async (path: string, value: unknown): Promise<void> => {
   const tmp = path + ".tmp";
   await writeFile(tmp, JSON.stringify(value, null, 2) + "\n", "utf8");
-  await rename(tmp, path);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(tmp, path);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== "EPERM" && code !== "EBUSY") || attempt >= 20) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
 };
 
 const createCollection = <T extends Record<string, unknown>>(

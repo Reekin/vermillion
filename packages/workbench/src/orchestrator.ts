@@ -69,7 +69,7 @@ export class Orchestrator {
         if (event.type === "missions.changed" || event.type === "scheduler.changed") this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
         else if (event.type === "workItems.changed" || event.type === "decisions.changed") this.enqueue(event.workspaceId, () => this.schedule(event.workspaceId));
         else if (event.type === "workItem.updated") this.enqueue(event.workspaceId, () => this.steerWorker(event.sessionId, event.note));
-        else if (event.type === "workItem.cancelled") this.enqueue(event.workspaceId, () => this.cancelWorker(event.workspaceId, event.sessionId));
+        else if (event.type === "workItem.cancelled") this.enqueue(event.workspaceId, () => this.onCancelled(event.workspaceId, event.workItemId, event.sessionId, event.dependants));
       }),
       this.runner.onTurnCompleted((event) => {
         const bound = this.runsBySession.get(event.sessionId);
@@ -116,45 +116,21 @@ export class Orchestrator {
 
   // ---- steward ----
 
+  /** One revision per steward run. A running steward gets the next revision steered into its session rather than a new one. */
   private async steward(workspaceId: string): Promise<void> {
     const [missions, runs] = await Promise.all([this.service.listMissions(workspaceId), this.service.listRuns(workspaceId)]);
     const processed = new Set(runs.filter((r) => r.role === "steward" && r.revision).map((r) => r.revision));
-    const activeStewards = runs.filter((r) => r.role === "steward" && r.status === "running");
-    if (activeStewards.length > 0) return; // single queue: next revision is picked up when this run ends
     const mission = missions.find((m) => m.status === "active" && !processed.has(latestRevision(m).commit));
     if (!mission) return;
-    await this.openSteward(workspaceId, mission);
-  }
-
-  private async openSteward(workspaceId: string, mission: Mission): Promise<void> {
-    const root = await this.service.workspaceRoot(workspaceId);
     const revision = latestRevision(mission);
-    const items = await this.service.listWorkItems(workspaceId, mission.missionId);
     const previous = mission.revisions.length > 1 ? mission.revisions[mission.revisions.length - 2]!.commit : undefined;
+    const root = await this.service.workspaceRoot(workspaceId);
     const diff = previous
       ? await git(root, ["diff", "--no-color", previous, revision.commit, "--", DOCS_DIR]).catch(() => "")
       : await git(root, ["show", "--no-color", "--format=", revision.commit, "--", DOCS_DIR]).catch(() => "");
-    const { content } = await this.roles.read(root, "steward");
-    const { sessionId } = await this.runner.open({
-      workspaceId,
-      cwd: root,
-      developerInstructions: content,
-      title: "管家 · " + mission.title,
-      metadata: { role: "steward", missionId: mission.missionId }
-    });
-    const run = await this.service.putRun(workspaceId, {
-      runId: createId("run"),
-      role: "steward",
-      sessionId,
-      missionId: mission.missionId,
-      revision: revision.commit,
-      status: "running",
-      turns: 0,
-      startedAt: this.now()
-    });
-    this.runsBySession.set(sessionId, { workspaceId, run, idleTurns: 0 });
+    const items = await this.service.listWorkItems(workspaceId, mission.missionId);
     const existing = items.length === 0 ? "（还没有工单）" : items.map((i) => "- " + i.workItemId + " [" + i.status + "] " + i.title + (i.refs.length ? " @ " + i.refs.map((r) => r.commit.slice(0, 8)).join(",") : "")).join("\n");
-    await this.runner.send(sessionId, [
+    const message = [
       "任务「" + mission.title + "」" + (previous ? "有了新的 revision" : "刚创建，这是首个 revision") + "。",
       "workspaceId: " + workspaceId,
       "missionId: " + mission.missionId,
@@ -170,8 +146,46 @@ export class Orchestrator {
       "----- diff end -----",
       "",
       "请按你的规则处理：新建、调整或取消工单。用 CLI 完成所有写入；最后回复一行摘要说明做了什么。"
-    ].join("\n"));
+    ].join("\n");
+    await this.stewardTurn(workspaceId, mission, revision.commit, message);
   }
+
+  /**
+   * Starts a steward run for the mission. If a steward is already running for it, the message is steered into that
+   * session and the run's revision advances; otherwise a fresh session is opened.
+   */
+  private async stewardTurn(workspaceId: string, mission: Mission, revision: string | undefined, message: string): Promise<void> {
+    const active = [...this.runsBySession.values()].find((b) => b.workspaceId === workspaceId && b.run.role === "steward" && b.run.missionId === mission.missionId);
+    if (active) {
+      if (revision) {
+        active.run = await this.service.putRun(workspaceId, { ...active.run, revision });
+      }
+      await this.runner.steer(active.run.sessionId, "（追加）" + message);
+      return;
+    }
+    const root = await this.service.workspaceRoot(workspaceId);
+    const { content } = await this.roles.read(root, "steward");
+    const { sessionId } = await this.runner.open({
+      workspaceId,
+      cwd: root,
+      developerInstructions: content,
+      title: "管家 · " + mission.title,
+      metadata: { role: "steward", missionId: mission.missionId }
+    });
+    const run = await this.service.putRun(workspaceId, {
+      runId: createId("run"),
+      role: "steward",
+      sessionId,
+      missionId: mission.missionId,
+      revision,
+      status: "running",
+      turns: 0,
+      startedAt: this.now()
+    });
+    this.runsBySession.set(sessionId, { workspaceId, run, idleTurns: 0 });
+    await this.runner.send(sessionId, message);
+  }
+
 
   // ---- scheduler ----
 
@@ -182,7 +196,7 @@ export class Orchestrator {
     const running = items.filter((i) => i.status === "running").length;
     const capacity = scheduler.maxWorkers - running;
     if (capacity <= 0) return;
-    const closed = new Set(items.filter((i) => i.status === "closed").map((i) => i.workItemId));
+    const closed = new Set(items.filter((i) => i.status === "closed").map((i) => i.workItemId)); // cancelled never satisfies a dependency
     const busy = new Set(items.filter((i) => i.status === "running").flatMap((i) => i.needs));
     const ready = items.filter(
       (i) => i.status === "queued" && (i.run.attempts ?? 0) < 3 && i.dependsOn.every((id) => closed.has(id)) && !i.needs.some((need) => busy.has(need))
@@ -205,13 +219,32 @@ export class Orchestrator {
     ].join("\n"));
   }
 
-  /** The item a worker holds was cancelled: interrupt the session and close the run. */
-  private async cancelWorker(workspaceId: string, sessionId: string): Promise<void> {
-    const bound = this.runsBySession.get(sessionId);
-    if (!bound) return;
-    this.runsBySession.delete(sessionId);
-    await this.runner.interrupt(sessionId).catch(() => undefined);
-    await this.service.putRun(workspaceId, { ...bound.run, status: "failed", note: "工单已取消", endedAt: this.now() });
+  /**
+   * A work item was cancelled: interrupt its worker if one held it, and when queued items depended on it, wake the
+   * steward of that mission to decide what happens to them.
+   */
+  private async onCancelled(workspaceId: string, workItemId: string, sessionId: string | undefined, dependants: string[]): Promise<void> {
+    const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
+    if (bound) {
+      this.runsBySession.delete(bound.run.sessionId);
+      await this.runner.interrupt(bound.run.sessionId).catch(() => undefined);
+      await this.service.putRun(workspaceId, { ...bound.run, status: "failed", note: "工单已取消", endedAt: this.now() });
+    }
+    if (dependants.length === 0) return;
+    const item = await this.service.getWorkItem(workspaceId, workItemId);
+    const mission = item.missionId ? (await this.service.listMissions(workspaceId)).find((m) => m.missionId === item.missionId) : undefined;
+    if (!mission) return;
+    const items = await this.service.listWorkItems(workspaceId, mission.missionId);
+    const lines = dependants.map((id) => { const w = items.find((x) => x.workItemId === id); return "- " + id + " " + (w?.title ?? "") + "（dependsOn: " + (w?.dependsOn.join(", ") ?? "") + "）"; });
+    await this.stewardTurn(workspaceId, mission, undefined, [
+      "工单「" + item.title + "」（" + workItemId + "）已取消。以下排队中的工单依赖它：",
+      ...lines,
+      "",
+      "workspaceId: " + workspaceId,
+      "missionId: " + mission.missionId,
+      "",
+      "请逐张判断：去掉依赖继续（workItem.update 改 dependsOn，带 note）、改依赖到替代工单、或一并取消（workItem.cancel）。拿不准就 decision.create。最后回复一行摘要。"
+    ].join("\n"));
   }
 
   private async openWorker(workspaceId: string, item: WorkItem): Promise<void> {
@@ -296,7 +329,7 @@ export class Orchestrator {
     // The item left this session: submitted, parked on a decision, voided (and possibly already re-assigned).
     if (item.status !== "running" || item.run.sessionId !== run.sessionId) {
       this.runsBySession.delete(run.sessionId);
-      const note = item.run.sessionId !== run.sessionId && item.status !== "review" && item.status !== "closed" ? "提交作废：合同已变更" : item.status === "decision" ? "等待决策" : "已提交 (" + item.status + ")";
+      const note = item.run.sessionId !== run.sessionId && item.status !== "review" && item.status !== "closed" && item.status !== "cancelled" ? "提交作废：合同已变更" : item.status === "decision" ? "等待决策" : "已提交 (" + item.status + ")";
       await this.service.putRun(workspaceId, { ...run, status: "done", note, endedAt: this.now() });
       await this.schedule(workspaceId);
       return;
