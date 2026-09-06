@@ -1,8 +1,10 @@
 import { Maximize2, X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
+import { IconButton } from "./ui.js";
 
 type ModalProps = {
   title: string;
+  titleContent?: ReactNode;
   onClose: () => void;
   onExpand?: () => void;
   width?: number;
@@ -11,7 +13,7 @@ type ModalProps = {
 };
 
 /** Single modal frame for every overlay so they share position, backdrop and chrome. */
-export const Modal = ({ title, onClose, onExpand, width = 720, height, children }: ModalProps) => {
+export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, children }: ModalProps) => {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -29,13 +31,14 @@ export const Modal = ({ title, onClose, onExpand, width = 720, height, children 
         style={{ width, height }}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="flex h-10 items-center gap-2 border-b border-border px-4">
-          <h2 className="text-title-sm font-medium text-strong">{title}</h2>
+        <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
+          <h2 className="shrink-0 text-title-sm font-medium text-strong">{title}</h2>
+          {titleContent}
           <div className="ml-auto flex items-center gap-0.5">
             {onExpand && (
-              <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-surface-hover hover:text-strong" title="展开为页面" aria-label="展开为页面" onClick={onExpand}><Maximize2 size={14} /></button>
+              <IconButton icon={Maximize2} label="展开为页面" onClick={onExpand} />
             )}
-            <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-surface-hover hover:text-strong" title="关闭" aria-label="关闭" onClick={onClose}><X size={15} /></button>
+            <IconButton icon={X} label="关闭" onClick={onClose} />
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-auto">{children}</div>
