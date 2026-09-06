@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { InboxItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
-import { Badge, Button, Card, EmptyState, Field } from "./ui.js";
+import { Badge, Button, Card, EmptyState, Field, InlineNotice } from "./ui.js";
 
 type InboxPanelProps = { store: WorkbenchStore };
 
@@ -32,12 +32,16 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const [busy, setBusy] = useState(false);
   const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + item.card.decisionId] ?? false);
   const toggleDetails = store((s) => s.toggleInboxDetails);
+  const [error, setError] = useState<string | null>(null);
   const missionTitle = store((s) => s.view?.workspaceId === item.workspaceId ? s.view.missions.find((m) => m.missionId === item.card.missionId)?.title : undefined);
   const { card } = item;
   const answer = async (key: string) => {
     setBusy(true);
+    setError(null);
     try {
       await client.request("decision.answer", { workspaceId: item.workspaceId, decisionId: item.card.decisionId, key });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
     }
@@ -70,6 +74,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
           );
         })}
       </ul>
+      {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
       {card.details && (
         <div className="mt-3">
           <button type="button" className="flex items-center gap-1 text-caption text-muted-foreground hover:text-strong" onClick={() => toggleDetails(item.workspaceId, card.decisionId)}>
@@ -86,13 +91,17 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
 const ReviewCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "review" }> }) => {
   const client = store((s) => s.client);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const { workItem } = item;
   const run = async (task: () => Promise<unknown>) => {
     setBusy(true);
+    setError(null);
     try {
       await task();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
     }
@@ -153,6 +162,7 @@ const ReviewCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
       {rejected.length > 0 && (
         <p className="mt-2 text-caption text-faint-foreground">已拒绝的 review 意见：{rejected.map((r) => r.comment + "（" + r.reason + "）").join("；")}</p>
       )}
+      {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
     </Card>
   );
 };
