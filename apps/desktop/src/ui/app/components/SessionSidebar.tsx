@@ -1,9 +1,12 @@
-import { ListTree, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ListTree, Pin, Plus } from "lucide-react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
+import type { SessionMenu } from "../use-session-actions.js";
+import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { cn } from "../lib/cn.js";
 import { Button, SectionLabel } from "./ui.js";
+import { ContextMenu } from "./ContextMenu.js";
 
 type SessionSidebarProps = {
   sessions: SidebarSession[];
@@ -15,9 +18,15 @@ type SessionSidebarProps = {
   workspaceLabelById: Map<string, string>;
   onOpen: (sessionId: string) => void;
   onNewChat: () => void;
+  menu: SessionMenu | undefined;
+  onOpenMenu: (event: MouseEvent, sessionId: string) => void;
+  onCloseMenu: () => void;
+  onRunAction: (sessionId: string, action: SessionActionDescriptorRpc["action"]) => void;
+  notice: { text: string; error?: boolean } | undefined;
+  onClearNotice: () => void;
 };
 
-export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, onOpen, onNewChat }: SessionSidebarProps) => {
+export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, onOpen, onNewChat, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
   const [grouped, setGrouped] = useState(false);
 
   const groups = useMemo(() => {
@@ -36,6 +45,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
       <button
         type="button"
         onClick={() => onOpen(session.sessionId)}
+        onContextMenu={(event) => onOpenMenu(event, session.sessionId)}
         className={cn(
           "relative flex w-full flex-col gap-0.5 px-4 py-2 text-left hover:bg-surface-hover",
           selectedSessionId === session.sessionId && "bg-surface-selected before:absolute before:bottom-[5px] before:left-0 before:top-[5px] before:w-0.5 before:bg-accent"
@@ -44,6 +54,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         <span className="flex items-center gap-2">
           {session.statusDot === "running" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-strong" aria-label="running" />}
           <span className="truncate text-label text-strong">{session.title}</span>
+          {session.isPinned && <Pin size={11} className="ml-auto shrink-0 text-faint-foreground" aria-label="pinned" />}
         </span>
         <span className="flex items-center gap-2 font-mono text-micro text-faint-foreground">
           {!grouped && <span className="truncate">{workspaceLabelById.get(session.workspaceId) ?? session.workspaceId}</span>}
@@ -92,6 +103,26 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           </li>
         )}
       </ul>
+      {notice && (
+        <div role="status" className={cn("flex items-start gap-2 border-t border-border px-4 py-2 text-caption", notice.error ? "text-strong" : "text-muted-foreground")}>
+          <span className="min-w-0 flex-1 break-words">{notice.text}</span>
+          {notice.error && <button type="button" className="shrink-0 text-faint-foreground hover:text-foreground" onClick={onClearNotice}>关闭</button>}
+        </div>
+      )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={onCloseMenu}
+          items={menu.actions.map((action) => ({
+            key: action.action,
+            label: action.label,
+            disabled: action.disabled,
+            title: action.reason,
+            onSelect: () => onRunAction(menu.sessionId, action.action)
+          }))}
+        />
+      )}
     </aside>
   );
 };

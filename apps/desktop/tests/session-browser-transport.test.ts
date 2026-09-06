@@ -85,6 +85,7 @@ describe("session browser transport contracts", () => {
                 title: "Root Session",
                 statusDot: "running",
                 isActive: true,
+                isPinned: false,
                 childCount: 1
               }],
               nextCursor: "cursor-2",
@@ -108,6 +109,7 @@ describe("session browser transport contracts", () => {
                 title: "Child Session",
                 statusDot: "unread_completed",
                 isActive: false,
+                isPinned: false,
                 childCount: 0
               }],
               hasMore: false,

@@ -11,6 +11,7 @@ import { TextEditor } from "./components/TextEditor.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { WorkspacesPanel } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
+import { useSessionActions } from "./use-session-actions.js";
 import { createWorkbenchStore, type Panel } from "./workbench-store.js";
 import { createRendererWorkbenchClient } from "./workbench-client.js";
 import "./app.css";
@@ -44,6 +45,14 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds });
   const workspaceLabelById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w.label])), [workspaces]);
   const workspaceById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w])), [workspaces]);
+  const [reloadSignal, setReloadSignal] = useState(0);
+  const sessionActions = useSessionActions({
+    transport,
+    reloadSidebar: sidebar.reload,
+    onForked: setSessionId,
+    onArchived: (id) => setSessionId((current) => (current === id ? undefined : current)),
+    onResumed: () => setReloadSignal((n) => n + 1)
+  });
 
   // Docs panel follows the open session's workspace; in draft it follows the picker.
   const openSession = sidebar.sessions.find((s) => s.sessionId === sessionId);
@@ -115,12 +124,19 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             workspaceLabelById={workspaceLabelById}
             onOpen={setSessionId}
             onNewChat={() => setSessionId(undefined)}
+            menu={sessionActions.menu}
+            onOpenMenu={(event, id) => void sessionActions.openMenu(event, id)}
+            onCloseMenu={sessionActions.closeMenu}
+            onRunAction={(id, action) => void sessionActions.run(id, action)}
+            notice={sessionActions.notice}
+            onClearNotice={sessionActions.clearNotice}
           />
           <main className="relative min-w-0 flex-1">
             <SessionPane
               store={sessionStore}
               transport={transport}
               sessionId={sessionId}
+              reloadSignal={reloadSignal}
               createSession={createSession}
               composerExtras={<WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? openSession?.workspaceId : undefined} />}
             />

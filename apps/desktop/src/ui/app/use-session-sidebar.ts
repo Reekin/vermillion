@@ -16,7 +16,7 @@ const toSidebar = (page: SessionBrowserPageRpc): SidebarSession[] =>
   page.items.map((item) => ({ ...item, workspaceId: page.workspaceId, sortAt: sortAtOf(item) }));
 
 /**
- * Sidebar query owned by the app: one root page per workspace, merged and ordered by last completed turn.
+ * Sidebar query owned by the app: one flat page per workspace (forks included), merged and ordered by last completed turn.
  * "Load more" advances the workspace whose next page is most recent.
  */
 export const useSessionSidebar = (input: { transport: DesktopTransport; store: RendererStore; workspaceIds: string[] }) => {
@@ -32,7 +32,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     setLoading(true);
     const results = await Promise.all(
       workspaceIds.map(async (workspaceId) => {
-        const page = await transport.sessionBrowser.listRoots({ workspaceId, limit: PAGE });
+        const page = await transport.sessionBrowser.listRoots({ workspaceId, limit: PAGE, flat: true });
         return [workspaceId, { items: toSidebar(page), nextCursor: page.nextCursor, hasMore: page.hasMore, revision: page.revision }] as const;
       })
     );
@@ -48,7 +48,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
 
   const sessions = Object.values(pages)
     .flatMap((page) => page.items)
-    .sort((a, b) => b.sortAt.localeCompare(a.sortAt) || a.sessionId.localeCompare(b.sessionId));
+    .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || b.sortAt.localeCompare(a.sortAt) || a.sessionId.localeCompare(b.sessionId));
 
   const hasMore = Object.values(pages).some((page) => page.hasMore);
 
@@ -60,7 +60,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     const run = generation.current;
     setLoading(true);
     try {
-      const next = await transport.sessionBrowser.listRoots({ workspaceId, cursor: page.nextCursor, expectedRevision: page.revision, limit: PAGE });
+      const next = await transport.sessionBrowser.listRoots({ workspaceId, cursor: page.nextCursor, expectedRevision: page.revision, limit: PAGE, flat: true });
       if (run !== generation.current) return;
       setPages((current) => ({
         ...current,
@@ -74,5 +74,5 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     }
   }, [pages, transport, loadFirstPages]);
 
-  return { sessions, hasMore, loading, loadMore };
+  return { sessions, hasMore, loading, loadMore, reload: loadFirstPages };
 };

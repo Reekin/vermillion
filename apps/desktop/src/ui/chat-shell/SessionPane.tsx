@@ -92,6 +92,8 @@ export type SessionPaneProps = {
   transport: DesktopTransport;
   /** Session to display; undefined renders the draft state (no session yet). */
   sessionId: string | undefined;
+  /** Incrementing this re-hydrates the displayed session from the provider (after resume). */
+  reloadSignal?: number;
   /** Creates the session for the first message in draft state. Returns the new sessionId. */
   createSession: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
@@ -564,6 +566,7 @@ export const SessionPane = ({
   store,
   transport,
   sessionId,
+  reloadSignal,
   createSession,
   composerExtras
 }: SessionPaneProps): ReactElement => {
@@ -766,6 +769,12 @@ export const SessionPane = ({
       void openSession(sessionId);
     }
   }, [sessionId]);
+
+  useEffect(() => {
+    if (sessionId && reloadSignal) {
+      void reloadSessionWindow(sessionId, { forceProviderHydration: true });
+    }
+  }, [reloadSignal]);
 
   const backlogAutoRefreshRef = useRef<{
     displayedSessionId?: string;

@@ -43,6 +43,7 @@ describe("agent completion notifications", () => {
         statusDot: "none",
         isActive: true,
         isExpanded: false,
+        isPinned: false,
         childCount: 1
       }]
     } satisfies SessionBrowserPathRpc;
@@ -58,6 +59,7 @@ describe("agent completion notifications", () => {
           statusDot: "none",
           isActive: false,
           isExpanded: false,
+          isPinned: false,
           childCount: 0
         }
       ]

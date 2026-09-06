@@ -108,6 +108,7 @@ describe("IPC schemas", () => {
           statusDot: "none",
           isActive: true,
           isExpanded: false,
+          isPinned: false,
           childCount: 2
         }],
         hasMore: false,

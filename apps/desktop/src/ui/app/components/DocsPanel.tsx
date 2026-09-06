@@ -1,11 +1,11 @@
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
-import { createPortal } from "react-dom";
 import type { DocChange, DocFile, Mission } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Button, Empty, SectionLabel } from "./ui.js";
 import { CommitDocsDialog } from "./CommitDocsDialog.js";
+import { ContextMenu } from "./ContextMenu.js";
 import { DiffDialog } from "./DiffDialog.js";
 
 type DocsPanelProps = {
@@ -75,17 +75,6 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
     );
     return () => { active = false; };
   }, [client, diffTarget]);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(undefined);
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", close);
-    };
-  }, [menu]);
 
   const tree = useMemo(() => buildTree(docs.map((doc) => doc.path)), [docs]);
   const changeByPath = useMemo(() => new Map(pending.map((c) => [c.path, c])), [pending]);
@@ -177,45 +166,20 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
         )}
       </div>
 
-      {menu &&
-        createPortal(
-          <ul
-            role="menu"
-            className="fixed z-50 min-w-44 rounded-md border border-border-strong bg-surface-raised py-1 floating-shadow"
-            style={{ left: menu.x, top: menu.y }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {docs.some((doc) => doc.path === menu.path) && (
-              <li>
-                <button type="button" role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left text-label text-foreground hover:bg-surface-hover hover:text-strong"
-                  onClick={() => {
-                    setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path });
-                    setMenu(undefined);
-                  }}>Diff</button>
-              </li>
-            )}
-            {[
-              { label: "在文件管理器中显示", action: "reveal" as const },
-              { label: "用默认编辑器打开", action: "open" as const }
-            ].map((item) => (
-              <li key={item.action}>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left text-label text-foreground hover:bg-surface-hover hover:text-strong"
-                  onClick={() => {
-                    setMenu(undefined);
-                    void onFileAction(absolute(menu.path), item.action);
-                  }}
-                >
-                  {item.label}
-                </button>
-              </li>
-            ))}
-          </ul>,
-          document.body
-        )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(undefined)}
+          items={[
+            ...(docs.some((doc) => doc.path === menu.path)
+              ? [{ key: "diff", label: "Diff", onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
+              : []),
+            { key: "reveal", label: "在文件管理器中显示", onSelect: () => void onFileAction(absolute(menu.path), "reveal") },
+            { key: "open", label: "用默认编辑器打开", onSelect: () => void onFileAction(absolute(menu.path), "open") }
+          ]}
+        />
+      )}
 
       {missionOpen && (
         <CommitDocsDialog

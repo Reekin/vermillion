@@ -54,7 +54,10 @@ const buildForkMetadata = (
   rolloutPath: thread?.path ?? input.session?.metadata?.rolloutPath
 });
 
-const resolveForkTitle = (thread: { id: string; name?: string | null; preview?: string | null }): string => {
+const resolveForkTitle = (
+  thread: { id: string; name?: string | null; preview?: string | null },
+  parentTitle: string | undefined
+): string => {
   const name = thread.name?.trim();
   if (name) {
     return name;
@@ -63,7 +66,7 @@ const resolveForkTitle = (thread: { id: string; name?: string | null; preview?: 
     ?.split("\n")
     .map((line) => line.trim())
     .find(Boolean);
-  return preview || discoveredCodexSessionId(thread.id);
+  return preview || parentTitle || discoveredCodexSessionId(thread.id);
 };
 
 const isTreeRelationType = (
@@ -205,7 +208,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         engineId: input.engineId ?? this.engineId,
         providerKind: codexProviderKind,
         providerSessionId: thread.id,
-        title: resolveForkTitle(thread),
+        title: resolveForkTitle(thread, input.session?.title ?? input.indexEntry?.title),
         summaryText: thread.preview?.trim() || undefined,
         createdAt,
         updatedAt,

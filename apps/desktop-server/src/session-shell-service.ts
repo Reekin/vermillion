@@ -495,6 +495,7 @@ export class SessionShellService {
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
+    flat?: boolean;
   }): Promise<SessionBrowserPageRpc> {
     return this.sessionCatalog.listRoots(input);
   }

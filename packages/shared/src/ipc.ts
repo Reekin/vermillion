@@ -167,6 +167,7 @@ export type SessionBrowserItemRpc = {
   statusDot: z.infer<typeof zSessionStatusDotSchema>;
   isActive: boolean;
   isExpanded: boolean;
+  isPinned: boolean;
   childCount: number;
   activityAt?: string;
   lastCompletedTurnAt?: string;
@@ -196,6 +197,7 @@ const zSessionBrowserItemSchema = z.object({
   statusDot: zSessionStatusDotSchema,
   isActive: z.boolean(),
   isExpanded: z.boolean(),
+  isPinned: z.boolean(),
   childCount: z.number().int().nonnegative(),
   activityAt: z.string().min(1).optional(),
   lastCompletedTurnAt: z.string().min(1).optional()
@@ -683,7 +685,9 @@ const zSessionBrowserPageParamsSchema = z.object({
   workspaceId: z.string().min(1),
   cursor: z.string().min(1).optional(),
   expectedRevision: z.string().min(1).optional(),
-  limit: z.number().int().positive().max(100).default(20)
+  limit: z.number().int().positive().max(100).default(20),
+  /** List every session in the workspace regardless of parent relation. */
+  flat: z.boolean().optional()
 });
 
 const zSessionBrowserListRootsRequestSchema = z.object({

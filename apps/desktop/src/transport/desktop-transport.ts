@@ -275,6 +275,7 @@ export type DesktopTransport = {
       cursor?: string;
       limit?: number;
       expectedRevision?: string;
+      flat?: boolean;
     }) => Promise<SessionBrowserPageRpc>;
     listChildren: (input: {
       workspaceId: string;

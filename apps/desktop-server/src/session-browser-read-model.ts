@@ -28,6 +28,9 @@ const compareItems = (
   left: SessionBrowserReadModelSeed,
   right: SessionBrowserReadModelSeed
 ): number => {
+  if (left.isPinned !== right.isPinned) {
+    return left.isPinned ? -1 : 1;
+  }
   const bySortAt = right.sortAt.localeCompare(left.sortAt);
   return bySortAt !== 0 ? bySortAt : left.sessionId.localeCompare(right.sessionId);
 };
@@ -71,10 +74,14 @@ export class SessionBrowserReadModel {
   public constructor(seeds: readonly SessionBrowserReadModelSeed[]) {
     for (const seed of seeds) {
       this.bySessionId.set(seed.sessionId, seed);
-      const key = this.collectionKey(seed.workspaceId, seed.parentSessionId);
-      const collection = this.collections.get(key) ?? [];
-      collection.push(seed);
-      this.collections.set(key, collection);
+      for (const key of [
+        this.collectionKey(seed.workspaceId, seed.parentSessionId),
+        this.flatCollectionKey(seed.workspaceId)
+      ]) {
+        const collection = this.collections.get(key) ?? [];
+        collection.push(seed);
+        this.collections.set(key, collection);
+      }
     }
 
     for (const collection of this.collections.values()) {
@@ -96,6 +103,7 @@ export class SessionBrowserReadModel {
             seed.statusDot,
             seed.isActive,
             seed.isExpanded,
+            seed.isPinned,
             seed.childCount,
             seed.activityAt,
             seed.lastCompletedTurnAt,
@@ -112,6 +120,7 @@ export class SessionBrowserReadModel {
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
+    flat?: boolean;
   }): SessionBrowserPageRpc {
     return this.listPage({ ...input, parentSessionId: undefined });
   }
@@ -157,6 +166,7 @@ export class SessionBrowserReadModel {
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
+    flat?: boolean;
   }): SessionBrowserPageRpc {
     const revision = this.revisionFor(input.workspaceId);
     if (input.expectedRevision && input.expectedRevision !== revision) {
@@ -172,7 +182,9 @@ export class SessionBrowserReadModel {
     }
     const offset = cursor?.offset ?? 0;
     const collection = this.collections.get(
-      this.collectionKey(input.workspaceId, input.parentSessionId)
+      input.flat
+        ? this.flatCollectionKey(input.workspaceId)
+        : this.collectionKey(input.workspaceId, input.parentSessionId)
     ) ?? [];
     const items = collection.slice(offset, offset + limit);
     const nextOffset = offset + items.length;
@@ -198,6 +210,10 @@ export class SessionBrowserReadModel {
     return `${workspaceId}\u0000${parentSessionId ?? ""}`;
   }
 
+  private flatCollectionKey(workspaceId: string): string {
+    return this.collectionKey(workspaceId, "*");
+  }
+
   private toItem(seed: SessionBrowserReadModelSeed): SessionBrowserItemRpc {
     return {
       sessionId: seed.sessionId,
@@ -207,6 +223,7 @@ export class SessionBrowserReadModel {
       statusDot: seed.statusDot,
       isActive: seed.isActive,
       isExpanded: seed.isExpanded,
+      isPinned: seed.isPinned,
       childCount: seed.childCount,
       activityAt: seed.activityAt,
       lastCompletedTurnAt: seed.lastCompletedTurnAt
