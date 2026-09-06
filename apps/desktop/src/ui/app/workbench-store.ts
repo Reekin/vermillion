@@ -52,6 +52,8 @@ export type WorkbenchState = {
   editor: EditorTarget | undefined;
   /** Agent session shown in Workspaces → 会话; set by "会话" links in Inbox and the task board. */
   agentSessionId: string | undefined;
+  /** "另有 N 项已结束" in the overlay: open the full task board as a page. */
+  showTaskBoard: () => void;
   /** Outcome of the last commit dialog action, briefly shown in the global status bar. */
   docCommit: CommitOutcome | undefined;
   setDocCommit: (result: CommitOutcome | undefined) => void;
@@ -171,6 +173,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
       editor: undefined,
       agentSessionId: undefined,
+      showTaskBoard: () => set({ workspaceSection: "missions", panel: "workspaces", overlay: undefined }),
       docCommit: undefined,
       setDocCommit: (result) => set({ docCommit: result }),
 

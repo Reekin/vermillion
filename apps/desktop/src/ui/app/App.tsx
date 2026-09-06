@@ -12,7 +12,7 @@ import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
-import { WorkspacesPanel } from "./components/WorkspacesPanel.js";
+import { WorkspacesPanel, WorkspacesSwitcher } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
 import { createWorkbenchStore, type Panel } from "./workbench-store.js";
@@ -109,7 +109,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   );
 
   const renderPanel = (target: Panel, compact: boolean) =>
-    target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} compact={compact} />;
+    target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} compact={compact} onExpand={() => store.getState().showTaskBoard()} />;
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-page-canvas text-foreground">
@@ -156,7 +156,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       </div>
       <TaskStatusBar store={store} />
       {overlay && (
-        <Modal title={panelTitles[overlay]} onClose={closeOverlay} onExpand={() => setPanel(overlay)}>
+        <Modal title={panelTitles[overlay]} titleContent={overlay === "workspaces" ? <WorkspacesSwitcher store={store} /> : undefined} width={overlay === "workspaces" ? 900 : undefined} onClose={closeOverlay} onExpand={() => setPanel(overlay)}>
           {renderPanel(overlay, true)}
         </Modal>
       )}

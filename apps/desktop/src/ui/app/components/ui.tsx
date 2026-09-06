@@ -6,8 +6,8 @@
  *
  * Buttons       Button, IconButton
  * Text          Badge, SectionLabel, InlineNotice, StatusDot
- * Fields        Field (input / textarea / select / number)
- * Structure     PanelHeader, ListRow, Card, EmptyState, StatusBar
+ * Fields        Field (input / textarea / select / number), Toggle, Stepper
+ * Structure     PanelHeader, Tabs, ListRow, Card, EmptyState, StatusBar
  * Overlays      Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
@@ -18,7 +18,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes
 } from "react";
-import type { LucideIcon } from "lucide-react";
+import { Minus, Plus, type LucideIcon } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
@@ -28,11 +28,12 @@ import { cn } from "../lib/cn.js";
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "accent" | "secondary" | "ghost";
   size?: "sm" | "md";
+  outlined?: boolean;
 };
 
 /** Thin wrapper over the session shell's button so both layers render identical controls. */
-export const Button = ({ variant = "secondary", size = "md", ...rest }: ButtonProps) => (
-  <ShellButton variant={variant} size={size} {...rest} />
+export const Button = ({ variant = "secondary", size = "md", outlined, className, ...rest }: ButtonProps) => (
+  <ShellButton variant={variant} size={size} className={cn(outlined && "vm-button-outlined", className)} {...rest} />
 );
 
 type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
@@ -63,14 +64,17 @@ export const IconButton = ({ icon: Icon, label, size = 14, active, className, ..
 
 // ---- Text ----
 
-export const Badge = ({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" }) => (
+export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "review" | "decision" | "running" | "queued" | "closed" | "cancelled"; muted?: boolean }) => (
   <span
+    data-status={status}
     className={cn(
-      "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-mono text-micro uppercase tracking-eyebrow",
-      tone === "neutral" && "border-border-strong text-muted-foreground",
-      tone === "accent" && "border-control-border-hover bg-accent-soft text-strong"
+      status ? "vm-status" : "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-mono text-micro uppercase tracking-eyebrow",
+      !status && tone === "neutral" && "border-border-strong text-muted-foreground",
+      !status && tone === "accent" && "border-control-border-hover bg-accent-soft text-strong",
+      muted && "vm-status-muted"
     )}
   >
+    {status && status !== "closed" && status !== "cancelled" && <span className="vm-status-marker" aria-hidden="true" />}
     {children}
   </span>
 );
@@ -109,7 +113,7 @@ export const StatusDot = ({ status }: { status: "none" | "running" | "unread_com
 export const fieldClass =
   "w-full rounded-lg border border-control-border bg-input px-3 text-body text-foreground outline-none placeholder:text-faint-foreground focus:border-control-border-hover disabled:opacity-60";
 
-type FieldBase = { label?: ReactNode; hint?: ReactNode; className?: string };
+type FieldBase = { label?: ReactNode; hint?: ReactNode; className?: string; compact?: boolean };
 type FieldProps =
   | (FieldBase & { kind?: "input" } & InputHTMLAttributes<HTMLInputElement>)
   | (FieldBase & { kind: "textarea" } & TextareaHTMLAttributes<HTMLTextAreaElement>)
@@ -118,7 +122,7 @@ type FieldProps =
 /** Labelled form control. The label is an eyebrow above; the hint sits below in caption text. */
 export const Field = (props: FieldProps) => {
   const { label, hint, className } = props;
-  const controlClass = cn(fieldClass, label && "mt-1.5");
+  const controlClass = cn(fieldClass, label && "mt-1.5", props.compact && "vm-field-compact");
   const control =
     props.kind === "textarea" ? (
       <textarea spellCheck={false} {...omit(props)} className={cn(controlClass, "resize-none py-2")} />
@@ -138,7 +142,7 @@ export const Field = (props: FieldProps) => {
 
 // Strips the wrapper-only props so the rest can spread onto the native control.
 const omit = <T extends FieldBase & { kind?: string }>(props: T): Omit<T, keyof FieldBase | "kind"> => {
-  const { label: _label, hint: _hint, className: _className, kind: _kind, ...rest } = props;
+  const { label: _label, hint: _hint, className: _className, compact: _compact, kind: _kind, ...rest } = props;
   return rest;
 };
 
@@ -171,6 +175,31 @@ export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenCha
   </footer>
 );
 
+export const Toggle = ({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) => (
+  <button type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)} className="vm-toggle">
+    <span className="vm-toggle-track" aria-hidden="true"><span /></span>{label}
+  </button>
+);
+
+export const Stepper = ({ label, value, min, max, disabled, onChange }: { label: string; value: number; min: number; max: number; disabled?: boolean; onChange: (value: number) => void }) => (
+  <span className="vm-stepper">
+    {label}<span className="vm-stepper-control">
+      <IconButton icon={Minus} label={"减少" + label} disabled={disabled || value <= min} onClick={() => onChange(value - 1)} />
+      <output aria-label={label}>{value}</output>
+      <IconButton icon={Plus} label={"增加" + label} disabled={disabled || value >= max} onClick={() => onChange(value + 1)} />
+    </span>
+  </span>
+);
+
+export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ id: string; label: string; count?: number }>; selected: string; onSelect: (id: string) => void; children?: ReactNode }) => (
+  <nav className="vm-tabs" aria-label="workspace 导航">
+    {items.map((item) => <button key={item.id} type="button" aria-current={selected === item.id ? "page" : undefined} onClick={() => onSelect(item.id)}>
+      {item.label}{item.count !== undefined && <span className="vm-tab-count">{item.count}</span>}
+    </button>)}
+    {children}
+  </nav>
+);
+
 /** Panel top line: section label on the left, optional actions on the right. */
 export const PanelHeader = ({ title, children, className }: { title: ReactNode; children?: ReactNode; className?: string }) => (
   <div className={cn("flex items-center pr-2", className)}>
@@ -195,13 +224,25 @@ type ListRowProps = {
   onContextMenu?: (event: MouseEvent) => void;
   className?: string;
   titleClassName?: string;
+  /** Dense one-line list with fixed status, hover-action and action slots. */
+  columns?: { info?: ReactNode; status: ReactNode; action?: ReactNode; hoverAction?: ReactNode };
 };
 
 /**
  * Standard row for sidebars and lists: leading | title / meta | trailing. Clickable when `onClick` is given;
  * the selection bar on the left is the same everywhere.
  */
-export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName }: ListRowProps) => {
+export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName, columns }: ListRowProps) => {
+  if (columns) return (
+    <div className={cn("vm-list-columns", className)}>
+      {leading}
+      <span className={cn("truncate text-label text-foreground", titleClassName)}>{title}</span>
+      <span className="vm-list-info">{columns.info}</span>
+      <span className="vm-list-status">{columns.status}</span>
+      <span className="vm-list-cancel">{columns.hoverAction}</span>
+      <span className="vm-list-action">{columns.action}</span>
+    </div>
+  );
   const body = (
     <>
       <span className="flex min-w-0 items-center gap-2">
@@ -234,16 +275,17 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
   return (
     <div className="group flex items-center">
       <button type="button" className={cn(shared, "min-w-0 flex-1")} style={style} onClick={onClick} onContextMenu={onContextMenu}>{body}</button>
-      <span className="mr-2 hidden shrink-0 items-center gap-1 group-hover:flex">{hoverActions}</span>
+      <span className="mr-2 flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">{hoverActions}</span>
     </div>
   );
 };
 
 /** Bordered container for one self-contained item (a decision, a mission, a review). Header line + body + optional footer actions. */
-export const Card = ({ header, children, footer, className }: { header?: ReactNode; children: ReactNode; footer?: ReactNode; className?: string }) => (
-  <article className={cn("rounded-lg border border-border-strong bg-surface", className)}>
+export const Card = ({ header, children, footer, className, compact, rows }: { header?: ReactNode; children?: ReactNode; footer?: ReactNode; className?: string; compact?: boolean; rows?: ReactNode }) => (
+  <article className={cn("rounded-lg border border-border-strong bg-surface", compact && "vm-card-compact", className)}>
     {header && <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">{header}</header>}
-    <div className="px-4 py-3">{children}</div>
+    {children && <div className={compact ? "px-3 pb-2.5" : "px-4 py-3"}>{children}</div>}
+    {rows && <div className="border-t border-border">{rows}</div>}
     {footer && <footer className="flex items-center gap-2 border-t border-border px-4 py-2.5">{footer}</footer>}
   </article>
 );
