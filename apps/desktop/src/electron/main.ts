@@ -704,9 +704,9 @@ const boot = async (): Promise<void> => {
       void service
         .getSessionBrowserItem(completed.sessionId)
         .then((session) => {
-          // Agent sessions (steward / worker / supervisor) finish turns all the time; only the user's own design
-          // sessions are worth a desktop notification. Their outcomes surface through the Inbox instead.
-          if (session && !session.role) {
+          // Agent sessions (steward / worker / supervisor) and any subagent they spawn finish turns all the time;
+          // only the user's own top-level sessions are worth a desktop notification. Agent outcomes surface via Inbox.
+          if (session && !session.role && !session.parentSessionId) {
             showDesktopNotification(`「${session.title}」会话已完成`);
           }
         })
