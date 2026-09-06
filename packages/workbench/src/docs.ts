@@ -156,6 +156,8 @@ export class DocsService {
 
   /** Commits everything in a work item's worktree onto its branch, merges into the workspace branch, and removes the worktree. */
   async mergeWorktree(worktreePath: string, branch: string, message: string): Promise<string> {
+    const unresolved = await git(this.rootPath, ["ls-files", "--unmerged"]);
+    if (unresolved) throw new Error("主工作区存在尚未解决的冲突，请先完成当前 Git 操作。");
     await git(worktreePath, ["add", "-A"]);
     const staged = (await git(worktreePath, ["status", "--porcelain=v1"])).trim();
     if (staged) await git(worktreePath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message]);

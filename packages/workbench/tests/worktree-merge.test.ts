@@ -123,4 +123,27 @@ describe("work item merge conflict loop with real Git and RPC", { timeout: 30000
     expect(await readFile(join(root, files[0]!), "utf8")).toBe("unsaved user work\n");
     await access(worktreePath);
   });
+
+  it("preserves an unfinished user merge instead of treating it as a worker conflict", async () => {
+    const { root, service, client, workspaceId, workItemId, worktreePath } = await setup();
+    const params = { workspaceId, workItemId };
+    await client.request("workItem.submit", { ...params, ...submission });
+    await git(root, "checkout", "-b", "user-side");
+    await writeFile(join(root, files[0]!), "user side\n");
+    await commit(root, "user side");
+    await git(root, "checkout", "-");
+    await writeFile(join(root, files[0]!), "user main\n");
+    await commit(root, "user main");
+    await expect(git(root, "merge", "user-side")).rejects.toThrow();
+    const mergeHead = await git(root, "rev-parse", "MERGE_HEAD");
+    const index = await git(root, "ls-files", "--stage");
+    const conflict = await readFile(join(root, files[0]!), "utf8");
+
+    await expect(client.request("workItem.approve", params)).rejects.toThrow("主工作区存在尚未解决的冲突");
+    expect(await service.getWorkItem(workspaceId, workItemId)).toMatchObject({ status: "review", rejections: [] });
+    expect(await git(root, "rev-parse", "MERGE_HEAD")).toBe(mergeHead);
+    expect(await git(root, "ls-files", "--stage")).toBe(index);
+    expect(await readFile(join(root, files[0]!), "utf8")).toBe(conflict);
+    await access(worktreePath);
+  });
 });
