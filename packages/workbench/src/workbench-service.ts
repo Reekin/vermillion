@@ -245,11 +245,15 @@ export class WorkbenchService {
 
   async createWorkItem(
     workspaceId: string,
-    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { missionId?: string; refs?: WorkItem["refs"]; needs?: string[]; autoClose?: boolean }
+    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { missionId?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[]; autoClose?: boolean }
   ): Promise<WorkItem> {
     const now = this.now();
     const { store } = await this.context(workspaceId);
     if (input.missionId && !(await store.missions.get(input.missionId))) throw new Error("Unknown mission: " + input.missionId);
+    for (const id of input.dependsOn ?? []) {
+      const dep = await store.workItems.get(id);
+      if (!dep || dep.missionId !== input.missionId) throw new Error("dependsOn must reference a work item in the same mission: " + id);
+    }
     const item = await store.workItems.put({
       workItemId: createId("wi"),
       contractVersion: 0,
@@ -260,6 +264,7 @@ export class WorkbenchService {
       risk: input.risk,
       autoClose: input.autoClose ?? isLowRisk(input.risk),
       needs: input.needs ?? [],
+      dependsOn: input.dependsOn ?? [],
       refs: input.refs ?? [],
       scope: input.scope,
       acceptance: input.acceptance,

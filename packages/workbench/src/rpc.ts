@@ -73,6 +73,7 @@ export const workbenchRpc = {
       scope: zScope,
       acceptance: z.array(zAcceptanceItem),
       needs: z.array(z.string()).optional(),
+      dependsOn: z.array(z.string()).optional(),
       autoClose: z.boolean().optional()
     }),
     result: zWorkItem

@@ -48,7 +48,7 @@ const createFakeRunner = () => {
   return { runner, sessions, complete };
 };
 
-const setup = async () => {
+const setup = async (maxWorkers = 1) => {
   const root = await mkdtemp(join(tmpdir(), "verm-orch-"));
   const globalDir = await mkdtemp(join(tmpdir(), "verm-orch-roles-"));
   dirs.push(root, globalDir);
@@ -57,7 +57,7 @@ const setup = async () => {
   const service = new WorkbenchService({ workspaces: createMemoryWorkspaceSource(), roles });
   cleanup.push(() => service.dispose());
   const ws = await service.addWorkspace({ rootPath: root, label: "O" });
-  await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+  await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers });
   const fake = createFakeRunner();
   const orchestrator = new Orchestrator({ service, roles, runner: fake.runner, maxIdleTurns: 1 });
   orchestrator.start();
@@ -96,6 +96,28 @@ describe("Orchestrator", { timeout: 20000 }, () => {
     complete(worker.sessionId, "done");
     await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("review");
+  });
+
+  it("holds items until dependsOn are closed and needs slots are free", async () => {
+    const { service, ws, sessions, complete } = await setup(3);
+    const base = { objective: "o", risk: "R1" as const, scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] };
+    await service.createWorkItem(ws.workspaceId, { ...base, title: "A", needs: ["browser"] });
+    await service.createWorkItem(ws.workspaceId, { ...base, title: "B", needs: ["browser"] });
+    await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 1);
+    await tick();
+    expect(sessions.filter((s) => s.metadata.role === "worker")).toHaveLength(1); // B waits for the browser slot
+    await expect(service.createWorkItem(ws.workspaceId, { ...base, title: "X", dependsOn: ["nope"] })).rejects.toThrow(/dependsOn/);
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/d.md", "# d\n");
+    const mission = await service.createMission(ws.workspaceId, { title: "D", summary: "" });
+    await until(async () => sessions.some((s) => s.metadata.role === "steward"));
+    complete(sessions.find((s) => s.metadata.role === "steward")!.sessionId, "no-op");
+    const first = await service.createWorkItem(ws.workspaceId, { ...base, title: "first", missionId: mission.missionId });
+    const second = await service.createWorkItem(ws.workspaceId, { ...base, title: "second", missionId: mission.missionId, dependsOn: [first.workItemId] });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, first.workItemId)).status === "running");
+    await tick();
+    expect((await service.getWorkItem(ws.workspaceId, second.workItemId)).status).toBe("queued");
+    await service.cancelWorkItem(ws.workspaceId, first.workItemId);
+    await until(async () => (await service.getWorkItem(ws.workspaceId, second.workItemId)).status === "running");
   });
 
   it("steers the running worker on a contract change and only voids submits made against an older version", async () => {

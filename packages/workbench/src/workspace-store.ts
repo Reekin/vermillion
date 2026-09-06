@@ -21,6 +21,10 @@ type Collection<T> = {
   put: (record: T) => Promise<T>;
 };
 
+/** Fields added after records were first written; filled in on read so older files stay valid. */
+const withDefaults = (raw: unknown): unknown =>
+  raw && typeof raw === "object" && "workItemId" in raw ? { dependsOn: [], ...(raw as Record<string, unknown>) } : raw;
+
 const readJsonDir = async <T>(dir: string, schema: z.ZodType<T>): Promise<T[]> => {
   let names: string[];
   try {
@@ -32,7 +36,7 @@ const readJsonDir = async <T>(dir: string, schema: z.ZodType<T>): Promise<T[]> =
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
     const raw = await readFile(join(dir, name), "utf8");
-    records.push(schema.parse(JSON.parse(raw)));
+    records.push(schema.parse(withDefaults(JSON.parse(raw))));
   }
   return records;
 };
@@ -52,7 +56,7 @@ const createCollection = <T extends Record<string, unknown>>(
   get: async (id) => {
     try {
       const raw = await readFile(join(dir, id + ".json"), "utf8");
-      return schema.parse(JSON.parse(raw));
+      return schema.parse(withDefaults(JSON.parse(raw)));
     } catch {
       return undefined;
     }

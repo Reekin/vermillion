@@ -110,7 +110,10 @@ export const zWorkItem = z.object({
   status: zWorkItemStatus,
   risk: zRisk,
   autoClose: z.boolean(),
+  /** Execution resources this item occupies (e.g. "browser"); the scheduler waits for a free slot. */
   needs: z.array(z.string()),
+  /** Work items in the same mission that must be closed before this one is scheduled. */
+  dependsOn: z.array(z.string()),
   refs: z.array(zDocRef),
   scope: zScope,
   acceptance: z.array(zAcceptanceItem),

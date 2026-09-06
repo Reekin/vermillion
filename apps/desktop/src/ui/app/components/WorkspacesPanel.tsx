@@ -130,13 +130,13 @@ const SessionLink = ({ sessionId, onOpenSession }: { sessionId: string; onOpenSe
 );
 
 /** One work item with the agent runs that touched it, newest first. */
-const WorkItemRow = ({ item, runs, onOpenSession }: { item: WorkItem; runs: AgentRun[]; onOpenSession: (sessionId: string) => void }) => (
+const WorkItemRow = ({ item, runs, waitingFor, onOpenSession }: { item: WorkItem; runs: AgentRun[]; waitingFor: string[]; onOpenSession: (sessionId: string) => void }) => (
   <li className="text-caption">
     <div className="flex items-center gap-2">
       <Badge>{item.risk}</Badge>
       <span className="truncate text-foreground">{item.title}</span>
       {item.run.sessionId && (item.status === "running" || item.status === "review") && <SessionLink sessionId={item.run.sessionId} onOpenSession={onOpenSession} />}
-      <span className="ml-auto shrink-0 font-mono text-micro text-faint-foreground">{statusLabel[item.status]}{item.rejections.length > 0 ? " · 打回 " + item.rejections.length : ""}{item.run.lastFailure ? " · " + item.run.lastFailure : ""}</span>
+      <span className="ml-auto shrink-0 font-mono text-micro text-faint-foreground">{statusLabel[item.status]}{waitingFor.length > 0 ? " · 等待 " + waitingFor.join("、") : ""}{item.rejections.length > 0 ? " · 打回 " + item.rejections.length : ""}{item.run.lastFailure ? " · " + item.run.lastFailure : ""}</span>
     </div>
     {runs.length > 0 && (
       <ul className="ml-2 mt-1 space-y-0.5 border-l border-border pl-3">
@@ -166,6 +166,9 @@ type MissionsSectionProps = {
 const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, onOpenSession }: MissionsSectionProps) => {
   const setScheduler = (value: Partial<Scheduler>) => void client.request("scheduler.set", { workspaceId, value: { ...scheduler, ...value } });
   const runsFor = (item: WorkItem) => runs.filter((r) => r.workItemId === item.workItemId);
+  const titleById = new Map(workItems.map((w) => [w.workItemId, w.title]));
+  const waitingFor = (item: WorkItem) =>
+    item.status === "queued" ? item.dependsOn.filter((id) => workItems.find((w) => w.workItemId === id)?.status !== "closed").map((id) => titleById.get(id) ?? id) : [];
   const stewardRuns = (mission: Mission) => runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
   const standalone = workItems.filter((w) => !w.missionId);
   return (
@@ -196,7 +199,7 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
               {stewards[0]?.note && <p className="mt-1 line-clamp-2 text-caption text-muted-foreground">管家：{stewards[0].note}</p>}
               {items.length > 0 && (
                 <ul className="mt-2 space-y-1.5">
-                  {items.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} onOpenSession={onOpenSession} />)}
+                  {items.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} />)}
                 </ul>
               )}
             </li>
@@ -209,7 +212,7 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
               <Badge>不经文档</Badge>
             </div>
             <ul className="mt-2 space-y-1.5">
-              {standalone.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} onOpenSession={onOpenSession} />)}
+              {standalone.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} />)}
             </ul>
           </li>
         )}

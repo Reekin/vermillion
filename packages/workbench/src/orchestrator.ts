@@ -182,9 +182,15 @@ export class Orchestrator {
     const running = items.filter((i) => i.status === "running").length;
     const capacity = scheduler.maxWorkers - running;
     if (capacity <= 0) return;
-    // Items parked on a decision keep their slot semantics out of the queue; everything else queued is fair game.
-    const queued = items.filter((i) => i.status === "queued" && (i.run.attempts ?? 0) < 3);
-    for (const item of queued.slice(0, capacity)) await this.openWorker(workspaceId, item);
+    const closed = new Set(items.filter((i) => i.status === "closed").map((i) => i.workItemId));
+    const busy = new Set(items.filter((i) => i.status === "running").flatMap((i) => i.needs));
+    const ready = items.filter(
+      (i) => i.status === "queued" && (i.run.attempts ?? 0) < 3 && i.dependsOn.every((id) => closed.has(id)) && !i.needs.some((need) => busy.has(need))
+    );
+    for (const item of ready.slice(0, capacity)) {
+      await this.openWorker(workspaceId, item);
+      for (const need of item.needs) busy.add(need);
+    }
   }
 
   /** The steward changed a running item's contract: tell the worker now, mid-turn if needed. */
