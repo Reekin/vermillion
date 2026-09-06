@@ -43,6 +43,8 @@ export type ComposerContainerProps = {
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   onPreviewImage?: (input: ImageLightboxState) => void;
   createSession?: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
+  prepareSend?: () => Promise<string>;
+  autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
@@ -76,6 +78,8 @@ export const ComposerContainer = ({
   onStatusNotice,
   onPreviewImage,
   createSession,
+  prepareSend,
+  autoSendQueuedMessages,
   onResumeSession,
   onRequestTranscriptBottom,
   onExecutionPreferenceChange,
@@ -102,6 +106,8 @@ export const ComposerContainer = ({
     statusNotice,
     onStatusNotice,
     createSession,
+    prepareSend,
+    autoSendQueuedMessages,
     onResumeSession,
     onRequestTranscriptBottom,
     onExecutionPreferenceChange

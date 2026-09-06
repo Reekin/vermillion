@@ -53,17 +53,14 @@ import {
 import { buildTurnTranscriptRows } from "./transcript-view-model.js";
 import {
   useRendererConversationRevision,
-  useRendererSessionRevision,
+  useRendererSessionsRevision,
   useRendererStoreState
 } from "./use-renderer-store-state.js";
 import { useTranscriptViewportController } from "./use-transcript-viewport-controller.js";
-import { useSessionOpenController } from "./use-session-open-controller.js";
-import type { SessionWindowCoverage } from "./use-session-open-controller.js";
 import { useChatTreeController } from "./use-chat-tree-controller.js";
 import { ChatTreePanel } from "./ChatTreePanel.js";
 import { GitBranch } from "lucide-react";
 import { useRendererDiagnostics } from "./use-renderer-diagnostics.js";
-import { resolveAutoRefreshBacklogAttempt } from "./auto-refresh-backlog.js";
 import { ComposerContainer } from "./composer/ComposerContainer.js";
 import type { ComposerExecutionSelection } from "./composer/composer-types.js";
 import "./chat-shell.css";
@@ -90,7 +87,7 @@ const autoRefreshBacklogStreamThreshold = 500;
 export type SessionPaneProps = {
   store: RendererStore;
   transport: DesktopTransport;
-  /** Session to display; undefined renders the draft state (no session yet). */
+  /** Tree entry to display; undefined renders the draft state (no session yet). */
   sessionId: string | undefined;
   /** Incrementing this re-hydrates the displayed session from the provider (after resume). */
   reloadSignal?: number;
@@ -592,13 +589,6 @@ export const SessionPane = ({
     SessionSettingsRpc["executionPreferencesByEngineId"]
   >({});
   const [statusNotice, setStatusNoticeState] = useState<ComposerStatusNotice | undefined>();
-  const [sessionWindows, setSessionWindows] = useState<
-    Record<string, SessionWindowCoverage | undefined>
-  >({});
-  const [loadingOlderSessionId, setLoadingOlderSessionId] = useState<
-    string | undefined
-  >();
-  const [openingSessionId, setOpeningSessionId] = useState<string | undefined>();
   const [processVisibilityByTurnId, setProcessVisibilityByTurnId] = useState<
     Record<string, ProcessVisibilityOverride>
   >({});
@@ -673,32 +663,67 @@ export const SessionPane = ({
     [setStatusNotice, transport]
   );
 
-  const displayedSessionRevision = useRendererSessionRevision(store, sessionId);
+  const {
+    chatTree: activeChatTree,
+    viewSessionId,
+    isOpening: isOpeningSelectedSession,
+    refreshChatTree,
+    onJumpChatTree,
+    prepareSend
+  } = useChatTreeController({
+    store,
+    transport,
+    sessionId,
+    refreshSignal: state.refreshSignals.chatTree + state.refreshSignals.sessionBrowser,
+    onStatusNotice: setStatusNotice
+  });
+  const memberSessionIds = useMemo(
+    () => activeChatTree?.memberSessionIds ?? (sessionId ? [sessionId] : []),
+    [activeChatTree?.memberSessionIds, sessionId]
+  );
+  const displayedSessionRevision = useRendererSessionsRevision(store, memberSessionIds);
   const domain = store.getDomainReadModel();
-  const displayedSession = sessionId ? domain.getSession(sessionId) : undefined;
-  const activeSessionWindow = sessionId ? sessionWindows[sessionId] : undefined;
-  const loadingOlderTurns = Boolean(sessionId) && loadingOlderSessionId === sessionId;
+  const displayedSession = viewSessionId ? domain.getSession(viewSessionId) : undefined;
+  const activeSessionId = displayedSession && !isOpeningSelectedSession ? viewSessionId : undefined;
+  const activeSessionWindow = activeChatTree?.windows?.find((window) => window.sessionId === viewSessionId);
   const displayedEngineId = displayedSession?.engineId ?? selectedEngineId;
+  const activeThreadGoal = activeSessionId
+    ? domain.getThreadGoal(activeSessionId)
+    : undefined;
   const skillsCwd =
     typeof displayedSession?.metadata?.cwd === "string"
       ? displayedSession.metadata.cwd
       : undefined;
+
+  useRendererDiagnostics({
+    transport,
+    activeSessionId,
+    eventCursor: state.eventStream.lastCursor
+  });
 
   const displayedConversationId = displayedSession?.conversationId;
   const displayedConversationRevision = useRendererConversationRevision(
     store,
     displayedConversationId
   );
-  const isOpeningSelectedSession =
-    Boolean(sessionId) && openingSessionId === sessionId;
   // Most session switches resolve within a frame; only surface the loading state when a switch is genuinely slow.
   const showOpeningIndicator = useDelayedFlag(isOpeningSelectedSession, 300);
-  const browsedSessionId =
-    sessionId && !isOpeningSelectedSession ? sessionId : undefined;
   const turns = useMemo(
-    () => (sessionId ? domain.listTurns({ sessionId }) : emptyTurns),
-    [domain, sessionId, displayedSessionRevision]
+    () => activeChatTree?.visibleTurnIds
+      ? activeChatTree.visibleTurnIds.map((id) => domain.getTurn(id)).filter((turn): turn is Turn => Boolean(turn))
+      : viewSessionId ? domain.listTurns({ sessionId: viewSessionId }) : emptyTurns,
+    [domain, viewSessionId, displayedSessionRevision, activeChatTree]
   );
+  const currentTurn = turns.at(-1);
+  const activeSession = displayedSession && activeSessionId
+    ? {
+        ...displayedSession,
+        status: currentTurn?.status === "completed" || !currentTurn
+          ? "idle" as const
+          : displayedSession.status === "awaiting_approval" ? "awaiting_approval" as const : "running" as const,
+        lastTurnId: currentTurn?.turnId
+      }
+    : undefined;
   const participants = useMemo(
     () =>
       displayedConversationId
@@ -722,166 +747,40 @@ export const SessionPane = ({
   const viewport = useTranscriptViewportController({
     displayedSessionId: sessionId,
     isOpeningSelectedSession,
-    windowStartTurnId: activeSessionWindow?.windowStartTurnId,
-    windowEndTurnId: activeSessionWindow?.windowEndTurnId,
+    windowStartTurnId: turns[0]?.turnId,
+    windowEndTurnId: currentTurn?.turnId,
     renderedTranscriptRowCount: transcriptRows.length,
     transcriptContentVersion
   });
 
-  const resetSessionSwitchState = (): void => {
-    setLoadingOlderSessionId(undefined);
-    setProcessVisibilityByTurnId({});
-  };
-
-  const {
-    activatedSessionId,
-    reloadSessionWindow,
-    refreshDisplayedSessionWindow,
-    onLoadOlder,
-    openSession
-  } = useSessionOpenController({
-    store,
-    transport,
-    sessionWindows,
-    setSessionWindows,
-    loadingOlderSessionId,
-    setLoadingOlderSessionId,
-    openingSessionId,
-    setOpeningSessionId,
-    displayedSessionId: sessionId,
-    activeSessionWindow,
-    isOpeningSelectedSession,
-    viewport,
-    onResetSessionSwitchState: resetSessionSwitchState,
-    onStatusNotice: setStatusNotice
-  });
-
-  // Each pane binds to the session activated by its own open controller.
-  const activeSessionId = sessionId === activatedSessionId ? sessionId : undefined;
-  const activeSession = activeSessionId ? displayedSession : undefined;
-  const activeThreadGoal = activeSessionId
-    ? domain.getThreadGoal(activeSessionId)
-    : undefined;
-
-  useRendererDiagnostics({
-    transport,
-    activeSessionId,
-    eventCursor: state.eventStream.lastCursor
-  });
-
   useEffect(() => {
-    if (sessionId) {
-      void openSession(sessionId);
-    }
+    setProcessVisibilityByTurnId({});
+    if (sessionId) viewport.scrollToBottom(sessionId);
   }, [sessionId]);
 
   useEffect(() => {
-    if (sessionId && reloadSignal) {
-      void reloadSessionWindow(sessionId, { forceProviderHydration: true });
-    }
+    if (!viewSessionId || !reloadSignal) return;
+    void transport.sessionBrowser.open(viewSessionId, { forceProviderHydration: true })
+      .then(() => refreshChatTree())
+      .catch((error) => setStatusNotice({
+        message: `Session refresh failed: ${(error as Error).message}`,
+        source: "session-browser",
+        ...statusNoticeErrorDetails(error)
+      }));
   }, [reloadSignal]);
 
-  const backlogAutoRefreshRef = useRef<{
-    displayedSessionId?: string;
-    refreshDisplayedSessionWindow: typeof refreshDisplayedSessionWindow;
-    isOpeningSelectedSession: boolean;
-    lastRefreshStartedAtMs?: number;
-    refreshInFlight: boolean;
-    pendingPressure?: EventBacklogPressure;
-  }>({
-    displayedSessionId: sessionId,
-    refreshDisplayedSessionWindow,
-    isOpeningSelectedSession,
-    refreshInFlight: false
-  });
-  if (backlogAutoRefreshRef.current.displayedSessionId !== sessionId) {
-    backlogAutoRefreshRef.current.pendingPressure = undefined;
-  }
-  backlogAutoRefreshRef.current.displayedSessionId = sessionId;
-  backlogAutoRefreshRef.current.refreshDisplayedSessionWindow =
-    refreshDisplayedSessionWindow;
-  backlogAutoRefreshRef.current.isOpeningSelectedSession = isOpeningSelectedSession;
-  if (isOpeningSelectedSession) {
-    backlogAutoRefreshRef.current.pendingPressure = undefined;
-  }
+  const backlogRefreshRef = useRef({ startedAt: 0, inFlight: false });
+  const refreshChatTreeRef = useRef(refreshChatTree);
+  refreshChatTreeRef.current = refreshChatTree;
+  const onBacklogPressure = useCallback((pressure: EventBacklogPressure): void => {
+    const backlog = backlogRefreshRef.current;
+    if (pressure.streamPendingCount < autoRefreshBacklogStreamThreshold ||
+        backlog.inFlight || Date.now() - backlog.startedAt < autoRefreshBacklogCooldownMs) return;
+    backlog.startedAt = Date.now();
+    backlog.inFlight = true;
+    void refreshChatTreeRef.current().catch(() => undefined).finally(() => { backlog.inFlight = false; });
+  }, []);
 
-  const attemptBacklogAutoRefresh = useCallback(
-    (incomingPressure?: EventBacklogPressure): void => {
-      const current = backlogAutoRefreshRef.current;
-      if (current.isOpeningSelectedSession) {
-        current.pendingPressure = undefined;
-        return;
-      }
-      const nowMs =
-        typeof performance !== "undefined" && typeof performance.now === "function"
-          ? performance.now()
-          : Date.now();
-      const result = resolveAutoRefreshBacklogAttempt({
-        incomingPressure,
-        pendingPressure: current.pendingPressure,
-        displayedSessionId: current.displayedSessionId,
-        visibilityState:
-          typeof document === "undefined" ? "visible" : document.visibilityState,
-        nowMs,
-        lastRefreshStartedAtMs: current.lastRefreshStartedAtMs,
-        refreshInFlight: current.refreshInFlight,
-        cooldownMs: autoRefreshBacklogCooldownMs,
-        streamThreshold: autoRefreshBacklogStreamThreshold
-      });
-      current.pendingPressure = result.pendingPressure;
-      const decision = result.decision;
-      if (!decision) {
-        return;
-      }
-      current.lastRefreshStartedAtMs = nowMs;
-      current.refreshInFlight = true;
-      void current
-        .refreshDisplayedSessionWindow(decision.sessionId, {
-          forceProviderHydration: true,
-          preserveViewport: true
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          backlogAutoRefreshRef.current.refreshInFlight = false;
-        });
-    },
-    []
-  );
-
-  const onBacklogPressure = useCallback(
-    (pressure: EventBacklogPressure): void => {
-      attemptBacklogAutoRefresh(pressure);
-    },
-    [attemptBacklogAutoRefresh]
-  );
-
-  useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-    const onVisibilityChange = (): void => {
-      if (document.visibilityState === "visible") {
-        attemptBacklogAutoRefresh();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [attemptBacklogAutoRefresh]);
-
-  const { chatTree, onJumpChatTree } = useChatTreeController({
-    transport,
-    browsedSessionId,
-    displayedSessionId: sessionId,
-    displayedSessionIdRef: viewport.displayedSessionIdRef,
-    isOpeningSelectedSession,
-    refreshSignal: state.refreshSignals.chatTree,
-    onStatusNotice: setStatusNotice,
-    reloadSessionWindow
-  });
-  const activeChatTree =
-    chatTree?.sessionId === sessionId ? chatTree : undefined;
   const [showChatTree, setShowChatTree] = useState(() => globalThis.localStorage?.getItem(CHAT_TREE_VISIBLE_KEY) === "1");
   const toggleChatTree = () => {
     setShowChatTree((current) => {
@@ -894,8 +793,8 @@ export const SessionPane = ({
     [transcriptRows, activeChatTree]
   );
   const composerTurns = useMemo(
-    () => filterComposerTurnsForChatTree(turns, activeChatTree),
-    [turns, activeChatTree]
+    () => filterComposerTurnsForChatTree(currentTurn ? [currentTurn] : emptyTurns, activeChatTree),
+    [currentTurn, activeChatTree]
   );
   const renderedTranscriptRows = isOpeningSelectedSession ? [] : visibleTranscriptRows;
   const activeSessionApprovals = useMemo(
@@ -903,20 +802,20 @@ export const SessionPane = ({
       activeSessionId
         ? domain.listApprovalRequests().filter(
             (approval): approval is ApprovalRequest =>
-              approval.sessionId === activeSessionId && approval.status === "pending"
+              approval.sessionId === activeSessionId && approval.turnId === currentTurn?.turnId && approval.status === "pending"
           )
         : [],
-    [activeSessionId, displayedSessionRevision, domain]
+    [activeSessionId, currentTurn?.turnId, displayedSessionRevision, domain]
   );
   const activeSessionInteractions = useMemo(
     () =>
       activeSessionId
         ? domain.listRuntimeInteractions({ sessionId: activeSessionId }).filter(
             (interaction): interaction is RuntimeInteraction =>
-              interaction.sessionId === activeSessionId && interaction.status === "pending"
+              interaction.sessionId === activeSessionId && interaction.turnId === currentTurn?.turnId && interaction.status === "pending"
           )
         : [],
-    [activeSessionId, displayedSessionRevision, domain]
+    [activeSessionId, currentTurn?.turnId, displayedSessionRevision, domain]
   );
 
   useEffect(() => {
@@ -1132,8 +1031,8 @@ export const SessionPane = ({
             activeSessionId={activeSessionId}
             isOpeningSelectedSession={showOpeningIndicator}
             isSwitchPending={isOpeningSelectedSession}
-            loadingOlderTurns={loadingOlderTurns}
-            onLoadOlder={() => void onLoadOlder()}
+            loadingOlderTurns={false}
+            onLoadOlder={() => undefined}
             processVisibilityByTurnId={processVisibilityByTurnId}
             onToggleProcess={onToggleProcess}
             onPreviewImage={onPreviewImage}
@@ -1146,7 +1045,9 @@ export const SessionPane = ({
               <section className="awb-detail__graph">
                 <ChatTreePanel
                   chatTree={activeChatTree}
-                  onJump={sessionId ? (nodeId) => void onJumpChatTree(nodeId) : undefined}
+                  onJump={sessionId ? (nodeId) => {
+                    void onJumpChatTree(nodeId).then(() => viewport.scrollToBottom(sessionId));
+                  } : undefined}
                 />
               </section>
             </aside>
@@ -1177,7 +1078,7 @@ export const SessionPane = ({
           )}
           skillsCwd={skillsCwd}
           turns={composerTurns}
-          interruptTurns={turns}
+          interruptTurns={composerTurns}
           allowSessionLastTurnFallback={!activeChatTree?.supportsJump}
           approvals={activeSessionApprovals}
           interactions={activeSessionInteractions}
@@ -1186,8 +1087,13 @@ export const SessionPane = ({
           onStatusNotice={setStatusNotice}
           onPreviewImage={onPreviewImage}
           createSession={sessionId ? undefined : createSession}
-          onResumeSession={sessionId ? () => openSession(sessionId) : undefined}
-          onRequestTranscriptBottom={viewport.scrollToBottom}
+          prepareSend={sessionId ? prepareSend : undefined}
+          autoSendQueuedMessages={currentTurn?.turnId === displayedSession?.lastTurnId}
+          onResumeSession={viewSessionId ? async () => {
+            await transport.sessionBrowser.open(viewSessionId);
+            await refreshChatTree();
+          } : undefined}
+          onRequestTranscriptBottom={() => { if (sessionId) viewport.scrollToBottom(sessionId); }}
           onExecutionPreferenceChange={onExecutionPreferenceChange}
           onRespondApproval={onRespondApproval}
           onRespondInteraction={onRespondInteraction}

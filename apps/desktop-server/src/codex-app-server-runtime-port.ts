@@ -1333,12 +1333,13 @@ export class CodexAppServerRuntimePort
     return result.thread;
   }
 
-  public async forkThread(threadId: string): Promise<Thread> {
+  public async forkThread(threadId: string, lastTurnId?: string): Promise<Thread> {
     await this.start(this.startConfig);
     const result = (await this.rpc("thread/fork", {
       threadId,
+      ...(lastTurnId ? { lastTurnId } : {}),
       threadSource: "user"
-    } satisfies ThreadForkParams)) as ThreadForkResponse;
+    } satisfies ThreadForkParams & { lastTurnId?: string })) as ThreadForkResponse;
     return result.thread;
   }
 

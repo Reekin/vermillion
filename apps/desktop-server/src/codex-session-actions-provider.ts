@@ -158,7 +158,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
   }
 
   public async runAction(
-    input: SessionActionProviderContext & { action: SessionActionKind }
+    input: SessionActionProviderContext & { action: SessionActionKind; fromTurnId?: string }
   ): Promise<SessionActionResult | undefined> {
     const threadId = resolveCodexThreadId(input);
 
@@ -199,7 +199,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
       if (!workspaceId) {
         throw new Error("Fork is unavailable without a workspace context.");
       }
-      const thread = await this.codexRuntimePort.forkThread(threadId);
+      const thread = await this.codexRuntimePort.forkThread(threadId, input.fromTurnId);
       const childSessionId = discoveredCodexSessionId(thread.id);
       const createdAt = isoFromUnixSeconds(thread.createdAt);
       const updatedAt = isoFromUnixSeconds(thread.updatedAt);
@@ -249,6 +249,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         parentSessionId: input.sessionId,
         childSessionId,
         relationType: "fork",
+        sourceTurnId: input.fromTurnId ?? thread.turns.at(-1)?.id,
         createdAt
       });
       await input.runtimeService.getWorkspaceRegistry()?.setLastActiveSelection({

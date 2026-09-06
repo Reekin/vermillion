@@ -1,4 +1,5 @@
 import type { HostToolRegistry } from "./host-tools.js";
+import type { WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import type {
   ChatInteractionCapabilitiesRpc,
   ChatSession,
@@ -144,6 +145,7 @@ const resolveComposerSlashSuggestions = (
 
 export type SessionShellServiceOptions = {
   runtimeService: SessionRuntimeService;
+  wrapperChatTree?: WrapperChatTreeService;
   sessionCatalog: SessionCatalogService;
   capabilities?: CapabilityRegistry;
   skillsProvider?: {
@@ -175,6 +177,7 @@ export type SessionShellServiceOptions = {
 };
 
 export class SessionShellService {
+  private readonly wrapperChatTree: WrapperChatTreeService | undefined;
   private readonly runtimeService: SessionRuntimeService;
   private readonly sessionCatalog: SessionCatalogService;
   private readonly capabilities: CapabilityRegistry | undefined;
@@ -204,6 +207,7 @@ export class SessionShellService {
   private readonly partiallyHydratedSessionIds = new Set<string>();
 
   public constructor(options: SessionShellServiceOptions) {
+    this.wrapperChatTree = options.wrapperChatTree;
     this.runtimeService = options.runtimeService;
     this.sessionCatalog = options.sessionCatalog;
     this.capabilities = options.capabilities;
@@ -404,6 +408,7 @@ export class SessionShellService {
   }
 
   public async dispose(): Promise<void> {
+    this.wrapperChatTree?.dispose();
     await this.runtimeService.dispose();
   }
 
@@ -744,6 +749,7 @@ export class SessionShellService {
   }
 
   public async getChatTree(sessionId: string): Promise<ChatTreeSnapshot> {
+    if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId);
     return this.capabilities
       ? this.capabilities.getConversationGraph(sessionId)
       : this.requireChatTreeProvider().get(sessionId);
@@ -754,6 +760,7 @@ export class SessionShellService {
     nodeId: string;
     expectedRevision?: number;
   }): Promise<{ jumped: boolean }> {
+    if (this.wrapperChatTree) return this.wrapperChatTree.jump(input.sessionId, input.nodeId);
     await this.applyCapabilityOperationGuards(
       input.sessionId,
       this.capabilities?.getOperationGuards(input.sessionId, "conversationGraph.jump") ??
@@ -770,6 +777,11 @@ export class SessionShellService {
           input.nodeId,
           input.expectedRevision
         );
+  }
+
+  public async prepareChatTreeSend(input: { sessionId: string; nodeId?: string }): Promise<{ sessionId: string }> {
+    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
+    return this.wrapperChatTree.prepareSend(input.sessionId, input.nodeId);
   }
 
   public async getDelegation(sessionId: string): Promise<DelegationSnapshot> {

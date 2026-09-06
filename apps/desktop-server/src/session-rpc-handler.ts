@@ -401,6 +401,12 @@ export const createWorkbenchRpcHandler = (
                 chatTree: await shellService.getChatTree(request.params.sessionId)
               }
             });
+          case "chatTree.prepareSend":
+            if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");
+            return parseSessionRpcResponse({
+              id: request.id, method: request.method, ok: true,
+              result: await shellService.prepareChatTreeSend(request.params)
+            });
           case "chatTree.jump":
             if (!shellService) {
               return toErrorResponse(

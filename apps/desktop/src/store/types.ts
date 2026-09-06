@@ -83,4 +83,5 @@ export type RendererStoreAction =
   | { type: "store/ingestEnvelope"; envelope: EventEnvelope }
   | { type: "store/ingestEnvelopes"; envelopes: EventEnvelope[] }
   | { type: "store/setActiveConversation"; conversationId?: string }
-  | { type: "store/setActiveSession"; sessionId?: string };
+  | { type: "store/setActiveSession"; sessionId?: string }
+  | { type: "store/sessionBrowserChanged" };

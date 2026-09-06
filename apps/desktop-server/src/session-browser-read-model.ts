@@ -3,6 +3,9 @@ import type { SessionBrowserItemRpc, SessionBrowserPageRpc } from "@vermillion/s
 export type SessionBrowserReadModelSeed = Omit<SessionBrowserItemRpc, "subagents"> & {
   workspaceId: string;
   sortAt: string;
+  forkParentSessionId?: string;
+  archivedAt?: string;
+  isVisible?: boolean;
 };
 
 type CursorPayload = {
@@ -61,16 +64,65 @@ const createRevision = (value: string): string => {
   return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
 };
 
+const latest = (values: Array<string | undefined>): string | undefined =>
+  values.reduce<string | undefined>((result, value) => value && (!result || value > result) ? value : result, undefined);
+
+const collectForkTrees = (seeds: readonly SessionBrowserReadModelSeed[]): SessionBrowserReadModelSeed[] => {
+  const bySessionId = new Map(seeds.map((seed) => [seed.sessionId, seed]));
+  const rootById = new Map<string, SessionBrowserReadModelSeed>();
+  const rootOf = (seed: SessionBrowserReadModelSeed): SessionBrowserReadModelSeed => {
+    const cached = rootById.get(seed.sessionId);
+    if (cached) return cached;
+    const parent = seed.forkParentSessionId ? bySessionId.get(seed.forkParentSessionId) : undefined;
+    const root = parent && parent.workspaceId === seed.workspaceId ? rootOf(parent) : seed;
+    rootById.set(seed.sessionId, root);
+    return root;
+  };
+  const membersByRoot = new Map<SessionBrowserReadModelSeed, SessionBrowserReadModelSeed[]>();
+  for (const seed of seeds) {
+    const root = rootOf(seed);
+    const members = membersByRoot.get(root) ?? [];
+    members.push(seed);
+    membersByRoot.set(root, members);
+  }
+  return [...membersByRoot].map(([root, members]) => {
+    const visibleMembers = members.filter((member) => member.isVisible !== false && !member.archivedAt);
+    const isActive = visibleMembers.some((member) => member.isActive);
+    const lastCompletedTurnAt = latest(visibleMembers.map((member) => member.lastCompletedTurnAt));
+    const activityAt = lastCompletedTurnAt ?? latest(visibleMembers.map((member) => member.activityAt ?? member.sortAt));
+    const parent = root.parentSessionId ? bySessionId.get(root.parentSessionId) : undefined;
+    return {
+      ...root,
+      memberSessionIds: [root.sessionId, ...members.filter((member) => member !== root).map((member) => member.sessionId).sort()],
+      parentSessionId: parent ? rootOf(parent).sessionId : root.parentSessionId,
+      isVisible: visibleMembers.length > 0,
+      isActive,
+      statusDot: visibleMembers.some((member) => member.statusDot === "running")
+        ? "running"
+        : isActive
+          ? "none"
+          : visibleMembers.some((member) => member.statusDot === "unread_completed") ? "unread_completed" : "none",
+      lastCompletedTurnAt,
+      activityAt,
+      sortAt: activityAt ?? root.sortAt
+    };
+  });
+};
+
+const isVisibleTree = (seed: SessionBrowserReadModelSeed): boolean =>
+  seed.isVisible !== false && !seed.archivedAt;
+
 /**
- * Per-workspace paged view of visible sessions. Forks are ordinary rows; a subagent session is nested
- * under the session that spawned it (`parentSessionId`) and never appears as a root.
+ * Per-workspace paged view with one row per fork tree. Subagents nest under the tree that spawned them.
+ * Each member id resolves to its tree entry; archiving a root hides the tree and its nested subagents.
  */
 export class SessionBrowserReadModel {
   private readonly rootsByWorkspaceId = new Map<string, SessionBrowserItemRpc[]>();
   private readonly itemsBySessionId = new Map<string, SessionBrowserItemRpc>();
   private readonly revisions = new Map<string, string>();
 
-  public constructor(seeds: readonly SessionBrowserReadModelSeed[]) {
+  public constructor(sessionSeeds: readonly SessionBrowserReadModelSeed[]) {
+    const seeds = collectForkTrees(sessionSeeds);
     const seedsBySessionId = new Map(seeds.map((seed) => [seed.sessionId, seed] as const));
     const childrenByParentId = new Map<string, SessionBrowserReadModelSeed[]>();
     const roots: SessionBrowserReadModelSeed[] = [];
@@ -86,21 +138,24 @@ export class SessionBrowserReadModel {
     }
 
     const build = (seed: SessionBrowserReadModelSeed, parentSessionId?: string): SessionBrowserItemRpc => {
-      const { workspaceId: _workspaceId, sortAt: _sortAt, ...rest } = seed;
+      const { workspaceId: _workspaceId, sortAt: _sortAt, forkParentSessionId: _forkParentSessionId, archivedAt: _archivedAt, isVisible: _isVisible, ...rest } = seed;
       const item: SessionBrowserItemRpc = {
         ...rest,
         parentSessionId,
         subagents: (childrenByParentId.get(seed.sessionId) ?? [])
+          .filter(isVisibleTree)
           .sort(compareSeeds)
           .map((child) => build(child, seed.sessionId))
       };
-      this.itemsBySessionId.set(seed.sessionId, item);
+      for (const memberId of seed.memberSessionIds ?? [seed.sessionId]) {
+        this.itemsBySessionId.set(memberId, item);
+      }
       return item;
     };
 
     for (const workspaceId of new Set(seeds.map((seed) => seed.workspaceId))) {
       const workspaceRoots = roots
-        .filter((seed) => seed.workspaceId === workspaceId)
+        .filter((seed) => seed.workspaceId === workspaceId && isVisibleTree(seed))
         .sort(compareSeeds)
         .map((seed) => build(seed));
       this.rootsByWorkspaceId.set(workspaceId, workspaceRoots);
@@ -109,7 +164,10 @@ export class SessionBrowserReadModel {
         .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
         .map((seed) => [
           seed.sessionId,
+          seed.memberSessionIds,
           seed.parentSessionId,
+          seed.archivedAt,
+          seed.isVisible,
           seed.title,
           seed.engineId,
           seed.statusDot,

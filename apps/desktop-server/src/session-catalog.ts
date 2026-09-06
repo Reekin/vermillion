@@ -87,7 +87,6 @@ const isBrowserVisibleSeed = (
   seed: SessionCatalogSeed,
   runtimeSessionIds: ReadonlySet<string>
 ): boolean =>
-  !seed.archivedAt &&
   (runtimeSessionIds.has(seed.sessionId) || Boolean(seed.providerSessionId));
 
 export class SessionCatalogService {
@@ -128,7 +127,10 @@ export class SessionCatalogService {
   }
 
   public async markSessionRead(sessionId: string): Promise<void> {
-    await this.sessionIndexStore.markSessionRead(sessionId);
+    const item = await this.get(sessionId);
+    for (const memberId of item?.memberSessionIds ?? [sessionId]) {
+      await this.sessionIndexStore.markSessionRead(memberId);
+    }
   }
 
   private async getReadModel(): Promise<SessionBrowserReadModel> {
@@ -207,6 +209,7 @@ export class SessionCatalogService {
       bySessionId.set(runtimeSeed.sessionId, {
         ...existing,
         ...runtimeSeed,
+        archivedAt: runtimeSeed.archivedAt ?? existing?.archivedAt,
         lastCompletedTurnAt: runtimeSeed.lastCompletedTurnAt ?? existing?.lastCompletedTurnAt,
         summaryText: existing?.summaryText,
         unreadState: existing?.unreadState,
@@ -214,21 +217,26 @@ export class SessionCatalogService {
       });
     }
 
-    // Only subagent relations nest; forks stay peers of their origin.
+    const forkParentById = new Map<string, string>();
     const subagentParentById = new Map<string, string>();
     for (const relation of [...snapshot.sessionRelations, ...this.sessionIndexStore.listRelations()]) {
+      if (relation.relationType === "fork" && !forkParentById.has(relation.childSessionId)) {
+        forkParentById.set(relation.childSessionId, relation.parentSessionId);
+      }
       if (relation.relationType === "subagent" && !subagentParentById.has(relation.childSessionId)) {
         subagentParentById.set(relation.childSessionId, relation.parentSessionId);
       }
     }
 
     const seeds: SessionBrowserReadModelSeed[] = [...bySessionId.values()]
-      .filter((seed) => isBrowserVisibleSeed(seed, runtimeSessionIds))
       .map((seed) => {
       const activityAt = resolveSeedActivityAt(seed);
       return {
         sessionId: seed.sessionId,
+        forkParentSessionId: forkParentById.get(seed.sessionId),
         parentSessionId: subagentParentById.get(seed.sessionId),
+        archivedAt: seed.archivedAt,
+        isVisible: isBrowserVisibleSeed(seed, runtimeSessionIds),
         workspaceId: seed.workspaceId,
         engineId: seed.engineId,
         title: seed.title ?? seed.sessionId,

@@ -365,6 +365,8 @@ type UseComposerControllerInput = {
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   /** Draft state only: creates the session for the first message and returns its id. */
   createSession?: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
+  prepareSend?: () => Promise<string>;
+  autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
@@ -932,9 +934,11 @@ export const useComposerController = (
     });
     try {
       // Draft state: the first message creates the session, then becomes its first turn.
-      const sessionId =
-        input.activeSessionId ??
-        (await input.createSession!({ content, attachments }));
+      const sessionId = input.activeSessionId
+        ? payload.mode === "send" && input.prepareSend
+          ? await input.prepareSend()
+          : input.activeSessionId
+        : await input.createSession!({ content, attachments });
       if (payload.mode === "steer" && payload.turnId) {
         const receipt = await input.transport.chat.steer({
           sessionId,
@@ -1435,6 +1439,7 @@ export const useComposerController = (
   useEffect(() => {
     if (
       !input.activeSessionId ||
+      input.autoSendQueuedMessages === false ||
       isDispatching ||
       input.activeSession?.status !== "idle" ||
       queue.length === 0
@@ -1459,6 +1464,7 @@ export const useComposerController = (
       cancelled = true;
     };
   }, [
+    input.autoSendQueuedMessages,
     input.activeSession?.status,
     input.activeSessionId,
     input.transport,

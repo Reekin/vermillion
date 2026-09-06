@@ -98,16 +98,17 @@ export const ChatTreePanel = ({
             <button
               key={entry.node.nodeId}
               type="button"
-              className={`awb-chat-tree__graph-node${entry.isCurrent ? " is-current" : ""}`}
+              className={`awb-chat-tree__graph-node${entry.isCurrent ? " is-current" : ""}${entry.node.status === "pending" ? " is-running" : ""}`}
               style={{
                 left: `${entry.x}px`,
                 top: `${entry.y}px`
               }}
               onDoubleClick={() => onJump?.(entry.node.nodeId)}
               title={`${shortLabel(entry.node)}${
-                entry.isCurrent ? "\nCurrent branch." : "\nDouble-click to switch."
-              }`}
-              aria-label={shortLabel(entry.node)}
+                entry.isCurrent ? "\nCurrent position." : "\nDouble-click to switch."
+              }${entry.node.status === "pending" ? "\nRunning." : ""}`}
+              aria-label={`${shortLabel(entry.node)}${entry.isCurrent ? ", current position" : ""}${entry.node.status === "pending" ? ", running" : ""}`}
+              aria-current={entry.isCurrent ? "step" : undefined}
             >
               <span className="awb-chat-tree__graph-node-dot" />
             </button>
