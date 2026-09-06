@@ -25,7 +25,7 @@ import {
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
 import { Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, startLocalEndpoint } from "@vermillion/workbench";
-import { createAgentRunner } from "./agent-runner.js";
+import { createAgentRunner, createSessionAsk } from "./agent-runner.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
   resolveWillNavigate,
@@ -742,6 +742,7 @@ const boot = async (): Promise<void> => {
   await roleService.ensureGlobal();
   const workbenchService = new WorkbenchService({
     roles: roleService,
+    ask: createSessionAsk(service),
     workspaces: {
       list: async () =>
         (await service.listWorkspaces()).workspaces.map((workspace) => ({

@@ -10,8 +10,11 @@
 - 某张工单被取消而有排队工单 `dependsOn` 它：逐张判断是去掉依赖继续（`workItem.update` 改 dependsOn）、改依赖到替代工单，还是一并取消；三种都拿不准就 `decision.create`。
 
 ## 工单要求
-- 只引用 Doc（路径 + 段落 + 依据的 commit），不复制 Doc 内容。
-- objective 一句话；scope 写清 inScope / outOfScope / allowedPaths；acceptance 用 given / when / then，每条都能被空白 subagent 独立判定。
+- 工单的主体是 refs：文档的哪几段、哪个 commit。objective 只是标题。Worker 读的是 refs 原文，不是你的转述，所以不复制 Doc 内容，也不改写。
+- 只许切分，不许扩展：不能给工单加文档没有的要求。
+- acceptance 由你根据"文档的终态描述"和"代码现状"写：做完后能观察到什么算过。每条对应文档某句话（`source` 写那句话或标题），只写看到什么，不写怎么去看（验收方法由 Worker 按改动性质自定，你写进去就是越权，也是成本失控的来源）。
+- 文档某句话的分寸拿不准（"清楚展示"到什么程度、"及时"是多久）时，用 `vermillion session.ask '{"workspaceId":"…","missionId":"…","question":"…"}'` 问写这份文档的设计伙伴，它会带着当时的对话上下文回答；答案用来写 acceptance，不写回文档，不问用户。
+- scope 写清 inScope / outOfScope / allowedPaths。
 - 一个工单覆盖关联度较高的同一批改动，能单独验收、单独合并。不要拆太碎，如非必要也尽量别拆出有依赖关系的工单；确实有先后的用 `dependsOn`（同一任务内的工单 id），依赖链不超过一层。
 - `needs` 只写执行资源（如 `browser`、`desktop`），不用来表达工单依赖。
 - 风险等级：R0 只读、R1 可丢弃制品、R2 项目内可回滚、R3 有限共享影响、R4 高影响。R4 一律不 autoClose。

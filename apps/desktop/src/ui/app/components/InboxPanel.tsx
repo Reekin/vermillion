@@ -81,7 +81,7 @@ const ReviewRow = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbox
           {workItem.verify.items.map((v) => (
             <li key={v.index} className="flex gap-2 text-caption">
               <span className="w-8 shrink-0 font-mono text-accent-strong">{v.pass ? "PASS" : "FAIL"}</span>
-              <span className="text-muted-foreground">{workItem.acceptance[v.index] ? workItem.acceptance[v.index]!.then : "#" + v.index}</span>
+              <span className="text-muted-foreground">{workItem.acceptance[v.index]?.text ?? "#" + v.index}</span>
             </li>
           ))}
         </ul>

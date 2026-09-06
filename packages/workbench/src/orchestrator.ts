@@ -148,7 +148,7 @@ export class Orchestrator {
       "完整 diff 用这条命令看：" + diffCommand,
       previous ? "读某个文件在本 revision 的内容：git show " + revision.commit + ":<path>" : "这是首次入库：文档里的内容不一定都是新需求，以变更说明和任务摘要为准判断哪些要开单，其余先核对项目现状。",
       "",
-      "请按你的规则处理：新建、调整或取消工单。用 CLI 完成所有写入；最后回复一行摘要说明做了什么。"
+      "请按你的规则处理：新建、调整或取消工单。工单主体是 refs；acceptance 只写做完能观察到什么、不写怎么验；文档分寸拿不准就 session.ask 问设计伙伴。用 CLI 完成所有写入；最后回复一行摘要说明做了什么。"
     ].join("\n");
     await this.stewardTurn(workspaceId, mission, revision.commit, message);
   }
@@ -390,7 +390,7 @@ export class Orchestrator {
       "Worker turn #" + run.turns + " 结束，工单「" + item.title + "」。",
       "objective: " + item.objective,
       "allowedPaths: " + (item.scope.allowedPaths.join(", ") || "(无限制)"),
-      "acceptance: " + item.acceptance.map((a, i) => (i + 1) + ") " + a.given + " / " + a.when + " / " + a.then).join("; "),
+      "acceptance: " + item.acceptance.map((a, i) => (i + 1) + ") " + a.text).join("; "),
       "",
       "确定性信号：越界路径 " + (outside.length ? outside.join(", ") : "无") + "；diff --stat：\n" + (stat.trim() || "(无改动)"),
       "",

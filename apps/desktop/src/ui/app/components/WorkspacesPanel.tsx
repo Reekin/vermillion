@@ -127,6 +127,7 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession }: Workspa
   );
 };
 
+const missionStatusLabel: Record<Mission["status"], string> = { active: "进行中", done: "已完成", cancelled: "已取消" };
 const statusLabel: Record<WorkItem["status"], string> = { queued: "排队中", running: "进行中", review: "待验收", decision: "待决策", closed: "已关闭", cancelled: "已取消" };
 
 const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
@@ -199,7 +200,7 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
             <li key={mission.missionId} className="border-b border-border px-4 py-3">
               <div className="flex items-center gap-2">
                 <span className="truncate text-label text-strong">{mission.title}</span>
-                <Badge tone={mission.status === "active" ? "accent" : "neutral"}>{mission.status}</Badge>
+                <Badge tone={mission.status === "active" ? "accent" : "neutral"}>{missionStatusLabel[mission.status]}</Badge>
                 {stewards[0] && <SessionLink sessionId={stewards[0].sessionId} onOpenSession={onOpenSession} />}
                 {stewards[0]?.status === "running" && <span className="font-mono text-micro text-muted-foreground">管家处理中</span>}
               </div>

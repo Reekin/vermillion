@@ -81,7 +81,7 @@ describe("Orchestrator", { timeout: 20000 }, () => {
     const item = await service.createWorkItem(ws.workspaceId, {
       missionId: mission.missionId, title: "Impl login", objective: "do", risk: "R2",
       refs: [{ path: ".vermillion/docs/spec.md", commit: mission.revisions[0]!.commit }],
-      scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: [{ given: "g", when: "w", then: "t" }]
+      scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: [{ text: "t" }]
     });
     complete(steward.sessionId, "建了 1 个工单");
     await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
@@ -102,7 +102,7 @@ describe("Orchestrator", { timeout: 20000 }, () => {
 
   it("holds items until dependsOn are closed and needs slots are free", async () => {
     const { service, ws, sessions, complete } = await setup(3);
-    const base = { objective: "o", risk: "R1" as const, scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] };
+    const base = { objective: "o", risk: "R1" as const, scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] };
     await service.createWorkItem(ws.workspaceId, { ...base, title: "A", needs: ["browser"] });
     await service.createWorkItem(ws.workspaceId, { ...base, title: "B", needs: ["browser"] });
     await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 1);
@@ -143,7 +143,7 @@ describe("Orchestrator", { timeout: 20000 }, () => {
 
   it("steers the running worker on a contract change and only voids submits made against an older version", async () => {
     const { service, ws, sessions, complete } = await setup();
-    const item = await service.createWorkItem(ws.workspaceId, { title: "Op", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] });
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Op", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
     const worker = sessions.find((s) => s.metadata.role === "worker")!;
     const v1 = await service.updateWorkItem(ws.workspaceId, item.workItemId, { objective: "v2", note: "范围收窄" });
@@ -161,7 +161,7 @@ describe("Orchestrator", { timeout: 20000 }, () => {
     await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.status === "done"));
 
     // a second item: a submit quoting a stale version is void
-    const item2 = await service.createWorkItem(ws.workspaceId, { title: "Op2", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] });
+    const item2 = await service.createWorkItem(ws.workspaceId, { title: "Op2", objective: "v1", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2 && sessions[sessions.length - 1]!.messages.length > 0);
     const worker2 = sessions[sessions.length - 1]!;
     await service.updateWorkItem(ws.workspaceId, item2.workItemId, { objective: "v3", note: "再改" });
@@ -182,7 +182,7 @@ describe("Orchestrator", { timeout: 20000 }, () => {
 
   it("runs the supervisor after an unfinished worker turn and requeues after too many idle turns", async () => {
     const { service, ws, sessions, complete } = await setup();
-    const item = await service.createWorkItem(ws.workspaceId, { title: "Package", objective: "pnpm package", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ given: "g", when: "w", then: "t" }] });
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Package", objective: "pnpm package", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
     const worker = sessions.find((s) => s.metadata.role === "worker")!;
     expect(worker.cwd).not.toContain("worktrees");

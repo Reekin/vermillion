@@ -164,11 +164,15 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
           <div role="status" className="mt-3 rounded-md border border-border p-2 text-caption">
             <div className="flex items-start gap-2">
               <p className="min-w-0 flex-1 break-words text-foreground">
-                已提交文档 · {result.message}
+                {result.kind === "commit" ? "已提交文档 · " + result.message : (result.appended ? "已补充任务 · " : "已创建任务 · ") + result.title}
               </p>
               <Button size="sm" variant="ghost" aria-label="关闭提交结果" onClick={() => setResult(undefined)}>关闭</Button>
             </div>
-            <p className="mt-1 font-mono text-micro text-muted-foreground">{result.commit.slice(0, 8)}</p>
+            {result.kind === "commit" ? (
+              <p className="mt-1 font-mono text-micro text-muted-foreground">{result.commit.slice(0, 8)}</p>
+            ) : (
+              <p className="mt-1 text-micro text-muted-foreground">{result.schedulerEnabled ? "管家会拆单并派给 Worker，进度在 Workspaces → 任务。" : "调度未开启，不会自动执行；到 Workspaces → 任务 顶部打开调度。"}</p>
+            )}
           </div>
         )}
       </div>
@@ -220,17 +224,18 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
           defaultMissionId={activeSessionId ? missions.find((m) => m.status === "active" && m.sessionId === activeSessionId)?.missionId : undefined}
           onClose={() => setMissionOpen(false)}
           onCreate={async (input) => {
-            await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
-            setResult(undefined);
+            const mission = await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
+            setResult({ kind: "mission", missionId: mission.missionId, title: mission.title, appended: false, schedulerEnabled: view?.scheduler.enabled ?? false });
             setMissionOpen(false);
           }}
           onAppend={async (input) => {
-            await client.request("mission.addRevision", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
-            setResult(undefined);
+            const mission = await client.request("mission.addRevision", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
+            setResult({ kind: "mission", missionId: mission.missionId, title: mission.title, appended: true, schedulerEnabled: view?.scheduler.enabled ?? false });
             setMissionOpen(false);
           }}
           onCommit={async (input) => {
-            setResult(await client.request("docs.commit", { workspaceId: workspace.workspaceId, ...input }));
+            const committed = await client.request("docs.commit", { workspaceId: workspace.workspaceId, ...input });
+            setResult({ kind: "commit", ...committed });
             setMissionOpen(false);
           }}
         />

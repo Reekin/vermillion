@@ -120,7 +120,9 @@ export const workbenchRpc = {
   },
   "decision.answer": { params: zWs.extend({ decisionId: z.string().min(1), key: z.string().min(1), note: z.string().optional() }), result: zDecisionCard },
 
-  "inbox.list": { params: zEmpty, result: z.array(zInboxItem) }
+  "inbox.list": { params: zEmpty, result: z.array(zInboxItem) },
+
+  "session.ask": { params: zWs.extend({ missionId: z.string().min(1), question: z.string().min(1) }), result: z.object({ answer: z.string() }) }
 } as const;
 
 export type WorkbenchRpcMethod = keyof typeof workbenchRpc;

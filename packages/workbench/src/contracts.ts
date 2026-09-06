@@ -52,10 +52,11 @@ export const zDocRef = z.object({
   commit: z.string().min(1)
 });
 
+/** One observable condition that must hold when the work is done. Says what to see, not how to look. */
 export const zAcceptanceItem = z.object({
-  given: z.string(),
-  when: z.string(),
-  then: z.string()
+  text: z.string().min(1),
+  /** Sentence or heading in a ref doc this condition comes from, so it can be traced back. */
+  source: z.string().optional()
 });
 
 export const zScope = z.object({

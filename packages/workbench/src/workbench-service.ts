@@ -29,9 +29,13 @@ export type WorkspaceSource = {
   remove: (workspaceId: string) => Promise<void>;
 };
 
+/** Asks a question in a throwaway fork of an existing session and returns the reply. The desktop implements it over the session engine. */
+export type SessionAsk = (input: { sessionId: string; question: string }) => Promise<string>;
+
 export type WorkbenchServiceOptions = {
   workspaces: WorkspaceSource;
   roles: RoleService;
+  ask?: SessionAsk;
   now?: () => string;
 };
 
@@ -40,6 +44,7 @@ type WorkspaceContext = { rootPath: string; store: WorkspaceStore; docs: DocsSer
 export class WorkbenchService {
   private readonly workspaces: WorkspaceSource;
   private readonly roles: RoleService;
+  private readonly ask?: SessionAsk;
   private readonly now: () => string;
   private readonly contexts = new Map<string, WorkspaceContext>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
@@ -47,6 +52,7 @@ export class WorkbenchService {
   constructor(options: WorkbenchServiceOptions) {
     this.workspaces = options.workspaces;
     this.roles = options.roles;
+    this.ask = options.ask;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -139,6 +145,18 @@ export class WorkbenchService {
     const { commit } = await this.commitDocChanges(docs, message, input.paths);
     this.emit({ type: "docs.changed", workspaceId });
     return { commit, message };
+  }
+
+  // ---- sessions ----
+
+  /** Steward asks the design partner what a doc sentence means; the mission remembers which session wrote it. */
+  async askMissionAuthor(workspaceId: string, missionId: string, question: string): Promise<string> {
+    if (!this.ask) throw new Error("session.ask is only available while the desktop is running");
+    const mission = await (await this.context(workspaceId)).store.missions.get(missionId);
+    if (!mission) throw new Error("Unknown mission: " + missionId);
+    const sessionId = [...mission.revisions].reverse().find((r) => r.sessionId)?.sessionId ?? mission.sessionId;
+    if (!sessionId) throw new Error("Mission has no originating session: " + missionId);
+    return this.ask({ sessionId, question });
   }
 
   // ---- roles ----

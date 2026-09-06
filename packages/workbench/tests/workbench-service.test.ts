@@ -47,7 +47,7 @@ const baseWorkItem = (missionId: string) => ({
   risk: "R2" as const,
   refs: [],
   scope: { inScope: [], outOfScope: [], allowedPaths: [] },
-  acceptance: [{ given: "g", when: "w", then: "t" }]
+  acceptance: [{ text: "t" }]
 });
 
 describe("WorkbenchService", () => {

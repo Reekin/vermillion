@@ -3,6 +3,10 @@ import type { AgentRun, DecisionCard, DocChange, DocCommit, DocFile, InboxItem, 
 
 export type Panel = "think" | "inbox" | "workspaces";
 
+export type CommitOutcome =
+  | { kind: "commit"; commit: string; message: string }
+  | { kind: "mission"; missionId: string; title: string; appended: boolean; schedulerEnabled: boolean };
+
 /** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
 export type WorkspaceView = {
   workspaceId: string;
@@ -33,8 +37,9 @@ export type WorkbenchState = {
   inbox: InboxItem[];
   editor: EditorTarget | undefined;
   /** Last "仅提交" result, shown under the Docs tree until dismissed or the workspace changes. */
-  docCommit: DocCommit | undefined;
-  setDocCommit: (result: DocCommit | undefined) => void;
+  /** Outcome of the last commit dialog action, shown under the Docs tree until dismissed. */
+  docCommit: CommitOutcome | undefined;
+  setDocCommit: (result: CommitOutcome | undefined) => void;
 
   setPanel: (panel: Panel) => void;
   openOverlay: (panel: Panel) => void;

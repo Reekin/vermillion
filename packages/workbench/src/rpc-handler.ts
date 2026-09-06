@@ -45,7 +45,9 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "decision.create": (p) => service.createDecision(p.workspaceId, p),
     "decision.answer": (p) => service.answerDecision(p.workspaceId, p.decisionId, { key: p.key, note: p.note }),
 
-    "inbox.list": () => service.listInbox()
+    "inbox.list": () => service.listInbox(),
+
+    "session.ask": async (p) => ({ answer: await service.askMissionAuthor(p.workspaceId, p.missionId, p.question) })
   };
 
   return async (raw: WorkbenchRpcRequest): Promise<WorkbenchRpcResponse> => {
