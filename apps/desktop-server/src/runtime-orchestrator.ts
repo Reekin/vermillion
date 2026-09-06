@@ -693,7 +693,17 @@ export class RuntimeOrchestrator {
       session.metadata && typeof session.metadata.developerInstructions === "string"
         ? session.metadata.developerInstructions
         : undefined;
-    if (!cwd && !providerSessionId && !developerInstructions) {
+    const execution =
+      envelope.command.type === "sendUserMessage" ||
+      envelope.command.type === "steerTurn"
+        ? (envelope.command.type === "sendUserMessage"
+            ? envelope.command.execution
+            : undefined) ?? resolveSessionExecutionProfile({
+            sessionEngineId: session.engineId,
+            metadata: session.metadata
+          })
+        : undefined;
+    if (!cwd && !providerSessionId && !developerInstructions && !execution) {
       return envelope;
     }
     return {
@@ -702,7 +712,8 @@ export class RuntimeOrchestrator {
         ...envelope.command,
         ...(cwd ? { cwd } : {}),
         ...(providerSessionId ? { providerSessionId } : {}),
-        ...(developerInstructions ? { developerInstructions } : {})
+        ...(developerInstructions ? { developerInstructions } : {}),
+        ...(execution ? { execution } : {})
       } as CommandEnvelope["command"]
     };
   }
