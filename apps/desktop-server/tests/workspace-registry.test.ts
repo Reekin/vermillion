@@ -43,7 +43,7 @@ afterEach(async () => {
 });
 
 describe("WorkspaceRegistryService", () => {
-  it("persists workspaces, expansion state, and last active selection", async () => {
+  it("persists workspaces, pin state, and last active selection", async () => {
     const baseDir = await createTempDir();
     const service = new WorkspaceRegistryService({
       baseDir,
@@ -65,8 +65,6 @@ describe("WorkspaceRegistryService", () => {
       label: "Tools"
     });
     await service.reorderWorkspaces([beta.workspaceId, alpha.workspaceId]);
-    await service.setWorkspaceExpanded(beta.workspaceId, true);
-    await service.setSessionExpanded("session-42", true);
     await service.setSessionPinned("session-42", true);
     await service.setLastActiveSelection({
       workspaceId: beta.workspaceId,
@@ -96,8 +94,6 @@ describe("WorkspaceRegistryService", () => {
       alpha.workspaceId
     ]);
     expect(reloaded.getState()).toMatchObject({
-      expandedWorkspaceIds: [beta.workspaceId],
-      expandedSessionIds: ["session-42"],
       pinnedSessionIds: ["session-42"],
       defaultNewSessionEngineId: "pi",
       allowedModelIdsByEngineId: {
@@ -188,8 +184,6 @@ describe("WorkspaceRegistryService", () => {
     await writeRegistry(baseDir, {
       version: 1,
       workspaces: [],
-      expandedWorkspaceIds: [],
-      expandedSessionIds: [],
       allowedModelIdsByEngineId: {},
       customModelReasoningOptionIdsByEngineId: {}
     });
@@ -205,8 +199,6 @@ describe("WorkspaceRegistryService", () => {
     const registryPath = await writeRegistry(baseDir, {
       version: 1,
       workspaces: [],
-      expandedWorkspaceIds: [],
-      expandedSessionIds: [],
       pinnedSessionIds: [],
       engineProgramPathsByEngineId: {},
       allowedModelIdsByEngineId: {},

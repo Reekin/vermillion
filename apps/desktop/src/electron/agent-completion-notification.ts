@@ -1,6 +1,5 @@
 import type {
   EventEnvelope,
-  SessionBrowserPathRpc,
   SessionEventPush,
   SessionEventPushBatch
 } from "@vermillion/shared";
@@ -15,13 +14,6 @@ export type AgentCompletionNotifier = {
   handlePush: (push: SessionEventPush) => void;
   handleBatch: (batch: SessionEventPushBatch) => void;
 };
-
-export const findMainSessionInPath = (
-  path: SessionBrowserPathRpc
-): SessionBrowserPathRpc["items"][number] | undefined =>
-  path.items.length === 1 && !path.items[0]?.parentSessionId
-    ? path.items[0]
-    : undefined;
 
 export const createAgentCompletionNotifier = (input: {
   notify: (notification: AgentCompletionNotification) => void;

@@ -19,8 +19,8 @@ import type {
   ErrorLogWriteInputRpc,
   ErrorLogWriteResultRpc,
   SessionExecutionProfileInput,
+  SessionBrowserItemRpc,
   SessionBrowserPageRpc,
-  SessionBrowserPathRpc,
   SkillDescriptorRpc,
   SessionSettingsRpc,
 } from "@vermillion/shared";
@@ -41,10 +41,7 @@ import {
 } from "./capability-registry.js";
 import { ChatTreeProvider } from "./chat-tree-provider.js";
 import { cloneModelSettings } from "./model-settings.js";
-import {
-  SessionCatalogService,
-  type WorkspaceBrowserNode
-} from "./session-catalog.js";
+import { SessionCatalogService } from "./session-catalog.js";
 import { SessionReconciliationService } from "./session-discovery.js";
 import { SessionIdentityRegistry } from "./session-identity-registry.js";
 import { SessionActionsProvider } from "./session-actions.js";
@@ -414,7 +411,6 @@ export class SessionShellService {
     workspaces: WorkspaceRecord[];
     lastActiveWorkspaceId?: string;
     lastActiveSessionId?: string;
-    expandedWorkspaceIds: string[];
   }> {
     const registry = this.requireWorkspaceRegistry();
     await registry.ready();
@@ -422,8 +418,7 @@ export class SessionShellService {
     return {
       workspaces: state.workspaces,
       lastActiveWorkspaceId: state.lastActiveWorkspaceId,
-      lastActiveSessionId: state.lastActiveSessionId,
-      expandedWorkspaceIds: state.expandedWorkspaceIds
+      lastActiveSessionId: state.lastActiveSessionId
     };
   }
 
@@ -465,18 +460,6 @@ export class SessionShellService {
     };
   }
 
-  public async setWorkspaceExpanded(
-    workspaceId: string,
-    expanded: boolean
-  ): Promise<{ workspaceId: string; expanded: boolean }> {
-    const registry = this.requireWorkspaceRegistry();
-    await registry.setWorkspaceExpanded(workspaceId, expanded);
-    return {
-      workspaceId,
-      expanded
-    };
-  }
-
   public async selectWorkspace(workspaceId: string): Promise<{
     workspaceId: string;
     activeSessionId?: string;
@@ -484,34 +467,17 @@ export class SessionShellService {
     return this.createWorkspaceSelectionService().selectWorkspace(workspaceId);
   }
 
-  public async listSessionTree(workspaceId?: string): Promise<{ workspaces: WorkspaceBrowserNode[] }> {
-    return {
-      workspaces: await this.sessionCatalog.listWorkspaceTree(workspaceId)
-    };
-  }
-
-  public async listSessionRoots(input: {
+  public async listBrowserSessions(input: {
     workspaceId: string;
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
-    flat?: boolean;
   }): Promise<SessionBrowserPageRpc> {
-    return this.sessionCatalog.listRoots(input);
+    return this.sessionCatalog.list(input);
   }
 
-  public async listSessionChildren(input: {
-    workspaceId: string;
-    parentSessionId: string;
-    cursor?: string;
-    limit?: number;
-    expectedRevision?: string;
-  }): Promise<SessionBrowserPageRpc> {
-    return this.sessionCatalog.listChildren(input);
-  }
-
-  public async getSessionBrowserPath(sessionId: string): Promise<SessionBrowserPathRpc> {
-    return this.sessionCatalog.getPath(sessionId);
+  public async getSessionBrowserItem(sessionId: string): Promise<SessionBrowserItemRpc | undefined> {
+    return this.sessionCatalog.get(sessionId);
   }
 
   public async repairSessionBrowser(workspaceIds: string[]): Promise<{
@@ -526,20 +492,6 @@ export class SessionShellService {
         relations: 0
       }
     );
-  }
-
-  public async toggleSessionExpanded(sessionId: string): Promise<{
-    sessionId: string;
-    expanded: boolean;
-  }> {
-    const registry = this.requireWorkspaceRegistry();
-    await registry.ready();
-    const expanded = !registry.getState().expandedSessionIds.includes(sessionId);
-    await registry.setSessionExpanded(sessionId, expanded);
-    return {
-      sessionId,
-      expanded
-    };
   }
 
   public async createBrowserSession(input: {
@@ -770,7 +722,9 @@ export class SessionShellService {
     action: SessionActionKind;
   }): Promise<SessionActionResult> {
     if (input.action === "pin" || input.action === "unpin") {
-      await this.sessionCatalog.getPath(input.sessionId);
+      if (!(await this.sessionCatalog.get(input.sessionId))) {
+        throw new Error(`Unknown browser session: ${input.sessionId}`);
+      }
       const pinned = input.action === "pin";
       await this.requireWorkspaceRegistry().setSessionPinned(input.sessionId, pinned);
       this.sessionCatalog.invalidate();

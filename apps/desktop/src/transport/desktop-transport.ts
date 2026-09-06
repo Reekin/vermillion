@@ -22,7 +22,6 @@ import type {
   FileActionKindRpc,
   FileActionResultRpc,
   SessionBrowserPageRpc,
-  SessionBrowserPathRpc,
   SkillDescriptorRpc,
   SessionActionDescriptorRpc,
   SessionActionKindRpc,
@@ -36,7 +35,6 @@ import type {
   SessionEventSubscriptionFilter,
   SessionSettingsRpc,
   WorktreeSnapshotRpc,
-  WorkspaceBrowserNodeRpc,
   WorkspaceRecordRpc,
   SessionRpcResponse
 } from "@vermillion/shared";
@@ -249,7 +247,6 @@ export type DesktopTransport = {
       workspaces: WorkspaceRecordRpc[];
       lastActiveWorkspaceId?: string;
       lastActiveSessionId?: string;
-      expandedWorkspaceIds?: string[];
     }>;
     pickDirectory: () => Promise<{
       canceled: boolean;
@@ -260,39 +257,22 @@ export type DesktopTransport = {
       workspaceId: string;
       removed: boolean;
     }>;
-    setExpanded: (
-      workspaceId: string,
-      expanded: boolean
-    ) => Promise<{ workspaceId: string; expanded: boolean }>;
     select: (
       workspaceId: string
     ) => Promise<{ workspaceId: string; activeSessionId?: string }>;
   };
   sessionBrowser: {
-    listTree: (workspaceId?: string) => Promise<{ workspaces: WorkspaceBrowserNodeRpc[] }>;
-    listRoots: (input: {
+    list: (input: {
       workspaceId: string;
       cursor?: string;
       limit?: number;
       expectedRevision?: string;
-      flat?: boolean;
     }) => Promise<SessionBrowserPageRpc>;
-    listChildren: (input: {
-      workspaceId: string;
-      parentSessionId: string;
-      cursor?: string;
-      limit?: number;
-      expectedRevision?: string;
-    }) => Promise<SessionBrowserPageRpc>;
-    getPath: (sessionId: string) => Promise<SessionBrowserPathRpc>;
     repair: (workspaceIds: string[]) => Promise<{
       workspaces: number;
       sessions: number;
       relations: number;
     }>;
-    toggleExpanded: (
-      sessionId: string
-    ) => Promise<{ sessionId: string; expanded: boolean }>;
     create: (input: {
       workspaceId: string;
       engineId: string;
@@ -743,14 +723,6 @@ export const createDesktopTransport = (
     });
   };
 
-  const requestSessionTree = async (workspaceId?: string): Promise<{
-    workspaces: WorkspaceBrowserNodeRpc[];
-  }> => {
-    return rpc.request("sessionBrowser.listTree", {
-      workspaceId
-    });
-  };
-
   return {
     engine: {
       list: requestEngineList,
@@ -798,39 +770,20 @@ export const createDesktopTransport = (
       pickDirectory: requestWorkspacePickDirectory,
       add: requestWorkspaceAdd,
       remove: requestWorkspaceRemove,
-      setExpanded: (workspaceId: string, expanded: boolean) =>
-        rpc.request("workspace.setExpanded", {
-          workspaceId,
-          expanded
-        }),
       select: (workspaceId: string) =>
         rpc.request("workspace.select", {
           workspaceId
         })
     },
     sessionBrowser: {
-      listTree: requestSessionTree,
-      listRoots: (input) =>
-        rpc.request("sessionBrowser.listRoots", {
+      list: (input) =>
+        rpc.request("sessionBrowser.list", {
           ...input,
           limit: input.limit ?? 20
-        }),
-      listChildren: (input) =>
-        rpc.request("sessionBrowser.listChildren", {
-          ...input,
-          limit: input.limit ?? 20
-        }),
-      getPath: (sessionId: string) =>
-        rpc.request("sessionBrowser.getPath", {
-          sessionId
         }),
       repair: (workspaceIds: string[]) =>
         rpc.request("sessionBrowser.repair", {
           workspaceIds
-        }),
-      toggleExpanded: (sessionId: string) =>
-        rpc.request("sessionBrowser.toggleExpanded", {
-          sessionId
         }),
       create: (input) => rpc.request("sessionBrowser.create", input),
       open: (sessionId: string, options?: { forceProviderHydration?: boolean }) =>

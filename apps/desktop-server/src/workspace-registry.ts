@@ -32,8 +32,6 @@ const workspaceRecordSchema = z.object({
 const workspaceRegistryDocumentSchema = z.object({
   version: z.literal(1),
   workspaces: z.array(workspaceRecordSchema).default([]),
-  expandedWorkspaceIds: z.array(z.string().min(1)).default([]),
-  expandedSessionIds: z.array(z.string().min(1)).default([]),
   pinnedSessionIds: z.array(z.string().min(1)).default([]),
   defaultNewSessionEngineId: z.string().min(1).optional(),
   engineProgramPathsByEngineId: z.record(z.string(), z.string().min(1)).default({}),
@@ -151,8 +149,6 @@ export class WorkspaceRegistryService {
   private document: WorkspaceRegistryDocument = {
     version: 1,
     workspaces: [],
-    expandedWorkspaceIds: [],
-    expandedSessionIds: [],
     pinnedSessionIds: [],
     engineProgramPathsByEngineId: {},
     allowedModelIdsByEngineId: {},
@@ -190,8 +186,6 @@ export class WorkspaceRegistryService {
     return {
       ...this.document,
       workspaces: [...this.document.workspaces],
-      expandedWorkspaceIds: [...this.document.expandedWorkspaceIds],
-      expandedSessionIds: [...this.document.expandedSessionIds],
       pinnedSessionIds: [...this.document.pinnedSessionIds],
       engineProgramPathsByEngineId: { ...this.document.engineProgramPathsByEngineId },
       ...cloneModelSettings(this.document)
@@ -285,9 +279,6 @@ export class WorkspaceRegistryService {
       workspaces: this.document.workspaces.filter(
         (workspace) => workspace.workspaceId !== workspaceId
       ),
-      expandedWorkspaceIds: this.document.expandedWorkspaceIds.filter(
-        (value) => value !== workspaceId
-      ),
       lastActiveWorkspaceId:
         this.document.lastActiveWorkspaceId === workspaceId
           ? undefined
@@ -302,34 +293,6 @@ export class WorkspaceRegistryService {
     }
     await this.persist();
     return true;
-  }
-
-  public async setWorkspaceExpanded(
-    workspaceId: string,
-    expanded: boolean
-  ): Promise<void> {
-    await this.ready();
-    this.document = {
-      ...this.document,
-      expandedWorkspaceIds: expanded
-        ? dedupeIds([...this.document.expandedWorkspaceIds, workspaceId])
-        : this.document.expandedWorkspaceIds.filter((value) => value !== workspaceId)
-    };
-    await this.persist();
-  }
-
-  public async setSessionExpanded(
-    sessionId: string,
-    expanded: boolean
-  ): Promise<void> {
-    await this.ready();
-    this.document = {
-      ...this.document,
-      expandedSessionIds: expanded
-        ? dedupeIds([...this.document.expandedSessionIds, sessionId])
-        : this.document.expandedSessionIds.filter((value) => value !== sessionId)
-    };
-    await this.persist();
   }
 
   public async setSessionPinned(
@@ -417,8 +380,6 @@ export class WorkspaceRegistryService {
     const loaded = await loadJsonFile<unknown>(this.filePath, {
       version: 1,
       workspaces: [],
-      expandedWorkspaceIds: [],
-      expandedSessionIds: [],
       pinnedSessionIds: [],
       engineProgramPathsByEngineId: {},
       allowedModelIdsByEngineId: {},

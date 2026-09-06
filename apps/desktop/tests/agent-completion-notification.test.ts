@@ -1,14 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   EventEnvelope,
-  SessionBrowserPathRpc,
   SessionEventPush,
   SessionEventPushBatch
 } from "@vermillion/shared";
-import {
-  createAgentCompletionNotifier,
-  findMainSessionInPath
-} from "../src/electron/agent-completion-notification.js";
+import { createAgentCompletionNotifier } from "../src/electron/agent-completion-notification.js";
 
 const completionEnvelope = (
   eventId: string,
@@ -32,43 +28,6 @@ const push = (envelope: EventEnvelope): SessionEventPush => ({
 });
 
 describe("agent completion notifications", () => {
-  it("allows root sessions and rejects subagent or unknown sessions", () => {
-    const root = {
-      workspaceId: "workspace-1",
-      revision: "revision-1",
-      items: [{
-        sessionId: "session-root",
-        engineId: "codex",
-        title: "Root",
-        statusDot: "none",
-        isActive: true,
-        isExpanded: false,
-        isPinned: false,
-        childCount: 1
-      }]
-    } satisfies SessionBrowserPathRpc;
-    const child = {
-      ...root,
-      items: [
-        root.items[0],
-        {
-          sessionId: "session-child",
-          parentSessionId: "session-root",
-          engineId: "codex",
-          title: "Child",
-          statusDot: "none",
-          isActive: false,
-          isExpanded: false,
-          isPinned: false,
-          childCount: 0
-        }
-      ]
-    } satisfies SessionBrowserPathRpc;
-
-    expect(findMainSessionInPath(root)?.title).toBe("Root");
-    expect(findMainSessionInPath(child)).toBeUndefined();
-  });
-
   it("notifies once for a successfully completed turn", () => {
     const notify = vi.fn();
     const notifier = createAgentCompletionNotifier({ notify });

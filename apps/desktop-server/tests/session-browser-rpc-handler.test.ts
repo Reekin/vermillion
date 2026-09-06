@@ -5,69 +5,40 @@ import type { SessionShellService } from "../src/session-shell-service.js";
 
 const createShell = (overrides: Record<string, unknown> = {}): SessionShellService => ({
   listWorkspaces: vi.fn(),
-  listSessionRoots: vi.fn(async () => ({
+  listBrowserSessions: vi.fn(async () => ({
     workspaceId: "workspace-1",
     revision: "revision-1",
     items: [],
     hasMore: false,
     totalCount: 0
-  })),
-  listSessionChildren: vi.fn(async () => ({
-    workspaceId: "workspace-1",
-    parentSessionId: "session-root",
-    revision: "revision-1",
-    items: [],
-    hasMore: false,
-    totalCount: 0
-  })),
-  getSessionBrowserPath: vi.fn(async () => ({
-    workspaceId: "workspace-1",
-    revision: "revision-1",
-    items: []
   })),
   ...overrides
 } as unknown as SessionShellService);
 
 describe("session browser workbench RPC handler", () => {
-  it("routes bounded roots, children, and selected path requests", async () => {
+  it("routes bounded session list requests", async () => {
     const shell = createShell();
     const handler = createWorkbenchRpcHandler(shell);
 
-    const roots = await handler.handleRequest({
-      id: "req-roots",
-      method: "sessionBrowser.listRoots",
+    const page = await handler.handleRequest({
+      id: "req-list",
+      method: "sessionBrowser.list",
       params: { workspaceId: "workspace-1", limit: 20 }
     });
-    const children = await handler.handleRequest({
-      id: "req-children",
-      method: "sessionBrowser.listChildren",
-      params: {
-        workspaceId: "workspace-1",
-        parentSessionId: "session-root",
-        expectedRevision: "revision-1",
-        limit: 20
-      }
-    });
-    const path = await handler.handleRequest({
-      id: "req-path",
-      method: "sessionBrowser.getPath",
-      params: { sessionId: "session-child" }
-    });
 
-    expect(roots).toMatchObject({ ok: true, method: "sessionBrowser.listRoots" });
-    expect(children).toMatchObject({ ok: true, method: "sessionBrowser.listChildren" });
-    expect(path).toMatchObject({ ok: true, method: "sessionBrowser.getPath" });
+    expect(page).toMatchObject({ ok: true, method: "sessionBrowser.list" });
+    expect(shell.listBrowserSessions).toHaveBeenCalledWith({ workspaceId: "workspace-1", limit: 20 });
   });
 
   it("maps revision mismatch to CURSOR_STALE", async () => {
     const shell = createShell({
-      listSessionRoots: vi.fn(async () => {
+      listBrowserSessions: vi.fn(async () => {
         throw new SessionBrowserCursorStaleError();
       })
     });
     const response = await createWorkbenchRpcHandler(shell).handleRequest({
       id: "req-stale",
-      method: "sessionBrowser.listRoots",
+      method: "sessionBrowser.list",
       params: {
         workspaceId: "workspace-1",
         expectedRevision: "old-revision",

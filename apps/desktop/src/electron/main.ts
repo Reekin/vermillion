@@ -42,10 +42,7 @@ import {
   type RendererHealthSnapshot
 } from "./electron-diagnostics.js";
 import { writeVerifiedClipboardText } from "./clipboard-writer.js";
-import {
-  createAgentCompletionNotifier,
-  findMainSessionInPath
-} from "./agent-completion-notification.js";
+import { createAgentCompletionNotifier } from "./agent-completion-notification.js";
 
 app.setName("Vermillion");
 
@@ -701,9 +698,8 @@ const boot = async (): Promise<void> => {
   const completionNotifier = createAgentCompletionNotifier({
     notify: (completed) => {
       void service
-        .getSessionBrowserPath(completed.sessionId)
-        .then((path) => {
-          const session = findMainSessionInPath(path);
+        .getSessionBrowserItem(completed.sessionId)
+        .then((session) => {
           if (session) {
             showAgentCompletionNotification(session.title);
           }

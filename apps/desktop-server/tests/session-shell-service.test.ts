@@ -600,31 +600,6 @@ describe("SessionShellService", () => {
     expect(removeIndexedWorkspace).toHaveBeenCalledWith("workspace-1");
   });
 
-  it("returns persisted workspace expansion state", async () => {
-    const ready = vi.fn().mockResolvedValue(undefined);
-    const getState = vi.fn().mockReturnValue({
-      workspaces: [],
-      lastActiveWorkspaceId: "workspace-1",
-      lastActiveSessionId: "session-1",
-      expandedWorkspaceIds: ["workspace-1", "workspace-2"]
-    });
-    const service = new SessionShellService({
-      runtimeService: {
-        getWorkspaceRegistry: () => ({ ready, getState })
-      } as never,
-      sessionCatalog: {} as never,
-      sessionActions: {} as never,
-      chatTreeProvider: {} as never
-    });
-
-    await expect(service.listWorkspaces()).resolves.toEqual({
-      workspaces: [],
-      lastActiveWorkspaceId: "workspace-1",
-      lastActiveSessionId: "session-1",
-      expandedWorkspaceIds: ["workspace-1", "workspace-2"]
-    });
-  });
-
   it("preserves the active session when reselecting the current workspace", async () => {
     const ready = vi.fn().mockResolvedValue(undefined);
     const getState = vi.fn().mockReturnValue({
@@ -737,11 +712,7 @@ describe("SessionShellService", () => {
       .mockReturnValueOnce({ pinnedSessionIds: [] })
       .mockReturnValue({ pinnedSessionIds: ["session-1"] });
     const setSessionPinned = vi.fn().mockResolvedValue(undefined);
-    const getPath = vi.fn().mockResolvedValue({
-      workspaceId: "workspace-1",
-      revision: "revision-1",
-      items: []
-    });
+    const get = vi.fn().mockResolvedValue({ sessionId: "session-1" });
     const invalidate = vi.fn();
     const listActions = vi.fn().mockResolvedValue([
       { action: "refresh", label: "Refresh" }
@@ -755,7 +726,7 @@ describe("SessionShellService", () => {
         })
       } as never,
       sessionCatalog: {
-        getPath,
+        get,
         invalidate
       } as never,
       sessionActions: {
@@ -783,7 +754,7 @@ describe("SessionShellService", () => {
       ]
     });
     expect(setSessionPinned).toHaveBeenCalledWith("session-1", true);
-    expect(getPath).toHaveBeenCalledWith("session-1");
+    expect(get).toHaveBeenCalledWith("session-1");
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
@@ -1821,25 +1792,6 @@ describe("SessionShellService", () => {
     await expect(service.openSession("session-legacy")).rejects.toThrow(
       "This session does not expose a loadable provider session id."
     );
-  });
-
-  it("passes workspace filters through to the session catalog", async () => {
-    const listWorkspaceTree = vi
-      .fn()
-      .mockResolvedValue([{ workspaceId: "workspace-1", sessions: [] }]);
-    const service = new SessionShellService({
-      runtimeService: {} as never,
-      sessionCatalog: {
-        listWorkspaceTree
-      } as never,
-      sessionActions: {} as never,
-      chatTreeProvider: {} as never
-    });
-
-    await expect(service.listSessionTree("workspace-1")).resolves.toEqual({
-      workspaces: [{ workspaceId: "workspace-1", sessions: [] }]
-    });
-    expect(listWorkspaceTree).toHaveBeenCalledWith("workspace-1");
   });
 
   it("forwards explicit repair requests to the session discovery service", async () => {

@@ -37,14 +37,9 @@ export const sessionRpcMethods = [
   "workspace.pickDirectory",
   "workspace.add",
   "workspace.remove",
-  "workspace.setExpanded",
   "workspace.select",
-  "sessionBrowser.listTree",
-  "sessionBrowser.listRoots",
-  "sessionBrowser.listChildren",
-  "sessionBrowser.getPath",
+  "sessionBrowser.list",
   "sessionBrowser.repair",
-  "sessionBrowser.toggleExpanded",
   "sessionBrowser.create",
   "sessionBrowser.open",
   "sessionBrowser.activate",
@@ -138,44 +133,19 @@ export const zProviderSessionHandleSchema = z.object({
 
 export type ProviderSessionHandle = z.infer<typeof zProviderSessionHandleSchema>;
 
-export type SessionBrowserNodeRpc = {
-  sessionId: string;
-  displaySessionId: string;
-  providerSessionId?: string;
-  providerHandle?: ProviderSessionHandle;
-  workspaceId: string;
-  conversationId?: string;
-  engineId: string;
-  title: string;
-  summaryText?: string;
-  statusDot: z.infer<typeof zSessionStatusDotSchema>;
-  isPinned?: boolean;
-  isExpanded: boolean;
-  isActive: boolean;
-  isArchived: boolean;
-  parentSessionId?: string;
-  children: SessionBrowserNodeRpc[];
-  updatedAt: string;
-  lastCompletedTurnAt?: string;
-};
-
 export type SessionBrowserItemRpc = {
   sessionId: string;
-  parentSessionId?: string;
   engineId: string;
   title: string;
   statusDot: z.infer<typeof zSessionStatusDotSchema>;
   isActive: boolean;
-  isExpanded: boolean;
   isPinned: boolean;
-  childCount: number;
   activityAt?: string;
   lastCompletedTurnAt?: string;
 };
 
 export type SessionBrowserPageRpc = {
   workspaceId: string;
-  parentSessionId?: string;
   revision: string;
   items: SessionBrowserItemRpc[];
   nextCursor?: string;
@@ -183,97 +153,24 @@ export type SessionBrowserPageRpc = {
   totalCount: number;
 };
 
-export type SessionBrowserPathRpc = {
-  workspaceId: string;
-  revision: string;
-  items: SessionBrowserItemRpc[];
-};
-
 const zSessionBrowserItemSchema = z.object({
   sessionId: zSessionId,
-  parentSessionId: zSessionId.optional(),
   engineId: zEngineId,
   title: z.string().min(1),
   statusDot: zSessionStatusDotSchema,
   isActive: z.boolean(),
-  isExpanded: z.boolean(),
   isPinned: z.boolean(),
-  childCount: z.number().int().nonnegative(),
   activityAt: z.string().min(1).optional(),
   lastCompletedTurnAt: z.string().min(1).optional()
 });
 
 const zSessionBrowserPageSchema = z.object({
   workspaceId: z.string().min(1),
-  parentSessionId: zSessionId.optional(),
   revision: z.string().min(1),
   items: z.array(zSessionBrowserItemSchema),
   nextCursor: z.string().min(1).optional(),
   hasMore: z.boolean(),
   totalCount: z.number().int().nonnegative()
-});
-
-const zSessionBrowserPathSchema = z.object({
-  workspaceId: z.string().min(1),
-  revision: z.string().min(1),
-  items: z.array(zSessionBrowserItemSchema)
-});
-
-export type WorkspaceBrowserNodeRpc = {
-  workspaceId: string;
-  label: string;
-  rootPath: string;
-  isExpanded: boolean;
-  isActive: boolean;
-  sessions: SessionBrowserNodeRpc[];
-};
-
-type SessionBrowserNodeRpcInput = Omit<SessionBrowserNodeRpc, "children"> & {
-  children?: SessionBrowserNodeRpcInput[];
-};
-
-type WorkspaceBrowserNodeRpcInput = Omit<WorkspaceBrowserNodeRpc, "sessions"> & {
-  sessions?: SessionBrowserNodeRpcInput[];
-};
-
-const zSessionBrowserNodeSchema: z.ZodType<
-  SessionBrowserNodeRpc,
-  z.ZodTypeDef,
-  SessionBrowserNodeRpcInput
-> = z.lazy(() =>
-  z.object({
-    sessionId: zSessionId,
-    displaySessionId: z.string().min(1),
-    providerSessionId: z.string().min(1).optional(),
-    providerHandle: zProviderSessionHandleSchema.optional(),
-    workspaceId: z.string().min(1),
-    conversationId: zConversationId.optional(),
-    engineId: zEngineId,
-    title: z.string().min(1),
-    summaryText: z.string().min(1).optional(),
-    statusDot: zSessionStatusDotSchema,
-    isPinned: z.boolean().default(false),
-    isExpanded: z.boolean(),
-    isActive: z.boolean(),
-    isArchived: z.boolean(),
-    parentSessionId: zSessionId.optional(),
-    children: z.array(zSessionBrowserNodeSchema).default([]),
-    updatedAt: z.string().min(1),
-    lastCompletedTurnAt: z.string().min(1).optional()
-  })
-);
-
-const zWorkspaceBrowserNodeSchema: z.ZodType<
-  WorkspaceBrowserNodeRpc,
-  z.ZodTypeDef,
-  WorkspaceBrowserNodeRpcInput
-> = z.object({
-  workspaceId: z.string().min(1),
-  label: z.string().min(1),
-  rootPath: z.string().min(1),
-  isExpanded: z.boolean(),
-  isActive: z.boolean(),
-  sessions: z.array(zSessionBrowserNodeSchema).default([])
 });
 
 const zSessionActionKindSchema = z.enum([
@@ -664,15 +561,6 @@ const zWorkspaceRemoveRequestSchema = z.object({
   })
 });
 
-const zWorkspaceSetExpandedRequestSchema = z.object({
-  id: zRequestId,
-  method: z.literal("workspace.setExpanded"),
-  params: z.object({
-    workspaceId: z.string().min(1),
-    expanded: z.boolean()
-  })
-});
-
 const zWorkspaceSelectRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("workspace.select"),
@@ -681,48 +569,14 @@ const zWorkspaceSelectRequestSchema = z.object({
   })
 });
 
-const zSessionBrowserPageParamsSchema = z.object({
-  workspaceId: z.string().min(1),
-  cursor: z.string().min(1).optional(),
-  expectedRevision: z.string().min(1).optional(),
-  limit: z.number().int().positive().max(100).default(20),
-  /** List every session in the workspace regardless of parent relation. */
-  flat: z.boolean().optional()
-});
-
-const zSessionBrowserListRootsRequestSchema = z.object({
+const zSessionBrowserListRequestSchema = z.object({
   id: zRequestId,
-  method: z.literal("sessionBrowser.listRoots"),
-  params: zSessionBrowserPageParamsSchema
-});
-
-const zSessionBrowserListChildrenRequestSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.listChildren"),
-  params: zSessionBrowserPageParamsSchema.extend({
-    parentSessionId: zSessionId
-  })
-});
-
-const zSessionBrowserGetPathRequestSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.getPath"),
-  params: z.object({ sessionId: zSessionId })
-});
-
-const zSessionBrowserListTreeRequestSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.listTree"),
+  method: z.literal("sessionBrowser.list"),
   params: z.object({
-    workspaceId: z.string().min(1).optional()
-  })
-});
-
-const zSessionBrowserToggleExpandedRequestSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.toggleExpanded"),
-  params: z.object({
-    sessionId: zSessionId
+    workspaceId: z.string().min(1),
+    cursor: z.string().min(1).optional(),
+    expectedRevision: z.string().min(1).optional(),
+    limit: z.number().int().positive().max(100).default(20)
   })
 });
 
@@ -997,14 +851,9 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zWorkspacePickDirectoryRequestSchema,
   zWorkspaceAddRequestSchema,
   zWorkspaceRemoveRequestSchema,
-  zWorkspaceSetExpandedRequestSchema,
   zWorkspaceSelectRequestSchema,
-  zSessionBrowserListTreeRequestSchema,
-  zSessionBrowserListRootsRequestSchema,
-  zSessionBrowserListChildrenRequestSchema,
-  zSessionBrowserGetPathRequestSchema,
+  zSessionBrowserListRequestSchema,
   zSessionBrowserRepairRequestSchema,
-  zSessionBrowserToggleExpandedRequestSchema,
   zSessionBrowserCreateRequestSchema,
   zSessionBrowserOpenRequestSchema,
   zSessionBrowserActivateRequestSchema,
@@ -1108,8 +957,7 @@ const zWorkspaceListResponseSchema = z.object({
   result: z.object({
     workspaces: z.array(zWorkspaceRecordSchema),
     lastActiveWorkspaceId: z.string().min(1).optional(),
-    lastActiveSessionId: z.string().min(1).optional(),
-    expandedWorkspaceIds: z.array(z.string().min(1))
+    lastActiveSessionId: z.string().min(1).optional()
   })
 });
 
@@ -1142,16 +990,6 @@ const zWorkspaceRemoveResponseSchema = z.object({
   })
 });
 
-const zWorkspaceSetExpandedResponseSchema = z.object({
-  id: zRequestId,
-  method: z.literal("workspace.setExpanded"),
-  ok: z.literal(true),
-  result: z.object({
-    workspaceId: z.string().min(1),
-    expanded: z.boolean()
-  })
-});
-
 const zWorkspaceSelectResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("workspace.select"),
@@ -1162,44 +1000,11 @@ const zWorkspaceSelectResponseSchema = z.object({
   })
 });
 
-const zSessionBrowserListRootsResponseSchema = z.object({
+const zSessionBrowserListResponseSchema = z.object({
   id: zRequestId,
-  method: z.literal("sessionBrowser.listRoots"),
+  method: z.literal("sessionBrowser.list"),
   ok: z.literal(true),
   result: zSessionBrowserPageSchema
-});
-
-const zSessionBrowserListChildrenResponseSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.listChildren"),
-  ok: z.literal(true),
-  result: zSessionBrowserPageSchema
-});
-
-const zSessionBrowserGetPathResponseSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.getPath"),
-  ok: z.literal(true),
-  result: zSessionBrowserPathSchema
-});
-
-const zSessionBrowserListTreeResponseSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.listTree"),
-  ok: z.literal(true),
-  result: z.object({
-    workspaces: z.array(zWorkspaceBrowserNodeSchema)
-  })
-});
-
-const zSessionBrowserToggleExpandedResponseSchema = z.object({
-  id: zRequestId,
-  method: z.literal("sessionBrowser.toggleExpanded"),
-  ok: z.literal(true),
-  result: z.object({
-    sessionId: zSessionId,
-    expanded: z.boolean()
-  })
 });
 
 const zSessionBrowserCreateResponseSchema = z.object({
@@ -1488,14 +1293,9 @@ export const zSessionRpcResponseSchema = z.union([
   zWorkspacePickDirectoryResponseSchema,
   zWorkspaceAddResponseSchema,
   zWorkspaceRemoveResponseSchema,
-  zWorkspaceSetExpandedResponseSchema,
   zWorkspaceSelectResponseSchema,
-  zSessionBrowserListTreeResponseSchema,
-  zSessionBrowserListRootsResponseSchema,
-  zSessionBrowserListChildrenResponseSchema,
-  zSessionBrowserGetPathResponseSchema,
+  zSessionBrowserListResponseSchema,
   zSessionBrowserRepairResponseSchema,
-  zSessionBrowserToggleExpandedResponseSchema,
   zSessionBrowserCreateResponseSchema,
   zSessionBrowserOpenResponseSchema,
   zSessionBrowserActivateResponseSchema,

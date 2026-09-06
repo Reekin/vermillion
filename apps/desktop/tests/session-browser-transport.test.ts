@@ -51,16 +51,6 @@ describe("session browser transport contracts", () => {
               activeSessionId: "session-root"
             }
           } as const;
-        case "workspace.setExpanded":
-          return {
-            id: request.id,
-            method: "workspace.setExpanded",
-            ok: true,
-            result: {
-              workspaceId: request.params.workspaceId,
-              expanded: request.params.expanded
-            }
-          } as const;
         case "workspace.remove":
           return {
             id: request.id,
@@ -71,10 +61,10 @@ describe("session browser transport contracts", () => {
               removed: true
             }
           } as const;
-        case "sessionBrowser.listRoots":
+        case "sessionBrowser.list":
           return {
             id: request.id,
-            method: "sessionBrowser.listRoots",
+            method: "sessionBrowser.list",
             ok: true,
             result: {
               workspaceId: request.params.workspaceId,
@@ -85,46 +75,11 @@ describe("session browser transport contracts", () => {
                 title: "Root Session",
                 statusDot: "running",
                 isActive: true,
-                isPinned: false,
-                childCount: 1
+                isPinned: false
               }],
               nextCursor: "cursor-2",
               hasMore: true,
               totalCount: 11
-            }
-          } as const;
-        case "sessionBrowser.listChildren":
-          return {
-            id: request.id,
-            method: "sessionBrowser.listChildren",
-            ok: true,
-            result: {
-              workspaceId: request.params.workspaceId,
-              parentSessionId: request.params.parentSessionId,
-              revision: "revision-1",
-              items: [{
-                sessionId: "session-child",
-                parentSessionId: request.params.parentSessionId,
-                engineId: "agent-codex",
-                title: "Child Session",
-                statusDot: "unread_completed",
-                isActive: false,
-                isPinned: false,
-                childCount: 0
-              }],
-              hasMore: false,
-              totalCount: 1
-            }
-          } as const;
-        case "sessionBrowser.getPath":
-          return {
-            id: request.id,
-            method: "sessionBrowser.getPath",
-            ok: true,
-            result: {
-              workspaceId: "workspace-1",
-              revision: "revision-1",
-              items: []
             }
           } as const;
         case "sessionBrowser.repair":
@@ -203,16 +158,6 @@ describe("session browser transport contracts", () => {
               }
             }
           } as const;
-        case "sessionBrowser.toggleExpanded":
-          return {
-            id: request.id,
-            method: "sessionBrowser.toggleExpanded",
-            ok: true,
-            result: {
-              sessionId: request.params.sessionId,
-              expanded: false
-            }
-          } as const;
         case "sessionBrowser.create":
           return {
             id: request.id,
@@ -231,19 +176,10 @@ describe("session browser transport contracts", () => {
 
     const pickedWorkspace = await transport.workspace.pickDirectory();
     const workspaceSelection = await transport.workspace.select("workspace-1");
-    const workspaceToggle = await transport.workspace.setExpanded(
-      "workspace-1",
-      true
-    );
     const workspaceRemoval = await transport.workspace.remove({
       workspaceId: "workspace-1"
     });
-    const roots = await transport.sessionBrowser.listRoots({ workspaceId: "workspace-1" });
-    const children = await transport.sessionBrowser.listChildren({
-      workspaceId: "workspace-1",
-      parentSessionId: "session-root"
-    });
-    const path = await transport.sessionBrowser.getPath("session-child");
+    const page = await transport.sessionBrowser.list({ workspaceId: "workspace-1" });
     const repair = await transport.sessionBrowser.repair(["workspace-1"]);
     const openResult = await transport.sessionBrowser.open("session-child");
     const forceOpenResult = await transport.sessionBrowser.open("session-force", {
@@ -255,7 +191,6 @@ describe("session browser transport contracts", () => {
       beforeTurnId: "turn-2",
       limit: 8
     });
-    const sessionToggle = await transport.sessionBrowser.toggleExpanded("session-root");
     const createResult = await transport.sessionBrowser.create({
       workspaceId: "workspace-1",
       engineId: "agent-codex"
@@ -269,17 +204,11 @@ describe("session browser transport contracts", () => {
       workspaceId: "workspace-1",
       activeSessionId: "session-root"
     });
-    expect(workspaceToggle).toEqual({
-      workspaceId: "workspace-1",
-      expanded: true
-    });
     expect(workspaceRemoval).toEqual({
       workspaceId: "workspace-1",
       removed: true
     });
-    expect(roots.items[0]?.sessionId).toBe("session-root");
-    expect(children.items[0]?.sessionId).toBe("session-child");
-    expect(path.workspaceId).toBe("workspace-1");
+    expect(page.items[0]?.sessionId).toBe("session-root");
     expect(repair).toEqual({
       workspaces: 1,
       sessions: 2,
@@ -315,10 +244,6 @@ describe("session browser transport contracts", () => {
         hasNewer: true
       })
     });
-    expect(sessionToggle).toEqual({
-      sessionId: "session-root",
-      expanded: false
-    });
     expect(createResult).toEqual({
       sessionId: "session-new",
       conversationId: "conversation-new"
@@ -330,17 +255,13 @@ describe("session browser transport contracts", () => {
     expect(methods).toEqual([
       "workspace.pickDirectory",
       "workspace.select",
-      "workspace.setExpanded",
       "workspace.remove",
-      "sessionBrowser.listRoots",
-      "sessionBrowser.listChildren",
-      "sessionBrowser.getPath",
+      "sessionBrowser.list",
       "sessionBrowser.repair",
       "sessionBrowser.open",
       "sessionBrowser.open",
       "sessionBrowser.activate",
       "sessionBrowser.loadOlder",
-      "sessionBrowser.toggleExpanded",
       "sessionBrowser.create"
     ]);
   });

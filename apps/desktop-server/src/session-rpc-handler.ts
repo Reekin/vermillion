@@ -221,23 +221,6 @@ export const createWorkbenchRpcHandler = (
               result: await shellService.removeWorkspace(request.params.workspaceId)
             });
           }
-          case "workspace.setExpanded":
-            if (!shellService) {
-              return toErrorResponse(
-                request,
-                "WORKSPACE_BROWSER_UNAVAILABLE",
-                "Workspace browser APIs are unavailable for this runtime service."
-              );
-            }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.setWorkspaceExpanded(
-                request.params.workspaceId,
-                request.params.expanded
-              )
-            });
           case "workspace.select":
             if (!shellService) {
               return toErrorResponse(
@@ -252,7 +235,7 @@ export const createWorkbenchRpcHandler = (
               ok: true,
               result: await shellService.selectWorkspace(request.params.workspaceId)
             });
-          case "sessionBrowser.listTree":
+          case "sessionBrowser.list":
             if (!shellService) {
               return toErrorResponse(
                 request,
@@ -264,49 +247,7 @@ export const createWorkbenchRpcHandler = (
               id: request.id,
               method: request.method,
               ok: true,
-              result: await shellService.listSessionTree(request.params.workspaceId)
-            });
-          case "sessionBrowser.listRoots":
-            if (!shellService) {
-              return toErrorResponse(
-                request,
-                "SESSION_BROWSER_UNAVAILABLE",
-                "Session browser APIs are unavailable for this runtime service."
-              );
-            }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.listSessionRoots(request.params)
-            });
-          case "sessionBrowser.listChildren":
-            if (!shellService) {
-              return toErrorResponse(
-                request,
-                "SESSION_BROWSER_UNAVAILABLE",
-                "Session browser APIs are unavailable for this runtime service."
-              );
-            }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.listSessionChildren(request.params)
-            });
-          case "sessionBrowser.getPath":
-            if (!shellService) {
-              return toErrorResponse(
-                request,
-                "SESSION_BROWSER_UNAVAILABLE",
-                "Session browser APIs are unavailable for this runtime service."
-              );
-            }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.getSessionBrowserPath(request.params.sessionId)
+              result: await shellService.listBrowserSessions(request.params)
             });
           case "sessionBrowser.repair":
             if (!shellService) {
@@ -321,20 +262,6 @@ export const createWorkbenchRpcHandler = (
               method: request.method,
               ok: true,
               result: await shellService.repairSessionBrowser(request.params.workspaceIds)
-            });
-          case "sessionBrowser.toggleExpanded":
-            if (!shellService) {
-              return toErrorResponse(
-                request,
-                "SESSION_BROWSER_UNAVAILABLE",
-                "Session browser APIs are unavailable for this runtime service."
-              );
-            }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.toggleSessionExpanded(request.params.sessionId)
             });
           case "sessionBrowser.create":
             if (!shellService) {

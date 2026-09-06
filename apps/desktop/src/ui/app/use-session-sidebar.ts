@@ -16,7 +16,7 @@ const toSidebar = (page: SessionBrowserPageRpc): SidebarSession[] =>
   page.items.map((item) => ({ ...item, workspaceId: page.workspaceId, sortAt: sortAtOf(item) }));
 
 /**
- * Sidebar query owned by the app: one flat page per workspace (forks included), merged and ordered by last completed turn.
+ * Sidebar query owned by the app: one page per workspace, merged and ordered pinned-first then by last completed turn.
  * "Load more" advances the workspace whose next page is most recent.
  */
 export const useSessionSidebar = (input: { transport: DesktopTransport; store: RendererStore; workspaceIds: string[] }) => {
@@ -32,7 +32,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     setLoading(true);
     const results = await Promise.all(
       workspaceIds.map(async (workspaceId) => {
-        const page = await transport.sessionBrowser.listRoots({ workspaceId, limit: PAGE, flat: true });
+        const page = await transport.sessionBrowser.list({ workspaceId, limit: PAGE });
         return [workspaceId, { items: toSidebar(page), nextCursor: page.nextCursor, hasMore: page.hasMore, revision: page.revision }] as const;
       })
     );
@@ -60,7 +60,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     const run = generation.current;
     setLoading(true);
     try {
-      const next = await transport.sessionBrowser.listRoots({ workspaceId, cursor: page.nextCursor, expectedRevision: page.revision, limit: PAGE, flat: true });
+      const next = await transport.sessionBrowser.list({ workspaceId, cursor: page.nextCursor, expectedRevision: page.revision, limit: PAGE });
       if (run !== generation.current) return;
       setPages((current) => ({
         ...current,

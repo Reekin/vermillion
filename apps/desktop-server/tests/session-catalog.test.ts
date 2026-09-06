@@ -38,7 +38,7 @@ afterEach(async () => {
 });
 
 describe("SessionCatalogService", () => {
-  it("merges runtime and index state into workspace trees with relation nesting and status dots", async () => {
+  it("merges runtime and index state into flat per-workspace lists with pin and status dots", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({
       baseDir
@@ -57,8 +57,6 @@ describe("SessionCatalogService", () => {
       absolutePath: "I:/workspace-beta",
       label: "Beta"
     });
-    await workspaceRegistry.setWorkspaceExpanded("workspace-1", true);
-    await workspaceRegistry.setSessionExpanded("session-root", true);
     await workspaceRegistry.setSessionPinned("session-root", true);
     await workspaceRegistry.setLastActiveSelection({
       workspaceId: "workspace-1",
@@ -187,7 +185,8 @@ describe("SessionCatalogService", () => {
       ]
     };
     const runtimeService = {
-      getSnapshot: () => snapshot
+      getSnapshot: () => snapshot,
+      getSessionBrowserRevision: () => 1
     } as unknown as SessionRuntimeService;
 
     const service = new SessionCatalogService({
@@ -196,54 +195,27 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const tree = await service.listWorkspaceTree();
-    const alphaWorkspace = tree.find((item) => item.workspaceId === "workspace-1");
-    const betaWorkspace = tree.find((item) => item.workspaceId === "workspace-2");
+    const alpha = await service.list({ workspaceId: "workspace-1" });
+    const beta = await service.list({ workspaceId: "workspace-2" });
 
-    expect(alphaWorkspace).toMatchObject({
-      workspaceId: "workspace-1",
-      label: "Alpha",
-      isExpanded: true,
-      isActive: true
-    });
-    expect(alphaWorkspace?.sessions.map((item) => item.sessionId)).toEqual([
-      "session-root"
-    ]);
-
-    const rootNode = alphaWorkspace?.sessions[0];
-    expect(rootNode).toMatchObject({
+    expect(alpha.items.map((item) => item.sessionId)).toEqual(["session-root", "session-child"]);
+    expect(alpha.items[0]).toMatchObject({
       sessionId: "session-root",
-      displaySessionId: "thread-root",
-      providerSessionId: "thread-root",
       title: "Runtime Root",
-      summaryText: "summary from index",
       statusDot: "unread_completed",
       isPinned: true,
-      isExpanded: true,
       isActive: false,
-      isArchived: false,
       lastCompletedTurnAt: "2026-04-18T00:00:13Z"
     });
-    expect(rootNode?.children).toHaveLength(1);
-    expect(rootNode?.children[0]).toMatchObject({
+    expect(alpha.items[1]).toMatchObject({
       sessionId: "session-child",
-      parentSessionId: "session-root",
       statusDot: "running",
       isPinned: false,
       isActive: true
     });
-    expect(betaWorkspace).toMatchObject({
-      workspaceId: "workspace-2",
-      isActive: false
-    });
-    expect(betaWorkspace?.sessions[0]).toMatchObject({
-      sessionId: "session-beta",
-      displaySessionId: "session-beta",
-      statusDot: "none"
-    });
-    expect(
-      alphaWorkspace?.sessions.some((item) => item.sessionId === "session-archived")
-    ).toBe(false);
+    expect(JSON.stringify(alpha)).not.toContain("summary from index");
+    expect(beta.items[0]).toMatchObject({ sessionId: "session-beta", statusDot: "none" });
+    expect(await service.get("session-archived")).toBeUndefined();
   });
 
   it("marks unread sessions as read through the backing index store", async () => {
@@ -294,7 +266,8 @@ describe("SessionCatalogService", () => {
             updatedAt: "2026-04-18T00:00:02Z"
           }
         ]
-      })
+      }),
+      getSessionBrowserRevision: () => 1
     } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
@@ -397,7 +370,8 @@ describe("SessionCatalogService", () => {
             approvalRequestIds: []
           }
         ]
-      })
+      }),
+      getSessionBrowserRevision: () => 1
     } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
@@ -405,18 +379,14 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const tree = await service.listWorkspaceTree("workspace-1");
+    const page = await service.list({ workspaceId: "workspace-1" });
 
-    expect(tree[0]?.sessions.map((item) => item.sessionId)).toEqual([
+    expect(page.items.map((item) => item.sessionId)).toEqual([
       "session-new",
       "session-old"
     ]);
-    expect(tree[0]?.sessions[0]?.lastCompletedTurnAt).toBe(
-      "2026-04-18T00:15:00Z"
-    );
-    expect(tree[0]?.sessions[1]?.lastCompletedTurnAt).toBe(
-      "2026-04-18T00:05:00Z"
-    );
+    expect(page.items[0]?.lastCompletedTurnAt).toBe("2026-04-18T00:15:00Z");
+    expect(page.items[1]?.lastCompletedTurnAt).toBe("2026-04-18T00:05:00Z");
   });
 
   it("falls back to created time when completed turn time is unknown", async () => {
@@ -457,7 +427,8 @@ describe("SessionCatalogService", () => {
     });
 
     const runtimeService = {
-      getSnapshot: () => emptySnapshot()
+      getSnapshot: () => emptySnapshot(),
+      getSessionBrowserRevision: () => 1
     } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
@@ -465,9 +436,9 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const tree = await service.listWorkspaceTree("workspace-1");
+    const page = await service.list({ workspaceId: "workspace-1" });
 
-    expect(tree[0]?.sessions.map((item) => item.sessionId)).toEqual([
+    expect(page.items.map((item) => item.sessionId)).toEqual([
       "session-newer-created",
       "session-recently-updated"
     ]);
@@ -516,7 +487,7 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const page = await service.listRoots({
+    const page = await service.list({
       workspaceId: "workspace-1",
       limit: 10
     });
@@ -583,7 +554,8 @@ describe("SessionCatalogService", () => {
             updatedAt: "2026-04-18T00:00:02Z"
           }
         ]
-      })
+      }),
+      getSessionBrowserRevision: () => 1
     } as unknown as SessionRuntimeService;
     const service = new SessionCatalogService({
       runtimeService,
@@ -591,16 +563,16 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const tree = await service.listWorkspaceTree("workspace-1");
+    const page = await service.list({ workspaceId: "workspace-1" });
 
-    expect(tree[0]?.sessions[0]).toMatchObject({
+    expect(page.items[0]).toMatchObject({
       sessionId: "session-1",
       isActive: true,
       statusDot: "none"
     });
   });
 
-  it("returns bounded lightweight pages and the selected session path", async () => {
+  it("returns bounded lightweight pages and caches until sources change", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
     const indexStore = new SessionIndexStore({ baseDir });
@@ -623,13 +595,6 @@ describe("SessionCatalogService", () => {
         summaryText: "x".repeat(10_000)
       });
     }
-    await indexStore.upsertRelation({
-      workspaceId: "workspace-1",
-      parentSessionId: "session-23",
-      childSessionId: "session-24",
-      relationType: "subagent",
-      createdAt: "2026-07-19T01:00:00Z"
-    });
     const getSnapshot = vi.fn(() => emptySnapshot());
     let runtimeRevision = "runtime-1";
     let runtimeBrowserRevision = 1;
@@ -643,31 +608,24 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const roots = await service.listRoots({ workspaceId: "workspace-1" });
-    expect(roots.items).toHaveLength(20);
-    expect(roots.totalCount).toBe(24);
-    expect(roots.hasMore).toBe(true);
-    expect(JSON.stringify(roots)).not.toContain("summaryText");
-    expect((await service.getPath("session-24")).items.map((item) => item.sessionId)).toEqual([
-      "session-23",
-      "session-24"
-    ]);
+    const page = await service.list({ workspaceId: "workspace-1" });
+    expect(page.items).toHaveLength(20);
+    expect(page.totalCount).toBe(25);
+    expect(page.hasMore).toBe(true);
+    expect(JSON.stringify(page)).not.toContain("summaryText");
+    expect((await service.get("session-24"))?.title).toBe("Session 24");
     expect(getSnapshot).toHaveBeenCalledTimes(1);
 
     runtimeRevision = "runtime-2";
-    await service.listRoots({ workspaceId: "workspace-1" });
-    expect(getSnapshot).toHaveBeenCalledTimes(1);
-
-    await workspaceRegistry.setSessionExpanded("session-23", true);
-    await service.listRoots({ workspaceId: "workspace-1" });
+    await service.list({ workspaceId: "workspace-1" });
     expect(getSnapshot).toHaveBeenCalledTimes(1);
 
     runtimeBrowserRevision += 1;
-    await service.listRoots({ workspaceId: "workspace-1" });
+    await service.list({ workspaceId: "workspace-1" });
     expect(getSnapshot).toHaveBeenCalledTimes(2);
 
     await indexStore.markSessionUnreadCompleted("session-00");
-    await service.listRoots({ workspaceId: "workspace-1" });
+    await service.list({ workspaceId: "workspace-1" });
     expect(getSnapshot).toHaveBeenCalledTimes(3);
   });
 

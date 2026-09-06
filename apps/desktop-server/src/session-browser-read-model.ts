@@ -1,8 +1,4 @@
-import type {
-  SessionBrowserItemRpc,
-  SessionBrowserPageRpc,
-  SessionBrowserPathRpc
-} from "@vermillion/shared";
+import type { SessionBrowserItemRpc, SessionBrowserPageRpc } from "@vermillion/shared";
 
 export type SessionBrowserReadModelSeed = SessionBrowserItemRpc & {
   workspaceId: string;
@@ -12,7 +8,6 @@ export type SessionBrowserReadModelSeed = SessionBrowserItemRpc & {
 type CursorPayload = {
   revision: string;
   offset: number;
-  parentSessionId?: string;
 };
 
 export class SessionBrowserCursorStaleError extends Error {
@@ -24,6 +19,7 @@ export class SessionBrowserCursorStaleError extends Error {
   }
 }
 
+/** Pinned first, then most recently completed turn first. */
 const compareItems = (
   left: SessionBrowserReadModelSeed,
   right: SessionBrowserReadModelSeed
@@ -44,8 +40,7 @@ const decodeCursor = (cursor: string): CursorPayload => {
     if (
       typeof parsed.revision !== "string" ||
       !Number.isInteger(parsed.offset) ||
-      (parsed.offset ?? -1) < 0 ||
-      (parsed.parentSessionId !== undefined && typeof parsed.parentSessionId !== "string")
+      (parsed.offset ?? -1) < 0
     ) {
       throw new Error("invalid cursor");
     }
@@ -66,107 +61,41 @@ const createRevision = (value: string): string => {
   return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
 };
 
+/** Flat, per-workspace, paged view of visible sessions. Forks and subagents are ordinary rows. */
 export class SessionBrowserReadModel {
-  private readonly bySessionId = new Map<string, SessionBrowserReadModelSeed>();
-  private readonly collections = new Map<string, SessionBrowserReadModelSeed[]>();
+  private readonly byWorkspaceId = new Map<string, SessionBrowserReadModelSeed[]>();
   private readonly revisions = new Map<string, string>();
 
   public constructor(seeds: readonly SessionBrowserReadModelSeed[]) {
     for (const seed of seeds) {
-      this.bySessionId.set(seed.sessionId, seed);
-      for (const key of [
-        this.collectionKey(seed.workspaceId, seed.parentSessionId),
-        this.flatCollectionKey(seed.workspaceId)
-      ]) {
-        const collection = this.collections.get(key) ?? [];
-        collection.push(seed);
-        this.collections.set(key, collection);
-      }
+      const collection = this.byWorkspaceId.get(seed.workspaceId) ?? [];
+      collection.push(seed);
+      this.byWorkspaceId.set(seed.workspaceId, collection);
     }
-
-    for (const collection of this.collections.values()) {
+    for (const [workspaceId, collection] of this.byWorkspaceId) {
       collection.sort(compareItems);
-    }
-
-    const workspaceIds = new Set(seeds.map((seed) => seed.workspaceId));
-    for (const workspaceId of workspaceIds) {
-      const workspaceSeeds = seeds
-        .filter((seed) => seed.workspaceId === workspaceId)
-        .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
-      const revision = createRevision(
-        JSON.stringify(
-          workspaceSeeds.map((seed) => [
-            seed.sessionId,
-            seed.parentSessionId,
-            seed.title,
-            seed.engineId,
-            seed.statusDot,
-            seed.isActive,
-            seed.isExpanded,
-            seed.isPinned,
-            seed.childCount,
-            seed.activityAt,
-            seed.lastCompletedTurnAt,
-            seed.sortAt
-          ])
-        )
-      );
-      this.revisions.set(workspaceId, revision);
+      const fingerprint = [...collection]
+        .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
+        .map((seed) => [
+          seed.sessionId,
+          seed.title,
+          seed.engineId,
+          seed.statusDot,
+          seed.isActive,
+          seed.isPinned,
+          seed.activityAt,
+          seed.lastCompletedTurnAt,
+          seed.sortAt
+        ]);
+      this.revisions.set(workspaceId, createRevision(JSON.stringify(fingerprint)));
     }
   }
 
-  public listRoots(input: {
+  public list(input: {
     workspaceId: string;
     cursor?: string;
     limit?: number;
     expectedRevision?: string;
-    flat?: boolean;
-  }): SessionBrowserPageRpc {
-    return this.listPage({ ...input, parentSessionId: undefined });
-  }
-
-  public listChildren(input: {
-    workspaceId: string;
-    parentSessionId: string;
-    cursor?: string;
-    limit?: number;
-    expectedRevision?: string;
-  }): SessionBrowserPageRpc {
-    return this.listPage(input);
-  }
-
-  public getPath(sessionId: string): SessionBrowserPathRpc {
-    const selected = this.bySessionId.get(sessionId);
-    if (!selected) {
-      throw new Error(`Unknown browser session: ${sessionId}`);
-    }
-    const path: SessionBrowserReadModelSeed[] = [];
-    const visited = new Set<string>();
-    let current: SessionBrowserReadModelSeed | undefined = selected;
-    while (current) {
-      if (visited.has(current.sessionId)) {
-        throw new Error(`Session browser relation cycle detected at ${current.sessionId}.`);
-      }
-      visited.add(current.sessionId);
-      path.push(current);
-      current = current.parentSessionId
-        ? this.bySessionId.get(current.parentSessionId)
-        : undefined;
-    }
-    return {
-      workspaceId: selected.workspaceId,
-      revision: this.revisionFor(selected.workspaceId),
-      items: path.reverse().map((item) => this.toItem(item))
-    };
-  }
-
-  private listPage(input: {
-    workspaceId: string;
-    parentSessionId?: string;
-    cursor?: string;
-    limit?: number;
-    expectedRevision?: string;
-    flat?: boolean;
   }): SessionBrowserPageRpc {
     const revision = this.revisionFor(input.workspaceId);
     if (input.expectedRevision && input.expectedRevision !== revision) {
@@ -174,59 +103,46 @@ export class SessionBrowserReadModel {
     }
     const limit = Math.min(100, Math.max(1, input.limit ?? 20));
     const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
-    if (
-      cursor &&
-      (cursor.revision !== revision || cursor.parentSessionId !== input.parentSessionId)
-    ) {
+    if (cursor && cursor.revision !== revision) {
       throw new SessionBrowserCursorStaleError();
     }
     const offset = cursor?.offset ?? 0;
-    const collection = this.collections.get(
-      input.flat
-        ? this.flatCollectionKey(input.workspaceId)
-        : this.collectionKey(input.workspaceId, input.parentSessionId)
-    ) ?? [];
+    const collection = this.byWorkspaceId.get(input.workspaceId) ?? [];
     const items = collection.slice(offset, offset + limit);
     const nextOffset = offset + items.length;
     const hasMore = nextOffset < collection.length;
     return {
       workspaceId: input.workspaceId,
-      parentSessionId: input.parentSessionId,
       revision,
-      items: items.map((item) => this.toItem(item)),
-      nextCursor: hasMore
-        ? encodeCursor({ revision, offset: nextOffset, parentSessionId: input.parentSessionId })
-        : undefined,
+      items: items.map(toItem),
+      nextCursor: hasMore ? encodeCursor({ revision, offset: nextOffset }) : undefined,
       hasMore,
       totalCount: collection.length
     };
   }
 
+  public get(sessionId: string): SessionBrowserItemRpc | undefined {
+    for (const collection of this.byWorkspaceId.values()) {
+      const seed = collection.find((item) => item.sessionId === sessionId);
+      if (seed) {
+        return toItem(seed);
+      }
+    }
+    return undefined;
+  }
+
   private revisionFor(workspaceId: string): string {
     return this.revisions.get(workspaceId) ?? createRevision(workspaceId);
   }
-
-  private collectionKey(workspaceId: string, parentSessionId?: string): string {
-    return `${workspaceId}\u0000${parentSessionId ?? ""}`;
-  }
-
-  private flatCollectionKey(workspaceId: string): string {
-    return this.collectionKey(workspaceId, "*");
-  }
-
-  private toItem(seed: SessionBrowserReadModelSeed): SessionBrowserItemRpc {
-    return {
-      sessionId: seed.sessionId,
-      parentSessionId: seed.parentSessionId,
-      engineId: seed.engineId,
-      title: seed.title,
-      statusDot: seed.statusDot,
-      isActive: seed.isActive,
-      isExpanded: seed.isExpanded,
-      isPinned: seed.isPinned,
-      childCount: seed.childCount,
-      activityAt: seed.activityAt,
-      lastCompletedTurnAt: seed.lastCompletedTurnAt
-    };
-  }
 }
+
+const toItem = (seed: SessionBrowserReadModelSeed): SessionBrowserItemRpc => ({
+  sessionId: seed.sessionId,
+  engineId: seed.engineId,
+  title: seed.title,
+  statusDot: seed.statusDot,
+  isActive: seed.isActive,
+  isPinned: seed.isPinned,
+  activityAt: seed.activityAt,
+  lastCompletedTurnAt: seed.lastCompletedTurnAt
+});

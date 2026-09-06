@@ -800,25 +800,14 @@ describe("createWorkbenchRpcHandler", () => {
         workspaceId: "workspace-1",
         removed: true
       }),
-      setWorkspaceExpanded: vi.fn().mockResolvedValue({
-        workspaceId: "workspace-1",
-        expanded: true
-      }),
       selectWorkspace: vi.fn().mockResolvedValue({
         workspaceId: "workspace-1",
         activeSessionId: "session-1"
-      }),
-      listSessionTree: vi.fn().mockResolvedValue({
-        workspaces: []
       }),
       repairSessionBrowser: vi.fn().mockResolvedValue({
         workspaces: 1,
         sessions: 2,
         relations: 1
-      }),
-      toggleSessionExpanded: vi.fn().mockResolvedValue({
-        sessionId: "session-1",
-        expanded: true
       }),
       openSession: vi.fn().mockResolvedValue({
         page: {
@@ -915,13 +904,6 @@ describe("createWorkbenchRpcHandler", () => {
 
     const handler = createWorkbenchRpcHandler(shellService);
 
-    const listTreeResponse = await handler.handleRequest({
-      id: "req-tree",
-      method: "sessionBrowser.listTree",
-      params: {
-        workspaceId: "workspace-1"
-      }
-    });
     const pickWorkspaceResponse = await handler.handleRequest({
       id: "req-pick-workspace",
       method: "workspace.pickDirectory",
@@ -1008,14 +990,6 @@ describe("createWorkbenchRpcHandler", () => {
       }
     });
 
-    expect(listTreeResponse).toMatchObject({
-      id: "req-tree",
-      method: "sessionBrowser.listTree",
-      ok: true,
-      result: {
-        workspaces: []
-      }
-    });
     expect(pickWorkspaceResponse).toMatchObject({
       id: "req-pick-workspace",
       method: "workspace.pickDirectory",
@@ -1141,7 +1115,6 @@ describe("createWorkbenchRpcHandler", () => {
         }
       }
     });
-    expect((shellService as any).listSessionTree).toHaveBeenCalledWith("workspace-1");
     expect((shellService as any).pickWorkspaceDirectory).toHaveBeenCalledTimes(1);
     expect((shellService as any).repairSessionBrowser).toHaveBeenCalledWith(
       ["workspace-1", "workspace-2"]
