@@ -372,6 +372,11 @@ export class Orchestrator {
       "workspaceId: " + workspaceId,
       "workItemId: " + item.workItemId,
       "工作目录: " + cwd + (isolated ? "（独立 worktree，分支 " + branch + "）" : "（workspace 根目录，不开分支）"),
+      ...(isolated ? [
+        "workspace 根目录（只读主分支）: " + root,
+        "提交前先在自己的分支提交 allowedPaths 内的成果，再用 git -C " + JSON.stringify(root) + " rev-parse HEAD 读取主分支当前 SHA，在本 worktree 执行 git rebase <该 SHA>。不要修改或合并主分支。",
+        "rebase 冲突在自己的分支解决并继续；基于 rebase 后的结果做 review 和验收。workItem.submit 前再次读取主分支 HEAD，若已前进则重复 rebase 并更新受影响的验证和提交材料。"
+      ] : []),
       "",
       "先用 CLI 读取完整工单：vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "'",
       ...(prior.length ? ["", "历史记录：", ...prior.map((p) => "- " + p)] : []),

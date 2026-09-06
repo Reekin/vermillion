@@ -75,6 +75,24 @@ const setup = async (maxWorkers = 1, patrolIntervalMs = 60_000) => {
 };
 
 describe("Orchestrator", { timeout: 60000 }, () => {
+  it("delivers current-main rebase instructions even with a custom worker role", async () => {
+    const { service, ws, sessions } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# base\n");
+    await service.commitDocs(ws.workspaceId, { message: "base" });
+    await service.writeRoleOverride(ws.workspaceId, "worker", "# Custom worker\nFollow the contract.");
+    const item = await service.createWorkItem(ws.workspaceId, {
+      title: "Rebase", objective: "do", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: []
+    });
+    await until(async () => sessions.some((s) => s.metadata.workItemId === item.workItemId && s.messages.length > 0));
+    const worker = sessions.find((s) => s.metadata.workItemId === item.workItemId)!;
+    expect(worker.developerInstructions).toContain("Follow the contract.");
+    expect(worker.messages[0]).toContain("git -C " + JSON.stringify(await service.workspaceRoot(ws.workspaceId)) + " rev-parse HEAD");
+    expect(worker.messages[0]).toContain("git rebase <该 SHA>");
+    expect(worker.messages[0]).toContain("基于 rebase 后的结果做 review 和验收");
+    expect(worker.messages[0]).toContain("workItem.submit 前再次读取主分支 HEAD");
+    expect(worker.messages[0]).toContain("不要修改或合并主分支");
+  });
+
   it("opens a steward per new revision and a worker per queued item, then closes the run on submit", async () => {
     const { service, ws, sessions, complete } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n- login\n");
@@ -192,6 +210,65 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     expect(await readFile(join(ws.rootPath, "result.txt"), "utf8")).toBe("initial\nfirst correction\nsecond correction\n");
     await expect(access(worker.cwd)).rejects.toThrow();
     expect(await service.listInbox()).toEqual([]);
+  });
+
+  it("returns a merge conflict to the same worker session with the file list, then merges the rebased resubmission", async () => {
+    const { service, ws, sessions, complete } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n");
+    await service.commitDocs(ws.workspaceId, { message: "seed" });
+    const gitRoot = (...args: string[]) => promisify(execFile)("git", args, { cwd: ws.rootPath });
+    await gitRoot("config", "core.autocrlf", "false");
+    await writeFile(join(ws.rootPath, "result.txt"), "base\n");
+    await gitRoot("add", "-A");
+    await gitRoot("-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "base");
+    const item = await service.createWorkItem(ws.workspaceId, {
+      title: "Conflict", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: ["result.txt"] }, acceptance: [{ text: "result" }]
+    });
+    await until(async () => sessions.some((s) => s.messages.length > 0));
+    const worker = sessions[0]!;
+    const original = (await service.getWorkItem(ws.workspaceId, item.workItemId)).run;
+    const submit = (summary: string) => service.submitWorkItem(ws.workspaceId, item.workItemId, {
+      evidence: { summary, commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] },
+      review: [],
+      verify: { items: [{ index: 0, pass: true, evidence: summary }], verdict: "pass" }
+    });
+    await writeFile(join(worker.cwd, "result.txt"), "worker\n");
+    await submit("worker result");
+    complete(worker.sessionId, "submitted");
+    await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
+
+    // Main moves on the same file while the item waits for review; approving hits a real conflict.
+    await writeFile(join(ws.rootPath, "result.txt"), "upstream\n");
+    await gitRoot("add", "-A");
+    await gitRoot("-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "upstream");
+    const mainHead = (await gitRoot("rev-parse", "HEAD")).stdout.trim();
+    const rejected = await service.approveWorkItem(ws.workspaceId, item.workItemId);
+    expect(rejected.status).toBe("queued");
+    expect(rejected.rejections[0]!.reason).toContain("- result.txt");
+    expect(rejected.run).toMatchObject({ sessionId: original.sessionId, worktreePath: original.worktreePath, branch: original.branch });
+    await until(async () => worker.messages.length === 2);
+    expect(sessions).toHaveLength(1);
+    expect(worker.messages[1]).toContain("合并冲突");
+    expect(worker.messages[1]).toContain("- result.txt");
+    expect(worker.messages[1]).toContain("rebase");
+    expect((await gitRoot("status", "--porcelain")).stdout).toBe("");
+    expect(await service.listInbox()).toEqual([]);
+
+    // The worker resolves on its own branch and resubmits; the second approval merges and cleans up.
+    const gitWork = (...args: string[]) => promisify(execFile)("git", args, { cwd: worker.cwd });
+    await expect(gitWork("rebase", mainHead)).rejects.toThrow();
+    await writeFile(join(worker.cwd, "result.txt"), "upstream\nworker resolved\n");
+    await gitWork("add", "result.txt");
+    await gitWork("-c", "core.editor=true", "rebase", "--continue");
+    await submit("resolved");
+    complete(worker.sessionId, "resubmitted");
+    await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
+    expect((await service.listInbox()).map((e) => e.kind)).toEqual(["review"]);
+    const closed = await service.approveWorkItem(ws.workspaceId, item.workItemId);
+    expect(closed.status).toBe("closed");
+    expect(closed.run.worktreePath).toBeUndefined();
+    expect(await readFile(join(ws.rootPath, "result.txt"), "utf8")).toBe("upstream\nworker resolved\n");
+    await expect(access(worker.cwd)).rejects.toThrow();
   });
 
   it.each(["available", "missing", "throws"])("recovers a queued rejection after restart when the session is %s", async (availability) => {
