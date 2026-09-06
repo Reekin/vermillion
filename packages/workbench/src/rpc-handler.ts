@@ -1,5 +1,6 @@
 import { workbenchRpc, type WorkbenchRpcMethod, type WorkbenchRpcParams, type WorkbenchRpcRequest, type WorkbenchRpcResponse, type WorkbenchRpcResult } from "./rpc.js";
 import type { WorkbenchService } from "./workbench-service.js";
+import { parseRoleDocument, serializeRoleDocument } from "./role-document.js";
 
 type Handlers = { [M in WorkbenchRpcMethod]: (params: WorkbenchRpcParams<M>) => Promise<WorkbenchRpcResult<M>> };
 
@@ -18,6 +19,14 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
 
     "role.list": (p) => service.listRoles(p.workspaceId),
     "role.read": (p) => service.readRole(p.workspaceId, p.roleId),
+    "role.editor.read": async (p) => {
+      const { content, source } = await service.readRole(p.workspaceId, p.roleId);
+      return { document: parseRoleDocument(content), source };
+    },
+    "role.editor.write": async (p) => {
+      await service.writeRoleOverride(p.workspaceId, p.roleId, serializeRoleDocument(p.document));
+      return {};
+    },
     "role.resolve": (p) => service.resolveRole(p.workspaceId, p.roleId),
     "role.write": async (p) => { await service.writeRoleOverride(p.workspaceId, p.roleId, p.content); return {}; },
     "role.reset": async (p) => { await service.resetRoleOverride(p.workspaceId, p.roleId); return {}; },
