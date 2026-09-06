@@ -7,6 +7,10 @@ type InboxPanelProps = { store: WorkbenchStore; onOpenSession: (sessionId: strin
 
 export const InboxPanel = ({ store, onOpenSession }: InboxPanelProps) => {
   const inbox = store((s) => s.inbox);
+  const inboxError = store((s) => s.inboxError);
+  if (inboxError) {
+    return <Empty title="Inbox 加载失败" hint={inboxError} />;
+  }
   if (inbox.length === 0) {
     return <Empty title="没有待处理事项" hint="决策卡和待验收的工单会出现在这里。" />;
   }

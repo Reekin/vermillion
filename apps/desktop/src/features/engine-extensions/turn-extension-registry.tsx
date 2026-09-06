@@ -10,6 +10,8 @@ export type TurnExtensionRenderInput = {
   engineSurface?: EngineSurfaceRpc;
   sessionId: string;
   turnId: string;
+  /** Session working directory; changed-file paths are shown relative to it. */
+  cwd?: string;
   refreshSignal?: number;
 };
 
@@ -31,6 +33,7 @@ const rendererByExtensionId: Record<string, TurnExtensionRenderer> = {
       engineSurface={input.engineSurface}
       sessionId={input.sessionId}
       turnId={input.turnId}
+      cwd={input.cwd}
     />
   )
 };

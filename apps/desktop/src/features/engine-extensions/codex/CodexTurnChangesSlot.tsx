@@ -24,13 +24,15 @@ export type CodexTurnChangesSlotProps = {
   engineSurface?: EngineSurfaceRpc;
   sessionId: string;
   turnId: string;
+  cwd?: string;
 };
 
 export const CodexTurnChangesSlot = ({
   transport,
   engineSurface,
   sessionId,
-  turnId
+  turnId,
+  cwd
 }: CodexTurnChangesSlotProps): ReactElement | null => {
   const [turnChanges, setTurnChanges] = useState<CodexTurnChangesResultRpc | undefined>();
 
@@ -72,6 +74,7 @@ export const CodexTurnChangesSlot = ({
       <CodexTurnChangesExtension
         sessionId={sessionId}
         turnId={turnId}
+        cwd={cwd}
         changedFiles={turnChanges.changedFiles}
         canUndo={turnChanges.canUndo}
         onUndoTurn={

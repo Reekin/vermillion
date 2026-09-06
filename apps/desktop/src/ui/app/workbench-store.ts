@@ -34,7 +34,10 @@ export type WorkbenchState = {
   /** Workspace whose docs and missions are shown. Follows the open session, or the draft when none. */
   browsingWorkspaceId: string | undefined;
   view: WorkspaceView | undefined;
+  /** Why the last view load failed (a bad record, a missing workspace); cleared on the next successful load. */
+  viewError: string | undefined;
   inbox: InboxItem[];
+  inboxError: string | undefined;
   editor: EditorTarget | undefined;
   /** Last "仅提交" result, shown under the Docs tree until dismissed or the workspace changes. */
   /** Outcome of the last commit dialog action, shown under the Docs tree until dismissed. */
@@ -75,22 +78,31 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         set({ view: undefined });
         return;
       }
-      const [missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs] = await Promise.all([
-        client.request("mission.list", { workspaceId }),
-        client.request("workItem.list", { workspaceId }),
-        client.request("decision.list", { workspaceId }),
-        client.request("docs.list", { workspaceId }),
-        client.request("docs.pending", { workspaceId }),
-        client.request("role.list", { workspaceId }),
-        client.request("scheduler.get", { workspaceId }),
-        client.request("run.list", { workspaceId })
-      ]);
-      if (generation !== viewGeneration) return;
-      set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs } });
+      try {
+        const [missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs] = await Promise.all([
+          client.request("mission.list", { workspaceId }),
+          client.request("workItem.list", { workspaceId }),
+          client.request("decision.list", { workspaceId }),
+          client.request("docs.list", { workspaceId }),
+          client.request("docs.pending", { workspaceId }),
+          client.request("role.list", { workspaceId }),
+          client.request("scheduler.get", { workspaceId }),
+          client.request("run.list", { workspaceId })
+        ]);
+        if (generation !== viewGeneration) return;
+        set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs }, viewError: undefined });
+      } catch (error) {
+        if (generation !== viewGeneration) return;
+        set({ viewError: (error as Error).message });
+      }
     };
 
     const loadInbox = async () => {
-      set({ inbox: await client.request("inbox.list", {}) });
+      try {
+        set({ inbox: await client.request("inbox.list", {}), inboxError: undefined });
+      } catch (error) {
+        set({ inboxError: (error as Error).message });
+      }
     };
 
     return {
@@ -101,7 +113,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       draftWorkspaceId: undefined,
       browsingWorkspaceId: undefined,
       view: undefined,
+      viewError: undefined,
       inbox: [],
+      inboxError: undefined,
       editor: undefined,
       docCommit: undefined,
       setDocCommit: (result) => set({ docCommit: result }),
@@ -116,7 +130,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
       browseWorkspace: (workspaceId) => {
         if (workspaceId === get().browsingWorkspaceId) return;
-        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined, docCommit: undefined });
+        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined, viewError: undefined, docCommit: undefined });
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),

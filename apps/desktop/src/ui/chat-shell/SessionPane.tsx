@@ -109,6 +109,7 @@ type TranscriptPaneProps = {
   engineId?: string;
   engineSurface?: EngineSurfaceRpc;
   engineExtensionRefreshSignal: number;
+  sessionCwd?: string;
   activeSessionWindow?: Omit<SessionWindowRpc, "snapshot">;
   activeSessionId?: string;
   isOpeningSelectedSession: boolean;
@@ -349,6 +350,7 @@ const TranscriptPane = memo(
     engineId,
     engineSurface,
     engineExtensionRefreshSignal,
+    sessionCwd,
     activeSessionWindow,
     activeSessionId,
     isOpeningSelectedSession,
@@ -535,6 +537,7 @@ const TranscriptPane = memo(
                     engineSurface,
                     sessionId: visibleRow.turn.sessionId,
                     turnId: visibleRow.turn.turnId,
+                    cwd: sessionCwd,
                     refreshSignal: engineExtensionRefreshSignal
                   })
                 : null}
@@ -551,6 +554,7 @@ const TranscriptPane = memo(
     previous.engineId === next.engineId &&
     previous.engineSurface === next.engineSurface &&
     previous.engineExtensionRefreshSignal === next.engineExtensionRefreshSignal &&
+    previous.sessionCwd === next.sessionCwd &&
     previous.activeSessionWindow === next.activeSessionWindow &&
     previous.activeSessionId === next.activeSessionId &&
     previous.isOpeningSelectedSession === next.isOpeningSelectedSession &&
@@ -1122,6 +1126,7 @@ export const SessionPane = ({
             engineId={displayedEngineId}
             engineSurface={displayedEngineId ? engineSurfacesById[displayedEngineId] : undefined}
             engineExtensionRefreshSignal={state.refreshSignals.engineExtensions}
+            sessionCwd={skillsCwd}
             activeSessionWindow={activeSessionWindow}
             activeSessionId={activeSessionId}
             isOpeningSelectedSession={showOpeningIndicator}

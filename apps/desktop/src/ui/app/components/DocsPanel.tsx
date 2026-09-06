@@ -52,6 +52,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
   const client = store((s) => s.client);
   const workspace = store((s) => s.workspaces.find((w) => w.workspaceId === s.browsingWorkspaceId));
   const view = store((s) => s.view);
+  const viewError = store((s) => s.viewError);
   const docs = view?.docs ?? EMPTY_DOCS;
   const pending = view?.pendingDocChanges ?? EMPTY_CHANGES;
   const missions = view?.missions ?? EMPTY_MISSIONS;
@@ -144,7 +145,11 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
         {pending.length > 0 && <span className="ml-auto font-mono text-micro text-accent-strong">{pending.length} 处变更</span>}
       </div>
       <ul className="min-h-0 flex-1 overflow-auto pb-2">
-        {tree.length === 0 && <li className="px-4 py-2 text-caption text-muted-foreground">.vermillion/docs 下还没有文件。和设计伙伴聊出第一份 spec 吧。</li>}
+        {viewError ? (
+          <li className="px-4 py-2 text-caption text-strong">工作区数据加载失败：<span className="break-all font-mono text-micro text-muted-foreground">{viewError}</span></li>
+        ) : (
+          !view || (tree.length === 0 && <li className="px-4 py-2 text-caption text-muted-foreground">.vermillion/docs 下还没有文件。和设计伙伴聊出第一份 spec 吧。</li>)
+        )}
         {tree.map((node) => renderNode(node, 0))}
       </ul>
       <div className="border-t border-border p-3">
