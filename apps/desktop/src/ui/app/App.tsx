@@ -10,6 +10,7 @@ import { Rail } from "./components/Rail.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
 import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
+import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { WorkspacesPanel } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
@@ -112,7 +113,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} compact={compact} />;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-page-canvas text-foreground">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-page-canvas text-foreground">
+      <div className="flex min-h-0 flex-1">
       <Rail panel={panel} overlay={overlay} inboxCount={inboxCount} onSelect={onSelect} />
       <div className="relative min-w-0 flex-1">
         {/* The think page stays mounted so switching panels never loses chat state. */}
@@ -152,6 +154,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
           </div>
         )}
       </div>
+      </div>
+      <TaskStatusBar store={store} />
       {overlay && (
         <Modal title={panelTitles[overlay]} onClose={closeOverlay} onExpand={() => setPanel(overlay)}>
           {renderPanel(overlay, true)}

@@ -7,7 +7,7 @@
  * Buttons       Button, IconButton
  * Text          Badge, SectionLabel, InlineNotice, StatusDot
  * Fields        Field (input / textarea / select / number)
- * Structure     PanelHeader, ListRow, Card, EmptyState
+ * Structure     PanelHeader, ListRow, Card, EmptyState, StatusBar
  * Overlays      Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
@@ -19,6 +19,7 @@ import type {
   TextareaHTMLAttributes
 } from "react";
 import type { LucideIcon } from "lucide-react";
+import { Popover } from "@base-ui/react/popover";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
 
@@ -142,6 +143,33 @@ const omit = <T extends FieldBase & { kind?: string }>(props: T): Omit<T, keyof 
 };
 
 // ---- Structure ----
+
+/** Window-wide status feedback with an anchored, keyboard-accessible summary panel. */
+export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenChange }: {
+  icon: LucideIcon;
+  label: string;
+  notice?: string;
+  children: ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => (
+  <footer aria-label="状态条" className="flex h-8 shrink-0 items-center border-t border-border-strong bg-app-shell px-2">
+    <div role="status" className="min-w-0 max-w-full truncate text-caption text-foreground" title={notice}>
+      {notice ?? (
+        <Popover.Root open={open} onOpenChange={onOpenChange}>
+          <Popover.Trigger render={<Button variant="ghost" size="sm" />}><Icon size={13} aria-hidden="true" />{label}</Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Positioner side="top" align="start" sideOffset={6} className="z-50">
+              <Popover.Popup aria-label="当前任务" className="flex max-h-[60vh] w-96 max-w-[94vw] flex-col overflow-auto rounded-md border border-border-strong bg-surface-raised py-1 floating-shadow">
+                {children}
+              </Popover.Popup>
+            </Popover.Positioner>
+          </Popover.Portal>
+        </Popover.Root>
+      )}
+    </div>
+  </footer>
+);
 
 /** Panel top line: section label on the left, optional actions on the right. */
 export const PanelHeader = ({ title, children, className }: { title: ReactNode; children?: ReactNode; className?: string }) => (

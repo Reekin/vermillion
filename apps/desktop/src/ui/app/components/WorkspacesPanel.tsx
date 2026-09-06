@@ -1,10 +1,12 @@
 import { CornerDownRight, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { latestRevision, type AgentRun, type DecisionCard, type Mission, type RoleFile, type Scheduler, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { RendererStore } from "../../../store/store.js";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { SessionPane, formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { WorkbenchStore, WorkspaceSection } from "../workbench-store.js";
+import type { TaskTarget } from "../workbench-store.js";
+import { missionStatusLabel, statusLabel } from "./task-labels.js";
 import { useSessionSidebar, type SidebarSession } from "../use-session-sidebar.js";
 import { cn } from "../lib/cn.js";
 import { Badge, Button, Card, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, StatusDot } from "./ui.js";
@@ -35,6 +37,7 @@ const DOMAINS_DIR = ".vermillion/docs/domains/";
 export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory, compact }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
   const agentSessionId = store((s) => s.agentSessionId);
+  const taskTarget = store((s) => s.taskTarget);
   const showAgentSession = store((s) => s.showAgentSession);
   const selectAgentSession = store((s) => s.selectAgentSession);
   const workspaces = store((s) => s.workspaces);
@@ -107,7 +110,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
             </nav>
             <div className="min-h-0 flex-1 overflow-auto">
               {section === "missions" && view && (
-                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} />
+                <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
               )}
               {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
@@ -183,9 +186,6 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
   );
 };
 
-const missionStatusLabel: Record<Mission["status"], string> = { active: "进行中", done: "已完成", cancelled: "已取消" };
-const statusLabel: Record<WorkItem["status"], string> = { queued: "排队中", running: "进行中", review: "待验收", decision: "待决策", closed: "已关闭", cancelled: "已取消" };
-
 const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
 const runStatusLabel: Record<AgentRun["status"], string> = { running: "运行中", done: "完成", failed: "失败" };
 
@@ -197,7 +197,7 @@ const isOpen = (w: WorkItem) => w.status !== "closed" && w.status !== "cancelled
 
 /** One work item with the agent runs that touched it, newest first. */
 const WorkItemRow = ({ item, runs, waitingFor, onOpenSession, onCancel }: { item: WorkItem; runs: AgentRun[]; waitingFor: string[]; onOpenSession: (sessionId: string) => void; onCancel: () => void }) => (
-  <li className="rounded-md border border-border px-3 py-2">
+  <li data-task-id={item.workItemId} className="rounded-md border border-border px-3 py-2">
     <div className="flex items-center gap-2">
       <Badge>{item.risk}</Badge>
       <span className="truncate text-label text-strong">{item.title}</span>
@@ -221,6 +221,7 @@ const WorkItemRow = ({ item, runs, waitingFor, onOpenSession, onCancel }: { item
 );
 
 type MissionsSectionProps = {
+  taskTarget?: TaskTarget;
   client: WorkbenchClient;
   workspaceId: string;
   scheduler: Scheduler;
@@ -231,7 +232,17 @@ type MissionsSectionProps = {
   compact: boolean;
 };
 
-const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, onOpenSession, compact }: MissionsSectionProps) => {
+const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, onOpenSession, compact, taskTarget }: MissionsSectionProps) => {
+  const board = useRef<HTMLDivElement>(null);
+  const located = useRef<TaskTarget | undefined>(undefined);
+  useEffect(() => {
+    if (!taskTarget || located.current === taskTarget) return;
+    const item = board.current?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskTarget.id)}"]`);
+    if (item) {
+      item.scrollIntoView({ block: "start" });
+      located.current = taskTarget;
+    }
+  }, [taskTarget, missions, workItems]);
   const setScheduler = (value: Partial<Scheduler>) => void client.request("scheduler.set", { workspaceId, value: { ...scheduler, ...value } });
   const cancelItem = (item: WorkItem) => void client.request("workItem.cancel", { workspaceId, workItemId: item.workItemId });
   /** Cancelling a mission also cancels every open work item under it, so nothing keeps running for a dropped goal. */
@@ -248,8 +259,8 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
       : [];
   const stewardRuns = (mission: Mission) => runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
   const standalone = workItems.filter((w) => !w.missionId);
-  const visibleMissions = compact ? missions.filter((m) => m.status === "active") : missions;
-  const visibleStandalone = compact ? standalone.filter(isOpen) : standalone;
+  const visibleMissions = compact ? missions.filter((m) => m.status === "active" || m.missionId === taskTarget?.id) : missions;
+  const visibleStandalone = compact ? standalone.filter((w) => isOpen(w) || w.workItemId === taskTarget?.id) : standalone;
   const hidden = missions.length - visibleMissions.length + (standalone.length - visibleStandalone.length);
   const renderItems = (items: WorkItem[]) => (
     <ul className="mt-3 space-y-1.5">
@@ -257,7 +268,7 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
     </ul>
   );
   return (
-    <div>
+    <div ref={board}>
       <div className="flex items-center gap-3 border-b border-border px-4 py-2">
         <Button size="sm" variant={scheduler.enabled ? "accent" : "secondary"} onClick={() => setScheduler({ enabled: !scheduler.enabled })}>{scheduler.enabled ? "调度已开启" : "调度已关闭"}</Button>
         <label className="flex shrink-0 items-center gap-2 whitespace-nowrap text-caption text-muted-foreground">
@@ -273,7 +284,7 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
           const items = workItems.filter((w) => w.missionId === mission.missionId);
           const steward = stewardRuns(mission)[0];
           return (
-            <li key={mission.missionId}>
+            <li key={mission.missionId} data-task-id={mission.missionId}>
               <Card
                 header={
                   <>
