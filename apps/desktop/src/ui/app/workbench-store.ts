@@ -1,12 +1,15 @@
 import { create } from "zustand";
-import type { AgentRun, DecisionCard, DocChange, DocCommit, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
 
 export type Panel = "think" | "inbox" | "workspaces";
 export type WorkspaceSection = "missions" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
 
 export type CommitOutcome =
   | { kind: "commit"; commit: string; message: string }
-  | { kind: "mission"; missionId: string; title: string; appended: boolean; schedulerEnabled: boolean };
+  | { kind: "mission"; missionId: string; title: string; appended: boolean };
+
+export type TaskTarget = { workspaceId: string; kind: "mission" | "workItem"; id: string };
+export type TaskSummary = TaskTarget & { title: string; status: Mission["status"] | WorkItem["status"]; progress?: string };
 
 /** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
 export type WorkspaceView = {
@@ -42,11 +45,14 @@ export type WorkbenchState = {
   viewError: string | undefined;
   inbox: InboxItem[];
   inboxError: string | undefined;
+  tasks: TaskSummary[];
+  tasksError: string | undefined;
+  taskTarget: TaskTarget | undefined;
+  showTask: (target: TaskTarget) => void;
   editor: EditorTarget | undefined;
   /** Agent session shown in Workspaces → 会话; set by "会话" links in Inbox and the task board. */
   agentSessionId: string | undefined;
-  /** Last "仅提交" result, shown under the Docs tree until dismissed or the workspace changes. */
-  /** Outcome of the last commit dialog action, shown under the Docs tree until dismissed. */
+  /** Outcome of the last commit dialog action, briefly shown in the global status bar. */
   docCommit: CommitOutcome | undefined;
   setDocCommit: (result: CommitOutcome | undefined) => void;
 
@@ -70,6 +76,33 @@ const LAST_WORKSPACE_KEY = "vermillion.draftWorkspaceId";
 export const createWorkbenchStore = (client: WorkbenchClient) =>
   create<WorkbenchState>((set, get) => {
     let viewGeneration = 0;
+    let tasksGeneration = 0;
+
+    const loadTasks = async () => {
+      const generation = ++tasksGeneration;
+      try {
+        const groups = await Promise.all(get().workspaces.map(async ({ workspaceId }) => {
+          const [missions, workItems] = await Promise.all([
+            client.request("mission.list", { workspaceId }),
+            client.request("workItem.list", { workspaceId })
+          ]);
+          const tasks: TaskSummary[] = missions.filter((m) => m.status === "active").map((mission) => {
+            const items = workItems.filter((w) => w.missionId === mission.missionId);
+            return { workspaceId, kind: "mission", id: mission.missionId, title: mission.title, status: mission.status,
+              progress: `${items.filter((w) => w.status === "closed").length}/${items.length}` };
+          });
+          for (const item of workItems) {
+            if (!item.missionId && ["queued", "running", "review", "decision"].includes(item.status)) {
+              tasks.push({ workspaceId, kind: "workItem", id: item.workItemId, title: item.title, status: item.status });
+            }
+          }
+          return tasks;
+        }));
+        if (generation === tasksGeneration) set({ tasks: groups.flat(), tasksError: undefined });
+      } catch (error) {
+        if (generation === tasksGeneration) set({ tasksError: (error as Error).message });
+      }
+    };
 
     const loadWorkspaces = async () => {
       const workspaces = await client.request("workspace.list", {});
@@ -79,7 +112,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       const browsingWorkspaceId = workspaces.some((w) => w.workspaceId === browsing) ? browsing : draftWorkspaceId;
       set({ workspaces, draftWorkspaceId, browsingWorkspaceId });
       if (draftWorkspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, draftWorkspaceId);
-      await loadView();
+      await Promise.all([loadView(), loadTasks()]);
     };
 
     const loadView = async () => {
@@ -129,6 +162,13 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       viewError: undefined,
       inbox: [],
       inboxError: undefined,
+      tasks: [],
+      tasksError: undefined,
+      taskTarget: undefined,
+      showTask: (target) => {
+        get().browseWorkspace(target.workspaceId);
+        set({ taskTarget: { ...target }, agentSessionId: undefined, workspaceSection: "missions", overlay: "workspaces" });
+      },
       editor: undefined,
       agentSessionId: undefined,
       docCommit: undefined,
@@ -149,7 +189,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
       browseWorkspace: (workspaceId) => {
         if (workspaceId === get().browsingWorkspaceId) return;
-        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined, viewError: undefined, docCommit: undefined });
+        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined, viewError: undefined });
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),
@@ -171,10 +211,14 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
             case "roles.changed":
             case "scheduler.changed":
             case "runs.changed":
-            case "missions.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               return;
+            case "missions.changed":
             case "workItems.changed":
+              void loadTasks();
+              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
+              void loadInbox();
+              return;
             case "decisions.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               void loadInbox();
