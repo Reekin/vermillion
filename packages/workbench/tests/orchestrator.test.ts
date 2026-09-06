@@ -39,6 +39,7 @@ const createFakeRunner = () => {
     send: async (sessionId, content) => { const s = sessions.find((s) => s.sessionId === sessionId)!; s.messages.push(content); s.turnOpen = true; },
     steer: async (sessionId, content) => { const s = sessions.find((s) => s.sessionId === sessionId)!; s.messages.push("[steer] " + content); return { turnId: s.turnOpen ? "t-" + s.messages.length : undefined }; },
     interrupt: async () => {},
+    resume: async (sessionId) => sessions.some((s) => s.sessionId === sessionId),
     lastReply: (sessionId) => sessions.find((s) => s.sessionId === sessionId)?.reply,
     onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
   };
@@ -65,7 +66,7 @@ const setup = async (maxWorkers = 1) => {
   const orchestrator = new Orchestrator({ service, roles, runner: fake.runner, maxIdleTurns: 1 });
   orchestrator.start();
   cleanup.push(() => orchestrator.dispose());
-  return { service, ws, ...fake };
+  return { service, ws, roles, ...fake };
 };
 
 describe("Orchestrator", { timeout: 60000 }, () => {
@@ -104,6 +105,29 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     complete(worker.sessionId, "done");
     await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("review");
+  });
+
+  it("after a restart, resumes the interrupted worker session instead of re-queuing; requeues only when the session is gone", async () => {
+    const { service, ws, roles, sessions, runner } = await setup();
+    const a = await service.createWorkItem(ws.workspaceId, { title: "A", objective: "o", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, a.workItemId)).status === "running");
+    const workerA = sessions.find((s) => s.metadata.role === "worker")!;
+    // simulate a second item whose session no longer exists after the restart
+    const b = await service.createWorkItem(ws.workspaceId, { title: "B", objective: "o", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
+    await service.startWorkItem(ws.workspaceId, b.workItemId, { sessionId: "ghost" });
+    await service.putRun(ws.workspaceId, { runId: "run-ghost", role: "worker", sessionId: "ghost", workItemId: b.workItemId, status: "running", turns: 0, startedAt: new Date().toISOString() });
+
+    // "restart": a fresh orchestrator over the same files and the same (persistent) sessions
+    const second = new Orchestrator({ service, roles, runner, maxIdleTurns: 1 });
+    second.start();
+    cleanup.push(() => second.dispose());
+    await until(async () => workerA.messages.some((m) => m.includes("会话已恢复")));
+    expect((await service.getWorkItem(ws.workspaceId, a.workItemId)).status).toBe("running");
+    expect((await service.getWorkItem(ws.workspaceId, a.workItemId)).run.sessionId).toBe(workerA.sessionId);
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.runId === "run-ghost" && r.status === "failed"));
+    const bAfter = await service.getWorkItem(ws.workspaceId, b.workItemId);
+    expect(bAfter.run.lastFailure).toContain("无法恢复");
+    expect(sessions.filter((s) => s.metadata.role === "worker")).toHaveLength(1); // A was not re-dispatched
   });
 
   it("holds items until dependsOn are closed and needs slots are free", async () => {

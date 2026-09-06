@@ -18,6 +18,8 @@ export type AgentRunner = {
   /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
+  /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
+  resume: (sessionId: string) => Promise<boolean>;
   /** Text of the last assistant message in the session, if any. */
   lastReply: (sessionId: string) => string | undefined;
   onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void) => () => void;
@@ -102,15 +104,32 @@ export class Orchestrator {
     await this.schedule(workspaceId);
   }
 
-  /** Runs recorded as running but not owned by this process ended with the previous process; close them out. */
+  /**
+   * Runs recorded as running but not owned by this process were cut off by a restart. Their sessions are persistent, so
+   * the agent is resumed with its full context and told to carry on; only when the session cannot be opened does the
+   * work item go back to the queue for a fresh worker.
+   */
   private async recoverStaleRuns(workspaceId: string): Promise<void> {
     for (const run of await this.service.listRuns(workspaceId)) {
       if (run.status !== "running" || this.runsBySession.has(run.sessionId)) continue;
-      await this.service.putRun(workspaceId, { ...run, status: "failed", note: "进程重启，会话未完成", endedAt: this.now() });
-      if (run.workItemId) {
-        const item = await this.service.getWorkItem(workspaceId, run.workItemId).catch(() => undefined);
-        if (item?.status === "running") await this.service.requeueWorkItem(workspaceId, item.workItemId, "进程重启");
+      if (run.role === "supervisor") {
+        // Stateless per turn; a new one is opened when next needed.
+        await this.service.putRun(workspaceId, { ...run, status: "done", note: "进程重启", endedAt: this.now() });
+        continue;
       }
+      const item = run.workItemId ? await this.service.getWorkItem(workspaceId, run.workItemId).catch(() => undefined) : undefined;
+      const stillOwns = run.role === "steward" || (item?.status === "running" && item.run.sessionId === run.sessionId);
+      const resumed = stillOwns && (await this.runner.resume(run.sessionId).catch(() => false));
+      if (resumed) {
+        const resumedRun = await this.service.putRun(workspaceId, { ...run, note: "进程重启后恢复会话" });
+        this.runsBySession.set(run.sessionId, { workspaceId, run: resumedRun, idleTurns: 0 });
+        await this.runner.send(run.sessionId, run.role === "worker"
+          ? "工作台重启过，你的会话已恢复。先看 worktree 当前状态（git status / diff）和你上一条回复停在哪，再继续处理工单；完成后仍然 workItem.submit。"
+          : "工作台重启过，你的会话已恢复。检查 workItem.list 里已建的工单，把没做完的处理完，最后回复一行摘要。");
+        continue;
+      }
+      await this.service.putRun(workspaceId, { ...run, status: "failed", note: "进程重启，会话无法恢复", endedAt: this.now() });
+      if (item?.status === "running") await this.service.requeueWorkItem(workspaceId, item.workItemId, "进程重启，会话无法恢复");
     }
   }
 

@@ -84,6 +84,14 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     if (!turn) return;
     await shell.executeCommand({ commandId: createId(), command: { type: "interruptTurn", sessionId, turnId: turn.turnId } });
   },
+  resume: async (sessionId) => {
+    try {
+      await shell.openSession(sessionId);
+      return true;
+    } catch {
+      return false;
+    }
+  },
   lastReply: (sessionId) => lastAssistantText(shell, sessionId),
   onTurnCompleted: (listener) =>
     shell.subscribe(
