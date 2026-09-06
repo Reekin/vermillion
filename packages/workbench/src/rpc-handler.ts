@@ -18,6 +18,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
 
     "role.list": (p) => service.listRoles(p.workspaceId),
     "role.read": (p) => service.readRole(p.workspaceId, p.roleId),
+    "role.resolve": (p) => service.resolveRole(p.workspaceId, p.roleId),
     "role.write": async (p) => { await service.writeRoleOverride(p.workspaceId, p.roleId, p.content); return {}; },
     "role.reset": async (p) => { await service.resetRoleOverride(p.workspaceId, p.roleId); return {}; },
 

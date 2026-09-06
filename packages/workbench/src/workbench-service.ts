@@ -189,6 +189,10 @@ export class WorkbenchService {
     return this.roles.read((await this.context(workspaceId)).rootPath, roleId);
   }
 
+  async resolveRole(workspaceId: string, roleId: string): Promise<{ content: string }> {
+    return this.roles.resolve((await this.context(workspaceId)).rootPath, roleId);
+  }
+
   async writeRoleOverride(workspaceId: string, roleId: string, content: string): Promise<void> {
     await this.roles.writeOverride((await this.context(workspaceId)).rootPath, roleId, content);
     this.emit({ type: "roles.changed", workspaceId });

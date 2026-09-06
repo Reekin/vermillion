@@ -361,7 +361,7 @@ const roleSourceLabel: Record<RoleFile["source"], string> = { global: "全局", 
 const RolesSection = ({ client, workspaceId, roles, onEdit }: { client: WorkbenchClient; workspaceId: string; roles: RoleFile[]; onEdit: (roleId: string) => void }) => (
   <div>
     <SectionLabel>角色 prompt</SectionLabel>
-    <InlineNotice>全局版本在 ~/.vermillion/roles；在这里编辑会写入本 workspace 的 .vermillion/roles 作为覆盖。</InlineNotice>
+    <InlineNotice>全局版本在 ~/.vermillion/roles；这里编辑本 workspace 的 .vermillion/roles。文件开头用 --- 包围 frontmatter：mode: override 替换全局正文（默认），mode: append 在全局正文后追加。</InlineNotice>
     <ul>
       {roles.map((role) => (
         <li key={role.roleId}>

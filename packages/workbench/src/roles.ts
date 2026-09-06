@@ -30,6 +30,16 @@ const exists = async (path: string): Promise<boolean> => {
 
 const titleOf = (content: string): string => content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? "";
 
+/** Only the top-level mode field affects prompt composition; the header is never prompt text. */
+const parsePrompt = (content: string): { body: string; mode: "override" | "append" } => {
+  const header = content.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/m);
+  if (!header || header.index !== 0) return { body: content, mode: "override" };
+  const value = header[1]!.match(/^mode:[ \t]*(.*)$/m)?.[1]?.replace(/[ \t]+#.*$/, "").trim();
+  const mode = value?.replace(/^(["'])(.*)\1$/, "$2") ?? "override";
+  if (mode !== "override" && mode !== "append") throw new Error("角色 frontmatter 的 mode 必须为 override 或 append。");
+  return { body: content.slice(header[0].length), mode };
+};
+
 export type RoleServiceOptions = {
   /** ~/.vermillion/roles: the user's editable copy of every role prompt. */
   globalDir: string;
@@ -38,7 +48,7 @@ export type RoleServiceOptions = {
 };
 
 /**
- * Role prompts resolve workspace override (<root>/.vermillion/roles/<id>.md) -> global (~/.vermillion/roles/<id>.md).
+ * Workspace role bodies replace or append to the global body according to their frontmatter mode.
  * The global layer is seeded from the shipped defaults, so it always holds every role once the app has started.
  */
 export class RoleService {
@@ -76,9 +86,20 @@ export class RoleService {
 
   async writeOverride(workspaceRoot: string, roleId: string, content: string): Promise<void> {
     assertRoleId(roleId);
+    parsePrompt(content);
     const dir = join(workspaceRoot, ROLES_DIR);
     await mkdir(dir, { recursive: true });
     await writeFile(roleFile(dir, roleId), content, "utf8");
+  }
+
+  /** Resolve runtime instructions separately from the editable Markdown returned by read(). */
+  async resolve(workspaceRoot: string, roleId: string): Promise<{ content: string }> {
+    const raw = await this.read(workspaceRoot, roleId);
+    const { body, mode } = parsePrompt(raw.content);
+    if (raw.source === "global" || mode === "override") return { content: body };
+    const globalPath = roleFile(this.options.globalDir, roleId);
+    const global = await exists(globalPath) ? parsePrompt(await readFile(globalPath, "utf8")).body : "";
+    return { content: [global.trim(), body.trim()].filter(Boolean).join("\n\n") };
   }
 
   async removeOverride(workspaceRoot: string, roleId: string): Promise<void> {
