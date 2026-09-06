@@ -66,7 +66,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       const workspace = draftWorkspaceId ? workspaceById.get(draftWorkspaceId) : undefined;
       if (!workspace) throw new Error("请先在 Composer 里选择一个 workspace。");
       const engineId = (await transport.engine.list()).find((e) => e.engineId === "codex")?.engineId ?? "codex";
-      const role = await store.getState().client.request("role.read", { workspaceId: workspace.workspaceId, roleId: "design-partner" });
+      const role = await store.getState().client.request("role.resolve", { workspaceId: workspace.workspaceId, roleId: "design-partner" });
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
         engineId,

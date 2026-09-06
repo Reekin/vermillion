@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { EditorTarget, WorkbenchStore } from "../workbench-store.js";
 import { Modal } from "./Modal.js";
-import { Button } from "./ui.js";
+import { Button, InlineNotice } from "./ui.js";
 
 const titleOf = (target: EditorTarget): string =>
   target.kind === "doc" ? target.path.replace(/^\.vermillion\/docs\//, "") : "角色 · " + target.roleId;
 
-/** Plain-text editor modal for a doc or a role prompt override; saves straight to disk. */
+/** Plain-text editor for document and role Markdown, including frontmatter. */
 export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
   const client = store((s) => s.client);
   const workspaceId = store((s) => s.browsingWorkspaceId);
@@ -16,12 +16,14 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
   const [content, setContent] = useState<string | undefined>();
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
 
   useEffect(() => {
     if (!workspaceId || !target) return;
     let cancelled = false;
     setContent(undefined);
     setDirty(false);
+    setError(undefined);
     const read =
       target.kind === "doc"
         ? client.request("docs.read", { workspaceId, path: target.path })
@@ -37,10 +39,13 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
   const save = async () => {
     if (content === undefined) return;
     setSaving(true);
+    setError(undefined);
     try {
       if (target.kind === "doc") await client.request("docs.write", { workspaceId, path: target.path, content });
       else await client.request("role.write", { workspaceId, roleId: target.roleId, content });
       setDirty(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
     }
@@ -66,9 +71,10 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
             style={{ fontFamily: "var(--awb-font-mono)" }}
           />
         )}
+        {error && <InlineNotice tone="error">{error}</InlineNotice>}
         <footer className="flex h-10 items-center gap-3 border-t border-border px-4">
           <span className="text-caption text-faint-foreground">
-            {target.kind === "role" ? "保存后成为本 workspace 的覆盖版本 · " : ""}
+            {target.kind === "role" ? "保存到本 workspace · " : ""}
             {dirty ? "未保存 · Ctrl+S" : "已保存"}
           </span>
           <Button size="sm" variant="primary" className="ml-auto" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</Button>

@@ -206,7 +206,7 @@ export class Orchestrator {
       return;
     }
     const root = await this.service.workspaceRoot(workspaceId);
-    const { content } = await this.roles.read(root, "steward");
+    const { content } = await this.roles.resolve(root, "steward");
     const { sessionId } = await this.runner.open({
       workspaceId,
       cwd: root,
@@ -307,7 +307,7 @@ export class Orchestrator {
       cwd = worktreePath;
     }
     // Reviewer and verifier run as the worker's subagents, so their prompts ride along verbatim instead of relying on the worker to fetch them.
-    const [worker, reviewer, verifier] = await Promise.all([this.roles.read(root, "worker"), this.roles.read(root, "reviewer"), this.roles.read(root, "verifier")]);
+    const [worker, reviewer, verifier] = await Promise.all([this.roles.resolve(root, "worker"), this.roles.resolve(root, "reviewer"), this.roles.resolve(root, "verifier")]);
     const developerInstructions = [
       worker.content.trim(),
       "",
@@ -475,7 +475,7 @@ export class Orchestrator {
       }
       if (sections.length === 0) return;
       const mission = (await this.service.listMissions(workspaceId)).find((m) => m.missionId === groupId);
-      const { content } = await this.roles.read(root, "supervisor");
+      const { content } = await this.roles.resolve(root, "supervisor");
       const { sessionId } = await this.runner.open({
         workspaceId,
         cwd: root,
