@@ -29,6 +29,7 @@ const until = async (check: () => Promise<boolean>) => {
 /** Scripted runner: records opened sessions and messages; test completes turns by hand. */
 const createFakeRunner = () => {
   const sessions: Array<{ sessionId: string; title: string; cwd: string; metadata: Record<string, unknown>; developerInstructions: string; messages: string[]; reply?: string; turnOpen?: boolean }> = [];
+  const tools = new Map<string, { role: string; handle: (args: Record<string, unknown>, callerSessionId: string) => Promise<string> }>();
   const listeners = new Set<(e: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void>();
   const runner: AgentRunner = {
     open: async (input) => {
@@ -41,6 +42,8 @@ const createFakeRunner = () => {
     interrupt: async () => {},
     resume: async (sessionId) => sessions.some((s) => s.sessionId === sessionId),
     lastReply: (sessionId) => sessions.find((s) => s.sessionId === sessionId)?.reply,
+    turnMessages: (sessionId) => { const s = sessions.find((s) => s.sessionId === sessionId); return s?.reply ? [s.reply] : []; },
+    registerTool: (tool) => { tools.set(tool.name, tool); },
     onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
   };
   const complete = (sessionId: string, reply: string) => {
@@ -49,10 +52,10 @@ const createFakeRunner = () => {
     s.turnOpen = false;
     for (const l of [...listeners]) l({ sessionId, turnId: "t", finishReason: "completed" });
   };
-  return { runner, sessions, complete };
+  return { runner, sessions, complete, tools };
 };
 
-const setup = async (maxWorkers = 1) => {
+const setup = async (maxWorkers = 1, patrolIntervalMs = 60_000) => {
   const root = await mkdtemp(join(tmpdir(), "verm-orch-"));
   const globalDir = await mkdtemp(join(tmpdir(), "verm-orch-roles-"));
   dirs.push(root, globalDir);
@@ -63,7 +66,7 @@ const setup = async (maxWorkers = 1) => {
   const ws = await service.addWorkspace({ rootPath: root, label: "O" });
   await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers });
   const fake = createFakeRunner();
-  const orchestrator = new Orchestrator({ service, roles, runner: fake.runner, maxIdleTurns: 1 });
+  const orchestrator = new Orchestrator({ service, roles, runner: fake.runner, maxIdleTurns: 1, patrolIntervalMs });
   orchestrator.start();
   cleanup.push(() => orchestrator.dispose());
   return { service, ws, roles, ...fake };
@@ -118,7 +121,7 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await service.putRun(ws.workspaceId, { runId: "run-ghost", role: "worker", sessionId: "ghost", workItemId: b.workItemId, status: "running", turns: 0, startedAt: new Date().toISOString() });
 
     // "restart": a fresh orchestrator over the same files and the same (persistent) sessions
-    const second = new Orchestrator({ service, roles, runner, maxIdleTurns: 1 });
+    const second = new Orchestrator({ service, roles, runner, maxIdleTurns: 1, patrolIntervalMs: 120 });
     second.start();
     cleanup.push(() => second.dispose());
     await until(async () => workerA.messages.some((m) => m.includes("会话已恢复")));
@@ -187,8 +190,6 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     // that turn ends without a submit; the next turn starts on the new contract, so its submit is accepted
     complete(worker.sessionId, "re-reading");
     await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.staleTurnId === undefined);
-    await until(async () => sessions.some((s) => s.metadata.role === "supervisor" && s.messages.length > 0));
-    complete(sessions.find((s) => s.metadata.role === "supervisor")!.sessionId, "none");
     await until(async () => worker.messages.length === 3); // orchestrator's continue prompt opened a new turn
     const evidence = { summary: "done", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] };
     const accepted = await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence, review: [], verify: { items: [], verdict: "pass" } });
@@ -217,22 +218,34 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.status === "failed" && r.note === "工单已取消"));
   });
 
-  it("runs the supervisor after an unfinished worker turn and requeues after too many idle turns", async () => {
-    const { service, ws, sessions, complete } = await setup();
+  it("patrols running workers with a fresh supervisor session, relays remind into the worker's turn, and requeues after too many idle turns", async () => {
+    const { service, ws, sessions, complete, tools } = await setup(1, 120);
     const item = await service.createWorkItem(ws.workspaceId, { title: "Package", objective: "pnpm package", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     await until(async () => sessions.some((s) => s.metadata.role === "worker" && s.messages.length > 0));
     const worker = sessions.find((s) => s.metadata.role === "worker")!;
     expect(worker.cwd).not.toContain("worktrees");
-    complete(worker.sessionId, "still going");
+    worker.reply = "我先把整个测试套件跑一遍";
+    // the patrol timer opens a supervisor session while the worker's turn is still open
     await until(async () => sessions.some((s) => s.metadata.role === "supervisor" && s.messages.length > 0));
-    const supervisor = sessions.find((s) => s.metadata.role === "supervisor")!;
-    expect(supervisor.messages[0]).toContain("Worker turn #1");
-    complete(supervisor.sessionId, "remind: 别跑题");
-    await until(async () => worker.messages.length === 2);
-    expect(worker.messages[1]).toContain("Supervisor 提醒：别跑题");
+    const supervisor1 = sessions.find((s) => s.metadata.role === "supervisor")!;
+    expect(supervisor1.messages[0]).toContain("workItemId: " + item.workItemId);
+    expect(supervisor1.messages[0]).toContain("整个测试套件");
+    // supervisor calls the remind tool -> steered into the worker mid-turn
+    const remind = tools.get("remind")!;
+    expect(remind.role).toBe("supervisor");
+    await remind.handle({ workItemId: item.workItemId, message: "别跑全量测试，工单只要求打包" }, supervisor1.sessionId);
+    expect(worker.messages[1]).toContain("[steer] Supervisor 提醒：别跑全量测试");
+    complete(supervisor1.sessionId, "已提醒");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "supervisor" && r.status === "done"));
+    // next patrol is a new session, not the same one
+    await until(async () => sessions.filter((s) => s.metadata.role === "supervisor").length >= 2);
+    const supervisor2 = sessions.filter((s) => s.metadata.role === "supervisor").at(-1)!;
+    expect(supervisor2.sessionId).not.toBe(supervisor1.sessionId);
+    complete(supervisor2.sessionId, "无事");
+    // worker's turn ends twice without submitting -> requeued
     complete(worker.sessionId, "still going");
-    await until(async () => sessions.filter((s) => s.metadata.role === "supervisor").length === 1 && supervisor.messages.length === 2);
-    complete(supervisor.sessionId, "none");
+    await until(async () => worker.messages.some((m) => m.includes("工单仍是进行中")));
+    complete(worker.sessionId, "still going");
     await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.lastFailure === "多轮未提交");
     // requeued and immediately picked up again by a fresh worker session
     await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2 && sessions[sessions.length - 1]!.messages.length > 0);

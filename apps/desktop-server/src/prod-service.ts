@@ -283,6 +283,7 @@ export const createSessionRuntimeService = (
     }),
     diagnosticLogService
   });
+  shellService.hostTools = hostTools;
   hostTools.register(
     createReadSessionHostTool({
       getSnapshot: () => runtimeService.getSnapshot(),

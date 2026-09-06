@@ -1,3 +1,4 @@
+import type { HostToolRegistry } from "./host-tools.js";
 import type {
   ChatInteractionCapabilitiesRpc,
   ChatSession,
@@ -337,6 +338,13 @@ export class SessionShellService {
       await this.ensureSessionReadyForCommand(input.command);
     }
     return this.runtimeService.executeCommand(input);
+  }
+
+  /** Host tools offered to agent sessions (dynamicTools on thread/start). Set by the service factory. */
+  public hostTools?: HostToolRegistry;
+
+  public getSessionMetadata(sessionId: string): Record<string, unknown> | undefined {
+    return this.runtimeService.getSession(sessionId)?.metadata;
   }
 
   public setSessionTitle(sessionId: string, title: string): Promise<void> {

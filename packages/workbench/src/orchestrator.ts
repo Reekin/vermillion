@@ -22,6 +22,10 @@ export type AgentRunner = {
   resume: (sessionId: string) => Promise<boolean>;
   /** Text of the last assistant message in the session, if any. */
   lastReply: (sessionId: string) => string | undefined;
+  /** All assistant messages of the session's latest turn, in order. */
+  turnMessages: (sessionId: string) => string[];
+  /** Offers a tool to sessions whose metadata.role matches; handler receives the calling session id. */
+  registerTool: (tool: { role: string; name: string; description: string; inputSchema: unknown; handle: (args: Record<string, unknown>, callerSessionId: string) => Promise<string> }) => void;
   onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void) => () => void;
 };
 
@@ -32,6 +36,8 @@ export type OrchestratorOptions = {
   now?: () => string;
   /** Worker turns without status progress before the item is requeued. */
   maxIdleTurns?: number;
+  /** How often a mission with running workers gets a supervisor patrol. */
+  patrolIntervalMs?: number;
 };
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; idleTurns: number };
@@ -49,12 +55,14 @@ export class Orchestrator {
   private readonly runner: AgentRunner;
   private readonly now: () => string;
   private readonly maxIdleTurns: number;
+  private readonly patrolIntervalMs: number;
   private readonly disposers: Array<() => void> = [];
+  /** Per patrol group (mission id, or work item id for standalone items): timer + in-flight flag. */
+  private readonly patrols = new Map<string, { workspaceId: string; timer: NodeJS.Timeout; busy: boolean }>();
   /** Serializes work per workspace so two events do not schedule the same item twice. */
   private readonly queues = new Map<string, Promise<void>>();
   /** sessionId -> run, for sessions opened in this process. */
   private readonly runsBySession = new Map<string, WorkerBinding>();
-  private readonly supervisorSessionByMission = new Map<string, string>();
 
   constructor(options: OrchestratorOptions) {
     this.service = options.service;
@@ -62,6 +70,14 @@ export class Orchestrator {
     this.runner = options.runner;
     this.now = options.now ?? (() => new Date().toISOString());
     this.maxIdleTurns = options.maxIdleTurns ?? 3;
+    this.patrolIntervalMs = options.patrolIntervalMs ?? 4 * 60_000;
+    this.runner.registerTool({
+      role: "supervisor",
+      name: "remind",
+      description: "把一句提醒插进指定 Worker 正在进行的一轮里，把它拉回工单范围。只在确实偏离时调用。",
+      inputSchema: { type: "object", properties: { workItemId: { type: "string" }, message: { type: "string" } }, required: ["workItemId", "message"], additionalProperties: false },
+      handle: (args) => this.remind(String(args.workItemId ?? ""), String(args.message ?? ""))
+    });
   }
 
   start(): void {
@@ -85,6 +101,8 @@ export class Orchestrator {
 
   dispose(): void {
     for (const dispose of this.disposers.splice(0)) dispose();
+    for (const patrol of this.patrols.values()) clearInterval(patrol.timer);
+    this.patrols.clear();
   }
 
   private enqueue(workspaceId: string, task: () => Promise<void>): void {
@@ -123,6 +141,7 @@ export class Orchestrator {
       if (resumed) {
         const resumedRun = await this.service.putRun(workspaceId, { ...run, note: "进程重启后恢复会话" });
         this.runsBySession.set(run.sessionId, { workspaceId, run: resumedRun, idleTurns: 0 });
+        if (run.role === "worker") this.ensurePatrol(workspaceId, run.missionId ?? run.workItemId!);
         await this.runner.send(run.sessionId, run.role === "worker"
           ? "工作台重启过，你的会话已恢复。先看 worktree 当前状态（git status / diff）和你上一条回复停在哪，再继续处理工单；完成后仍然 workItem.submit。"
           : "工作台重启过，你的会话已恢复。检查 workItem.list 里已建的工单，把没做完的处理完，最后回复一行摘要。");
@@ -321,6 +340,7 @@ export class Orchestrator {
       startedAt: this.now()
     });
     this.runsBySession.set(sessionId, { workspaceId, run, idleTurns: 0 });
+    this.ensurePatrol(workspaceId, item.missionId ?? item.workItemId);
     const prior = [
       ...item.rejections.map((r) => "用户打回：" + r.reason),
       ...item.decisions.map((d) => "已决策：" + d),
@@ -380,20 +400,12 @@ export class Orchestrator {
       return;
     }
     await this.service.heartbeatWorkItem(workspaceId, item.workItemId);
-    const verdict = await this.supervise(workspaceId, item, run);
-    if (verdict.kind === "interrupt") {
-      await this.runner.interrupt(run.sessionId).catch(() => undefined);
-      await this.failWorker(workspaceId, run, "Supervisor 中断：" + verdict.text);
-      return;
-    }
     bound.idleTurns += 1;
     if (bound.idleTurns > this.maxIdleTurns) {
       await this.failWorker(workspaceId, run, "多轮未提交");
       return;
     }
-    await this.runner.send(run.sessionId, verdict.kind === "remind"
-      ? "Supervisor 提醒：" + verdict.text + "\n继续处理工单；完成后调用 workItem.submit。"
-      : "工单仍是进行中。继续；完成后调用 workItem.submit，需要用户决定则调用 decision.create。");
+    await this.runner.send(run.sessionId, "工单仍是进行中。继续；完成后调用 workItem.submit，需要用户决定则调用 decision.create。");
   }
 
   private async failWorker(workspaceId: string, run: AgentRun, note: string): Promise<void> {
@@ -404,43 +416,96 @@ export class Orchestrator {
 
   // ---- supervisor ----
 
-  private async supervise(workspaceId: string, item: WorkItem, run: AgentRun): Promise<{ kind: "none" | "remind" | "interrupt"; text: string }> {
-    const root = await this.service.workspaceRoot(workspaceId);
-    const cwd = item.run.worktreePath ?? root;
-    const reply = this.runner.lastReply(run.sessionId) ?? "";
-    const stat = await git(cwd, ["diff", "--stat", "HEAD"]).catch(() => "");
-    const changed = await git(cwd, ["diff", "--name-only", "HEAD"]).catch(() => "");
-    const outside = item.scope.allowedPaths.length
-      ? changed.split("\n").filter(Boolean).filter((p) => !item.scope.allowedPaths.some((allowed) => p.startsWith(allowed.replace(/\*+$/, "").replace(/\/$/, ""))))
-      : [];
-    const key = item.missionId ?? item.workItemId;
-    let sessionId = this.supervisorSessionByMission.get(key);
-    if (!sessionId) {
-      const { content } = await this.roles.read(root, "supervisor");
-      sessionId = (await this.runner.open({ workspaceId, cwd: root, developerInstructions: content, title: "Supervisor · " + (item.missionId ?? item.title), metadata: { role: "supervisor", missionId: item.missionId } })).sessionId;
-      this.supervisorSessionByMission.set(key, sessionId);
-      await this.service.putRun(workspaceId, { runId: createId("run"), role: "supervisor", sessionId, missionId: item.missionId, status: "running", turns: 0, startedAt: this.now() });
+  private ensurePatrol(workspaceId: string, groupId: string): void {
+    if (this.patrols.has(groupId)) return;
+    // Not enqueued: a patrol waits on a model turn and must not block scheduling for that workspace.
+    const timer = setInterval(() => { void this.patrol(workspaceId, groupId).catch((error) => console.error("[orchestrator] patrol", groupId, error instanceof Error ? error.message : error)); }, this.patrolIntervalMs);
+    this.patrols.set(groupId, { workspaceId, timer, busy: false });
+  }
+
+  private stopPatrol(groupId: string): void {
+    const patrol = this.patrols.get(groupId);
+    if (!patrol) return;
+    clearInterval(patrol.timer);
+    this.patrols.delete(groupId);
+  }
+
+  private workersInGroup(workspaceId: string, groupId: string): WorkerBinding[] {
+    return [...this.runsBySession.values()].filter((b) => b.workspaceId === workspaceId && b.run.role === "worker" && (b.run.missionId ?? b.run.workItemId) === groupId);
+  }
+
+  /**
+   * One fresh supervisor session looks at every running worker of the group: contract, this turn's agent messages,
+   * diff stat and out-of-scope paths. It nudges a worker through the remind tool; the session is archived afterwards.
+   */
+  private async patrol(workspaceId: string, groupId: string): Promise<void> {
+    const patrolState = this.patrols.get(groupId);
+    const workers = this.workersInGroup(workspaceId, groupId);
+    if (workers.length === 0) {
+      this.stopPatrol(groupId);
+      return;
     }
-    const done = new Promise<void>((resolve) => {
-      const off = this.runner.onTurnCompleted((e) => { if (e.sessionId === sessionId) { off(); resolve(); } });
-    });
-    await this.runner.send(sessionId, [
-      "Worker turn #" + run.turns + " 结束，工单「" + item.title + "」。",
-      "objective: " + item.objective,
-      "allowedPaths: " + (item.scope.allowedPaths.join(", ") || "(无限制)"),
-      "acceptance: " + item.acceptance.map((a, i) => (i + 1) + ") " + a.text).join("; "),
-      "",
-      "确定性信号：越界路径 " + (outside.length ? outside.join(", ") : "无") + "；diff --stat：\n" + (stat.trim() || "(无改动)"),
-      "",
-      "Worker 本 turn 输出：",
-      reply.slice(-3000) || "(无文本)",
-      "",
-      "只回复一行，格式为 none | remind: <一句话> | interrupt: <一句话>。"
-    ].join("\n"));
-    await done;
-    const text = (this.runner.lastReply(sessionId) ?? "").trim();
-    const match = /^(none|remind|interrupt)\s*[:：]?\s*(.*)$/is.exec(text);
-    if (!match) return { kind: "none", text: "" };
-    return { kind: match[1]!.toLowerCase() as "none" | "remind" | "interrupt", text: match[2]!.trim() };
+    if (!patrolState || patrolState.busy) return;
+    patrolState.busy = true;
+    try {
+      const root = await this.service.workspaceRoot(workspaceId);
+      const sections: string[] = [];
+      for (const bound of workers) {
+        const item = await this.service.getWorkItem(workspaceId, bound.run.workItemId!).catch(() => undefined);
+        if (!item || item.status !== "running") continue;
+        const cwd = item.run.worktreePath ?? root;
+        const stat = (await git(cwd, ["diff", "--stat", "HEAD"]).catch(() => "")).trim();
+        const changed = await git(cwd, ["diff", "--name-only", "HEAD"]).catch(() => "");
+        const outside = item.scope.allowedPaths.length
+          ? changed.split("\n").filter(Boolean).filter((p) => !item.scope.allowedPaths.some((allowed) => p.startsWith(allowed.replace(/\*+$/, "").replace(/\/$/, ""))))
+          : [];
+        const messages = this.runner.turnMessages(bound.run.sessionId);
+        sections.push([
+          "### 工单「" + item.title + "」 workItemId: " + item.workItemId,
+          "objective: " + item.objective,
+          "allowedPaths: " + (item.scope.allowedPaths.join(", ") || "(无限制)"),
+          "acceptance: " + item.acceptance.map((a, i) => (i + 1) + ") " + a.text).join("; "),
+          "越界路径: " + (outside.length ? outside.join(", ") : "无"),
+          "diff --stat:",
+          stat || "(无改动)",
+          "",
+          "本轮 agent 消息（" + messages.length + " 条）：",
+          ...messages.map((m, i) => (i + 1) + ". " + m.slice(0, 1500)),
+        ].join("\n"));
+      }
+      if (sections.length === 0) return;
+      const mission = (await this.service.listMissions(workspaceId)).find((m) => m.missionId === groupId);
+      const { content } = await this.roles.read(root, "supervisor");
+      const { sessionId } = await this.runner.open({
+        workspaceId,
+        cwd: root,
+        developerInstructions: content,
+        title: "Supervisor · " + (mission?.title ?? groupId),
+        metadata: { role: "supervisor", missionId: mission?.missionId }
+      });
+      const run = await this.service.putRun(workspaceId, { runId: createId("run"), role: "supervisor", sessionId, missionId: mission?.missionId, status: "running", turns: 0, startedAt: this.now() });
+      const done = new Promise<void>((resolve) => {
+        const off = this.runner.onTurnCompleted((e) => { if (e.sessionId === sessionId) { off(); resolve(); } });
+      });
+      await this.runner.send(sessionId, [
+        "巡视任务「" + (mission?.title ?? groupId) + "」，当前 " + sections.length + " 个 Worker 在进行中。",
+        "",
+        ...sections,
+        "",
+        "对偏离的 Worker 调用 remind 工具；都正常就回复一行“无事”。"
+      ].join("\n\n"));
+      await done;
+      await this.service.putRun(workspaceId, { ...run, status: "done", turns: 1, note: (this.runner.lastReply(sessionId) ?? "").slice(0, 200), endedAt: this.now() });
+    } finally {
+      patrolState.busy = false;
+    }
+  }
+
+  private async remind(workItemId: string, message: string): Promise<string> {
+    const bound = [...this.runsBySession.values()].find((b) => b.run.role === "worker" && b.run.workItemId === workItemId);
+    if (!bound) throw new Error("没有正在进行的 Worker 持有工单 " + workItemId);
+    if (!message.trim()) throw new Error("message 不能为空");
+    await this.runner.steer(bound.run.sessionId, "Supervisor 提醒：" + message.trim());
+    return "已提醒 " + workItemId;
   }
 }

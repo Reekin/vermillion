@@ -780,7 +780,12 @@ const boot = async (): Promise<void> => {
     }
   });
   const localEndpoint = await startLocalEndpoint(persistenceBaseDir, workbenchRpc);
-  const orchestrator = new Orchestrator({ service: workbenchService, roles: roleService, runner: createAgentRunner(service, "codex") });
+  const orchestrator = new Orchestrator({
+    service: workbenchService,
+    roles: roleService,
+    runner: createAgentRunner(service, "codex"),
+    patrolIntervalMs: Number(process.env.VERMILLION_PATROL_INTERVAL_MS) || undefined
+  });
   orchestrator.start();
   app.on("before-quit", () => {
     orchestrator.dispose();
