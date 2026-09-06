@@ -75,6 +75,24 @@ const setup = async (maxWorkers = 1, patrolIntervalMs = 60_000) => {
 };
 
 describe("Orchestrator", { timeout: 60000 }, () => {
+  it("delivers current-main rebase instructions even with a custom worker role", async () => {
+    const { service, ws, sessions } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# base\n");
+    await service.commitDocs(ws.workspaceId, { message: "base" });
+    await service.writeRoleOverride(ws.workspaceId, "worker", "# Custom worker\nFollow the contract.");
+    const item = await service.createWorkItem(ws.workspaceId, {
+      title: "Rebase", objective: "do", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: []
+    });
+    await until(async () => sessions.some((s) => s.metadata.workItemId === item.workItemId && s.messages.length > 0));
+    const worker = sessions.find((s) => s.metadata.workItemId === item.workItemId)!;
+    expect(worker.developerInstructions).toContain("Follow the contract.");
+    expect(worker.messages[0]).toContain("git -C " + JSON.stringify(await service.workspaceRoot(ws.workspaceId)) + " rev-parse HEAD");
+    expect(worker.messages[0]).toContain("git rebase <该 SHA>");
+    expect(worker.messages[0]).toContain("基于 rebase 后的结果做 review 和验收");
+    expect(worker.messages[0]).toContain("workItem.submit 前再次读取主分支 HEAD");
+    expect(worker.messages[0]).toContain("不要修改或合并主分支");
+  });
+
   it("opens a steward per new revision and a worker per queued item, then closes the run on submit", async () => {
     const { service, ws, sessions, complete } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n- login\n");

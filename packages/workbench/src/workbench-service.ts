@@ -15,7 +15,7 @@ import type {
   WorkbenchEvent,
   Workspace
 } from "./contracts.js";
-import { DocsService } from "./docs.js";
+import { DocsService, WorktreeMergeConflict } from "./docs.js";
 import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -375,7 +375,14 @@ export class WorkbenchService {
     const { docs } = await this.context(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
-    if (item.run.worktreePath && item.run.branch) await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
+    if (item.run.worktreePath && item.run.branch) {
+      try {
+        await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
+      } catch (error) {
+        if (!(error instanceof WorktreeMergeConflict)) throw error;
+        return this.rejectWorkItem(workspaceId, workItemId, error.message + "\n在原 worktree 的工单分支上 rebase 到 workspace 当前主分支，解决冲突后重新 review、验收并提交；由用户再次验收，合并仍由工作台完成。");
+      }
+    }
     return this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
   }
 
