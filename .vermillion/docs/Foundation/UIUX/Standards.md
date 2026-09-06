@@ -1,26 +1,38 @@
 # UI/UX 开发维护规范
 
-让后续页面自然延续同一套审美：共享视觉定义和常用组合，减少每次开发需要重新决定的字号、间距、控件状态和操作位置。
+新界面从共享组件和主题变量长出来，不从零写样式。每个页面只做内容和动作，布局、状态、字号由公共层决定。
 
-## 视觉与交互
+## 从哪里开始
 
-- 保持单色、低饱和、3–5px 圆角和细分隔线，不用红色或高饱和色。主操作通过明度、文字和位置突出；错误、等待和禁用通过文字与图标区分。
-- 字体、字号、表面、边框和控件尺寸使用共享定义。等宽大写用于简短区块标签，业务标题和正文使用统一术语，代码与路径可用等宽字体。
-- 同类信息和操作使用同类组件。空态说明当前状态与下一步，不让多个面板重复催促同一操作。
-- 主要内容保持可读，辅助区域按业务需求分配空间。具体页面行为由相应 PRD 定义。
+- 应用壳组件入口：`apps/desktop/src/ui/app/components/ui.tsx`。文件头列出全部可用组件；先在这里找，再看相近页面（`InboxPanel`、`WorkspacesPanel`、`DocsPanel`、`SessionSidebar`）的真实用法。
+- 主题变量：`apps/desktop/src/ui/app/app.css` 的 `@theme` 块。字号档位 `text-micro / caption / label / body / title-sm / title`，颜色 `text-strong / foreground / muted-foreground / faint-foreground`，表面 `bg-surface / surface-raised / surface-hover / surface-selected / input`，边框 `border-border / border-strong / control-border`，圆角 `rounded-sm / md / lg`，字距 `tracking-eyebrow`。
+- 会话区（`ui/chat-shell`）保留自己的 `awb-*` 样式；应用壳和 `features/` 只用上面两处，不引用 `awb-*` class。会话区里嵌入的业务块（turn 扩展）用 `app.css` 里的 `vm-*` 块。
 
-## 组件与扩展
+## 必须复用的结构
 
-公共 UI 独立于业务模块，应用壳和会话区共同引用；没有跨应用需要时，不单独建立 package。
+| 需要 | 用 |
+|---|---|
+| 面板顶部一行标签 + 右侧动作 | `PanelHeader` |
+| 列表里的一行：前导 / 标题 + 次行 / 尾部状态，可选中、可嵌套 | `ListRow` |
+| 当前没有内容时的说明和下一步 | `EmptyState`（一个视图一个，不叠加） |
+| 标题下的一句说明或错误 | `InlineNotice` |
+| 表单输入、文本域、下拉 | `Field` |
+| 只有图标的按钮 | `IconButton`（必带 `label`） |
+| 普通按钮 | `Button`，变体只有 primary / accent / secondary / ghost |
+| 短标签、状态、风险等级 | `Badge` |
+| 弹窗、右键菜单、diff | `Modal`、`ContextMenu`、`DiffDialog` |
 
-开发前先找已有组件和相近页面。优先复用按钮、菜单、选择器，以及页头、列表行、表单分组、空态、弹窗等重复结构。公共组件负责布局和交互状态，业务页面传入内容与动作。
+页面可以安排这些组件的外部布局；不跨层覆盖组件内部样式。出现新用途时扩展 `ui.tsx` 的接口并检查已有使用处，不在页面里复制一份。
 
-组件只提供用途明确的变体。页面可以安排外部布局，不跨层覆盖组件内部样式；出现新用途时完善公共接口，并检查已有使用处。不要为尚未出现的页面预建通用框架。
+## 视觉规则
 
-外部组件统一来源和添加方式，整理到共享目录后再使用，不覆盖已有定制。组件入口应能直接找到可用变体和真实使用示例；具体扩展步骤按需记录在 Implementation.md。
+- 单色、低饱和；主操作靠明度和位置突出，错误用 `InlineNotice tone="error"` 或文字说明，不用红色。
+- 等宽大写只用于 `SectionLabel` / `Badge` / eyebrow 这类短标签；业务标题和正文用统一术语的 sans。路径、id、时间可用等宽。
+- 同一状态只在一个地方表达。多个面板不重复催促同一操作。
+- 主要内容区保持可读宽度；辅助区域没有内容时不占据强布局地位。
 
 ## 检查
 
-公共组件变更后，打开受影响的真实页面，检查普通状态、空态、长中文、错误和窄窗口下的可读性与操作。独立视觉审阅判断效果，不能用组件测试代替。
-
-自动检查只处理明确的偏离，例如普通界面的硬编码颜色、字号或绕过公共组件；编辑器和图表按实际需要处理。已发生的公共契约退化可加回归检查，不把审美写成任意数值的禁令。
+- `pnpm --filter @vermillion/desktop lint:ui`：拦截 `ui/app` 和 `features/` 里的硬编码颜色、任意字号/圆角/字距、`awb-*` class、裸 `<input>/<textarea>/<select>`。确需例外的元素加 `data-ui-raw="原因"`。
+- 改公共组件或 `app.css` 后，起实例打开 Think（会话列表 + Docs）、Inbox、Workspaces → 任务 三个页面，看普通状态、空态、长中文标题、错误和窄窗口。截图交给空白 subagent 对照本文判断，不自己看图下结论。
+- 涉及界面的工单，verifier 除了逐条 acceptance，还要对照本文看一遍截图：是否用了对应组件、是否出现规则之外的颜色和字号、重要操作是否被弱化到看不见。
