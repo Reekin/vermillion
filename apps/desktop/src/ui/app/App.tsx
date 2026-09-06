@@ -8,6 +8,7 @@ import { Modal } from "./components/Modal.js";
 import { Rail } from "./components/Rail.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
 import { TextEditor } from "./components/TextEditor.js";
+import { RoleEditor } from "./components/RoleEditor.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { WorkspacesPanel } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
@@ -151,6 +152,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         </Modal>
       )}
       <TextEditor store={store} />
+      <RoleEditor store={store} transport={transport} />
     </div>
   );
 };

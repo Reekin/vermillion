@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zRoleDocument } from "./role-document.js";
 import {
   zAcceptanceItem,
   zAgentRun,
@@ -47,6 +48,8 @@ export const workbenchRpc = {
 
   "role.list": { params: zWs, result: z.array(zRoleFile) },
   "role.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string(), source: zRoleFile.shape.source }) },
+  "role.editor.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ document: zRoleDocument, source: zRoleFile.shape.source }) },
+  "role.editor.write": { params: zWs.extend({ roleId: z.string().min(1), document: zRoleDocument }), result: zEmpty },
   "role.resolve": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string() }) },
   "role.write": { params: zWs.extend({ roleId: z.string().min(1), content: z.string() }), result: zEmpty },
   "role.reset": { params: zWs.extend({ roleId: z.string().min(1) }), result: zEmpty },
