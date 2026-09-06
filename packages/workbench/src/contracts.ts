@@ -95,6 +95,8 @@ export const zRun = z.object({
   heartbeatAt: z.string().optional(),
   worktreePath: z.string().optional(),
   branch: z.string().optional(),
+  /** User feedback waiting to be delivered as the next message in this worker's session. Cleared when claimed. */
+  resumeMessage: z.string().optional(),
   /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
   attempts: z.number().int().nonnegative().optional(),

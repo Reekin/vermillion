@@ -136,6 +136,10 @@ export class Orchestrator {
         continue;
       }
       const item = run.workItemId ? await this.service.getWorkItem(workspaceId, run.workItemId).catch(() => undefined) : undefined;
+      if (item?.status === "queued" && item.run.resumeMessage && item.run.sessionId === run.sessionId) {
+        await this.service.putRun(workspaceId, { ...run, status: "done", note: "用户已反馈，等待续做", endedAt: this.now() });
+        continue;
+      }
       const stillOwns = run.role === "steward" || (item?.status === "running" && item.run.sessionId === run.sessionId);
       const resumed = stillOwns && (await this.runner.resume(run.sessionId).catch(() => false));
       if (resumed) {
@@ -243,6 +247,8 @@ export class Orchestrator {
     const busy = new Set(items.filter((i) => i.status === "running").flatMap((i) => i.needs));
     const ready = items.filter(
       (i) => i.status === "queued" && i.dependsOn.every((id) => closed.has(id)) && !i.needs.some((need) => busy.has(need))
+        // Inbox may receive a submit or decision before its turn ends. Deliver feedback after that turn finishes.
+        && !(i.run.resumeMessage && i.run.sessionId && this.runsBySession.has(i.run.sessionId))
     );
     for (const item of ready.slice(0, capacity)) {
       await this.openWorker(workspaceId, item);
@@ -309,29 +315,33 @@ export class Orchestrator {
       }
       cwd = worktreePath;
     }
-    // Reviewer and verifier run as the worker's subagents, so their prompts ride along verbatim instead of relying on the worker to fetch them.
-    const [worker, reviewer, verifier] = await Promise.all([this.roles.resolve(root, "worker"), this.roles.resolve(root, "reviewer"), this.roles.resolve(root, "verifier")]);
-    const developerInstructions = [
-      worker.content.trim(),
-      "",
-      "## 附：reviewer subagent 的 prompt（spawn 时原样作为它的首条消息，再附上工单和 diff）",
-      "----- reviewer begin -----",
-      reviewer.content.trim(),
-      "----- reviewer end -----",
-      "",
-      "## 附：verifier subagent 的 prompt（spawn 时原样作为它的首条消息，再附上 acceptance、refs 原文、diff）",
-      "----- verifier begin -----",
-      verifier.content.trim(),
-      "----- verifier end -----"
-    ].join("\n");
-    const { sessionId } = await this.runner.open({
-      workspaceId,
-      cwd,
-      developerInstructions,
-      modelConfig: worker.modelConfig,
-      title: "Worker · " + item.title,
-      metadata: { role: "worker", workItemId: item.workItemId, missionId: item.missionId }
-    });
+    const resumed = !!(item.run.resumeMessage && item.run.sessionId && await this.runner.resume(item.run.sessionId).catch(() => false));
+    let sessionId = item.run.sessionId!;
+    if (!resumed) {
+      // Reviewer and verifier run as the worker's subagents, so their prompts ride along verbatim instead of relying on the worker to fetch them.
+      const [worker, reviewer, verifier] = await Promise.all([this.roles.resolve(root, "worker"), this.roles.resolve(root, "reviewer"), this.roles.resolve(root, "verifier")]);
+      const developerInstructions = [
+        worker.content.trim(),
+        "",
+        "## 附：reviewer subagent 的 prompt（spawn 时原样作为它的首条消息，再附上工单和 diff）",
+        "----- reviewer begin -----",
+        reviewer.content.trim(),
+        "----- reviewer end -----",
+        "",
+        "## 附：verifier subagent 的 prompt（spawn 时原样作为它的首条消息，再附上 acceptance、refs 原文、diff）",
+        "----- verifier begin -----",
+        verifier.content.trim(),
+        "----- verifier end -----"
+      ].join("\n");
+      ({ sessionId } = await this.runner.open({
+        workspaceId,
+        cwd,
+        developerInstructions,
+        modelConfig: worker.modelConfig,
+        title: "Worker · " + item.title,
+        metadata: { role: "worker", workItemId: item.workItemId, missionId: item.missionId }
+      }));
+    }
     await this.service.startWorkItem(workspaceId, item.workItemId, { sessionId, worktreePath, branch, heartbeatAt: this.now() });
     const run = await this.service.putRun(workspaceId, {
       runId: createId("run"),
@@ -345,6 +355,13 @@ export class Orchestrator {
     });
     this.runsBySession.set(sessionId, { workspaceId, run, idleTurns: 0 });
     this.ensurePatrol(workspaceId, item.missionId ?? item.workItemId);
+    if (resumed) {
+      await this.runner.send(sessionId, [
+        item.run.resumeMessage,
+        "请在当前会话和原 worktree 中继续处理。先用 vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "' 读取工单，完成后重新提交 evidence、review 处置和 verify 报告。"
+      ].join("\n"));
+      return;
+    }
     const prior = [
       ...item.rejections.map((r) => "用户打回：" + r.reason),
       ...item.decisions.map((d) => "已决策：" + d),
