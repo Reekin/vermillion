@@ -684,7 +684,7 @@ export const SessionPane = ({
   const displayedSessionRevision = useRendererSessionsRevision(store, memberSessionIds);
   const domain = store.getDomainReadModel();
   const displayedSession = viewSessionId ? domain.getSession(viewSessionId) : undefined;
-  const activeSessionId = activeChatTree ? viewSessionId : undefined;
+  const activeSessionId = displayedSession && !isOpeningSelectedSession ? viewSessionId : undefined;
   const activeSessionWindow = activeChatTree?.windows?.find((window) => window.sessionId === viewSessionId);
   const displayedEngineId = displayedSession?.engineId ?? selectedEngineId;
   const activeThreadGoal = activeSessionId

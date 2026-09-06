@@ -70,7 +70,10 @@ export const useChatTreeController = (input: {
   }, [refreshChatTree, input.refreshSignal, onStatusNotice]);
 
   const chatTree = loaded && loaded.entrySessionId === sessionId ? loaded.tree : undefined;
-  const isOpening = Boolean(sessionId && !chatTree && failedSessionId !== sessionId);
+  // A session the store already holds renders at once; the tree refresh then narrows the view to the saved position.
+  const isOpening = Boolean(
+    sessionId && !chatTree && failedSessionId !== sessionId && !store.getDomainReadModel().getSession(sessionId)
+  );
 
   return {
     chatTree,

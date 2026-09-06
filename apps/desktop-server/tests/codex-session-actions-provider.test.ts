@@ -282,7 +282,7 @@ describe("CodexSessionActionsProvider", () => {
       providerSessionId: "thread-child"
     });
 
-    expect(forkThread).toHaveBeenCalledWith("thread-1");
+    expect(forkThread).toHaveBeenCalledWith("thread-1", undefined);
     expect(attachThreadToSession).toHaveBeenCalledWith(
       "codex-thread:thread-child",
       "thread-child"
@@ -314,6 +314,7 @@ describe("CodexSessionActionsProvider", () => {
       parentSessionId: "session-1",
       childSessionId: "codex-thread:thread-child",
       relationType: "fork",
+      sourceTurnId: "turn-child",
       createdAt: "2026-04-18T00:00:02.000Z"
     });
     expect(setLastActiveSelection).toHaveBeenCalledWith({
@@ -371,7 +372,7 @@ describe("CodexSessionActionsProvider", () => {
       providerSessionId: "thread-child"
     });
 
-    expect(forkThread).toHaveBeenCalledWith("thread-parent");
+    expect(forkThread).toHaveBeenCalledWith("thread-parent", undefined);
     expect(upsertRelation).toHaveBeenCalledWith(
       expect.objectContaining({
         parentSessionId: "codex-thread:thread-parent",
