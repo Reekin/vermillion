@@ -381,7 +381,7 @@ export class CapabilityRegistry {
       },
       {
         action: "copy_awb_session_id",
-        label: "Copy AWB session id"
+        label: "Copy session id"
       }
     ];
     if (!session && !indexEntry) {

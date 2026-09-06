@@ -1542,7 +1542,7 @@ const emitReadSessionRequest = ({ threadId, turnId }) => {
   const threadStartParams = threadStartParamsByThreadId.get(threadId);
   const dynamicTool = (threadStartParams?.dynamicTools ?? []).find(
     (tool) =>
-      tool?.namespace === "another_workbench" && tool?.name === "read_session"
+      tool?.namespace === "vermillion" && tool?.name === "read_session"
   );
   const args = {
     sessionId: "session-read-target"
@@ -1570,7 +1570,7 @@ const emitReadSessionRequest = ({ threadId, turnId }) => {
       item: {
         type: "dynamicToolCall",
         id: toolCallId,
-        namespace: dynamicTool?.namespace ?? "another_workbench",
+        namespace: dynamicTool?.namespace ?? "vermillion",
         tool: dynamicTool?.name ?? "read_session",
         arguments: args,
         status: "inProgress",
@@ -1584,7 +1584,7 @@ const emitReadSessionRequest = ({ threadId, turnId }) => {
     threadId,
     turnId,
     toolCallId,
-    namespace: dynamicTool?.namespace ?? "another_workbench",
+    namespace: dynamicTool?.namespace ?? "vermillion",
     tool: dynamicTool?.name ?? "read_session",
     arguments: args
   });
@@ -1595,7 +1595,7 @@ const emitReadSessionRequest = ({ threadId, turnId }) => {
       threadId,
       turnId,
       callId: toolCallId,
-      namespace: dynamicTool?.namespace ?? "another_workbench",
+      namespace: dynamicTool?.namespace ?? "vermillion",
       tool: dynamicTool?.name ?? "read_session",
       arguments: args
     }

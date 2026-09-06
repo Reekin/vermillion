@@ -362,7 +362,7 @@ describe("session browser transport contracts", () => {
               },
               {
                 action: "copy_awb_session_id",
-                label: "Copy AWB session id"
+                label: "Copy session id"
               },
               {
                 action: "open_rollout",

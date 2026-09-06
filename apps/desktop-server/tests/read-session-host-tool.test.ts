@@ -82,7 +82,7 @@ const invocationContext = {
 };
 
 describe("createReadSessionHostTool", () => {
-  it("registers as an AWB host tool definition", async () => {
+  it("registers as a host tool definition", async () => {
     const registry = new HostToolRegistry([
       createReadSessionHostTool({
         getSnapshot: () => snapshot

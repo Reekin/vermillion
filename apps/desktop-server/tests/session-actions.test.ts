@@ -43,7 +43,7 @@ describe("SessionActionsProvider", () => {
       },
       {
         action: "copy_awb_session_id",
-        label: "Copy AWB session id"
+        label: "Copy session id"
       }
     ]);
 
@@ -54,7 +54,7 @@ describe("SessionActionsProvider", () => {
       },
       {
         action: "copy_awb_session_id",
-        label: "Copy AWB session id"
+        label: "Copy session id"
       },
       {
         action: "archive",
@@ -108,7 +108,7 @@ describe("SessionActionsProvider", () => {
       },
       {
         action: "copy_awb_session_id",
-        label: "Copy AWB session id"
+        label: "Copy session id"
       },
       {
         action: "archive",

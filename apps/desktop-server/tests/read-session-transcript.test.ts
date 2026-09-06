@@ -400,7 +400,7 @@ describe("buildReadSessionTranscript", () => {
     expect(result.turns[0]?.agentFinal).toBe("67");
   });
 
-  it("fails clearly for unknown AWB sessions", () => {
+  it("fails clearly for unknown sessions", () => {
     expect(() =>
       buildReadSessionTranscript({
         snapshot: baseSnapshot([], []),

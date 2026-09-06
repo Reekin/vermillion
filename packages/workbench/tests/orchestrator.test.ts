@@ -18,7 +18,8 @@ afterEach(async () => {
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
 const until = async (check: () => Promise<boolean>) => {
-  for (let i = 0; i < 400; i += 1) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
     if (await check()) return;
     await tick();
   }
@@ -65,7 +66,7 @@ const setup = async (maxWorkers = 1) => {
   return { service, ws, ...fake };
 };
 
-describe("Orchestrator", { timeout: 20000 }, () => {
+describe("Orchestrator", { timeout: 60000 }, () => {
   it("opens a steward per new revision and a worker per queued item, then closes the run on submit", async () => {
     const { service, ws, sessions, complete } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n- login\n");

@@ -139,6 +139,7 @@ export class Orchestrator {
       "missionId: " + mission.missionId,
       ...(mission.summary.trim() ? ["任务摘要: " + mission.summary.trim()] : []),
       "revision: " + revision.commit + (revision.message ? "（变更说明：" + revision.message + "）" : ""),
+      ...(revision.sessionId ? ["来源会话: " + revision.sessionId + "（用 vermillion.read_session 工具读，看这次讨论到底要做什么、哪些已否定或已实现）"] : []),
       "涉及文件: " + revision.paths.join(", "),
       ...(stat ? ["", stat] : []),
       "",

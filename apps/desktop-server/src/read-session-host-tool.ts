@@ -9,7 +9,7 @@ import {
   serializeReadSessionTranscript
 } from "./read-session-transcript.js";
 
-export const readSessionToolNamespace = "another_workbench";
+export const readSessionToolNamespace = "vermillion";
 export const readSessionToolName = "read_session";
 
 export type ReadSessionRuntime = {
@@ -96,14 +96,14 @@ export const createReadSessionHostTool = (
   namespace: readSessionToolNamespace,
   name: readSessionToolName,
   description:
-    "Read an AWB session by AWB sessionId and return the collapsed visible user/final-agent transcript as JSON.",
+    "Read a Vermillion session by sessionId and return the collapsed visible user/final-agent transcript as JSON.",
   inputSchema: {
     type: "object",
     properties: {
       sessionId: {
         type: "string",
         minLength: 1,
-        description: "AWB ChatSession.sessionId to read."
+        description: "Vermillion sessionId to read."
       },
       limit: {
         type: "integer",

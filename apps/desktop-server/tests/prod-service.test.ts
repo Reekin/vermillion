@@ -292,7 +292,7 @@ describe("prod runtime service", () => {
       expect.objectContaining({
         dynamicTools: expect.arrayContaining([
           expect.objectContaining({
-            namespace: "another_workbench",
+            namespace: "vermillion",
             name: "read_session",
             inputSchema: expect.objectContaining({
               properties: expect.objectContaining({

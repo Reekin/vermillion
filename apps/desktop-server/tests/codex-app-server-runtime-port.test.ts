@@ -2519,7 +2519,7 @@ describe("Codex app-server runtime port", () => {
           method: "tool.started",
           params: expect.objectContaining({
             sessionId: "session-reader",
-            toolName: "another_workbench.read_session"
+            toolName: "vermillion.read_session"
           })
         }),
         expect.objectContaining({
