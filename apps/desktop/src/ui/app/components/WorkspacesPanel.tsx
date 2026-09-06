@@ -196,11 +196,11 @@ const SessionLink = ({ sessionId, onOpenSession }: { sessionId: string; onOpenSe
 const isOpen = (w: WorkItem) => w.status !== "closed" && w.status !== "cancelled";
 
 /** One work item with the agent runs that touched it, newest first. */
-const WorkItemRow = ({ item, runs, waitingFor, onOpenSession, onCancel }: { item: WorkItem; runs: AgentRun[]; waitingFor: string[]; onOpenSession: (sessionId: string) => void; onCancel: () => void }) => (
+const WorkItemRow = ({ item, runs, waitingFor, muted, onOpenSession, onCancel }: { item: WorkItem; runs: AgentRun[]; waitingFor: string[]; muted?: boolean; onOpenSession: (sessionId: string) => void; onCancel: () => void }) => (
   <li data-task-id={item.workItemId} className="rounded-md border border-border px-3 py-2">
     <div className="flex items-center gap-2">
       <Badge>{item.risk}</Badge>
-      <span className="truncate text-label text-strong">{item.title}</span>
+      <span className={cn("truncate text-label", muted ? "text-muted-foreground" : "text-strong")}>{item.title}</span>
       <span className="ml-auto shrink-0 font-mono text-caption text-faint-foreground">{statusLabel[item.status]}{waitingFor.length > 0 ? " · 等待 " + waitingFor.join("、") : ""}{item.rejections.length > 0 ? " · 打回 " + item.rejections.length : ""}{item.run.lastFailure ? " · " + item.run.lastFailure : ""}</span>
       {item.run.sessionId && (item.status === "running" || item.status === "review") && <SessionLink sessionId={item.run.sessionId} onOpenSession={onOpenSession} />}
       {isOpen(item) && <Button size="sm" variant="ghost" onClick={onCancel}>取消</Button>}
@@ -262,9 +262,9 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
   const visibleMissions = compact ? missions.filter((m) => m.status === "active" || m.missionId === taskTarget?.id) : missions;
   const visibleStandalone = compact ? standalone.filter((w) => isOpen(w) || w.workItemId === taskTarget?.id) : standalone;
   const hidden = missions.length - visibleMissions.length + (standalone.length - visibleStandalone.length);
-  const renderItems = (items: WorkItem[]) => (
+  const renderItems = (items: WorkItem[], muted = false) => (
     <ul className="mt-3 space-y-1.5">
-      {items.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} onCancel={() => cancelItem(item)} />)}
+      {items.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} muted={muted} onOpenSession={onOpenSession} onCancel={() => cancelItem(item)} />)}
     </ul>
   );
   return (
@@ -301,7 +301,7 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
                 {mission.summary && <p className="line-clamp-3 text-label text-muted-foreground">{mission.summary}</p>}
                 <p className="mt-1.5 font-mono text-caption text-faint-foreground">{mission.revisions.length} 个 revision · 最新 {latestRevision(mission).commit.slice(0, 8)} · {new Date(mission.updatedAt).toLocaleString()}</p>
                 {steward?.note && <p className="mt-1.5 line-clamp-2 text-label text-muted-foreground">管家：{steward.note}</p>}
-                {items.length > 0 && renderItems(items)}
+                {items.length > 0 && renderItems(items, mission.status !== "active")}
               </Card>
             </li>
           );

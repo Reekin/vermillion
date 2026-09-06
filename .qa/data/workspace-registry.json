@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "workspaces": [
+    {
+      "workspaceId": "workspace-mtqbs3g2-ud9z37ip",
+      "absolutePath": "I:\\gpt-projects\\vermillion\\.vermillion\\worktrees\\wi-mtqapqa5-uyyc6r\\.qa\\ws",
+      "label": "QA",
+      "createdAt": "2026-09-06T21:30:05.042Z",
+      "updatedAt": "2026-09-06T21:30:05.042Z"
+    }
+  ],
+  "pinnedSessionIds": [],
+  "engineProgramPathsByEngineId": {},
+  "allowedModelIdsByEngineId": {},
+  "customModelReasoningOptionIdsByEngineId": {},
+  "executionPreferencesByEngineId": {}
+}
