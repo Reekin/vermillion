@@ -5,7 +5,7 @@ import {
 } from "../src/title-generation-service.js";
 
 describe("title generation service", () => {
-  it("calls gpt-5.4-mini through the Responses API", async () => {
+  it("calls gpt-5.6-luna through the Responses API", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -47,7 +47,7 @@ describe("title generation service", () => {
       model: string;
       input: Array<{ content: Array<{ text: string }> }>;
     };
-    expect(body.model).toBe("gpt-5.4-mini");
+    expect(body.model).toBe("gpt-5.6-luna");
     expect(body.input[1].content[0].text).toContain(
       "帮我调研低功耗迷你主机 CPU"
     );

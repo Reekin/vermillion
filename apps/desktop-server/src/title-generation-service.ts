@@ -1,6 +1,6 @@
 import type { Attachment } from "@vermillion/shared";
 
-const DEFAULT_TITLE_MODEL = "gpt-5.4-mini";
+const DEFAULT_TITLE_MODEL = "gpt-5.6-luna";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_PROMPT_CONTENT_LENGTH = 4_000;
