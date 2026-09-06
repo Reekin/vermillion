@@ -436,6 +436,28 @@ export class WorkbenchService {
     return updated;
   }
 
+  /**
+   * Worker found it needs another item merged first: back to the queue with that item in dependsOn. Session, worktree
+   * and branch stay on the record and the wake-up note waits in resumeMessage, so once the prerequisite closes the
+   * scheduler resumes the same conversation. Not a failure, so attempts are untouched. The prerequisite may belong to
+   * any mission.
+   */
+  async deferWorkItem(workspaceId: string, workItemId: string, dependsOn: string, note: string): Promise<WorkItem> {
+    if (dependsOn === workItemId) throw new Error("Work item cannot depend on itself: " + workItemId);
+    const prerequisite = await this.getWorkItem(workspaceId, dependsOn);
+    if (prerequisite.status === "closed" || prerequisite.status === "cancelled") throw new Error("Work item is already " + prerequisite.status + ": " + dependsOn);
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
+      if (item.status !== "running") throw new Error("Work item is not running: " + workItemId);
+      return {
+        ...item,
+        status: "queued",
+        dependsOn: item.dependsOn.includes(dependsOn) ? item.dependsOn : [...item.dependsOn, dependsOn],
+        decisions: [...item.decisions, "等待工单 " + dependsOn + "：" + note],
+        run: { ...item.run, resumeMessage: "你等待的工单「" + prerequisite.title + "」（" + dependsOn + "）已关闭合入。退回原因：" + note + "。先把本分支 rebase 到主分支当前 HEAD，再接着做。" }
+      };
+    });
+  }
+
   /** Orchestrator: marks/clears the turn during which a contract change landed mid-flight. */
   async setWorkItemStaleTurn(workspaceId: string, workItemId: string, staleTurnId: string | undefined): Promise<WorkItem> {
     return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, staleTurnId } }));

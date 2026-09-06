@@ -95,7 +95,7 @@ export const zRun = z.object({
   heartbeatAt: z.string().optional(),
   worktreePath: z.string().optional(),
   branch: z.string().optional(),
-  /** User feedback waiting to be delivered as the next message in this worker's session. Cleared when claimed. */
+  /** Next message for this worker's session (user feedback, or the wake-up once a deferred-on item closes); the scheduler resumes that session instead of opening a new one. Cleared when claimed. */
   resumeMessage: z.string().optional(),
   /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
@@ -115,7 +115,7 @@ export const zWorkItem = z.object({
   autoClose: z.boolean(),
   /** Execution resources this item occupies (e.g. "browser"); the scheduler waits for a free slot. */
   needs: z.array(z.string()),
-  /** Work items in the same mission that must be closed before this one is scheduled. */
+  /** Work items that must be closed before this one is scheduled. Same mission when the steward sets them; a worker may add one from any mission via workItem.defer. */
   dependsOn: z.array(z.string()),
   refs: z.array(zDocRef),
   scope: zScope,

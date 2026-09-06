@@ -45,6 +45,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workItem.approve": (p) => service.approveWorkItem(p.workspaceId, p.workItemId),
     "workItem.reject": (p) => service.rejectWorkItem(p.workspaceId, p.workItemId, p.reason),
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
+    "workItem.defer": (p) => service.deferWorkItem(p.workspaceId, p.workItemId, p.dependsOn, p.note),
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
     "scheduler.get": (p) => service.getScheduler(p.workspaceId),
