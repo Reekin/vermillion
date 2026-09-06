@@ -50,8 +50,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const sessionActions = useSessionActions({
     transport,
     reloadSidebar: sidebar.reload,
-    onForked: setSessionId,
-    onArchived: (id) => setSessionId((current) => (current === id ? undefined : current)),
+    onArchived: (id) => setSessionId((current) => (current === id || (current && sidebar.findSession(current)?.sessionId === id) ? undefined : current)),
     onResumed: () => setReloadSignal((n) => n + 1)
   });
 

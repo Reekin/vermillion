@@ -325,6 +325,10 @@ export type DesktopTransport = {
       nodeId: string;
       expectedRevision?: number;
     }) => Promise<{ jumped: boolean }>;
+    prepareSend: (input: {
+      sessionId: string;
+      nodeId?: string;
+    }) => Promise<{ sessionId: string }>;
   };
   delegation: {
     get: (sessionId: string) => Promise<DelegationSnapshotRpc>;
@@ -867,7 +871,8 @@ export const createDesktopTransport = (
         return result.chatTree;
       },
       jump: (input: { sessionId: string; nodeId: string; expectedRevision?: number }) =>
-        rpc.request("chatTree.jump", input)
+        rpc.request("chatTree.jump", input),
+      prepareSend: (input) => rpc.request("chatTree.prepareSend", input)
     },
     delegation: {
       get: async (sessionId: string) => {

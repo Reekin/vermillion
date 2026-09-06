@@ -1958,6 +1958,17 @@ button:disabled {
   display: flex;
   flex-direction: column;
 }
+.awb-chat-tree__graph-node.is-running::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--awb-accent-strong);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: awb-spin 1s linear infinite;
+}
+
 .awb-chat-tree-column {
   flex: 0 0 300px;
   display: flex;

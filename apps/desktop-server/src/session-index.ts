@@ -42,7 +42,11 @@ const sessionRelationIndexSchema = z.object({
 const sessionIndexDocumentSchema = z.object({
   version: z.literal(1),
   entries: z.array(sessionIndexEntrySchema).default([]),
-  relations: z.array(sessionRelationIndexSchema).default([])
+  relations: z.array(sessionRelationIndexSchema).default([]),
+  treeViews: z.record(z.string(), z.object({
+    sessionId: z.string(),
+    nodeId: z.string().optional()
+  })).default({})
 });
 
 export type SessionIndexEntry = z.infer<typeof sessionIndexEntrySchema>;
@@ -230,7 +234,8 @@ export class SessionIndexStore {
   private document: SessionIndexDocument = {
     version: 1,
     entries: [],
-    relations: []
+    relations: [],
+    treeViews: {}
   };
   private loadPromise: Promise<void> | undefined;
   private persistPromise: Promise<void> | undefined;
@@ -260,6 +265,38 @@ export class SessionIndexStore {
 
   public getRevision(): number {
     return this.revision;
+  }
+
+  public getTreeId(sessionId: string): string {
+    const parents = new Map(this.document.relations
+      .filter((relation) => relation.relationType === "fork")
+      .map((relation) => [relation.childSessionId, relation.parentSessionId]));
+    while (parents.has(sessionId)) sessionId = parents.get(sessionId)!;
+    return sessionId;
+  }
+
+  public getTreeMembers(sessionId: string): string[] {
+    const members = [this.getTreeId(sessionId)];
+    for (let index = 0; index < members.length; index += 1) {
+      for (const relation of this.document.relations) {
+        if (relation.relationType === "fork" && relation.parentSessionId === members[index]) {
+          members.push(relation.childSessionId);
+        }
+      }
+    }
+    return members;
+  }
+
+  public getTreeView(sessionId: string): { sessionId: string; nodeId?: string } | undefined {
+    return this.document.treeViews[this.getTreeId(sessionId)];
+  }
+
+  public async setTreeView(sessionId: string, view: { sessionId: string; nodeId?: string }): Promise<void> {
+    this.document = {
+      ...this.document,
+      treeViews: { ...this.document.treeViews, [this.getTreeId(sessionId)]: view }
+    };
+    await this.persist();
   }
 
   public listEntries(workspaceId?: string): SessionIndexEntry[] {
@@ -603,7 +640,7 @@ export class SessionIndexStore {
       parentSessionId: input.parentSessionId,
       childSessionId: input.childSessionId,
       relationType: input.relationType,
-      sourceTurnId: input.sourceTurnId,
+      sourceTurnId: input.sourceTurnId ?? existing?.sourceTurnId,
       createdAt: input.createdAt ?? existing?.createdAt ?? this.now()
     });
   }

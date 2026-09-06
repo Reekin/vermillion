@@ -1553,25 +1553,11 @@ export class SessionReconciliationService {
           if (!hydrated || areAllHydrationConsumersCancelled(consumers)) {
             return undefined;
           }
-          const relatedIndexRelations = this.sessionIndexStore
-            .listRelations(entry.workspaceId)
-            .filter(
-              (relation) =>
-                relation.parentSessionId === sessionId ||
-                relation.childSessionId === sessionId
-            );
-          const normalizedHydrated = this.normalizeHydratedRelations(
-            entry,
-            hydrated,
-            relatedIndexRelations
-          );
-          this.runtimeService.hydrateDiscoveredSession(normalizedHydrated, {
-            relatedIndexRelations
+          return this.commitHydratedSession(entry, hydrated, {
+            partial: true,
+            atLatest: !input.cursor && !anchorTurnId,
+            isCancelled: () => areAllHydrationConsumersCancelled(consumers)
           });
-          await this.upsertHydratedSession(entry, normalizedHydrated, {
-            partial: true
-          });
-          return normalizedHydrated;
         })
         .finally(() => this.windowHydrationByKey.delete(hydrationKey))
     };
@@ -1596,23 +1582,94 @@ export class SessionReconciliationService {
     if (!hydrated || input.isCancelled?.()) {
       return false;
     }
-    const relatedIndexRelations = this.sessionIndexStore
-      .listRelations(entry.workspaceId)
-      .filter(
-        (relation) =>
-          relation.parentSessionId === entry.sessionId ||
-          relation.childSessionId === entry.sessionId
-      );
-    const normalizedHydrated = this.normalizeHydratedRelations(
+    return Boolean(await this.commitHydratedSession(entry, hydrated, input));
+  }
+
+  private async commitHydratedSession<T extends HydratedSessionSnapshot>(
+    entry: SessionIndexEntry,
+    hydrated: T,
+    input: { partial?: boolean; atLatest?: boolean; isCancelled?: () => boolean } = {}
+  ): Promise<T | undefined> {
+    const indexRelations = this.sessionIndexStore.listRelations(entry.workspaceId);
+    const relatedIndexRelations = indexRelations.filter(
+      (relation) =>
+        relation.parentSessionId === entry.sessionId ||
+        relation.childSessionId === entry.sessionId
+    );
+    let normalizedHydrated = this.normalizeHydratedRelations(
       entry,
       hydrated,
       relatedIndexRelations
     );
+    const forkByChild = new Map(
+      [...normalizedHydrated.sessionRelations, ...indexRelations]
+        .filter((relation) => relation.relationType === "fork")
+        .map((relation) => [relation.childSessionId, relation] as const)
+    );
+    const fork = forkByChild.get(entry.sessionId);
+    const ancestorSessionIds = new Set<string>();
+    for (
+      let ancestor = fork;
+      ancestor;
+      ancestor = forkByChild.get(ancestor.parentSessionId)
+    ) {
+      ancestorSessionIds.add(ancestor.parentSessionId);
+    }
+    for (const ancestorSessionId of [...ancestorSessionIds].reverse()) {
+      await this.ensureSessionLoaded(ancestorSessionId, {
+        isCancelled: input.isCancelled
+      });
+    }
+    if (input.isCancelled?.()) {
+      return undefined;
+    }
+    if (fork) {
+      const inheritedTurnIds = new Set(
+        this.runtimeService.getSnapshot().turns
+          .filter((turn) => ancestorSessionIds.has(turn.sessionId))
+          .map((turn) => turn.turnId)
+      );
+      const sharedTurns = hydrated.turns.filter((turn) => inheritedTurnIds.has(turn.turnId));
+      // A newest-first window can identify the fork point only on its latest page.
+      const includesLatest = !input.partial || input.atLatest;
+      const sourceTurnId = input.partial ? sharedTurns[0]?.turnId : sharedTurns.at(-1)?.turnId;
+      if (!fork.sourceTurnId && includesLatest && sourceTurnId) {
+        const repaired = await this.sessionIndexStore.upsertRelation({
+          workspaceId: entry.workspaceId,
+          parentSessionId: fork.parentSessionId,
+          childSessionId: fork.childSessionId,
+          relationType: "fork",
+          sourceTurnId,
+          createdAt: fork.createdAt
+        });
+        const relationIndex = relatedIndexRelations.findIndex(
+          (relation) => relation.childSessionId === entry.sessionId
+        );
+        if (relationIndex >= 0) {
+          relatedIndexRelations[relationIndex] = repaired;
+        } else {
+          relatedIndexRelations.push(repaired);
+          normalizedHydrated = this.normalizeHydratedRelations(
+            entry,
+            normalizedHydrated,
+            relatedIndexRelations
+          );
+        }
+      }
+      const isOwn = (entity: { turnId: string }): boolean => !inheritedTurnIds.has(entity.turnId);
+      normalizedHydrated = {
+        ...normalizedHydrated,
+        turns: normalizedHydrated.turns.filter(isOwn),
+        messageBlocks: normalizedHydrated.messageBlocks.filter(isOwn),
+        toolCalls: normalizedHydrated.toolCalls.filter(isOwn),
+        terminalStreams: normalizedHydrated.terminalStreams.filter(isOwn)
+      };
+    }
     this.runtimeService.hydrateDiscoveredSession(normalizedHydrated, {
       relatedIndexRelations
     });
-    await this.upsertHydratedSession(entry, normalizedHydrated);
-    return true;
+    await this.upsertHydratedSession(entry, normalizedHydrated, input);
+    return normalizedHydrated;
   }
 
   private normalizeHydratedRelations<

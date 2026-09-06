@@ -11,7 +11,7 @@ import {
 import { SessionShellService } from "./session-shell-service.js";
 import { WorkspaceRegistryService } from "./workspace-registry.js";
 import { CodexSessionActionsProvider } from "./codex-session-actions-provider.js";
-import { CodexChatTreeAgentProvider } from "./codex-chat-tree-provider.js";
+import { WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import { SessionIdentityRegistry } from "./session-identity-registry.js";
 import { CodexDelegationProvider } from "./codex-delegation-provider.js";
 import { CodexWorktreeProvider } from "./codex-worktree-provider.js";
@@ -202,19 +202,12 @@ export const createSessionRuntimeService = (
     capabilities: [
       {
         engineId: codexAgentId,
-        operationGuards: {
-          "conversationGraph.jump": ["interactive-session"]
-        },
         sessionDiscovery: new CodexSessionDiscoveryProvider({
           codexRuntimePort,
           turnChangesStore: codexTurnChangesStore
         }),
         sessionActions: new CodexSessionActionsProvider({
           codexRuntimePort
-        }),
-        conversationGraph: new CodexChatTreeAgentProvider({
-          codexRuntimePort,
-          now: options.now
         }),
         delegation: new CodexDelegationProvider(),
         worktree: new CodexWorktreeProvider({
@@ -243,6 +236,20 @@ export const createSessionRuntimeService = (
 
   const shellService = new SessionShellService({
     runtimeService,
+    wrapperChatTree: new WrapperChatTreeService({
+      runtimeService,
+      sessionIndexStore,
+      reconciliation: sessionReconciliation,
+      fork: async (sessionId, fromTurnId) => {
+        const result = await new CodexSessionActionsProvider({ codexRuntimePort }).runAction({
+          ...capabilities.resolveContext(sessionId), action: "fork", fromTurnId
+        });
+        if (result?.action !== "fork" || result.status !== "forked") {
+          throw new Error("Unable to fork this turn.");
+        }
+        return result.forkedSessionId;
+      }
+    }),
     sessionCatalog,
     capabilities,
     skillsProvider: {

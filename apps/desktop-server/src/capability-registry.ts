@@ -6,6 +6,7 @@ import {
 } from "./session-identity-registry.js";
 import type { SessionDiscoveryProvider } from "./session-discovery.js";
 import type { SessionRuntimeService } from "./runtime-service.js";
+import type { SessionWindowSnapshot } from "./session-window.js";
 
 export type SessionActionKind =
   | "archive"
@@ -65,6 +66,10 @@ export type ConversationGraphNodeSnapshot = {
 
 export type ConversationGraphSnapshot = {
   sessionId: string;
+  treeId?: string;
+  currentSessionId?: string;
+  memberSessionIds?: string[];
+  windows?: SessionWindowSnapshot[];
   engineId: string;
   supportsJump: boolean;
   version?: number;
