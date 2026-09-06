@@ -30,7 +30,8 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const client = store((s) => s.client);
   const showAgentSession = store((s) => s.showAgentSession);
   const [busy, setBusy] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + item.card.decisionId] ?? false);
+  const toggleDetails = store((s) => s.toggleInboxDetails);
   const missionTitle = store((s) => s.view?.workspaceId === item.workspaceId ? s.view.missions.find((m) => m.missionId === item.card.missionId)?.title : undefined);
   const { card } = item;
   const answer = async (key: string) => {
@@ -71,7 +72,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       </ul>
       {card.details && (
         <div className="mt-3">
-          <button type="button" className="flex items-center gap-1 text-caption text-muted-foreground hover:text-strong" onClick={() => setShowDetails((v) => !v)}>
+          <button type="button" className="flex items-center gap-1 text-caption text-muted-foreground hover:text-strong" onClick={() => toggleDetails(item.workspaceId, card.decisionId)}>
             {showDetails ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             技术详情
           </button>

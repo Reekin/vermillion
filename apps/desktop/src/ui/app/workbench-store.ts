@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { AgentRun, DecisionCard, DocChange, DocCommit, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
 
 export type Panel = "think" | "inbox" | "workspaces";
+export type WorkspaceSection = "missions" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
 
 export type CommitOutcome =
   | { kind: "commit"; commit: string; message: string }
@@ -28,6 +29,9 @@ export type WorkbenchState = {
   client: WorkbenchClient;
   panel: Panel;
   overlay: Panel | undefined;
+  /** Panel view state survives switching between overlay and page. */
+  workspaceSection: WorkspaceSection;
+  expandedInboxDetails: Record<string, boolean>;
   workspaces: Workspace[];
   /** Workspace a new chat will be created in. Chosen in the composer; remembered across restarts. */
   draftWorkspaceId: string | undefined;
@@ -49,9 +53,12 @@ export type WorkbenchState = {
   setPanel: (panel: Panel) => void;
   openOverlay: (panel: Panel) => void;
   closeOverlay: () => void;
+  setWorkspaceSection: (section: WorkspaceSection) => void;
+  toggleInboxDetails: (workspaceId: string, decisionId: string) => void;
   setDraftWorkspace: (workspaceId: string | undefined) => void;
   browseWorkspace: (workspaceId: string | undefined) => void;
   openEditor: (target: EditorTarget | undefined) => void;
+  selectAgentSession: (sessionId: string) => void;
   /** Switches to the Workspaces page, 会话 tab, showing this agent session in its workspace. */
   showAgentSession: (workspaceId: string, sessionId: string) => void;
   /** Subscribes to workbench events and loads initial state. Returns an unsubscribe. */
@@ -113,6 +120,8 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       client,
       panel: "think",
       overlay: undefined,
+      workspaceSection: "missions",
+      expandedInboxDetails: {},
       workspaces: [],
       draftWorkspaceId: undefined,
       browsingWorkspaceId: undefined,
@@ -128,6 +137,11 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       setPanel: (panel) => set({ panel, overlay: undefined }),
       openOverlay: (panel) => set({ overlay: panel }),
       closeOverlay: () => set({ overlay: undefined }),
+      setWorkspaceSection: (workspaceSection) => set({ workspaceSection }),
+      toggleInboxDetails: (workspaceId, decisionId) => {
+        const key = workspaceId + "/" + decisionId;
+        set((state) => ({ expandedInboxDetails: { ...state.expandedInboxDetails, [key]: !state.expandedInboxDetails[key] } }));
+      },
       setDraftWorkspace: (workspaceId) => {
         if (workspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, workspaceId);
         set({ draftWorkspaceId: workspaceId });
@@ -139,9 +153,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),
+      selectAgentSession: (agentSessionId) => set({ agentSessionId }),
       showAgentSession: (workspaceId, sessionId) => {
         get().browseWorkspace(workspaceId);
-        set({ agentSessionId: sessionId, panel: "workspaces", overlay: undefined });
+        set({ agentSessionId: sessionId, workspaceSection: "sessions", panel: "workspaces", overlay: undefined });
       },
 
       connect: () => {

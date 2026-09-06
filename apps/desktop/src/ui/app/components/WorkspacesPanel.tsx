@@ -4,7 +4,7 @@ import { latestRevision, type AgentRun, type DecisionCard, type Mission, type Ro
 import type { RendererStore } from "../../../store/store.js";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { SessionPane, formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
-import type { WorkbenchStore } from "../workbench-store.js";
+import type { WorkbenchStore, WorkspaceSection } from "../workbench-store.js";
 import { useSessionSidebar, type SidebarSession } from "../use-session-sidebar.js";
 import { cn } from "../lib/cn.js";
 import { Badge, Button, Card, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, StatusDot } from "./ui.js";
@@ -19,8 +19,7 @@ type WorkspacesPanelProps = {
 };
 
 /** Secondary navigation inside a workspace. Sections without a backing feature yet render a placeholder. */
-type Section = "missions" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
-const sections: Array<{ id: Section; label: string }> = [
+const sections: Array<{ id: WorkspaceSection; label: string }> = [
   { id: "missions", label: "任务" },
   { id: "sessions", label: "会话" },
   { id: "domains", label: "Domain" },
@@ -37,18 +36,14 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
   const client = store((s) => s.client);
   const agentSessionId = store((s) => s.agentSessionId);
   const showAgentSession = store((s) => s.showAgentSession);
+  const selectAgentSession = store((s) => s.selectAgentSession);
   const workspaces = store((s) => s.workspaces);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
   const view = store((s) => s.view);
   const selectWorkspace = store((s) => s.browseWorkspace);
   const openEditor = store((s) => s.openEditor);
-  const [section, setSection] = useState<Section>("missions");
-  // A "会话" link elsewhere lands here on the 会话 tab.
-  const [seenAgentSessionId, setSeenAgentSessionId] = useState(agentSessionId);
-  if (agentSessionId !== seenAgentSessionId) {
-    setSeenAgentSessionId(agentSessionId);
-    if (agentSessionId) setSection("sessions");
-  }
+  const section = store((s) => s.workspaceSection);
+  const setSection = store((s) => s.setWorkspaceSection);
   const [error, setError] = useState<string | undefined>();
 
   const add = async () => {
@@ -114,7 +109,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
               {section === "missions" && view && (
                 <MissionsSection client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} />
               )}
-              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={(id) => showAgentSession(activeWorkspaceId, id)} />}
+              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
                 <DomainsSection client={client} workspaceId={activeWorkspaceId} docs={view?.docs.map((d) => d.path) ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
