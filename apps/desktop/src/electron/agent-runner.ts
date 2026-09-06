@@ -27,25 +27,28 @@ export const createSessionAsk = (shell: SessionShell): SessionAsk => async ({ se
   const forked = await shell.runSessionAction({ sessionId, action: "fork" });
   if (forked.action !== "fork" || forked.status !== "forked") throw new Error("Could not fork session " + sessionId);
   const child = forked.forkedSessionId;
-  await shell.openSession(child); // discovered fork -> loaded, executable session
-  await shell.setSessionTitle(child, "澄清 · " + question.slice(0, 40));
-  const done = new Promise<void>((resolve) => {
-    const off = shell.subscribe(
-      (envelope) => {
-        if (envelope.event.type === "turn.completed" && envelope.event.sessionId === child) { off(); resolve(); }
-      },
-      { eventTypes: ["turn.completed"] }
-    );
-  });
-  const receipt = await shell.executeCommand({
-    commandId: createId(),
-    command: { type: "sendUserMessage", sessionId: child, messageId: createId(), content: question, attachments: [] }
-  });
-  if (!receipt.accepted) throw new Error("ask rejected for " + child);
-  await done;
-  const answer = lastAssistantText(shell, child) ?? "";
-  await shell.runSessionAction({ sessionId: child, action: "archive" }).catch(() => undefined);
-  return answer;
+  try {
+    await shell.openSession(child); // discovered fork -> loaded, executable session
+    await shell.setSessionTitle(child, "澄清 · " + question.slice(0, 40));
+    const done = new Promise<void>((resolve) => {
+      const off = shell.subscribe(
+        (envelope) => {
+          if (envelope.event.type === "turn.completed" && envelope.event.sessionId === child) { off(); resolve(); }
+        },
+        { eventTypes: ["turn.completed"] }
+      );
+    });
+    const receipt = await shell.executeCommand({
+      commandId: createId(),
+      command: { type: "sendUserMessage", sessionId: child, messageId: createId(), content: question, attachments: [] }
+    });
+    if (!receipt.accepted) throw new Error("ask rejected for " + child);
+    await done;
+    return lastAssistantText(shell, child) ?? "";
+  } finally {
+    // The fork is throwaway either way; a failed ask must not leave it in the sidebar.
+    await shell.runSessionAction({ sessionId: child, action: "archive" }).catch(() => undefined);
+  }
 };
 
 /** Background agent sessions for the orchestrator: same engine and session list as the UI, opened headlessly. */
