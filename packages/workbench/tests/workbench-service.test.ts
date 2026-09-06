@@ -70,6 +70,15 @@ describe("WorkbenchService", () => {
     expect(events.filter((e) => e.type === "roles.changed")).toHaveLength(2);
   });
 
+  it("creates a mission from already committed docs, pointing the revision at HEAD", async () => {
+    const { service, ws } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/a.md", "# a\n");
+    const committed = await service.commitDocs(ws.workspaceId, { message: "a" });
+    const mission = await service.createMission(ws.workspaceId, { title: "A", summary: "", paths: [".vermillion/docs/a.md"] });
+    expect(mission.revisions[0]).toMatchObject({ commit: committed.commit, paths: [".vermillion/docs/a.md"] });
+    await expect(service.createMission(ws.workspaceId, { title: "B", summary: "", paths: [] })).rejects.toThrow("at least one");
+  });
+
   it("approve merges the worker's worktree branch into the workspace and removes it", async () => {
     const { service, ws } = await setup();
     const root = await service.workspaceRoot(ws.workspaceId);
@@ -135,7 +144,6 @@ describe("WorkbenchService", () => {
     expect(mission.revisions[0]!.paths).toEqual([".vermillion/docs/specs/login.md"]);
     expect(await service.pendingDocChanges(ws.workspaceId)).toEqual([]);
     expect(events.map((e) => e.type)).toContain("missions.changed");
-    await expect(service.createMission(ws.workspaceId, { title: "Empty", summary: "" })).rejects.toThrow(/No pending/);
   });
 
   it("commits only the selected paths and appends later changes as revisions", async () => {

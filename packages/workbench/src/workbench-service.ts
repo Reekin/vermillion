@@ -206,7 +206,7 @@ export class WorkbenchService {
     return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  /** Commits the selected doc changes as the mission's first revision. */
+  /** Records the mission's first revision: the selected docs at HEAD, committing any that still have local changes. */
   async createMission(
     workspaceId: string,
     input: { title: string; summary: string; sessionId?: string; paths?: string[] }
@@ -229,7 +229,7 @@ export class WorkbenchService {
     return mission;
   }
 
-  /** Commits further doc changes onto an existing mission. The steward reads new revisions to adjust or re-issue work items. */
+  /** Records a further revision on an existing mission. The steward reads new revisions to adjust or re-issue work items. */
   async addMissionRevision(
     workspaceId: string,
     input: { missionId: string; message: string; sessionId?: string; paths?: string[] }
@@ -245,8 +245,17 @@ export class WorkbenchService {
     return updated;
   }
 
+  /**
+   * A revision is "these docs as of this commit". Docs among `paths` with local changes are committed first;
+   * if nothing is pending the revision simply points at HEAD, so an already-committed doc can start a mission.
+   */
   private async commitRevision(docs: DocsService, message: string, paths: string[] | undefined, sessionId: string | undefined) {
-    return { ...await this.commitDocChanges(docs, message, paths), sessionId, at: this.now() };
+    if (paths?.length === 0) throw new Error("Select at least one doc path.");
+    const pending = await docs.pendingChanges();
+    const toCommit = (paths ? pending.filter((c) => paths.includes(c.path)) : pending).map((c) => c.path);
+    const commit = toCommit.length > 0 ? await docs.commit(message, toCommit) : await docs.head();
+    if (!commit) throw new Error("The docs directory has no commits yet.");
+    return { commit, message, paths: paths ?? toCommit, sessionId, at: this.now() };
   }
 
   private async commitDocChanges(docs: DocsService, message: string, paths: string[] | undefined) {

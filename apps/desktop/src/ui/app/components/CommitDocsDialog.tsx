@@ -5,6 +5,9 @@ import { Modal } from "./Modal.js";
 import { Button, Field, InlineNotice } from "./ui.js";
 
 type CommitDocsDialogProps = {
+  /** Every doc in the workspace; the mission's revision is "these docs at this commit". */
+  docs: string[];
+  /** Docs with local changes; they get committed as part of the revision. */
   pending: DocChange[];
   /** Active missions the changes may be appended to. */
   missions: Mission[];
@@ -36,12 +39,15 @@ const inferTitle = (paths: string[]): string => {
 
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
 
-export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose, onCreate, onAppend, onCommit }: CommitDocsDialogProps) => {
+export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, onClose, onCreate, onAppend, onCommit }: CommitDocsDialogProps) => {
   const active = missions.filter((m) => m.status === "active");
   const [mode, setMode] = useState<"create" | "append" | "commit">(defaultMissionId && active.some((m) => m.missionId === defaultMissionId) ? "append" : "create");
   const [missionId, setMissionId] = useState(defaultMissionId ?? active[0]?.missionId ?? "");
+  const changeByPath = useMemo(() => new Map(pending.map((c) => [c.path, c])), [pending]);
+  // "仅提交" only makes sense for pending changes; missions may also reference docs that are already committed.
+  const listed = useMemo(() => (mode === "commit" ? pending.map((c) => c.path) : [...new Set([...pending.map((c) => c.path), ...docs])].sort()), [mode, pending, docs]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(pending.map((c) => c.path)));
-  const selectedPaths = useMemo(() => pending.map((c) => c.path).filter((p) => selected.has(p)), [pending, selected]);
+  const selectedPaths = useMemo(() => listed.filter((p) => selected.has(p)), [listed, selected]);
   const [title, setTitle] = useState(() => inferTitle(pending.map((c) => c.path)));
   const [summary, setSummary] = useState("");
   const [message, setMessage] = useState("");
@@ -72,7 +78,7 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
   };
 
   return (
-    <Modal title="提交 Doc 变更" onClose={onClose} width={560}>
+    <Modal title={pending.length > 0 ? "提交 Doc 变更" : "创建任务"} onClose={onClose} width={560}>
       <form
         className="p-4"
         onSubmit={(event) => {
@@ -84,7 +90,7 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
           {[
             { id: "create" as const, label: "新任务" },
             { id: "append" as const, label: "补充到现有任务", disabled: active.length === 0 },
-            { id: "commit" as const, label: "仅提交" }
+            { id: "commit" as const, label: "仅提交", disabled: pending.length === 0 }
           ].map((option) => (
             <button
               key={option.id}
@@ -123,22 +129,25 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
 
         <div className="mt-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="eyebrow">本次提交的文件 {selectedPaths.length}/{pending.length}</span>
+            <span className="eyebrow">{mode === "commit" ? "本次提交的文件" : "任务涉及的文档"} {selectedPaths.length}/{listed.length}</span>
             <div className="flex gap-1">
-              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(pending.map((change) => change.path)))}>全选</Button>
-              <Button size="sm" variant="ghost" onClick={() => setSelected((current) => new Set(pending.map((change) => change.path).filter((path) => !current.has(path))))}>反选</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(listed))}>全选</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected((current) => new Set(listed.filter((path) => !current.has(path))))}>反选</Button>
             </div>
           </div>
           <ul className="mt-1.5 max-h-44 overflow-auto rounded-lg border border-border">
-            {pending.map((change) => (
-              <li key={change.path}>
-                <label className="flex h-7 cursor-pointer items-center gap-2 px-2.5 text-label hover:bg-surface-hover">
-                  <input type="checkbox" checked={selected.has(change.path)} onChange={() => togglePath(change.path)} className="accent-[var(--awb-accent-strong)]" />
-                  <span className="w-3 font-mono text-micro text-accent-strong">{statusMark[change.status]}</span>
-                  <span className="truncate text-foreground">{stripDocsPrefix(change.path)}</span>
-                </label>
-              </li>
-            ))}
+            {listed.map((path) => {
+              const change = changeByPath.get(path);
+              return (
+                <li key={path}>
+                  <label className="flex h-7 cursor-pointer items-center gap-2 px-2.5 text-label hover:bg-surface-hover">
+                    <input type="checkbox" checked={selected.has(path)} onChange={() => togglePath(path)} className="accent-[var(--awb-accent-strong)]" />
+                    <span className="w-3 font-mono text-micro text-accent-strong">{change ? statusMark[change.status] : ""}</span>
+                    <span className={cn("truncate", change ? "text-strong" : "text-foreground")}>{stripDocsPrefix(path)}</span>
+                  </label>
+                </li>
+              );
+            })}
           </ul>
         </div>
 

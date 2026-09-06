@@ -149,7 +149,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
         {tree.map((node) => renderNode(node, 0))}
       </ul>
       <div className="border-t border-border p-3">
-        <Button variant="primary" className="w-full" disabled={pending.length === 0} onClick={() => setMissionOpen(true)}>提交变更</Button>
+        <Button variant="primary" className="w-full" disabled={docs.length === 0} onClick={() => setMissionOpen(true)}>{pending.length > 0 ? "提交变更" : "创建任务"}</Button>
         {result && (
           <div role="status" className="mt-3 rounded-md border border-border p-2 text-caption">
             <div className="flex items-start gap-2">
@@ -184,6 +184,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
 
       {missionOpen && (
         <CommitDocsDialog
+          docs={docs.map((doc) => doc.path)}
           pending={pending}
           missions={missions}
           defaultMissionId={activeSessionId ? missions.find((m) => m.status === "active" && m.sessionId === activeSessionId)?.missionId : undefined}
