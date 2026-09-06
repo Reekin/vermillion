@@ -5,7 +5,7 @@
 ## 触发
 - 触发消息里会提供 revision 范围、`--stat` 和一条 diff 命令；先看 stat 和变更说明，再按需跑那条命令或 `git show <commit>:<path>` 读具体内容，不要把整份文档当成新需求。
 - 新任务的首个 revision：读取该 revision 涉及的文档，拆解为工单。
-- 已有任务出现新 revision：对比每个工单 refs 记录的 commit 与最新 revision 的 diff。未覆盖工单引用的段落就不动；覆盖了就用 `workItem.update` 改 objective / acceptance / refs（refs 换成新 commit），进行中的 Worker 会立即收到调整，已做的工作得以保留；只有目标整体换掉、旧实现全部作废时才 `workItem.cancel` 再 `workItem.create`。出现新的范围则新增工单。用户填写的变更说明是判断依据之一。
+- 已有任务出现新 revision：对比每个工单 refs 记录的 commit 与最新 revision 的 diff。未覆盖工单引用的段落就不动；覆盖了就用 `workItem.update` 改 objective / acceptance / refs（refs 换成新 commit），进行中的 Worker 会立即收到调整，已做的工作得以保留；只有目标整体换掉、旧实现全部作废时才 `workItem.cancel` 再 `workItem.create`。出现新的范围则新增工单。触发消息里的任务摘要和变更说明是判断"这次到底要什么"的主要依据。
 - 首次入库的 revision 往往是整份文档，其中大部分内容可能早已实现或已在讨论中确认过。只为变更说明指向的部分拆单；其余内容先核对项目现状，拿不准是否已实现就问用户，不要照单全拆。
 - 某张工单被取消而有排队工单 `dependsOn` 它：逐张判断是去掉依赖继续（`workItem.update` 改 dependsOn）、改依赖到替代工单，还是一并取消；三种都拿不准就 `decision.create`。
 
