@@ -85,7 +85,9 @@ export class Orchestrator {
       this.service.subscribe((event) => {
         if (!("workspaceId" in event)) return;
         if (event.type === "missions.changed" || event.type === "scheduler.changed") this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
-        else if (event.type === "workItems.changed" || event.type === "decisions.changed") this.enqueue(event.workspaceId, () => this.schedule(event.workspaceId));
+        else if (event.type === "workItems.changed") this.enqueue(event.workspaceId, async () => { await this.settleMissions(event.workspaceId); await this.schedule(event.workspaceId); });
+        else if (event.type === "decisions.changed") this.enqueue(event.workspaceId, () => this.schedule(event.workspaceId));
+        else if (event.type === "runs.changed") this.enqueue(event.workspaceId, () => this.settleMissions(event.workspaceId));
         else if (event.type === "workItem.updated") this.enqueue(event.workspaceId, () => this.steerWorker(event.sessionId, event.note));
         else if (event.type === "workItem.cancelled") this.enqueue(event.workspaceId, () => this.onCancelled(event.workspaceId, event.workItemId, event.sessionId, event.dependants));
       }),
@@ -115,6 +117,7 @@ export class Orchestrator {
 
   /** Runs whatever the files say is pending: unprocessed revisions, then queued items. Also the restart entry point. */
   private async reconcile(workspaceId: string): Promise<void> {
+    await this.settleMissions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
     if (!scheduler.enabled) return;
     await this.recoverStaleRuns(workspaceId);
@@ -156,13 +159,42 @@ export class Orchestrator {
     }
   }
 
+  // ---- missions ----
+
+  /**
+   * A mission is done once no work item under it is still open, at least one was closed (a mission whose items were
+   * all cancelled has produced nothing, like one with no items), and the steward has finished with its latest
+   * revision: a steward still issuing items, or a revision it has not picked up yet, keeps the mission active.
+   * A further revision reopens it (WorkbenchService.addMissionRevision). Runs on every work item and run change, so
+   * a steward finishing (its run is written as done) settles its mission.
+   */
+  private async settleMissions(workspaceId: string): Promise<void> {
+    const [missions, items, runs] = await Promise.all([this.service.listMissions(workspaceId), this.service.listWorkItems(workspaceId), this.service.listRuns(workspaceId)]);
+    for (const mission of missions.filter((m) => m.status === "active")) {
+      const own = items.filter((i) => i.missionId === mission.missionId);
+      if (!own.some((i) => i.status === "closed") || own.some((i) => i.status !== "closed" && i.status !== "cancelled")) continue;
+      const stewards = runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
+      if (stewards.some((r) => r.status === "running") || !this.stewarded(mission, stewards)) continue;
+      await this.service.setMissionStatus(workspaceId, mission.missionId, "done");
+    }
+  }
+
+  /**
+   * Whether a steward run has taken the mission's latest revision. Revisions can share a commit (appending without
+   * doc changes points at HEAD again), so the run must also postdate the revision; a running run holding the commit
+   * counts because new revisions are steered into it.
+   */
+  private stewarded(mission: Mission, stewards: AgentRun[]): boolean {
+    const latest = latestRevision(mission);
+    return stewards.some((r) => r.revision === latest.commit && (r.status === "running" || (r.endedAt ?? r.startedAt) >= latest.at));
+  }
+
   // ---- steward ----
 
   /** One revision per steward run. A running steward gets the next revision steered into its session rather than a new one. */
   private async steward(workspaceId: string): Promise<void> {
     const [missions, runs] = await Promise.all([this.service.listMissions(workspaceId), this.service.listRuns(workspaceId)]);
-    const processed = new Set(runs.filter((r) => r.role === "steward" && r.revision).map((r) => r.revision));
-    const mission = missions.find((m) => m.status === "active" && !processed.has(latestRevision(m).commit));
+    const mission = missions.find((m) => m.status === "active" && !this.stewarded(m, runs.filter((r) => r.role === "steward" && r.missionId === m.missionId)));
     if (!mission) return;
     const revision = latestRevision(mission);
     const previous = mission.revisions.length > 1 ? mission.revisions[mission.revisions.length - 2]!.commit : undefined;
