@@ -3,7 +3,7 @@ import { useState } from "react";
 import { latestRevision, type AgentRun, type DecisionCard, type Mission, type RoleFile, type Scheduler, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
-import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel } from "./ui.js";
+import { Badge, Button, Card, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel } from "./ui.js";
 
 type WorkspacesPanelProps = {
   store: WorkbenchStore;
@@ -130,26 +130,29 @@ const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker:
 const runStatusLabel: Record<AgentRun["status"], string> = { running: "运行中", done: "完成", failed: "失败" };
 
 const SessionLink = ({ sessionId, onOpenSession }: { sessionId: string; onOpenSession: (sessionId: string) => void }) => (
-  <button type="button" className="shrink-0 text-micro text-muted-foreground underline-offset-2 hover:text-strong hover:underline" onClick={() => onOpenSession(sessionId)}>会话</button>
+  <Button size="sm" variant="ghost" onClick={() => onOpenSession(sessionId)}>会话</Button>
 );
 
+const isOpen = (w: WorkItem) => w.status !== "closed" && w.status !== "cancelled";
+
 /** One work item with the agent runs that touched it, newest first. */
-const WorkItemRow = ({ item, runs, waitingFor, onOpenSession }: { item: WorkItem; runs: AgentRun[]; waitingFor: string[]; onOpenSession: (sessionId: string) => void }) => (
-  <li className="text-caption">
+const WorkItemRow = ({ item, runs, waitingFor, onOpenSession, onCancel }: { item: WorkItem; runs: AgentRun[]; waitingFor: string[]; onOpenSession: (sessionId: string) => void; onCancel: () => void }) => (
+  <li className="rounded-md border border-border px-3 py-2">
     <div className="flex items-center gap-2">
       <Badge>{item.risk}</Badge>
-      <span className="truncate text-foreground">{item.title}</span>
+      <span className="truncate text-label text-strong">{item.title}</span>
+      <span className="ml-auto shrink-0 font-mono text-caption text-faint-foreground">{statusLabel[item.status]}{waitingFor.length > 0 ? " · 等待 " + waitingFor.join("、") : ""}{item.rejections.length > 0 ? " · 打回 " + item.rejections.length : ""}{item.run.lastFailure ? " · " + item.run.lastFailure : ""}</span>
       {item.run.sessionId && (item.status === "running" || item.status === "review") && <SessionLink sessionId={item.run.sessionId} onOpenSession={onOpenSession} />}
-      <span className="ml-auto shrink-0 font-mono text-micro text-faint-foreground">{statusLabel[item.status]}{waitingFor.length > 0 ? " · 等待 " + waitingFor.join("、") : ""}{item.rejections.length > 0 ? " · 打回 " + item.rejections.length : ""}{item.run.lastFailure ? " · " + item.run.lastFailure : ""}</span>
+      {isOpen(item) && <Button size="sm" variant="ghost" onClick={onCancel}>取消</Button>}
     </div>
     {runs.length > 0 && (
-      <ul className="ml-2 mt-1 space-y-0.5 border-l border-border pl-3">
+      <ul className="ml-1 mt-1.5 space-y-1 border-l border-border pl-3">
         {runs.map((run) => (
-          <li key={run.runId} className="flex items-center gap-2 text-micro text-muted-foreground">
+          <li key={run.runId} className="flex items-center gap-2 text-caption text-muted-foreground">
             <Badge>{roleLabel[run.role]}</Badge>
             <span className="truncate">{run.note ?? ""}</span>
-            <SessionLink sessionId={run.sessionId} onOpenSession={onOpenSession} />
             <span className="ml-auto shrink-0 font-mono text-faint-foreground">{runStatusLabel[run.status]} · {run.turns} turn · {new Date(run.startedAt).toLocaleTimeString()}</span>
+            <SessionLink sessionId={run.sessionId} onOpenSession={onOpenSession} />
           </li>
         ))}
       </ul>
@@ -170,18 +173,29 @@ type MissionsSectionProps = {
 
 const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, onOpenSession, compact }: MissionsSectionProps) => {
   const setScheduler = (value: Partial<Scheduler>) => void client.request("scheduler.set", { workspaceId, value: { ...scheduler, ...value } });
+  const cancelItem = (item: WorkItem) => void client.request("workItem.cancel", { workspaceId, workItemId: item.workItemId });
+  /** Cancelling a mission also cancels every open work item under it, so nothing keeps running for a dropped goal. */
+  const cancelMission = async (mission: Mission) => {
+    for (const item of workItems.filter((w) => w.missionId === mission.missionId && isOpen(w))) {
+      await client.request("workItem.cancel", { workspaceId, workItemId: item.workItemId });
+    }
+    await client.request("mission.setStatus", { workspaceId, missionId: mission.missionId, status: "cancelled" });
+  };
   const runsFor = (item: WorkItem) => runs.filter((r) => r.workItemId === item.workItemId);
-  const titleById = new Map(workItems.map((w) => [w.workItemId, w.title]));
   const waitingFor = (item: WorkItem) =>
     item.status === "queued"
       ? item.dependsOn.map((id) => workItems.find((w) => w.workItemId === id)).filter((w) => w?.status !== "closed").map((w, i) => (w ? w.title + (w.status === "cancelled" ? "（已取消）" : "") : item.dependsOn[i]!))
       : [];
   const stewardRuns = (mission: Mission) => runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
   const standalone = workItems.filter((w) => !w.missionId);
-  const isOpen = (w: WorkItem) => w.status !== "closed" && w.status !== "cancelled";
   const visibleMissions = compact ? missions.filter((m) => m.status === "active") : missions;
   const visibleStandalone = compact ? standalone.filter(isOpen) : standalone;
   const hidden = missions.length - visibleMissions.length + (standalone.length - visibleStandalone.length);
+  const renderItems = (items: WorkItem[]) => (
+    <ul className="mt-3 space-y-1.5">
+      {items.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} onCancel={() => cancelItem(item)} />)}
+    </ul>
+  );
   return (
     <div>
       <div className="flex items-center gap-3 border-b border-border px-4 py-2">
@@ -191,41 +205,41 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
           <Field type="number" min={1} max={8} value={scheduler.maxWorkers} onChange={(e) => setScheduler({ maxWorkers: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} className="w-14 [&>input]:h-7" />
         </label>
         <span className="truncate text-caption text-faint-foreground">开启后新 revision 触发管家拆单，排队工单由 Worker 接手。</span>
-        {hidden > 0 && <span className="ml-auto shrink-0 text-micro text-faint-foreground">另有 {hidden} 项已结束，展开为页面查看</span>}
+        {hidden > 0 && <span className="ml-auto shrink-0 text-caption text-faint-foreground">另有 {hidden} 项已结束，展开为页面查看</span>}
       </div>
       {missions.length === 0 && standalone.length === 0 && <EmptyState title="还没有任务" hint="去「思考」里和设计伙伴聊出一个。" />}
-      <ul>
+      <ul className="space-y-3 p-4">
         {visibleMissions.map((mission) => {
           const items = workItems.filter((w) => w.missionId === mission.missionId);
-          const stewards = stewardRuns(mission);
+          const steward = stewardRuns(mission)[0];
           return (
-            <li key={mission.missionId} className="border-b border-border px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-label text-strong">{mission.title}</span>
-                <Badge tone={mission.status === "active" ? "accent" : "neutral"}>{missionStatusLabel[mission.status]}</Badge>
-                {stewards[0] && <SessionLink sessionId={stewards[0].sessionId} onOpenSession={onOpenSession} />}
-                {stewards[0]?.status === "running" && <span className="font-mono text-micro text-muted-foreground">管家处理中</span>}
-              </div>
-              {mission.summary && <p className="mt-1 line-clamp-2 text-caption text-muted-foreground">{mission.summary}</p>}
-              <p className="mt-1 font-mono text-micro text-faint-foreground">{mission.revisions.length} 个 revision · 最新 {latestRevision(mission).commit.slice(0, 8)} · {new Date(mission.updatedAt).toLocaleString()}</p>
-              {stewards[0]?.note && <p className="mt-1 line-clamp-2 text-caption text-muted-foreground">管家：{stewards[0].note}</p>}
-              {items.length > 0 && (
-                <ul className="mt-2 space-y-1.5">
-                  {items.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} />)}
-                </ul>
-              )}
+            <li key={mission.missionId}>
+              <Card
+                header={
+                  <>
+                    <Badge tone={mission.status === "active" ? "accent" : "neutral"}>{missionStatusLabel[mission.status]}</Badge>
+                    <span className="truncate text-label font-medium text-strong">{mission.title}</span>
+                    {steward?.status === "running" && <span className="shrink-0 font-mono text-caption text-muted-foreground">管家处理中</span>}
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {steward && <SessionLink sessionId={steward.sessionId} onOpenSession={onOpenSession} />}
+                      {mission.status === "active" && <Button size="sm" variant="ghost" onClick={() => void cancelMission(mission)}>取消任务</Button>}
+                    </span>
+                  </>
+                }
+              >
+                {mission.summary && <p className="line-clamp-3 text-label text-muted-foreground">{mission.summary}</p>}
+                <p className="mt-1.5 font-mono text-caption text-faint-foreground">{mission.revisions.length} 个 revision · 最新 {latestRevision(mission).commit.slice(0, 8)} · {new Date(mission.updatedAt).toLocaleString()}</p>
+                {steward?.note && <p className="mt-1.5 line-clamp-2 text-label text-muted-foreground">管家：{steward.note}</p>}
+                {items.length > 0 && renderItems(items)}
+              </Card>
             </li>
           );
         })}
         {visibleStandalone.length > 0 && (
-          <li className="border-b border-border px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span className="text-label text-strong">独立工单</span>
-              <Badge>不经文档</Badge>
-            </div>
-            <ul className="mt-2 space-y-1.5">
-              {visibleStandalone.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} />)}
-            </ul>
+          <li>
+            <Card header={<><Badge>不经文档</Badge><span className="text-label font-medium text-strong">独立工单</span></>}>
+              {renderItems(visibleStandalone)}
+            </Card>
           </li>
         )}
       </ul>

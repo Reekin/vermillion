@@ -31,17 +31,17 @@
 
 @theme {
   --tracking-eyebrow: 0.12em;
-  --text-micro: 0.66rem;
+  --text-micro: 0.7rem;
   --text-micro--line-height: 1;
-  --text-caption: 0.72rem;
-  --text-caption--line-height: 1.4;
-  --text-label: 0.79rem;
+  --text-caption: 0.76rem;
+  --text-caption--line-height: 1.45;
+  --text-label: 0.82rem;
   --text-label--line-height: 1.45;
-  --text-body: 0.86rem;
-  --text-body--line-height: 1.5;
-  --text-title-sm: 0.95rem;
+  --text-body: 0.9rem;
+  --text-body--line-height: 1.55;
+  --text-title-sm: 1rem;
   --text-title-sm--line-height: 1.3;
-  --text-title: 1.05rem;
+  --text-title: 1.1rem;
   --text-title--line-height: 1.3;
 }
 

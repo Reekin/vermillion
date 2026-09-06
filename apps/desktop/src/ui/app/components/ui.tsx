@@ -7,7 +7,7 @@
  * Buttons       Button, IconButton
  * Text          Badge, SectionLabel, InlineNotice
  * Fields        Field (input / textarea / select / number)
- * Structure     PanelHeader, ListRow, EmptyState
+ * Structure     PanelHeader, ListRow, Card, EmptyState
  * Overlays      Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
@@ -193,6 +193,15 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
     </div>
   );
 };
+
+/** Bordered container for one self-contained item (a decision, a mission, a review). Header line + body + optional footer actions. */
+export const Card = ({ header, children, footer, className }: { header?: ReactNode; children: ReactNode; footer?: ReactNode; className?: string }) => (
+  <article className={cn("rounded-lg border border-border-strong bg-surface", className)}>
+    {header && <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">{header}</header>}
+    <div className="px-4 py-3">{children}</div>
+    {footer && <footer className="flex items-center gap-2 border-t border-border px-4 py-2.5">{footer}</footer>}
+  </article>
+);
 
 /** Current state, why, and (optionally) the one thing to do next. One per view; never stack several. */
 export const EmptyState = ({ title, hint, action }: { title: string; hint?: string; action?: ReactNode }) => (
