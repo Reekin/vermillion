@@ -16,7 +16,7 @@ Vermillion（朱砂）是个人 agent 工作台：通过讨论明确需求，把
 
 ## 界面
 
-**思考**是主页，用于与设计伙伴讨论并修改文档，见 [思考](../Workbench/Think/PRD.md)。**Inbox** 集中展示待决策和待验收内容。**Workspaces** 按活跃顺序展示项目，进入项目后查看任务、Domain、Docs、角色、Issues、Automation。
+**思考**是主页，用于与设计伙伴讨论并修改文档，见 [思考](../Workbench/Think/PRD.md)。**Inbox** 集中展示待决策和待验收内容。**Workspaces** 按活跃顺序展示项目，进入项目后查看任务、会话（agent 的）、Domain、Docs、角色、Issues、Automation。
 
 思考之外的全局入口先以弹窗打开，可展开为页面；切换和关闭时保留原页面状态。Automation 用于用户自定义定时或触发任务，不承载内部 Worker 调度。搜索暂不展开设计。
 
