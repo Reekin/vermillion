@@ -52,6 +52,19 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
 
   const hasMore = Object.values(pages).some((page) => page.hasMore);
 
+  /** Finds a root or nested subagent session by id. */
+  const findSession = (sessionId: string): SidebarSession | undefined => {
+    const walk = (items: SidebarSession[]): SidebarSession | undefined => {
+      for (const item of items) {
+        if (item.sessionId === sessionId) return item;
+        const nested = walk(item.subagents.map((child) => ({ ...child, workspaceId: item.workspaceId, sortAt: item.sortAt })));
+        if (nested) return nested;
+      }
+      return undefined;
+    };
+    return walk(sessions);
+  };
+
   const loadMore = useCallback(async () => {
     const candidates = Object.entries(pages).filter(([, page]) => page.hasMore && page.nextCursor);
     if (candidates.length === 0) return;
@@ -74,5 +87,5 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     }
   }, [pages, transport, loadFirstPages]);
 
-  return { sessions, hasMore, loading, loadMore, reload: loadFirstPages };
+  return { sessions, hasMore, loading, loadMore, reload: loadFirstPages, findSession };
 };

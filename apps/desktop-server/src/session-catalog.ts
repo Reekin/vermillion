@@ -213,12 +213,21 @@ export class SessionCatalogService {
       });
     }
 
+    // Only subagent relations nest; forks stay peers of their origin.
+    const subagentParentById = new Map<string, string>();
+    for (const relation of [...snapshot.sessionRelations, ...this.sessionIndexStore.listRelations()]) {
+      if (relation.relationType === "subagent" && !subagentParentById.has(relation.childSessionId)) {
+        subagentParentById.set(relation.childSessionId, relation.parentSessionId);
+      }
+    }
+
     const seeds: SessionBrowserReadModelSeed[] = [...bySessionId.values()]
       .filter((seed) => isBrowserVisibleSeed(seed, runtimeSessionIds))
       .map((seed) => {
       const activityAt = resolveSeedActivityAt(seed);
       return {
         sessionId: seed.sessionId,
+        parentSessionId: subagentParentById.get(seed.sessionId),
         workspaceId: seed.workspaceId,
         engineId: seed.engineId,
         title: seed.title ?? seed.sessionId,

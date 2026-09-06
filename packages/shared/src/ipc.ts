@@ -142,6 +142,13 @@ export type SessionBrowserItemRpc = {
   isPinned: boolean;
   activityAt?: string;
   lastCompletedTurnAt?: string;
+  /** Set when this session was spawned as a subagent of another session; such items are nested under it. */
+  parentSessionId?: string;
+  subagents: SessionBrowserItemRpc[];
+};
+
+type SessionBrowserItemRpcInput = Omit<SessionBrowserItemRpc, "subagents"> & {
+  subagents?: SessionBrowserItemRpcInput[];
 };
 
 export type SessionBrowserPageRpc = {
@@ -153,16 +160,24 @@ export type SessionBrowserPageRpc = {
   totalCount: number;
 };
 
-const zSessionBrowserItemSchema = z.object({
-  sessionId: zSessionId,
-  engineId: zEngineId,
-  title: z.string().min(1),
-  statusDot: zSessionStatusDotSchema,
-  isActive: z.boolean(),
-  isPinned: z.boolean(),
-  activityAt: z.string().min(1).optional(),
-  lastCompletedTurnAt: z.string().min(1).optional()
-});
+const zSessionBrowserItemSchema: z.ZodType<
+  SessionBrowserItemRpc,
+  z.ZodTypeDef,
+  SessionBrowserItemRpcInput
+> = z.lazy(() =>
+  z.object({
+    sessionId: zSessionId,
+    engineId: zEngineId,
+    title: z.string().min(1),
+    statusDot: zSessionStatusDotSchema,
+    isActive: z.boolean(),
+    isPinned: z.boolean(),
+    activityAt: z.string().min(1).optional(),
+    lastCompletedTurnAt: z.string().min(1).optional(),
+    parentSessionId: zSessionId.optional(),
+    subagents: z.array(zSessionBrowserItemSchema).default([])
+  })
+);
 
 const zSessionBrowserPageSchema = z.object({
   workspaceId: z.string().min(1),

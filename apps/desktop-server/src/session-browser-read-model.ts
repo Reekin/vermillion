@@ -1,6 +1,6 @@
 import type { SessionBrowserItemRpc, SessionBrowserPageRpc } from "@vermillion/shared";
 
-export type SessionBrowserReadModelSeed = SessionBrowserItemRpc & {
+export type SessionBrowserReadModelSeed = Omit<SessionBrowserItemRpc, "subagents"> & {
   workspaceId: string;
   sortAt: string;
 };
@@ -20,7 +20,7 @@ export class SessionBrowserCursorStaleError extends Error {
 }
 
 /** Pinned first, then most recently completed turn first. */
-const compareItems = (
+const compareSeeds = (
   left: SessionBrowserReadModelSeed,
   right: SessionBrowserReadModelSeed
 ): number => {
@@ -61,23 +61,55 @@ const createRevision = (value: string): string => {
   return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
 };
 
-/** Flat, per-workspace, paged view of visible sessions. Forks and subagents are ordinary rows. */
+/**
+ * Per-workspace paged view of visible sessions. Forks are ordinary rows; a subagent session is nested
+ * under the session that spawned it (`parentSessionId`) and never appears as a root.
+ */
 export class SessionBrowserReadModel {
-  private readonly byWorkspaceId = new Map<string, SessionBrowserReadModelSeed[]>();
+  private readonly rootsByWorkspaceId = new Map<string, SessionBrowserItemRpc[]>();
+  private readonly itemsBySessionId = new Map<string, SessionBrowserItemRpc>();
   private readonly revisions = new Map<string, string>();
 
   public constructor(seeds: readonly SessionBrowserReadModelSeed[]) {
+    const seedsBySessionId = new Map(seeds.map((seed) => [seed.sessionId, seed] as const));
+    const childrenByParentId = new Map<string, SessionBrowserReadModelSeed[]>();
+    const roots: SessionBrowserReadModelSeed[] = [];
     for (const seed of seeds) {
-      const collection = this.byWorkspaceId.get(seed.workspaceId) ?? [];
-      collection.push(seed);
-      this.byWorkspaceId.set(seed.workspaceId, collection);
+      const parent = seed.parentSessionId ? seedsBySessionId.get(seed.parentSessionId) : undefined;
+      if (parent && parent.workspaceId === seed.workspaceId) {
+        const siblings = childrenByParentId.get(parent.sessionId) ?? [];
+        siblings.push(seed);
+        childrenByParentId.set(parent.sessionId, siblings);
+      } else {
+        roots.push(seed);
+      }
     }
-    for (const [workspaceId, collection] of this.byWorkspaceId) {
-      collection.sort(compareItems);
-      const fingerprint = [...collection]
+
+    const build = (seed: SessionBrowserReadModelSeed, parentSessionId?: string): SessionBrowserItemRpc => {
+      const { workspaceId: _workspaceId, sortAt: _sortAt, ...rest } = seed;
+      const item: SessionBrowserItemRpc = {
+        ...rest,
+        parentSessionId,
+        subagents: (childrenByParentId.get(seed.sessionId) ?? [])
+          .sort(compareSeeds)
+          .map((child) => build(child, seed.sessionId))
+      };
+      this.itemsBySessionId.set(seed.sessionId, item);
+      return item;
+    };
+
+    for (const workspaceId of new Set(seeds.map((seed) => seed.workspaceId))) {
+      const workspaceRoots = roots
+        .filter((seed) => seed.workspaceId === workspaceId)
+        .sort(compareSeeds)
+        .map((seed) => build(seed));
+      this.rootsByWorkspaceId.set(workspaceId, workspaceRoots);
+      const fingerprint = seeds
+        .filter((seed) => seed.workspaceId === workspaceId)
         .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
         .map((seed) => [
           seed.sessionId,
+          seed.parentSessionId,
           seed.title,
           seed.engineId,
           seed.statusDot,
@@ -107,42 +139,25 @@ export class SessionBrowserReadModel {
       throw new SessionBrowserCursorStaleError();
     }
     const offset = cursor?.offset ?? 0;
-    const collection = this.byWorkspaceId.get(input.workspaceId) ?? [];
-    const items = collection.slice(offset, offset + limit);
+    const roots = this.rootsByWorkspaceId.get(input.workspaceId) ?? [];
+    const items = roots.slice(offset, offset + limit);
     const nextOffset = offset + items.length;
-    const hasMore = nextOffset < collection.length;
+    const hasMore = nextOffset < roots.length;
     return {
       workspaceId: input.workspaceId,
       revision,
-      items: items.map(toItem),
+      items,
       nextCursor: hasMore ? encodeCursor({ revision, offset: nextOffset }) : undefined,
       hasMore,
-      totalCount: collection.length
+      totalCount: roots.length
     };
   }
 
   public get(sessionId: string): SessionBrowserItemRpc | undefined {
-    for (const collection of this.byWorkspaceId.values()) {
-      const seed = collection.find((item) => item.sessionId === sessionId);
-      if (seed) {
-        return toItem(seed);
-      }
-    }
-    return undefined;
+    return this.itemsBySessionId.get(sessionId);
   }
 
   private revisionFor(workspaceId: string): string {
     return this.revisions.get(workspaceId) ?? createRevision(workspaceId);
   }
 }
-
-const toItem = (seed: SessionBrowserReadModelSeed): SessionBrowserItemRpc => ({
-  sessionId: seed.sessionId,
-  engineId: seed.engineId,
-  title: seed.title,
-  statusDot: seed.statusDot,
-  isActive: seed.isActive,
-  isPinned: seed.isPinned,
-  activityAt: seed.activityAt,
-  lastCompletedTurnAt: seed.lastCompletedTurnAt
-});

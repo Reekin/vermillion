@@ -213,9 +213,34 @@ describe("SessionCatalogService", () => {
       isPinned: false,
       isActive: true
     });
+    expect(alpha.items[1]?.parentSessionId).toBeUndefined();
     expect(JSON.stringify(alpha)).not.toContain("summary from index");
     expect(beta.items[0]).toMatchObject({ sessionId: "session-beta", statusDot: "none" });
     expect(await service.get("session-archived")).toBeUndefined();
+
+    await indexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-reviewer",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        title: "Reviewer",
+        createdAt: "2026-04-18T00:00:20Z",
+        updatedAt: "2026-04-18T00:00:21Z"
+      },
+      providerSessionId: "thread-reviewer"
+    });
+    await indexStore.upsertRelation({
+      workspaceId: "workspace-1",
+      parentSessionId: "session-child",
+      childSessionId: "session-reviewer",
+      relationType: "subagent",
+      createdAt: "2026-04-18T00:00:20Z"
+    });
+    const nested = await service.list({ workspaceId: "workspace-1" });
+    expect(nested.items.map((item) => item.sessionId)).toEqual(["session-root", "session-child"]);
+    expect(nested.items[1]?.subagents.map((item) => item.sessionId)).toEqual(["session-reviewer"]);
+    expect((await service.get("session-reviewer"))?.parentSessionId).toBe("session-child");
   });
 
   it("marks unread sessions as read through the backing index store", async () => {

@@ -55,7 +55,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   });
 
   // Docs panel follows the open session's workspace; in draft it follows the picker.
-  const openSession = sidebar.sessions.find((s) => s.sessionId === sessionId);
+  const openSession = sessionId ? sidebar.findSession(sessionId) : undefined;
   useEffect(() => {
     browseWorkspace(sessionId ? openSession?.workspaceId : draftWorkspaceId);
   }, [sessionId, openSession?.workspaceId, draftWorkspaceId, browseWorkspace]);

@@ -36,6 +36,22 @@ describe("SessionBrowserReadModel", () => {
     expect(model.get("missing")).toBeUndefined();
   });
 
+  it("nests subagent sessions under their parent and keeps them out of the root page", () => {
+    const model = new SessionBrowserReadModel([
+      seed({ sessionId: "worker", sortAt: "2026-07-19T01:00:00Z" }),
+      seed({ sessionId: "reviewer", sortAt: "2026-07-19T02:00:00Z", parentSessionId: "worker" }),
+      seed({ sessionId: "verifier", sortAt: "2026-07-19T03:00:00Z", parentSessionId: "worker" }),
+      seed({ sessionId: "orphan", sortAt: "2026-07-19T04:00:00Z", parentSessionId: "missing" })
+    ]);
+
+    const page = model.list({ workspaceId: "workspace-1" });
+    expect(page.items.map((item) => item.sessionId)).toEqual(["orphan", "worker"]);
+    expect(page.totalCount).toBe(2);
+    expect(page.items[1]?.subagents.map((item) => item.sessionId)).toEqual(["verifier", "reviewer"]);
+    expect(page.items[1]?.subagents[0]).toMatchObject({ parentSessionId: "worker", subagents: [] });
+    expect(model.get("reviewer")?.parentSessionId).toBe("worker");
+  });
+
   it("rejects cursors from another revision", () => {
     const original = new SessionBrowserReadModel([
       seed({ sessionId: "older", sortAt: "2026-07-18T01:00:00Z" }),

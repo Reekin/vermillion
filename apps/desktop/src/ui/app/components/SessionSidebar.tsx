@@ -1,4 +1,4 @@
-import { ListTree, Pin, Plus } from "lucide-react";
+import { CornerDownRight, ListTree, Pin, Plus } from "lucide-react";
 import { useMemo, useState, type MouseEvent } from "react";
 import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
@@ -40,27 +40,33 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
     return [...byWorkspace.entries()];
   }, [grouped, sessions]);
 
-  const renderRow = (session: SidebarSession) => (
+  /** A session row; subagents it spawned render nested beneath it, indented one level per depth. */
+  const renderRow = (session: SidebarSession, depth = 0) => (
     <li key={session.sessionId}>
       <button
         type="button"
         onClick={() => onOpen(session.sessionId)}
         onContextMenu={(event) => onOpenMenu(event, session.sessionId)}
         className={cn(
-          "relative flex w-full flex-col gap-0.5 px-4 py-2 text-left hover:bg-surface-hover",
+          "relative flex w-full flex-col gap-0.5 py-2 pr-4 text-left hover:bg-surface-hover",
           selectedSessionId === session.sessionId && "bg-surface-selected before:absolute before:bottom-[5px] before:left-0 before:top-[5px] before:w-0.5 before:bg-accent"
         )}
+        style={{ paddingLeft: 16 + depth * 14 }}
       >
         <span className="flex items-center gap-2">
+          {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
           {session.statusDot === "running" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-strong" aria-label="running" />}
           <span className="truncate text-label text-strong">{session.title}</span>
           {session.isPinned && <Pin size={11} className="ml-auto shrink-0 text-faint-foreground" aria-label="pinned" />}
         </span>
         <span className="flex items-center gap-2 font-mono text-micro text-faint-foreground">
-          {!grouped && <span className="truncate">{workspaceLabelById.get(session.workspaceId) ?? session.workspaceId}</span>}
+          {!grouped && depth === 0 && <span className="truncate">{workspaceLabelById.get(session.workspaceId) ?? session.workspaceId}</span>}
           <span className="ml-auto shrink-0">{formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}</span>
         </span>
       </button>
+      {session.subagents.length > 0 && (
+        <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId: session.workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>
+      )}
     </li>
   );
 
@@ -93,10 +99,10 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           ? groups.map(([workspaceId, list]) => (
               <li key={workspaceId}>
                 <SectionLabel>{workspaceLabelById.get(workspaceId) ?? workspaceId}</SectionLabel>
-                <ul>{list.map(renderRow)}</ul>
+                <ul>{list.map((session) => renderRow(session))}</ul>
               </li>
             ))
-          : sessions.map(renderRow)}
+          : sessions.map((session) => renderRow(session))}
         {hasMore && (
           <li className="px-3 py-2">
             <Button size="sm" variant="ghost" className="w-full" disabled={loading} onClick={() => void loadMore()}>{loading ? "加载中…" : "加载更多"}</Button>
