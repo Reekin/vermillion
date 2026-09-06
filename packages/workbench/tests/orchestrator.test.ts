@@ -1,6 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMemoryWorkspaceSource } from "../src/memory-workspace-source.js";
 import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
@@ -69,7 +71,7 @@ const setup = async (maxWorkers = 1, patrolIntervalMs = 60_000) => {
   const orchestrator = new Orchestrator({ service, roles, runner: fake.runner, maxIdleTurns: 1, patrolIntervalMs });
   orchestrator.start();
   cleanup.push(() => orchestrator.dispose());
-  return { service, ws, roles, ...fake };
+  return { service, ws, roles, orchestrator, ...fake };
 };
 
 describe("Orchestrator", { timeout: 60000 }, () => {
@@ -131,6 +133,180 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     const bAfter = await service.getWorkItem(ws.workspaceId, b.workItemId);
     expect(bAfter.run.lastFailure).toContain("无法恢复");
     expect(sessions.filter((s) => s.metadata.role === "worker")).toHaveLength(1); // A was not re-dispatched
+  });
+
+  it("delivers two rejections as next messages in the same session and merges the accumulated work on approval", async () => {
+    const { service, ws, sessions, complete } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n");
+    await service.commitDocs(ws.workspaceId, { message: "seed" });
+    await promisify(execFile)("git", ["config", "core.autocrlf", "false"], { cwd: ws.rootPath });
+    const item = await service.createWorkItem(ws.workspaceId, {
+      title: "Rework", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: ["result.txt"] }, acceptance: [{ text: "result" }]
+    });
+    await until(async () => sessions.some((s) => s.messages.length > 0));
+    const worker = sessions[0]!;
+    const original = (await service.getWorkItem(ws.workspaceId, item.workItemId)).run;
+    const submit = (summary: string) => service.submitWorkItem(ws.workspaceId, item.workItemId, {
+      evidence: { summary, commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] },
+      review: [{ comment: summary, decision: "accepted", reason: "fixed" }],
+      verify: { items: [{ index: 0, pass: true, evidence: summary }], verdict: "pass" }
+    });
+    await writeFile(join(worker.cwd, "result.txt"), "initial\n");
+    await submit("initial");
+    const rejected = await service.rejectWorkItem(ws.workspaceId, item.workItemId, "first correction");
+    expect(rejected.run.resumeMessage).toBe("用户打回：first correction");
+    await tick();
+    expect(worker.messages).toHaveLength(1); // Inbox can reject before the submitting turn has finished.
+    complete(worker.sessionId, "initial submitted");
+    await until(async () => worker.messages.length === 2);
+    expect(worker.messages[1]).toContain("用户打回：first correction");
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run).toMatchObject({ sessionId: original.sessionId, worktreePath: original.worktreePath, branch: original.branch });
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.resumeMessage).toBeUndefined();
+    expect(await readFile(join(worker.cwd, "result.txt"), "utf8")).toBe("initial\n");
+    await writeFile(join(worker.cwd, "result.txt"), "initial\nfirst correction\n");
+    await submit("first corrected");
+    complete(worker.sessionId, "first correction submitted");
+    await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
+    await service.rejectWorkItem(ws.workspaceId, item.workItemId, "second correction");
+    await until(async () => worker.messages.length === 3);
+    expect(worker.messages[2]).toContain("用户打回：second correction");
+    expect(worker.messages[2]).not.toContain("first correction");
+    expect(sessions).toHaveLength(1);
+    const second = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    expect(second.run).toMatchObject({ sessionId: original.sessionId, worktreePath: original.worktreePath, branch: original.branch });
+    expect(second.rejections.map((r) => r.reason)).toEqual(["first correction", "second correction"]);
+    expect(await readFile(join(worker.cwd, "result.txt"), "utf8")).toBe("initial\nfirst correction\n");
+    await writeFile(join(worker.cwd, "result.txt"), "initial\nfirst correction\nsecond correction\n");
+    await submit("second corrected");
+    complete(worker.sessionId, "second correction submitted");
+    await until(async () => (await service.listRuns(ws.workspaceId)).every((r) => r.status === "done"));
+    const inbox = await service.listInbox();
+    expect(inbox).toHaveLength(1);
+    const submitted = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    expect(submitted.evidence?.summary).toBe("second corrected");
+    expect(submitted.review[0]?.comment).toBe("second corrected");
+    expect(submitted.verify?.items[0]?.evidence).toBe("second corrected");
+    expect((await service.listRuns(ws.workspaceId)).map((r) => r.sessionId)).toEqual([worker.sessionId, worker.sessionId, worker.sessionId]);
+    const closed = await service.approveWorkItem(ws.workspaceId, item.workItemId);
+    expect(closed.status).toBe("closed");
+    expect(await readFile(join(ws.rootPath, "result.txt"), "utf8")).toBe("initial\nfirst correction\nsecond correction\n");
+    await expect(access(worker.cwd)).rejects.toThrow();
+    expect(await service.listInbox()).toEqual([]);
+  });
+
+  it.each(["available", "missing", "throws"])("recovers a queued rejection after restart when the session is %s", async (availability) => {
+    const { service, ws, roles, sessions, runner, orchestrator } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Rework", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
+    await until(async () => sessions.some((s) => s.messages.length > 0));
+    const worker = sessions[0]!;
+    await service.setScheduler(ws.workspaceId, { enabled: false, maxWorkers: 1 });
+    for (const reason of ["first reason", "second reason"]) {
+      await service.submitWorkItem(ws.workspaceId, item.workItemId, { evidence: { summary: "done", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+      await service.rejectWorkItem(ws.workspaceId, item.workItemId, reason);
+    }
+    orchestrator.dispose();
+    const resumed: string[] = [];
+    runner.resume = async (id) => { resumed.push(id); if (availability === "throws") throw new Error("unavailable"); return availability === "available"; };
+    const second = new Orchestrator({ service, roles, runner });
+    second.start();
+    cleanup.push(() => second.dispose());
+    await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+    await until(async () => sessions.reduce((count, s) => count + s.messages.length, 0) === 2);
+    expect(resumed).toEqual([worker.sessionId]);
+    expect((await service.listRuns(ws.workspaceId)).filter((r) => r.status === "running")).toHaveLength(1);
+    if (availability === "available") {
+      expect(sessions).toHaveLength(1);
+      expect(worker.messages[1]).toContain("用户打回：second reason");
+      expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.sessionId).toBe(worker.sessionId);
+    } else {
+      expect(sessions).toHaveLength(2);
+      expect(sessions[1]!.messages[0]).toContain("用户打回：first reason");
+      expect(sessions[1]!.messages[0]).toContain("用户打回：second reason");
+      expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.sessionId).toBe(sessions[1]!.sessionId);
+    }
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts).toBeUndefined();
+  });
+
+  it("delivers decision answers after the issuing turn finishes and retains the session and worktree", async () => {
+    const { service, ws, sessions, complete } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# spec\n");
+    await service.commitDocs(ws.workspaceId, { message: "seed" });
+    const item = await service.createWorkItem(ws.workspaceId, {
+      title: "Decision", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: ["result.txt"] }, acceptance: [{ text: "result" }]
+    });
+    await until(async () => sessions.some((s) => s.messages.length > 0));
+    const worker = sessions[0]!;
+    const original = (await service.getWorkItem(ws.workspaceId, item.workItemId)).run;
+    await writeFile(join(worker.cwd, "result.txt"), "before decision\n");
+    for (const kind of ["worker", undefined] as const) {
+      const card = await service.createDecision(ws.workspaceId, {
+        kind, workItemId: item.workItemId, sessionId: worker.sessionId, question: "Choose a format?", context: "",
+        options: [{ key: "plain", label: "Plain text", detail: "" }]
+      });
+      const messageCount = worker.messages.length;
+      await service.answerDecision(ws.workspaceId, card.decisionId, { key: "plain", note: "keep previous lines" });
+      await tick();
+      expect(worker.messages).toHaveLength(messageCount);
+      complete(worker.sessionId, "waiting for decision");
+      await until(async () => worker.messages.length === messageCount + 1);
+      expect(worker.messages.at(-1)).toContain("用户决策答复：Choose a format? -> Plain text (keep previous lines)");
+      const continued = await service.getWorkItem(ws.workspaceId, item.workItemId);
+      expect(continued.status).toBe("running");
+      expect(continued.run).toMatchObject({ sessionId: original.sessionId, worktreePath: original.worktreePath, branch: original.branch });
+      expect(continued.run.resumeMessage).toBeUndefined();
+      expect(await readFile(join(worker.cwd, "result.txt"), "utf8")).toBe("before decision\n");
+      expect(sessions).toHaveLength(1);
+    }
+    expect((await service.listRuns(ws.workspaceId)).map((r) => r.sessionId)).toEqual([worker.sessionId, worker.sessionId, worker.sessionId]);
+  });
+
+  it.each(["available", "missing", "throws"])("recovers an answered decision after restart when the session is %s", async (availability) => {
+    const { service, ws, roles, sessions, runner, orchestrator } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Decision", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
+    await until(async () => sessions.some((s) => s.messages.length > 0));
+    const worker = sessions[0]!;
+    await service.setScheduler(ws.workspaceId, { enabled: false, maxWorkers: 1 });
+    const card = await service.createDecision(ws.workspaceId, {
+      workItemId: item.workItemId, sessionId: worker.sessionId, question: "A or B?", context: "",
+      options: [{ key: "a", label: "A", detail: "" }]
+    });
+    await service.answerDecision(ws.workspaceId, card.decisionId, { key: "a", note: "keep it simple" });
+    orchestrator.dispose();
+    const resumed: string[] = [];
+    runner.resume = async (id) => { resumed.push(id); if (availability === "throws") throw new Error("unavailable"); return availability === "available"; };
+    const second = new Orchestrator({ service, roles, runner });
+    second.start();
+    cleanup.push(() => second.dispose());
+    await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+    await until(async () => sessions.reduce((count, s) => count + s.messages.length, 0) === 2);
+    expect(resumed).toEqual([worker.sessionId]);
+    expect((await service.listRuns(ws.workspaceId)).filter((r) => r.status === "running")).toHaveLength(1);
+    const active = sessions.at(-1)!;
+    expect(active.messages.at(-1)).toContain("A or B? -> A (keep it simple)");
+    expect(sessions).toHaveLength(availability === "available" ? 1 : 2);
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.sessionId).toBe(active.sessionId);
+  });
+
+  it("opens a fresh session when retrying the scheduler's three-failure decision", async () => {
+    const { service, ws, sessions, runner, complete } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Retry", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await until(async () => sessions.length === attempt + 1 && sessions[attempt]!.messages.length > 0);
+      const worker = sessions[attempt]!;
+      complete(worker.sessionId, "unfinished");
+      await until(async () => worker.messages.length === 2);
+      complete(worker.sessionId, "still unfinished");
+    }
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "decision");
+    const [card] = await service.listDecisions(ws.workspaceId);
+    expect(card!.kind).toBe("attempts");
+    const resumed: string[] = [];
+    runner.resume = async (id) => { resumed.push(id); return true; };
+    await service.answerDecision(ws.workspaceId, card!.decisionId, { key: "retry", note: "try once more" });
+    await until(async () => sessions.length === 4 && sessions[3]!.messages.length > 0);
+    expect(resumed).toEqual([]);
+    expect(sessions[3]!.messages[0]).toContain("try once more");
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts).toBe(0);
   });
 
   it("holds items until dependsOn are closed and needs slots are free", async () => {

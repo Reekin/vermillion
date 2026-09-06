@@ -339,7 +339,7 @@ export class WorkbenchService {
 
   /** Worker claimed the item; records the session and worktree it runs in. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined } }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
@@ -382,7 +382,7 @@ export class WorkbenchService {
   async rejectWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
     return this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
-      return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }] };
+      return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }], run: { ...item.run, resumeMessage: "用户打回：" + reason } };
     });
   }
 
@@ -509,7 +509,11 @@ export class WorkbenchService {
           ...item,
           status: item.status === "decision" ? "queued" : item.status,
           decisions: [...item.decisions, line],
-          run: resetAttempts ? { ...item.run, attempts: 0, lastFailure: undefined } : item.run
+          run: resetAttempts
+            ? { ...item.run, sessionId: undefined, resumeMessage: undefined, attempts: 0, lastFailure: undefined }
+            : item.status === "decision"
+              ? { ...item.run, sessionId: card.sessionId ?? item.run.sessionId, resumeMessage: "用户决策答复：" + line }
+              : item.run
         }));
       }
     }

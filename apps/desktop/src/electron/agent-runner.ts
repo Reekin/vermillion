@@ -97,8 +97,10 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
   },
   resume: async (sessionId) => {
     try {
-      await shell.openSession(sessionId);
-      return true;
+      // Background recovery must not participate in the UI's cancellable session-opening sequence.
+      if (!await shell.ensureSessionLoadedForRead(sessionId)) return false;
+      const result = await shell.runSessionAction({ sessionId, action: "resume" });
+      return result.action === "resume" && result.resumed;
     } catch {
       return false;
     }
