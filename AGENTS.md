@@ -25,7 +25,7 @@
 
 ## 角色 prompt
 - 默认版本是 `packages/workbench/roles/<role>.md`（打包后在 `resources/app/roles/`）。启动时 `RoleService.ensureGlobal` 把缺失的角色补到 `~/.vermillion/roles/`；已存在的不覆盖。开发期间以 `~/.vermillion/roles/` 为准（用户直接改那里），提交前 `cp ~/.vermillion/roles/*.md packages/workbench/roles/` 反向同步。
-- 解析顺序：`<root>/.vermillion/roles/<role>.md` → `~/.vermillion/roles/<role>.md`。RPC：`role.list / read / write / reset`；Workspaces → Domain 页编辑的是 workspace 覆盖。
+- 解析顺序：`<root>/.vermillion/roles/<role>.md` → `~/.vermillion/roles/<role>.md`。RPC：`role.list / read / write / reset`；Workspaces → 角色 页编辑的是 workspace 覆盖。
 - 注入方式：会话 metadata 带 `developerInstructions`，runtime port 在 `thread/start` 时读 codex `config/read` 的 `developer_instructions` 并追加角色文本，不覆盖用户 config.toml 里的配置。思考会话注入 `design-partner`。
 
 ## 调度（packages/workbench/src/orchestrator.ts）
@@ -38,6 +38,9 @@
 - 调度开关和运行记录在 Workspaces → 任务 页；Automation 页留给用户自定义的定时/触发任务，与这套循环无关。
 - `AgentRunner`（apps/desktop/src/electron/agent-runner.ts）是编排层对会话引擎的唯一依赖：open / send / interrupt / lastReply / onTurnCompleted。agent 会话 metadata 带 `role`、`workItemId`、`missionId`。
 - 启动时把 `vermillion` CLI 放到 `<baseDir>/bin` 并加进本进程 PATH，codex 子进程继承，agent 直接 `vermillion <method> [json]`。
+
+## Domain
+- 领域定义是普通文档：`.vermillion/docs/domains/<id>.md`，正文自然语言说明覆盖范围和触发条件，frontmatter `standards:` 列规范文档路径。没有程序侧匹配；管家建单时读全部定义，语义判断工单涉及哪些领域，把这些领域的 standards 作为 refs 附上，Worker 开工前读。Workspaces → Domain 页只是列出并编辑这个目录。
 
 ## 工单
 - 独立工单：无 missionId、无 refs，用于打包、跑测试这类不改文档的操作；设计伙伴在聊天里直接 `workItem.create`，不经管家。

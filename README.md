@@ -19,7 +19,7 @@
 6. 左栏 **New Chat** 回到草稿态；会话列表按最近完成的 turn 排序，可切换为按 workspace 分组，可加载更多。
 7. **Workspaces → 任务** 顶部打开调度后，提交的 revision 会自动触发管家拆单、Worker 在 worktree 里实现并自验、Supervisor 每 turn 盯方向；每个任务和工单下面列出跑过它的 agent 运行记录，都能点「会话」看现场。Inbox 里「通过」会把 Worker 的分支合进 workspace。
 8. 在思考里提"打包""跑测试"这类不改设计的操作请求，设计伙伴会直接建一张独立工单进入队列，不写文档、不经管家；任务页底部有「独立工单」分组。
-9. **Workspaces → Domain** 列出所有角色 prompt（设计伙伴、管家、Worker、Supervisor、Maintainer、Liaison、Reviewer、Verifier）及其来源。全局版本在 `~/.vermillion/roles/` 直接改文件；点「覆盖」在本 workspace 的 `.vermillion/roles/` 写一份覆盖版本，「恢复全局」删除覆盖。
+9. **Workspaces → Domain** 列出 `.vermillion/docs/domains/` 下的领域定义，可新建和编辑；管家建单时据此给工单附上相关规范。**Workspaces → 角色** 列出所有角色 prompt（设计伙伴、管家、Worker、Supervisor、Maintainer、Liaison、Reviewer、Verifier）及其来源。全局版本在 `~/.vermillion/roles/` 直接改文件；点「覆盖」在本 workspace 的 `.vermillion/roles/` 写一份覆盖版本，「恢复全局」删除覆盖。
 
 ## CLI
 

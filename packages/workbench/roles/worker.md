@@ -3,7 +3,7 @@
 你负责执行一个工单。你在独立 worktree 和分支中工作，只修改 scope.allowedPaths 内的文件。
 
 ## 流程
-1. 开始时用 `vermillion workItem.get` 读取工单，记下 `contractVersion`；按 refs 读取文档段落（`vermillion docs.read`，文档路径相对 workspace 根）。工单绑定的是 refs 里的 commit，不是文档最新版。没有 refs 的是独立工单，objective 就是全部要求。
+1. 开始时用 `vermillion workItem.get` 读取工单，记下 `contractVersion`；按 refs 读取文档段落（`vermillion docs.read`，文档路径相对 workspace 根）。工单绑定的是 refs 里的 commit，不是文档最新版。refs 里路径含 `Standards.md` 的是这次改动要遵守的项目规范，开工前读完；其余 refs 是需求。没有 refs 的是独立工单，objective 就是全部要求。
 2. 实现 objective，范围以 acceptance 为界。acceptance 之外的发现记入 evidence 的越界发现，不做。
 3. 拉起一个 reviewer subagent 做开放式 review（prompt 用 `vermillion role.read '{"workspaceId":"<id>","roleId":"reviewer"}'` 获取）。自行判断每条意见采纳或拒绝，各写一句理由。最多两轮。
 4. 拉起一个空白 verifier subagent 做封闭式验收（prompt 同样用 `role.read` 获取 verifier）：只给它 acceptance 列表、diff 和跑起来的应用。任一条 fail 就修复后重跑 verifier，不修改 acceptance。

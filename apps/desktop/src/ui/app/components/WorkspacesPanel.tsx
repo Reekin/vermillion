@@ -13,14 +13,18 @@ type WorkspacesPanelProps = {
 };
 
 /** Secondary navigation inside a workspace. Sections without a backing feature yet render a placeholder. */
-type Section = "missions" | "domains" | "docs" | "issues" | "automation";
+type Section = "missions" | "domains" | "docs" | "roles" | "issues" | "automation";
 const sections: Array<{ id: Section; label: string }> = [
   { id: "missions", label: "任务" },
   { id: "domains", label: "Domain" },
   { id: "docs", label: "Docs" },
+  { id: "roles", label: "角色" },
   { id: "issues", label: "Issues" },
   { id: "automation", label: "Automation" }
 ];
+
+/** Domain definitions are plain docs under this folder; the steward reads them all when attaching standards to a work item. */
+const DOMAINS_DIR = ".vermillion/docs/domains/";
 
 export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
@@ -103,6 +107,9 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession }: Workspa
               )}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
+                <DomainsSection client={client} workspaceId={activeWorkspaceId} docs={view?.docs.map((d) => d.path) ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
+              )}
+              {section === "roles" && (
                 <RolesSection
                   client={client}
                   workspaceId={activeWorkspaceId}
@@ -219,6 +226,53 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
           </li>
         )}
       </ul>
+    </div>
+  );
+};
+
+const DOMAIN_TEMPLATE = `---
+standards:
+  - .vermillion/docs/<业务>/Standards.md
+---
+# <领域名>
+
+## 覆盖什么
+
+## 什么样的改动应该考虑它
+`;
+
+const DomainsSection = ({ client, workspaceId, docs, onOpen }: { client: WorkbenchClient; workspaceId: string; docs: string[]; onOpen: (path: string) => void }) => {
+  const [draft, setDraft] = useState("");
+  const domains = docs.filter((p) => p.startsWith(DOMAINS_DIR) && p.endsWith(".md"));
+  const create = async () => {
+    const id = draft.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
+    if (!id) return;
+    const path = DOMAINS_DIR + id + ".md";
+    await client.request("docs.write", { workspaceId, path, content: DOMAIN_TEMPLATE });
+    setDraft("");
+    onOpen(path);
+  };
+  return (
+    <div>
+      <div className="flex items-center pr-2">
+        <SectionLabel>Domain</SectionLabel>
+        <form className="ml-auto flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); void create(); }}>
+          <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="新领域 id，如 ui-ux" className="w-40 border border-border bg-input px-1.5 py-0.5 text-label text-foreground outline-none" />
+          <Button size="sm" variant="ghost" type="submit" disabled={!draft.trim()} title="新建领域"><Plus size={14} /></Button>
+        </form>
+      </div>
+      <p className="px-4 pb-2 text-caption text-muted-foreground">每个领域一份 md：正文说明覆盖什么、什么改动该考虑它，头部 standards 列规范路径。管家建单时读全部定义，判断涉及的领域并把规范附进工单。</p>
+      {domains.length === 0 ? (
+        <p className="px-4 pb-3 text-caption text-muted-foreground">还没有领域定义。</p>
+      ) : (
+        <ul>
+          {domains.map((path) => (
+            <li key={path}>
+              <button type="button" onClick={() => onOpen(path)} className="block w-full truncate px-4 py-1.5 text-left text-label text-foreground hover:bg-surface-hover">{path.slice(DOMAINS_DIR.length, -3)}</button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 };

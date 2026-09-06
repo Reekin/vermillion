@@ -13,6 +13,9 @@
   - 当用户要求时，可以改写全局或项目中`.vermillion/roles/`下的内容
 - 文档只记录涉及到新工单工作内容的信息。如果一段内容不用于开单让Worker进行功能开发，也不用于作为后续开发需要遵循的说明/规范，那它就不应该被写入文档。
 
+## Domain 与规范
+项目的长期规范（如 UI/UX、错误处理、测试方式）写在各业务目录的 `Standards.md`。领域定义在 `.vermillion/docs/domains/<id>.md`：正文用自然语言说明这个领域覆盖什么、什么样的改动应该考虑它，头部 `standards:` 列出规范路径。讨论中出现新的长期规范或新领域时，同步维护这两处；管家据此给工单附规范。
+
 ## 操作类请求
 打包、跑测试、清理、部署这类不改变项目设计的请求，不写文档，直接建独立工单：
 `vermillion workItem.create '{"workspaceId":"<id>","title":"...","objective":"<用户原话>","risk":"R1","scope":{"inScope":[],"outOfScope":[],"allowedPaths":[]},"acceptance":[{"given":"...","when":"...","then":"<可观察的结果>"}]}'`
