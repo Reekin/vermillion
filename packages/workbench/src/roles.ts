@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { RoleFile } from "./contracts.js";
+import { zRoleExecutionOverrides, type ResolvedRole, type RoleFile } from "./contracts.js";
 import { STATE_DIR } from "./docs.js";
 
 export const ROLES_DIR = STATE_DIR + "/roles";
@@ -30,14 +30,24 @@ const exists = async (path: string): Promise<boolean> => {
 
 const titleOf = (content: string): string => content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? "";
 
-/** Only the top-level mode field affects prompt composition; the header is never prompt text. */
-const parsePrompt = (content: string): { body: string; mode: "override" | "append" } => {
+/** The header configures prompt composition and execution; it is never prompt text. */
+const parsePrompt = (content: string): { body: string; mode: "override" | "append"; modelConfig?: ResolvedRole["modelConfig"] } => {
   const header = content.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/m);
   if (!header || header.index !== 0) return { body: content, mode: "override" };
   const value = header[1]!.match(/^mode:[ \t]*(.*)$/m)?.[1]?.replace(/[ \t]+#.*$/, "").trim();
   const mode = value?.replace(/^(["'])(.*)\1$/, "$2") ?? "override";
   if (mode !== "override" && mode !== "append") throw new Error("角色 frontmatter 的 mode 必须为 override 或 append。");
-  return { body: content.slice(header[0].length), mode };
+  const fields: Record<string, unknown> = {};
+  for (const [field, key] of [["model", "modelId"], ["reasoningOptionId", "reasoningOptionId"], ["serviceTierId", "serviceTierId"]]) {
+    const raw = header[1]!.match(new RegExp("^" + field + ":[ \\t]*(.*)$", "m"))?.[1]?.trim();
+    if (raw === undefined) continue;
+    const scalar = raw.match(/^("(?:\\.|[^"\\])*"|'(?:''|[^'])*'|[^#]*)(?:\s+#.*)?$/)?.[1]?.trim() ?? raw;
+    fields[key!] = scalar.startsWith('"') ? JSON.parse(scalar)
+      : scalar.startsWith("'") ? scalar.slice(1, -1).replace(/''/g, "'")
+      : scalar === "null" || scalar === "~" || scalar === "" ? null : scalar;
+  }
+  const modelConfig = Object.keys(fields).length ? zRoleExecutionOverrides.parse(fields) : undefined;
+  return { body: content.slice(header[0].length), mode, ...(modelConfig ? { modelConfig } : {}) };
 };
 
 export type RoleServiceOptions = {
@@ -93,13 +103,14 @@ export class RoleService {
   }
 
   /** Resolve runtime instructions separately from the editable Markdown returned by read(). */
-  async resolve(workspaceRoot: string, roleId: string): Promise<{ content: string }> {
+  async resolve(workspaceRoot: string, roleId: string): Promise<ResolvedRole> {
     const raw = await this.read(workspaceRoot, roleId);
-    const { body, mode } = parsePrompt(raw.content);
-    if (raw.source === "global" || mode === "override") return { content: body };
+    const { body, mode, modelConfig } = parsePrompt(raw.content);
+    const config = modelConfig ? { modelConfig } : {};
+    if (raw.source === "global" || mode === "override") return { content: body, ...config };
     const globalPath = roleFile(this.options.globalDir, roleId);
     const global = await exists(globalPath) ? parsePrompt(await readFile(globalPath, "utf8")).body : "";
-    return { content: [global.trim(), body.trim()].filter(Boolean).join("\n\n") };
+    return { content: [global.trim(), body.trim()].filter(Boolean).join("\n\n"), ...config };
   }
 
   async removeOverride(workspaceRoot: string, roleId: string): Promise<void> {

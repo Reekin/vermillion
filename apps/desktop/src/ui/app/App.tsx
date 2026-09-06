@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { mergeSessionExecutionProfile, resolveEngineExecutionPreference } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { SessionPane } from "../chat-shell/SessionPane.js";
@@ -68,9 +69,14 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       if (!workspace) throw new Error("请先在 Composer 里选择一个 workspace。");
       const engineId = (await transport.engine.list()).find((e) => e.engineId === "codex")?.engineId ?? "codex";
       const role = await store.getState().client.request("role.resolve", { workspaceId: workspace.workspaceId, roleId: "design-partner" });
+      const settings = await transport.settings.get();
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
         engineId,
+        sessionProfile: mergeSessionExecutionProfile(
+          resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]),
+          role.modelConfig
+        ),
         metadata: { cwd: workspace.rootPath, developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
       });
       void content;

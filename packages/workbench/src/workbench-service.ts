@@ -189,7 +189,7 @@ export class WorkbenchService {
     return this.roles.read((await this.context(workspaceId)).rootPath, roleId);
   }
 
-  async resolveRole(workspaceId: string, roleId: string): Promise<{ content: string }> {
+  async resolveRole(workspaceId: string, roleId: string) {
     return this.roles.resolve((await this.context(workspaceId)).rootPath, roleId);
   }
 

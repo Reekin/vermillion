@@ -510,7 +510,7 @@ export const useComposerController = (
         currentModelId,
         persistedProfile: readSessionExecutionProfile(input.activeSession?.metadata),
         lastExecution: input.lastExecution,
-        modelExecutionPreferences: input.modelExecutionPreferences
+        modelExecutionPreferences: currentModelId ? input.modelExecutionPreferences : undefined
       }),
     [
       currentModelId,
@@ -935,6 +935,15 @@ export const useComposerController = (
       const sessionId =
         input.activeSessionId ??
         (await input.createSession!({ content, attachments }));
+      let execution = payload.execution;
+      if (!input.activeSessionId) {
+        const { page } = await input.transport.sessionBrowser.open(sessionId);
+        const session = page.snapshot.sessions.find((item) => item.sessionId === sessionId);
+        const profile = readSessionExecutionProfile(session?.metadata);
+        if (profile?.modelId) {
+          execution = { modelId: profile.modelId, reasoningOptionId: profile.reasoningOptionId, serviceTierId: profile.serviceTierId };
+        }
+      }
       if (payload.mode === "steer" && payload.turnId) {
         const receipt = await input.transport.chat.steer({
           sessionId,
@@ -950,7 +959,7 @@ export const useComposerController = (
           sessionId,
           content,
           attachments,
-          execution: payload.execution
+          execution
         });
         if (!receipt.accepted) {
           throw new Error("The current runtime rejected the send request.");
