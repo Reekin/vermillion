@@ -440,12 +440,12 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await tick();
     expect(worker.messages.some((m) => m.includes("工单已调整"))).toBe(false);
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("decision");
-    // free answer: note only
+    // free answer: note only; the same worker session gets the note plus the adjustment as its next message
+    const messageCount = worker.messages.length;
     await service.answerDecision(ws.workspaceId, card.decisionId, { note: "做 A，但别碰配置文件" });
-    await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2);
-    const next = sessions.filter((s) => s.metadata.role === "worker").at(-1)!;
-    await until(async () => next.messages.length > 0);
-    expect(next.messages[0]).toContain("已决策：A or B? -> 备注：做 A，但别碰配置文件；挂起期间工单调整：范围收窄到 A");
+    await until(async () => worker.messages.length === messageCount + 1);
+    expect(worker.messages.at(-1)).toContain("用户决策答复：A or B? -> 备注：做 A，但别碰配置文件；挂起期间工单调整：范围收窄到 A");
+    expect(sessions.filter((s) => s.metadata.role === "worker")).toHaveLength(1);
   });
 
   it("steers the running worker on a contract change and voids a submit from the turn the change landed in", async () => {
