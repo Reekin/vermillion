@@ -291,7 +291,7 @@ describe("CodexSessionActionsProvider", () => {
       workspaceId: "workspace-1",
       session: {
         sessionId: "codex-thread:thread-child",
-        conversationId: "conversation-discovered:session-1",
+        conversationId: "conversation-1",
         engineId: "codex",
         title: "Forked preview",
         createdAt: "2026-04-18T00:00:02.000Z",
@@ -381,7 +381,7 @@ describe("CodexSessionActionsProvider", () => {
     );
   });
 
-  it("uses existing tree relations to keep forked children in the root conversation", async () => {
+  it("keeps forked children in the parent session's conversation", async () => {
     const forkThread = vi.fn().mockResolvedValue({
       id: "thread-child",
       preview: "Nested fork",
@@ -442,7 +442,7 @@ describe("CodexSessionActionsProvider", () => {
     expect(upsertSession).toHaveBeenCalledWith(
       expect.objectContaining({
         session: expect.objectContaining({
-          conversationId: "conversation-discovered:session-root"
+          conversationId: "conversation-parent"
         })
       })
     );

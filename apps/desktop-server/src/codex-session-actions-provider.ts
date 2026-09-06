@@ -214,13 +214,18 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         updatedAt,
         metadata: buildForkMetadata(input, thread.id, thread)
       };
-      const conversationId = resolveForkConversationId({
-        childSession: childSessionRecord,
-        parentSessionId: input.sessionId,
-        workspaceId,
-        sessionIndexStore: input.sessionIndexStore,
-        createdAt
-      });
+      // A fork stays in its parent's conversation. Sessions created in-app carry their conversation id; only
+      // discovered ones need it derived from the fork chain.
+      const conversationId =
+        input.session?.conversationId ??
+        input.indexEntry?.conversationId ??
+        resolveForkConversationId({
+          childSession: childSessionRecord,
+          parentSessionId: input.sessionId,
+          workspaceId,
+          sessionIndexStore: input.sessionIndexStore,
+          createdAt
+        });
       this.codexRuntimePort.attachThreadToSession(childSessionId, thread.id);
       await input.sessionIndexStore.upsertSession({
         workspaceId,
