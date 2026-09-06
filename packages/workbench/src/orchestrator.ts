@@ -203,7 +203,7 @@ export class Orchestrator {
     const closed = new Set(items.filter((i) => i.status === "closed").map((i) => i.workItemId)); // cancelled never satisfies a dependency
     const busy = new Set(items.filter((i) => i.status === "running").flatMap((i) => i.needs));
     const ready = items.filter(
-      (i) => i.status === "queued" && (i.run.attempts ?? 0) < 3 && i.dependsOn.every((id) => closed.has(id)) && !i.needs.some((need) => busy.has(need))
+      (i) => i.status === "queued" && i.dependsOn.every((id) => closed.has(id)) && !i.needs.some((need) => busy.has(need))
     );
     for (const item of ready.slice(0, capacity)) {
       await this.openWorker(workspaceId, item);

@@ -3,7 +3,9 @@ import type { InboxItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { Badge, Button, Empty } from "./ui.js";
 
-export const InboxPanel = ({ store }: { store: WorkbenchStore }) => {
+type InboxPanelProps = { store: WorkbenchStore; onOpenSession: (sessionId: string) => void };
+
+export const InboxPanel = ({ store, onOpenSession }: InboxPanelProps) => {
   const inbox = store((s) => s.inbox);
   if (inbox.length === 0) {
     return <Empty title="没有待处理事项" hint="决策卡和待验收的工单会出现在这里。" />;
@@ -12,16 +14,19 @@ export const InboxPanel = ({ store }: { store: WorkbenchStore }) => {
     <ul className="divide-y divide-border">
       {inbox.map((item) => (
         <li key={item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId} className="px-4 py-3">
-          {item.kind === "decision" ? <DecisionRow store={store} item={item} /> : <ReviewRow store={store} item={item} />}
+          {item.kind === "decision" ? <DecisionRow store={store} item={item} onOpenSession={onOpenSession} /> : <ReviewRow store={store} item={item} />}
         </li>
       ))}
     </ul>
   );
 };
 
-const DecisionRow = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "decision" }> }) => {
+const DecisionRow = ({ store, item, onOpenSession }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "decision" }>; onOpenSession: (sessionId: string) => void }) => {
   const client = store((s) => s.client);
   const [busy, setBusy] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const missionTitle = store((s) => s.view?.workspaceId === item.workspaceId ? s.view.missions.find((m) => m.missionId === item.card.missionId)?.title : undefined);
+  const { card } = item;
   const answer = async (key: string) => {
     setBusy(true);
     try {
@@ -32,15 +37,39 @@ const DecisionRow = ({ store, item }: { store: WorkbenchStore; item: Extract<Inb
   };
   return (
     <div>
-      <div className="flex items-center gap-2"><Badge tone="accent">决策</Badge><span className="text-body text-strong">{item.card.question}</span></div>
-      {item.card.context && <p className="mt-1 whitespace-pre-wrap text-caption text-muted-foreground">{item.card.context}</p>}
-      <div className="mt-2 flex flex-wrap gap-2">
-        {item.card.options.map((option) => (
-          <Button key={option.key} size="sm" variant={option.key === item.card.recommended ? "primary" : "secondary"} disabled={busy} onClick={() => void answer(option.key)} title={option.detail}>
-            {option.label}{option.key === item.card.recommended ? "（推荐）" : ""}
-          </Button>
-        ))}
+      <div className="flex items-center gap-2">
+        <Badge tone="accent">决策</Badge>
+        {missionTitle && <span className="truncate text-caption text-muted-foreground">{missionTitle}</span>}
+        {card.sessionId && (
+          <button type="button" className="ml-auto shrink-0 text-micro text-muted-foreground underline-offset-2 hover:text-strong hover:underline" onClick={() => onOpenSession(card.sessionId!)}>进入会话</button>
+        )}
       </div>
+      <p className="mt-1 text-body text-strong">{card.question}</p>
+      {card.context && <p className="mt-1 whitespace-pre-wrap text-caption text-muted-foreground">{card.context}</p>}
+      <ul className="mt-2 space-y-1.5">
+        {card.options.map((option) => {
+          const recommended = option.key === card.recommended;
+          return (
+            <li key={option.key} className="flex items-start gap-3">
+              <Button size="sm" variant={recommended ? "primary" : "secondary"} disabled={busy} className="shrink-0" onClick={() => void answer(option.key)}>
+                {option.label}
+              </Button>
+              <div className="min-w-0 pt-1 text-caption text-muted-foreground">
+                {option.detail && <span>{option.detail}</span>}
+                {recommended && card.recommendation && <span className="block text-faint-foreground">推荐：{card.recommendation}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {card.details && (
+        <div className="mt-2">
+          <button type="button" className="group" onClick={() => setShowDetails((v) => !v)}>
+            <span className="eyebrow group-hover:text-strong">{showDetails ? "收起技术详情" : "技术详情"}</span>
+          </button>
+          {showDetails && <pre className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap border border-border bg-input px-3 py-2 font-mono text-micro leading-relaxed text-muted-foreground">{card.details}</pre>}
+        </div>
+      )}
     </div>
   );
 };

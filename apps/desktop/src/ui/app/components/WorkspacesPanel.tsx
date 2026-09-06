@@ -181,6 +181,11 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
       : [];
   const stewardRuns = (mission: Mission) => runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
   const standalone = workItems.filter((w) => !w.missionId);
+  const [showAll, setShowAll] = useState(false);
+  const isOpen = (w: WorkItem) => w.status !== "closed" && w.status !== "cancelled";
+  const visibleMissions = showAll ? missions : missions.filter((m) => m.status === "active");
+  const visibleStandalone = showAll ? standalone : standalone.filter(isOpen);
+  const hidden = missions.length - visibleMissions.length + (standalone.length - visibleStandalone.length);
   return (
     <div>
       <div className="flex items-center gap-3 border-b border-border px-4 py-2">
@@ -190,10 +195,15 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
           <input type="number" min={1} max={8} value={scheduler.maxWorkers} onChange={(e) => setScheduler({ maxWorkers: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} className="w-12 border border-border bg-input px-1.5 py-0.5 text-label text-foreground outline-none" />
         </label>
         <span className="truncate text-caption text-faint-foreground">开启后新 revision 触发管家拆单，排队工单由 Worker 接手。</span>
+        {(hidden > 0 || showAll) && (
+          <button type="button" className="ml-auto shrink-0 text-micro text-muted-foreground underline-offset-2 hover:text-strong hover:underline" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? "只看进行中" : "全部 (+" + hidden + ")"}
+          </button>
+        )}
       </div>
       {missions.length === 0 && standalone.length === 0 && <p className="px-4 py-3 text-caption text-muted-foreground">还没有任务。去「思考」里和设计伙伴聊出一个。</p>}
       <ul>
-        {missions.map((mission) => {
+        {visibleMissions.map((mission) => {
           const items = workItems.filter((w) => w.missionId === mission.missionId);
           const stewards = stewardRuns(mission);
           return (
@@ -215,14 +225,14 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
             </li>
           );
         })}
-        {standalone.length > 0 && (
+        {visibleStandalone.length > 0 && (
           <li className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
               <span className="text-label text-strong">独立工单</span>
               <Badge>不经文档</Badge>
             </div>
             <ul className="mt-2 space-y-1.5">
-              {standalone.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} />)}
+              {visibleStandalone.map((item) => <WorkItemRow key={item.workItemId} item={item} runs={runsFor(item)} waitingFor={waitingFor(item)} onOpenSession={onOpenSession} />)}
             </ul>
           </li>
         )}

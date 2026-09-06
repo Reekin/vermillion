@@ -92,6 +92,27 @@ describe("WorkbenchService", () => {
     expect(status).not.toContain("workitems/");
   });
 
+  it("parks an item on a decision card after the third failure; retry resets, cancel closes", async () => {
+    const { service, ws } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Flaky", objective: "o", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
+    await service.requeueWorkItem(ws.workspaceId, item.workItemId, "one");
+    await service.requeueWorkItem(ws.workspaceId, item.workItemId, "two");
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("queued");
+    const parked = await service.requeueWorkItem(ws.workspaceId, item.workItemId, "three");
+    expect(parked.status).toBe("decision");
+    const card = (await service.listDecisions(ws.workspaceId)).find((c) => c.workItemId === item.workItemId && !c.answer)!;
+    expect(card.kind).toBe("attempts");
+    expect(card.context).toContain("three");
+    await service.answerDecision(ws.workspaceId, card.decisionId, { key: "retry" });
+    const retried = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    expect(retried.status).toBe("queued");
+    expect(retried.run.attempts).toBe(0);
+    for (const f of ["a", "b", "c"]) await service.requeueWorkItem(ws.workspaceId, item.workItemId, f);
+    const card2 = (await service.listDecisions(ws.workspaceId)).find((c) => c.workItemId === item.workItemId && !c.answer)!;
+    await service.answerDecision(ws.workspaceId, card2.decisionId, { key: "cancel" });
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("cancelled");
+  });
+
   it("rejects doc paths outside .vermillion/docs", async () => {
     const { service, ws } = await setup();
     await expect(service.writeDoc(ws.workspaceId, "docs/x.md", "x")).rejects.toThrow(/\.vermillion\/docs/);

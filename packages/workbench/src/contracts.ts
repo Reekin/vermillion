@@ -132,6 +132,7 @@ export type WorkItem = z.infer<typeof zWorkItem>;
 export const zDecisionOption = z.object({
   key: z.string().min(1),
   label: z.string().min(1),
+  /** What happens if this option is chosen; shown next to the label, never hidden in a tooltip. */
   detail: z.string().optional()
 });
 
@@ -140,10 +141,18 @@ export const zDecisionCard = z.object({
   workItemId: z.string().optional(),
   missionId: z.string().optional(),
   sessionId: z.string().optional(),
+  /** Who raised it: a worker (default) or the workbench after repeated failures. */
+  kind: z.enum(["worker", "attempts"]).optional(),
+  /** One plain sentence: what is blocked. */
   question: z.string().min(1),
+  /** Two or three sentences: what happened and why the user has to decide. */
   context: z.string(),
+  /** Source locations, logs, evidence paths. Collapsed by default. */
+  details: z.string().optional(),
   options: z.array(zDecisionOption),
   recommended: z.string().optional(),
+  /** Why the recommended option. */
+  recommendation: z.string().optional(),
   answer: z.object({ key: z.string(), note: z.string().optional(), at: z.string() }).optional(),
   createdAt: z.string()
 });

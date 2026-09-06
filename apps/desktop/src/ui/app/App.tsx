@@ -100,7 +100,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   );
 
   const renderPanel = (target: Panel) =>
-    target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} onOpenSession={showSession} />;
+    target === "inbox" ? <InboxPanel store={store} onOpenSession={showSession} /> : <WorkspacesPanel store={store} pickDirectory={pickDirectory} onOpenSession={showSession} />;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-page-canvas text-foreground">

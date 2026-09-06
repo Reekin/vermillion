@@ -108,10 +108,13 @@ export const workbenchRpc = {
   "decision.list": { params: zWs, result: z.array(zDecisionCard) },
   "decision.create": {
     params: zWs.extend({
+      kind: z.enum(["worker", "attempts"]).optional(),
       question: z.string().min(1),
       context: z.string(),
+      details: z.string().optional(),
       options: z.array(zDecisionOption).min(1),
       recommended: z.string().optional(),
+      recommendation: z.string().optional(),
       workItemId: z.string().optional(),
       missionId: z.string().optional(),
       sessionId: z.string().optional()

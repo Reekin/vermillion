@@ -20,6 +20,9 @@ import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
 
+/** Failures before an item stops being re-queued and asks the user instead. */
+const MAX_ATTEMPTS = 3;
+
 const createId = (prefix: string): string =>
   prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
@@ -404,13 +407,31 @@ export class WorkbenchService {
     return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, staleTurnId } }));
   }
 
-  /** Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted. */
+  /**
+   * Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted; after the
+   * third failure the item is parked on a decision card instead so the user sees it.
+   */
   async requeueWorkItem(workspaceId: string, workItemId: string, failure: string): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({
-      ...item,
+    const item = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({
+      ...current,
       status: "queued",
-      run: { ...item.run, sessionId: undefined, lastFailure: failure, attempts: (item.run.attempts ?? 0) + 1 }
+      run: { ...current.run, sessionId: undefined, lastFailure: failure, attempts: (current.run.attempts ?? 0) + 1 }
     }));
+    if ((item.run.attempts ?? 0) < MAX_ATTEMPTS) return item;
+    await this.createDecision(workspaceId, {
+      kind: "attempts",
+      workItemId,
+      missionId: item.missionId,
+      question: "工单「" + item.title + "」连续 " + MAX_ATTEMPTS + " 次没有完成，要继续吗？",
+      context: "最近一次失败：" + failure + "。每次都由新的 Worker 会话从上次的 worktree 继续，但都没有走到提交。",
+      options: [
+        { key: "retry", label: "再试一次", detail: "重新排队，失败计数清零，换一个 Worker 会话继续" },
+        { key: "cancel", label: "取消工单", detail: "关闭工单并清理它的 worktree；需要的话由管家或你重新建单" }
+      ],
+      recommended: "cancel",
+      recommendation: "三次都没提交通常说明工单本身有问题，先看看会话里卡在哪，比盲目重试有用"
+    });
+    return this.getWorkItem(workspaceId, workItemId);
   }
 
   // ---- scheduler ----
@@ -451,7 +472,7 @@ export class WorkbenchService {
     const { store } = await this.context(workspaceId);
     const card = await store.decisions.put({ ...input, decisionId: createId("d"), createdAt: this.now() });
     if (input.workItemId) {
-      await this.mutateWorkItem(workspaceId, input.workItemId, (item) => (item.status === "running" ? { ...item, status: "decision" } : item));
+      await this.mutateWorkItem(workspaceId, input.workItemId, (item) => (item.status === "running" || item.status === "queued" ? { ...item, status: "decision" } : item));
     }
     this.emit({ type: "decisions.changed", workspaceId });
     return card;
@@ -466,7 +487,18 @@ export class WorkbenchService {
     if (card.workItemId) {
       const option = card.options.find((o) => o.key === answer.key);
       const line = card.question + " -> " + (option?.label ?? answer.key) + (answer.note ? " (" + answer.note + ")" : "");
-      await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, status: item.status === "decision" ? "queued" : item.status, decisions: [...item.decisions, line] }));
+      if (card.kind === "attempts" && answer.key === "cancel") {
+        await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, decisions: [...item.decisions, line] }));
+        await this.cancelWorkItem(workspaceId, card.workItemId);
+      } else {
+        const resetAttempts = card.kind === "attempts";
+        await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({
+          ...item,
+          status: item.status === "decision" ? "queued" : item.status,
+          decisions: [...item.decisions, line],
+          run: resetAttempts ? { ...item.run, attempts: 0, lastFailure: undefined } : item.run
+        }));
+      }
     }
     this.emit({ type: "decisions.changed", workspaceId });
     return answered;
