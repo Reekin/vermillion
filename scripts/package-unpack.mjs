@@ -38,6 +38,7 @@ await mkdir(appDir, { recursive: true });
 await copy(resolve(desktopRoot, "dist-electron"), resolve(appDir, "dist-electron"));
 await copy(resolve(desktopRoot, "dist-web"), resolve(appDir, "dist-web"));
 await copy(resolve(workbenchRoot, "roles"), resolve(appDir, "roles"));
+await copy(resolve(workbenchRoot, "scripts"), resolve(appDir, "scripts"));
 
 // CLI: bundle to a single file so the package runs it with the system node and no node_modules.
 await mkdir(resolve(appDir, "cli"), { recursive: true });

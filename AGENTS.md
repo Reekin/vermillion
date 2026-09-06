@@ -39,6 +39,10 @@
 - `AgentRunner`（apps/desktop/src/electron/agent-runner.ts）是编排层对会话引擎的唯一依赖：open / send / interrupt / lastReply / onTurnCompleted。agent 会话 metadata 带 `role`、`workItemId`、`missionId`。
 - 启动时把 `vermillion` CLI 放到 `<baseDir>/bin` 并加进本进程 PATH，codex 子进程继承，agent 直接 `vermillion <method> [json]`。
 
+## 验收实例
+- `app.start` / `app.stop`（RPC 和 CLI）通过 `AppLauncher` 起一个独立数据目录、独立 userData、指定 CDP 端口的 Vermillion 实例。Windows 上经 `packages/workbench/scripts/start-on-hidden-desktop.ps1` 用 `CreateDesktop` + `CreateProcess(lpDesktop)` 放到桌面 `vermillion-qa`，窗口、弹窗、焦点都不会出现在用户屏幕；CDP 和截图照常。发布包里脚本在 `resources/app/scripts/`，可执行文件取 `Vermillion.exe`，仓库里取 electron + `dist-electron/main.js`。
+- Worker / Verifier 做界面验收只能用这条路径，不用 start.bat。
+
 ## Domain
 - 领域定义是普通文档：`.vermillion/docs/domains/<id>.md`，正文自然语言说明覆盖范围和触发条件，frontmatter `standards:` 列规范文档路径。没有程序侧匹配；管家建单时读全部定义，语义判断工单涉及哪些领域，把这些领域的 standards 作为 refs 附上，Worker 开工前读。Workspaces → Domain 页只是列出并编辑这个目录。
 

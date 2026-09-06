@@ -24,7 +24,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, startLocalEndpoint } from "@vermillion/workbench";
+import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, resolveAppCommand, startLocalEndpoint } from "@vermillion/workbench";
 import { createAgentRunner, createSessionAsk } from "./agent-runner.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
@@ -58,6 +58,8 @@ const bundledRendererIndexPath = join(appRoot, "dist-web", "index.html");
 const roleDefaultsDir = [join(appRoot, "roles"), resolve(appRoot, "../../packages/workbench/roles")].find((dir) => existsSync(dir));
 // CLI entry: bundled in a release, built package output in the repo.
 const cliEntryPath = [join(appRoot, "cli", "vermillion.mjs"), resolve(appRoot, "../../packages/workbench/bin/vermillion.mjs")].find((path) => existsSync(path));
+// Launcher script: resources/app/scripts in a release, packages/workbench in the repo.
+const launcherPackageRoot = [appRoot, resolve(appRoot, "../../packages/workbench")].find((dir) => existsSync(join(dir, "scripts", "start-on-hidden-desktop.ps1")));
 
 /** Puts a `vermillion` command on PATH for every agent process spawned from here. */
 const exposeCliOnPath = (baseDir: string): void => {
@@ -743,6 +745,7 @@ const boot = async (): Promise<void> => {
   const workbenchService = new WorkbenchService({
     roles: roleService,
     ask: createSessionAsk(service),
+    launcher: new AppLauncher({ command: resolveAppCommand(appRoot), packageRoot: launcherPackageRoot }),
     workspaces: {
       list: async () =>
         (await service.listWorkspaces()).workspaces.map((workspace) => ({

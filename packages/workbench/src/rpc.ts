@@ -122,6 +122,12 @@ export const workbenchRpc = {
 
   "inbox.list": { params: zEmpty, result: z.array(zInboxItem) },
 
+  "app.start": {
+    params: z.object({ dataDir: z.string().min(1), userDataDir: z.string().min(1).optional(), port: z.number().int().min(1024).max(65535), env: z.record(z.string()).optional() }),
+    result: z.object({ pid: z.number().int(), cdpUrl: z.string(), desktop: z.string() })
+  },
+  "app.stop": { params: z.object({ pid: z.number().int().positive() }), result: zEmpty },
+
   "session.ask": { params: zWs.extend({ missionId: z.string().min(1), question: z.string().min(1) }), result: z.object({ answer: z.string() }) }
 } as const;
 

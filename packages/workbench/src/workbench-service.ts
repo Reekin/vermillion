@@ -17,6 +17,7 @@ import type {
 } from "./contracts.js";
 import { DocsService } from "./docs.js";
 import { RoleService } from "./roles.js";
+import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
 
 const createId = (prefix: string): string =>
@@ -36,6 +37,8 @@ export type WorkbenchServiceOptions = {
   workspaces: WorkspaceSource;
   roles: RoleService;
   ask?: SessionAsk;
+  /** Starts isolated app instances for acceptance; absent when running without a desktop build around. */
+  launcher?: AppLauncher;
   now?: () => string;
 };
 
@@ -45,6 +48,7 @@ export class WorkbenchService {
   private readonly workspaces: WorkspaceSource;
   private readonly roles: RoleService;
   private readonly ask?: SessionAsk;
+  private readonly launcher?: AppLauncher;
   private readonly now: () => string;
   private readonly contexts = new Map<string, WorkspaceContext>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
@@ -53,6 +57,7 @@ export class WorkbenchService {
     this.workspaces = options.workspaces;
     this.roles = options.roles;
     this.ask = options.ask;
+    this.launcher = options.launcher;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -157,6 +162,18 @@ export class WorkbenchService {
     const sessionId = [...mission.revisions].reverse().find((r) => r.sessionId)?.sessionId ?? mission.sessionId;
     if (!sessionId) throw new Error("Mission has no originating session: " + missionId);
     return this.ask({ sessionId, question });
+  }
+
+  // ---- app instances ----
+
+  async startApp(input: AppStartInput): Promise<AppStartResult> {
+    if (!this.launcher) throw new Error("app.start is only available while the desktop is running");
+    return this.launcher.start(input);
+  }
+
+  async stopApp(pid: number): Promise<void> {
+    if (!this.launcher) throw new Error("app.stop is only available while the desktop is running");
+    await this.launcher.stop(pid);
   }
 
   // ---- roles ----
