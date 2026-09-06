@@ -28,12 +28,12 @@ const until = async (check: () => Promise<boolean>) => {
 
 /** Scripted runner: records opened sessions and messages; test completes turns by hand. */
 const createFakeRunner = () => {
-  const sessions: Array<{ sessionId: string; title: string; cwd: string; metadata: Record<string, unknown>; messages: string[]; reply?: string }> = [];
+  const sessions: Array<{ sessionId: string; title: string; cwd: string; metadata: Record<string, unknown>; developerInstructions: string; messages: string[]; reply?: string }> = [];
   const listeners = new Set<(e: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void>();
   const runner: AgentRunner = {
     open: async (input) => {
       const sessionId = "s" + (sessions.length + 1);
-      sessions.push({ sessionId, title: input.title, cwd: input.cwd, metadata: input.metadata, messages: [] });
+      sessions.push({ sessionId, title: input.title, cwd: input.cwd, metadata: input.metadata, developerInstructions: input.developerInstructions, messages: [] });
       return { sessionId };
     },
     send: async (sessionId, content) => { sessions.find((s) => s.sessionId === sessionId)!.messages.push(content); },
@@ -89,6 +89,9 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     const worker = sessions.find((s) => s.metadata.role === "worker")!;
     expect(worker.metadata.workItemId).toBe(item.workItemId);
     expect(worker.cwd).toContain("worktrees");
+    expect(worker.developerInstructions).toContain("# Worker");
+    expect(worker.developerInstructions).toContain("----- reviewer begin -----\n# Reviewer");
+    expect(worker.developerInstructions).toContain("----- verifier begin -----\n# Verifier");
     await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "running");
     await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "steward" && r.status === "done"));
     const runs = await service.listRuns(ws.workspaceId);

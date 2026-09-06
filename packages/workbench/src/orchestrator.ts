@@ -267,11 +267,25 @@ export class Orchestrator {
       }
       cwd = worktreePath;
     }
-    const { content } = await this.roles.read(root, "worker");
+    // Reviewer and verifier run as the worker's subagents, so their prompts ride along verbatim instead of relying on the worker to fetch them.
+    const [worker, reviewer, verifier] = await Promise.all([this.roles.read(root, "worker"), this.roles.read(root, "reviewer"), this.roles.read(root, "verifier")]);
+    const developerInstructions = [
+      worker.content.trim(),
+      "",
+      "## 附：reviewer subagent 的 prompt（spawn 时原样作为它的首条消息，再附上工单和 diff）",
+      "----- reviewer begin -----",
+      reviewer.content.trim(),
+      "----- reviewer end -----",
+      "",
+      "## 附：verifier subagent 的 prompt（spawn 时原样作为它的首条消息，再附上 acceptance、refs 原文、diff）",
+      "----- verifier begin -----",
+      verifier.content.trim(),
+      "----- verifier end -----"
+    ].join("\n");
     const { sessionId } = await this.runner.open({
       workspaceId,
       cwd,
-      developerInstructions: content,
+      developerInstructions,
       title: "Worker · " + item.title,
       metadata: { role: "worker", workItemId: item.workItemId, missionId: item.missionId }
     });
