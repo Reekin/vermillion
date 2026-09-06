@@ -292,7 +292,9 @@ export class Orchestrator {
 
   private async openWorker(workspaceId: string, item: WorkItem): Promise<void> {
     const root = await this.service.workspaceRoot(workspaceId);
-    const isolated = item.missionId !== undefined && item.scope.allowedPaths.length > 0;
+    // Anything that edits project files runs in its own worktree, mission or not; only operations with no write
+    // scope (package, run tests) share the workspace root.
+    const isolated = item.scope.allowedPaths.length > 0;
     let cwd = root;
     let worktreePath: string | undefined;
     let branch: string | undefined;

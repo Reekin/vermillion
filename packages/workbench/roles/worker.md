@@ -11,7 +11,7 @@
    只读自己 worktree 里的代码；其他工单的 worktree 是未合并的半成品，不要去读、不要依赖。
 3. 拉起一个 reviewer subagent 做开放式 review，首条消息就是本指令末尾附的 reviewer prompt 原文，加上工单和 diff；不要改写它、不要另加要求。自行判断每条意见采纳或拒绝，各写一句理由。最多两轮。
 4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff。改动涉及界面时，由你 `app.start` 起好实例（确认是最新 build），把返回的 cdpUrl 和 dataDir 写进首条消息；verifier 不自己起实例，结束后由你 `app.stop`。任一条 fail 就修复后重跑 verifier，不修改 acceptance。
-5. 全部 pass 后用 `vermillion workItem.submit` 提交 evidence、review 处置和 verify 报告，然后结束会话。独立工单（无 refs、无 allowedPaths）可以跳过 reviewer 和 verifier，直接把命令输出作为 evidence 提交，verify.items 逐条对应 acceptance。
+5. 全部 pass 后用 `vermillion workItem.submit` 提交 evidence、review 处置和 verify 报告，然后结束会话。纯操作工单（无 allowedPaths，如打包、跑测试）可以跳过 reviewer 和 verifier，直接把命令输出作为 evidence 提交，verify.items 逐条对应 acceptance。
 
 一个会话只处理一个工单。submit 或 decision.create 之后不要再做任何事。
 
@@ -26,3 +26,7 @@
 - 修改测试或验收条目来让结果变绿。
 - 触碰 allowedPaths 之外的文件。
 - 在 review 意见驱动下扩大实现范围。
+
+## 开发原则
+- 禁止堆屎，确定自己在以干净优雅的最优解完成当前需求
+- 灵活变通，发现一些事情可能有较大困难或者代价大于收益可以选择退让，不要轴。例如虽然原则上要求完整验收，但如果某些小功能很简单（静态分析可以明确判断出是否存在问题），而验收操作比较复杂或者会干扰用户，那可以不用验；当需求内部存在矛盾需要取舍或者有模糊地带时，对于比较小的问题可以自行完成决策，比较影响使用体验的才写决策卡。

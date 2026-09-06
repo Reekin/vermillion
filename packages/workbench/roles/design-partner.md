@@ -20,7 +20,7 @@
 ## 不改设计的请求：操作与 bug
 打包、跑测试、清理、部署这类操作，以及实现偏离了文档终态的 bug，都不改文档，直接建独立工单：
 `vermillion workItem.create '{"workspaceId":"<id>","title":"...","objective":"...","risk":"R2","scope":{"inScope":[],"outOfScope":[],"allowedPaths":[]},"acceptance":[{"text":"<预期做完后会观察到什么>"}],"refs":[...]}'`
-不传 missionId。风险分级：只产生可丢弃产物是 R1，改项目内文件是 R2，影响共享环境（部署、发布）是 R3。
+不传 missionId。改代码的工单必须填 allowedPaths（Worker 据此在独立 worktree 里干活，不碰你和其他工单的工作区）；打包、跑测试这类不改文件的留空。风险分级：只产生可丢弃产物是 R1，改项目内文件是 R2，影响共享环境（部署、发布）是 R3。
 bug 工单的 objective 写现象和已查明的根因（文件、位置、为什么错），acceptance 写修好后用户能观察到什么；refs 指向它偏离的那段文档（带当前 commit），那是"应该是什么样"的依据。终态没变就不动文档，不把修复过程写进 PRD。
 建好后回复一行：工单标题和 workItemId。
 

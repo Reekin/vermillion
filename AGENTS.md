@@ -32,7 +32,7 @@
 ## 调度（packages/workbench/src/orchestrator.ts）
 - 三个循环都在 `Orchestrator` 里，靠 `WorkbenchEvent` 和 `turn.completed` 驱动，状态只在 `.vermillion/` 文件里（`scheduler.json`、`runs/`、工单的 `run` 段）；进程重启后 `reconcile` 从文件恢复：仍在 running 的 worker/steward run 用 `runner.resume` 重新打开原会话（codex 会话是持久的），发一条“会话已恢复”让它接着做；打不开的才标 failed、工单退回队列。supervisor run 直接结束，下次需要时新开。
 - 管家：`missions.changed` 后找最新 revision 没有 steward run 的任务，开一个 cwd = workspace 根的会话，首条消息带任务摘要、变更说明、`diff --stat`、现有工单和一条范围已填好的 diff 命令，完整 diff 由管家按需自己拉。同一任务已有管家会话在跑时，新消息 steer 进那个会话（run 的 revision 前移），不另开。工单被取消且有排队工单 `dependsOn` 它时，也用同样方式叫醒该任务的管家，附上受影响工单，由它决定去掉依赖、换依赖或一并取消。
-- 调度器：`workItems.changed` / `decisions.changed` / worker turn 结束后取单；上限 `scheduler.maxWorkers`；第三次失败时 `requeueWorkItem` 不再回队列，而是建一张 `kind: "attempts"` 的决策卡把工单挂到 decision；回答 retry 清零计数回队列，cancel 走 `cancelWorkItem`。取单还要求 `dependsOn`（同任务内的工单 id，创建时校验）全部 closed，且 `needs`（执行资源名，如 browser）没有被 running 的工单占用（每种资源一个槽位）。挂在决策卡上的工单是 `decision` 状态，不占并发，也不会被取。有 missionId 且有 allowedPaths 的工单在 `.vermillion/worktrees/<id>` + 分支 `vermillion/<id>` 里跑，其余在 workspace 根。approve 时 merge 分支并删 worktree，cancel 直接删。
+- 调度器：`workItems.changed` / `decisions.changed` / worker turn 结束后取单；上限 `scheduler.maxWorkers`；第三次失败时 `requeueWorkItem` 不再回队列，而是建一张 `kind: "attempts"` 的决策卡把工单挂到 decision；回答 retry 清零计数回队列，cancel 走 `cancelWorkItem`。取单还要求 `dependsOn`（同任务内的工单 id，创建时校验）全部 closed，且 `needs`（执行资源名，如 browser）没有被 running 的工单占用（每种资源一个槽位）。挂在决策卡上的工单是 `decision` 状态，不占并发，也不会被取。有 allowedPaths 的工单在 `.vermillion/worktrees/<id>` + 分支 `vermillion/<id>` 里跑，其余在 workspace 根。approve 时 merge 分支并删 worktree，cancel 直接删。
 - `workItem.update` 对进行中的工单发 `workItem.updated`，编排层用 `runner.steer`（有活跃 turn 就 `turn/steer`，否则作为下一条消息）立即通知 worker，idle 计数归零。若送达时正有一轮在跑，那轮的 id 记在 `run.staleTurnId`，该轮结束时清掉；`staleTurnId` 未清时到达的 `workItem.submit` 视为依据旧合同，作废（工单回 queued、丢弃 evidence，保留 worktree）。worker 不维护任何版本号。`workItem.cancel` 对进行中的工单发 `workItem.cancelled`，编排层 interrupt 该会话。
 - `decision.create` 只把 running 的工单转为 decision；`decision.answer` 只把 decision 的转回 queued，其他状态不动。
 - Supervisor：按任务（独立工单按工单）定时巡视，`patrolIntervalMs` 默认 4 分钟（`VERMILLION_PATROL_INTERVAL_MS` 可覆盖）。有 running 的 worker 时每轮新开一个 supervisor 会话，塞进每个 worker 的合同、本轮全部 agent 消息（含 commentary）、`diff --stat`、越界路径；会话只有一个 host tool `remind(workItemId, message)`（`runner.registerTool`，按 `metadata.role === "supervisor"` 可见），调用即 `runner.steer` 进那个 worker 的当前 turn。没有 interrupt 权限。巡视不进 workspace 串行队列（它要等模型回复）。多轮未提交仍由 `maxIdleTurns` 判定 requeue。
@@ -48,7 +48,7 @@
 - 领域定义是普通文档：`.vermillion/docs/domains/<id>.md`，正文自然语言说明覆盖范围和触发条件，frontmatter `standards:` 列规范文档路径。没有程序侧匹配；管家建单时读全部定义，语义判断工单涉及哪些领域，把这些领域的 standards 作为 refs 附上，Worker 开工前读。Workspaces → Domain 页只是列出并编辑这个目录。
 
 ## 工单
-- 独立工单：无 missionId、无 refs，用于打包、跑测试这类不改文档的操作；设计伙伴在聊天里直接 `workItem.create`，不经管家。
+- 独立工单：无 missionId，用于打包、跑测试这类操作和不改设计的 bug 修复；设计伙伴在聊天里直接 `workItem.create`，不经管家。是否用 worktree 只看 `allowedPaths` 是否非空，与 missionId 无关。
 - Mission 是 Doc revision 的序列；commit 只能通过 `mission.create` / `mission.addRevision` 产生，支持部分路径提交。一个会话可以产出多个任务或给已有任务补 revision。
 - 状态：queued → running → review → closed，decision 为挂起，cancelled 是另一个终态（`cancelWorkItem`）。只有 closed 满足 `dependsOn`；前置 cancelled 的工单留在队列并在任务页标出。写操作有业务含义：create / start / heartbeat / submit(evidence+review+verify) / approve / reject(reason) / cancel，不暴露裸 status 修改。
 - submit 时 verify 通过且 autoClose（R0/R1 默认）直接 closed；rework 回 queued；否则进 review。
