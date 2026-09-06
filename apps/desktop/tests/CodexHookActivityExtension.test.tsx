@@ -36,7 +36,7 @@ describe("CodexHookActivityExtension", () => {
       />
     );
 
-    expect(markup).toContain("Hook activity");
+    expect(markup).toContain("Hook 活动");
     expect(markup).toContain("preToolUse · command");
     expect(markup).toContain("completed · 25ms");
     expect(markup).toContain("sync · turn · project");

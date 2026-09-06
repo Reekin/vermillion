@@ -35,7 +35,7 @@ export const Rail = ({ panel, overlay, inboxCount, onSelect }: RailProps) => (
         >
           <Icon size={17} strokeWidth={1.6} />
           {id === "inbox" && inboxCount > 0 && (
-            <span className="absolute right-0.5 top-0.5 min-w-3.5 rounded-sm bg-accent-strong px-1 text-center font-mono text-[9px] leading-[14px] text-page-canvas">{inboxCount}</span>
+            <span className="absolute right-0.5 top-0.5 min-w-3.5 rounded-sm bg-accent-strong px-1 text-center font-mono text-micro leading-none text-page-canvas py-0.5">{inboxCount}</span>
           )}
         </button>
       );

@@ -5,7 +5,7 @@ import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { cn } from "../lib/cn.js";
-import { Button, SectionLabel } from "./ui.js";
+import { Button, IconButton, ListRow, SectionLabel } from "./ui.js";
 import { ContextMenu } from "./ContextMenu.js";
 
 type SessionSidebarProps = {
@@ -43,27 +43,26 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
   /** A session row; subagents it spawned render nested beneath it, indented one level per depth. */
   const renderRow = (session: SidebarSession, depth = 0) => (
     <li key={session.sessionId}>
-      <button
-        type="button"
+      <ListRow
+        depth={depth}
+        selected={selectedSessionId === session.sessionId}
         onClick={() => onOpen(session.sessionId)}
         onContextMenu={(event) => onOpenMenu(event, session.sessionId)}
-        className={cn(
-          "relative flex w-full flex-col gap-0.5 py-2 pr-4 text-left hover:bg-surface-hover",
-          selectedSessionId === session.sessionId && "bg-surface-selected before:absolute before:bottom-[5px] before:left-0 before:top-[5px] before:w-0.5 before:bg-accent"
-        )}
-        style={{ paddingLeft: 16 + depth * 14 }}
-      >
-        <span className="flex items-center gap-2">
-          {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
-          {session.statusDot === "running" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-strong" aria-label="running" />}
-          <span className="truncate text-label text-strong">{session.title}</span>
-          {session.isPinned && <Pin size={11} className="ml-auto shrink-0 text-faint-foreground" aria-label="pinned" />}
-        </span>
-        <span className="flex items-center gap-2 font-mono text-micro text-faint-foreground">
-          {!grouped && depth === 0 && <span className="truncate">{workspaceLabelById.get(session.workspaceId) ?? session.workspaceId}</span>}
-          <span className="ml-auto shrink-0">{formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}</span>
-        </span>
-      </button>
+        leading={
+          <>
+            {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
+            {session.statusDot === "running" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-strong" aria-label="running" />}
+          </>
+        }
+        title={
+          <>
+            {session.title}
+            {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label="pinned" />}
+          </>
+        }
+        meta={!grouped && depth === 0 ? (workspaceLabelById.get(session.workspaceId) ?? session.workspaceId) : undefined}
+        trailing={formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}
+      />
       {session.subagents.length > 0 && (
         <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId: session.workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>
       )}
@@ -77,22 +76,11 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         <Button variant={isDraft ? "secondary" : "accent"} size="sm" className="flex-1" onClick={onNewChat} disabled={isDraft}>
           <Plus size={13} /> New Chat
         </Button>
-        <button
-          type="button"
-          aria-pressed={grouped}
-          title={grouped ? "平铺显示" : "按 workspace 分组"}
-          onClick={() => setGrouped((v) => !v)}
-          className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-faint-foreground hover:bg-surface-hover hover:text-foreground", grouped && "bg-surface-selected text-strong")}
-        >
-          <ListTree size={14} />
-        </button>
+        <IconButton icon={ListTree} label={grouped ? "平铺显示" : "按 workspace 分组"} active={grouped} onClick={() => setGrouped((v) => !v)} />
       </div>
       <ul className="min-h-0 flex-1 overflow-auto">
         {isDraft && (
-          <li className="relative bg-surface-selected px-4 py-2 before:absolute before:bottom-[5px] before:left-0 before:top-[5px] before:w-0.5 before:bg-accent">
-            <span className="text-label text-strong">新对话</span>
-            <span className="block font-mono text-micro text-faint-foreground">发送第一条消息后创建</span>
-          </li>
+          <li><ListRow selected title="新对话" meta="发送第一条消息后创建" /></li>
         )}
         {sessions.length === 0 && !isDraft && !loading && <li className="px-4 py-2 text-caption text-muted-foreground">还没有会话。点 New Chat 开始。</li>}
         {groups

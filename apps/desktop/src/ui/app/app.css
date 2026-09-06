@@ -30,6 +30,7 @@
 }
 
 @theme {
+  --tracking-eyebrow: 0.12em;
   --text-micro: 0.66rem;
   --text-micro--line-height: 1;
   --text-caption: 0.72rem;
@@ -87,6 +88,18 @@
 .vm-changes__dir { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; color: var(--awb-ink-muted); }
 .vm-changes__dir > bdi { direction: ltr; }
 .vm-changes__name { flex-shrink: 0; color: var(--awb-ink-strong); }
+
+/* Collapsible run inside a turn block (hook activity). */
+.vm-run__summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 4px 12px; list-style: none; cursor: pointer; color: var(--awb-ink); }
+.vm-run__summary::-webkit-details-marker { display: none; }
+.vm-run__summary:hover { background: var(--awb-accent-soft); color: var(--awb-ink-strong); }
+.vm-run__title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--awb-font-mono); font-size: var(--text-caption); }
+.vm-run__status { font-family: var(--awb-font-mono); font-size: var(--text-micro); letter-spacing: 0.08em; text-transform: uppercase; color: var(--awb-ink-faint); }
+.vm-run__status.is-running { color: var(--awb-ink-strong); }
+.vm-run__body { display: grid; gap: 6px; padding: 2px 12px 8px 26px; }
+.vm-run__meta { display: grid; gap: 4px; margin: 0; font-size: var(--text-caption); color: var(--awb-ink-muted); }
+.vm-run__meta code { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--awb-font-mono); font-size: var(--text-micro); color: var(--awb-ink); }
+.vm-run__output { margin: 0; max-height: 240px; overflow: auto; padding: 8px 10px; border: 1px solid var(--awb-rule); background: var(--awb-input); font: var(--text-micro)/1.6 var(--awb-font-mono); color: var(--awb-ink); white-space: pre-wrap; }
 
 .vm-diff { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .vm-diff__files { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 16px; max-height: 120px; overflow: auto; border-bottom: 1px solid var(--awb-rule); }

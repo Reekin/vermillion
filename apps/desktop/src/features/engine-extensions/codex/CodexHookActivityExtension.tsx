@@ -49,41 +49,33 @@ export const CodexHookActivityExtension = ({
   }
 
   return (
-    <section className="awb-hook-activity" aria-label="Hook activity">
-      <header className="awb-hook-activity__header">
-        <strong>Hook activity</strong>
-        <span>{sortedRuns.length} runs</span>
+    <section className="vm-changes" aria-label="Hook 活动">
+      <header className="vm-changes__header">
+        <span className="vm-changes__title">Hook 活动</span>
+        <span className="vm-changes__stats">{sortedRuns.length} 次</span>
       </header>
-      <div className="awb-hook-activity__list">
+      <ul className="vm-changes__list">
         {sortedRuns.map((run) => {
           const outputText = outputTextForRun(run);
           return (
-            <details
-              key={run.id}
-              className="awb-hook-activity__run"
-              open={run.status === "running" || run.status === "failed"}
-            >
-              <summary className="awb-hook-activity__summary">
-                <span className="awb-hook-activity__title">{titleForRun(run)}</span>
-                <span className={`awb-hook-activity__status is-${run.status}`}>
-                  {statusLabel(run)}
-                </span>
-              </summary>
-              <div className="awb-hook-activity__body">
-                <div className="awb-hook-activity__meta">
-                  <span>{detailForRun(run)}</span>
-                  <code>{run.sourcePath}</code>
+            <li key={run.id}>
+              <details className="vm-run" open={run.status === "running" || run.status === "failed"}>
+                <summary className="vm-run__summary">
+                  <span className="vm-run__title">{titleForRun(run)}</span>
+                  <span className={`vm-run__status is-${run.status}`}>{statusLabel(run)}</span>
+                </summary>
+                <div className="vm-run__body">
+                  <p className="vm-run__meta">
+                    {detailForRun(run)}
+                    <code>{run.sourcePath}</code>
+                  </p>
+                  {outputText ? <pre className="vm-run__output">{outputText}</pre> : <p className="vm-run__meta">没有输出。</p>}
                 </div>
-                {outputText ? (
-                  <pre className="awb-hook-activity__output">{outputText}</pre>
-                ) : (
-                  <p className="awb-hook-activity__empty">No hook output.</p>
-                )}
-              </div>
-            </details>
+              </details>
+            </li>
           );
         })}
-      </div>
+      </ul>
     </section>
   );
 };

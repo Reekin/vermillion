@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, type MouseEvent, type ReactElement } from
 import type { DocChange, DocFile, Mission } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
-import { Button, Empty, SectionLabel } from "./ui.js";
+import { Button, EmptyState, InlineNotice, PanelHeader } from "./ui.js";
 import { CommitDocsDialog } from "./CommitDocsDialog.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { DiffDialog } from "./DiffDialog.js";
@@ -89,7 +89,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
   }, [pending]);
 
   if (!workspace) {
-    return <Empty title="未选择 workspace" hint="在 Composer 里选择 workspace 后，这里显示它的文档。" />;
+    return <EmptyState title="未选择 workspace" hint="在 Composer 里选择 workspace 后，这里显示它的文档。" />;
   }
 
   const toggle = (path: string) =>
@@ -140,16 +140,12 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center pr-2">
-        <SectionLabel>Docs</SectionLabel>
-        {pending.length > 0 && <span className="ml-auto font-mono text-micro text-accent-strong">{pending.length} 处变更</span>}
-      </div>
+      <PanelHeader title="Docs">
+        {pending.length > 0 && <span className="font-mono text-micro text-accent-strong">{pending.length} 处变更</span>}
+      </PanelHeader>
+      {viewError && <InlineNotice tone="error">工作区数据加载失败：<span className="break-all font-mono text-micro text-muted-foreground">{viewError}</span></InlineNotice>}
+      {view && !viewError && tree.length === 0 && <InlineNotice>.vermillion/docs 下还没有文件。和设计伙伴聊出第一份 spec 吧。</InlineNotice>}
       <ul className="min-h-0 flex-1 overflow-auto pb-2">
-        {viewError ? (
-          <li className="px-4 py-2 text-caption text-strong">工作区数据加载失败：<span className="break-all font-mono text-micro text-muted-foreground">{viewError}</span></li>
-        ) : (
-          !view || (tree.length === 0 && <li className="px-4 py-2 text-caption text-muted-foreground">.vermillion/docs 下还没有文件。和设计伙伴聊出第一份 spec 吧。</li>)
-        )}
         {tree.map((node) => renderNode(node, 0))}
       </ul>
       <div className="border-t border-border p-3">

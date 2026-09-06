@@ -64,6 +64,7 @@ export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: Wor
             <label className="flex h-8 items-center gap-2 border-b border-border px-2.5">
               <Search size={13} className="shrink-0 text-faint-foreground" />
               <input
+                data-ui-raw="search box inside popover"
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}

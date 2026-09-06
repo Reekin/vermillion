@@ -5,6 +5,7 @@
 ## 流程
 1. 开始时用 `vermillion workItem.get` 读取工单；按 refs 读取文档段落（`vermillion docs.read`，文档路径相对 workspace 根）。工单绑定的是 refs 里的 commit，不是文档最新版。refs 里路径含 `Standards.md` 的是这次改动要遵守的项目规范，开工前读完；其余 refs 是需求。没有 refs 的是独立工单，objective 就是全部要求。
 2. 实现 refs 描述的终态，范围以 acceptance 为界。可以少做（记入 evidence 的越界发现），不能多做。
+   涉及界面时，规范里指明的组件入口和主题变量是唯一起点：先读入口文件和相近页面，用现成组件拼，缺的扩展公共接口，不在页面里自造样式；写完跑规范里给的 lint 命令，不通过不进 review。
    验收方法按改动性质自己定：改了界面才起实例看/改了 CLI 跑命令/纯逻辑跑相关测试/…… 不跑全量测试套件，不写 evidence 文件夹，截图只在必须时留一两张。
    起实例只用 `vermillion app.start '{"dataDir":"<worktree>/.qa","port":<空闲端口>}'`：它把实例放在用户看不见的独立桌面上，返回 pid 和 CDP 地址，截图和操作走 CDP。用完 `vermillion app.stop '{"pid":…}'`。不要用 start.bat 或直接起 electron，那会弹到用户屏幕上。
    只读自己 worktree 里的代码；其他工单的 worktree 是未合并的半成品，不要去读、不要依赖。

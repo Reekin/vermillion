@@ -58,6 +58,7 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
           <div className="p-4 text-caption text-muted-foreground">加载中…</div>
         ) : (
           <textarea
+            data-ui-raw="full-height editor"
             value={content}
             onChange={(event) => { setContent(event.target.value); setDirty(true); }}
             spellCheck={false}

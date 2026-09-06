@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { DocChange, Mission } from "@vermillion/workbench/client";
 import { cn } from "../lib/cn.js";
 import { Modal } from "./Modal.js";
-import { Button } from "./ui.js";
+import { Button, Field, InlineNotice } from "./ui.js";
 
 type CommitDocsDialogProps = {
   pending: DocChange[];
@@ -71,8 +71,6 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
     }
   };
 
-  const fieldClass = "mt-1.5 w-full rounded-lg border border-control-border bg-input px-3 text-body text-foreground outline-none focus:border-control-border-hover";
-
   return (
     <Modal title="提交 Doc 变更" onClose={onClose} width={560}>
       <form
@@ -107,31 +105,19 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
 
         {mode === "create" ? (
           <>
-            <label className="mt-4 block">
-              <span className="eyebrow">标题</span>
-              <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} className={cn(fieldClass, "h-8")} placeholder="这次要做什么" />
-            </label>
-            <label className="mt-3 block">
-              <span className="eyebrow">摘要</span>
-              <textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} className={cn(fieldClass, "resize-none py-2")} placeholder="预期效果" />
-            </label>
+            <Field label="标题" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="这次要做什么" className="mt-4" />
+            <Field kind="textarea" label="摘要" value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} placeholder="预期效果" className="mt-3" />
           </>
         ) : (
           <>
             {mode === "append" && (
-            <label className="mt-4 block">
-              <span className="eyebrow">任务</span>
-              <select value={missionId} onChange={(event) => setMissionId(event.target.value)} className={cn(fieldClass, "h-8")}>
-                {active.map((m) => (
-                  <option key={m.missionId} value={m.missionId}>{m.title}</option>
-                ))}
-              </select>
-            </label>
+            <Field kind="select" label="任务" value={missionId} onChange={(event) => setMissionId(event.target.value)} className="mt-4">
+              {active.map((m) => (
+                <option key={m.missionId} value={m.missionId}>{m.title}</option>
+              ))}
+            </Field>
             )}
-            <label className="mt-3 block">
-              <span className="eyebrow">{mode === "commit" ? "提交说明" : "变更说明"}</span>
-              <input autoFocus value={message} onChange={(event) => setMessage(event.target.value)} className={cn(fieldClass, "h-8")} placeholder="这次改了什么" />
-            </label>
+            <Field label={mode === "commit" ? "提交说明" : "变更说明"} autoFocus value={message} onChange={(event) => setMessage(event.target.value)} placeholder="这次改了什么" className="mt-3" />
           </>
         )}
 
@@ -156,7 +142,7 @@ export const CommitDocsDialog = ({ pending, missions, defaultMissionId, onClose,
           </ul>
         </div>
 
-        {error && <p className="mt-3 text-caption text-muted-foreground">{error}</p>}
+        {error && <InlineNotice tone="error" className="mt-3 px-0 pb-0">{error}</InlineNotice>}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>取消</Button>
           <Button variant="primary" type="submit" disabled={busy || !canSubmit}>

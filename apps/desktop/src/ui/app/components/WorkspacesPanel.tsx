@@ -3,7 +3,7 @@ import { useState } from "react";
 import { latestRevision, type AgentRun, type DecisionCard, type Mission, type RoleFile, type Scheduler, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
-import { Badge, Button, Empty, SectionLabel } from "./ui.js";
+import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel } from "./ui.js";
 
 type WorkspacesPanelProps = {
   store: WorkbenchStore;
@@ -57,34 +57,28 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession, compact }
   return (
     <div className="flex h-full min-h-[360px]">
       <aside className="w-56 shrink-0 border-r border-border">
-        <div className="flex items-center pr-2">
-          <SectionLabel>Workspaces</SectionLabel>
-          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void add()} title="添加 workspace"><Plus size={14} /></Button>
-        </div>
-        {error && <p className="px-4 pb-2 text-caption text-muted-foreground">{error}</p>}
+        <PanelHeader title="Workspaces">
+          <IconButton icon={Plus} label="添加 workspace" onClick={() => void add()} />
+        </PanelHeader>
+        {error && <InlineNotice tone="error">{error}</InlineNotice>}
         <ul>
           {workspaces.map((workspace) => (
-            <li key={workspace.workspaceId} className="group flex items-center">
-              <button
-                type="button"
+            <li key={workspace.workspaceId}>
+              <ListRow
+                title={workspace.label}
+                meta={workspace.rootPath}
+                selected={activeWorkspaceId === workspace.workspaceId}
                 onClick={() => selectWorkspace(workspace.workspaceId)}
-                className={cn(
-                  "flex min-w-0 flex-1 flex-col px-4 py-1.5 text-left hover:bg-surface-hover",
-                  activeWorkspaceId === workspace.workspaceId && "bg-surface-selected"
-                )}
-              >
-                <span className="truncate text-label text-strong">{workspace.label}</span>
-                <span className="truncate font-mono text-micro text-faint-foreground">{workspace.rootPath}</span>
-              </button>
-              <button type="button" aria-label={"移除 " + workspace.label} className="mr-2 hidden rounded-md p-1 text-faint-foreground hover:bg-surface-hover hover:text-strong group-hover:block" onClick={() => void remove(workspace.workspaceId)}><Trash2 size={13} /></button>
+                hoverActions={<IconButton icon={Trash2} label={"移除 " + workspace.label} size={13} onClick={() => void remove(workspace.workspaceId)} />}
+              />
             </li>
           ))}
-          {workspaces.length === 0 && <li className="px-4 py-2 text-caption text-muted-foreground">点右上角 + 添加一个目录</li>}
         </ul>
+        {workspaces.length === 0 && <InlineNotice>点右上角 + 添加一个目录</InlineNotice>}
       </aside>
       <section className="flex min-w-0 flex-1 flex-col">
         {!activeWorkspaceId ? (
-          <Empty title="选择一个 workspace" />
+          <EmptyState title="选择一个 workspace" />
         ) : (
           <>
             <nav className="flex gap-1 border-b border-border px-3" aria-label="workspace 导航">
@@ -119,8 +113,8 @@ export const WorkspacesPanel = ({ store, pickDirectory, onOpenSession, compact }
                   onEdit={(roleId) => openEditor({ kind: "role", roleId })}
                 />
               )}
-              {section === "issues" && <Empty title="Issues 尚未提供" hint="来自 IM 和 Maintainer 的议题会在这里汇总，经思考流程转化为任务。" />}
-              {section === "automation" && <Empty title="Automation 尚未提供" hint="定时任务和自定义触发器会在这里配置，例如每日检查依赖更新、按 webhook 建 issue。" />}
+              {section === "issues" && <EmptyState title="Issues 尚未提供" hint="来自 IM 和 Maintainer 的议题会在这里汇总，经思考流程转化为任务。" />}
+              {section === "automation" && <EmptyState title="Automation 尚未提供" hint="定时任务和自定义触发器会在这里配置，例如每日检查依赖更新、按 webhook 建 issue。" />}
             </div>
           </>
         )}
@@ -152,7 +146,7 @@ const WorkItemRow = ({ item, runs, waitingFor, onOpenSession }: { item: WorkItem
       <ul className="ml-2 mt-1 space-y-0.5 border-l border-border pl-3">
         {runs.map((run) => (
           <li key={run.runId} className="flex items-center gap-2 text-micro text-muted-foreground">
-            <span className="font-mono uppercase tracking-[0.12em]">{roleLabel[run.role]}</span>
+            <Badge>{roleLabel[run.role]}</Badge>
             <span className="truncate">{run.note ?? ""}</span>
             <SessionLink sessionId={run.sessionId} onOpenSession={onOpenSession} />
             <span className="ml-auto shrink-0 font-mono text-faint-foreground">{runStatusLabel[run.status]} · {run.turns} turn · {new Date(run.startedAt).toLocaleTimeString()}</span>
@@ -194,12 +188,12 @@ const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, 
         <Button size="sm" variant={scheduler.enabled ? "accent" : "secondary"} onClick={() => setScheduler({ enabled: !scheduler.enabled })}>{scheduler.enabled ? "调度已开启" : "调度已关闭"}</Button>
         <label className="flex shrink-0 items-center gap-2 whitespace-nowrap text-caption text-muted-foreground">
           并发 Worker
-          <input type="number" min={1} max={8} value={scheduler.maxWorkers} onChange={(e) => setScheduler({ maxWorkers: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} className="w-12 border border-border bg-input px-1.5 py-0.5 text-label text-foreground outline-none" />
+          <Field type="number" min={1} max={8} value={scheduler.maxWorkers} onChange={(e) => setScheduler({ maxWorkers: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} className="w-14 [&>input]:h-7" />
         </label>
         <span className="truncate text-caption text-faint-foreground">开启后新 revision 触发管家拆单，排队工单由 Worker 接手。</span>
         {hidden > 0 && <span className="ml-auto shrink-0 text-micro text-faint-foreground">另有 {hidden} 项已结束，展开为页面查看</span>}
       </div>
-      {missions.length === 0 && standalone.length === 0 && <p className="px-4 py-3 text-caption text-muted-foreground">还没有任务。去「思考」里和设计伙伴聊出一个。</p>}
+      {missions.length === 0 && standalone.length === 0 && <EmptyState title="还没有任务" hint="去「思考」里和设计伙伴聊出一个。" />}
       <ul>
         {visibleMissions.map((mission) => {
           const items = workItems.filter((w) => w.missionId === mission.missionId);
@@ -263,22 +257,19 @@ const DomainsSection = ({ client, workspaceId, docs, onOpen }: { client: Workben
   };
   return (
     <div>
-      <div className="flex items-center pr-2">
-        <SectionLabel>Domain</SectionLabel>
-        <form className="ml-auto flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-          <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="新领域 id，如 ui-ux" className="w-40 border border-border bg-input px-1.5 py-0.5 text-label text-foreground outline-none" />
-          <Button size="sm" variant="ghost" type="submit" disabled={!draft.trim()} title="新建领域"><Plus size={14} /></Button>
+      <PanelHeader title="Domain">
+        <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); void create(); }}>
+          <Field value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="领域 id" className="w-36 [&>input]:h-7" />
+          <IconButton icon={Plus} label="新建领域" type="submit" disabled={!draft.trim()} />
         </form>
-      </div>
-      <p className="px-4 pb-2 text-caption text-muted-foreground">每个领域一份 md：正文说明覆盖什么、什么改动该考虑它，头部 standards 列规范路径。管家建单时读全部定义，判断涉及的领域并把规范附进工单。</p>
+      </PanelHeader>
+      <InlineNotice>每个领域一份 md：正文说明覆盖什么、什么改动该考虑它，头部 standards 列规范路径。管家建单时读全部定义，判断涉及的领域并把规范附进工单。</InlineNotice>
       {domains.length === 0 ? (
-        <p className="px-4 pb-3 text-caption text-muted-foreground">还没有领域定义。</p>
+        <InlineNotice>还没有领域定义。</InlineNotice>
       ) : (
         <ul>
           {domains.map((path) => (
-            <li key={path}>
-              <button type="button" onClick={() => onOpen(path)} className="block w-full truncate px-4 py-1.5 text-left text-label text-foreground hover:bg-surface-hover">{path.slice(DOMAINS_DIR.length, -3)}</button>
-            </li>
+            <li key={path}><ListRow title={path.slice(DOMAINS_DIR.length, -3)} meta={path} onClick={() => onOpen(path)} /></li>
           ))}
         </ul>
       )}
@@ -291,21 +282,21 @@ const roleSourceLabel: Record<RoleFile["source"], string> = { global: "全局", 
 const RolesSection = ({ client, workspaceId, roles, onEdit }: { client: WorkbenchClient; workspaceId: string; roles: RoleFile[]; onEdit: (roleId: string) => void }) => (
   <div>
     <SectionLabel>角色 prompt</SectionLabel>
-    <p className="px-4 pb-2 text-caption text-muted-foreground">全局版本在 ~/.vermillion/roles；在这里编辑会写入本 workspace 的 .vermillion/roles 作为覆盖。</p>
+    <InlineNotice>全局版本在 ~/.vermillion/roles；在这里编辑会写入本 workspace 的 .vermillion/roles 作为覆盖。</InlineNotice>
     <ul>
       {roles.map((role) => (
-        <li key={role.roleId} className="group flex items-center gap-2 border-b border-border px-4 py-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-label text-strong">{role.title}</span>
-              <Badge tone={role.source === "workspace" ? "accent" : "neutral"}>{roleSourceLabel[role.source]}</Badge>
-            </div>
-            <span className="font-mono text-micro text-faint-foreground">{role.roleId}.md</span>
-          </div>
-          <Button size="sm" variant="ghost" onClick={() => onEdit(role.roleId)}>{role.source === "workspace" ? "编辑" : "覆盖"}</Button>
-          {role.source === "workspace" && (
-            <Button size="sm" variant="ghost" onClick={() => void client.request("role.reset", { workspaceId, roleId: role.roleId })}>恢复全局</Button>
-          )}
+        <li key={role.roleId}>
+          <ListRow
+            title={role.title}
+            leading={<Badge tone={role.source === "workspace" ? "accent" : "neutral"}>{roleSourceLabel[role.source]}</Badge>}
+            meta={role.roleId + ".md"}
+            onClick={() => onEdit(role.roleId)}
+            hoverActions={
+              role.source === "workspace" ? (
+                <Button size="sm" variant="ghost" onClick={() => void client.request("role.reset", { workspaceId, roleId: role.roleId })}>恢复全局</Button>
+              ) : undefined
+            }
+          />
         </li>
       ))}
     </ul>
@@ -316,25 +307,24 @@ const DocsSection = ({ docs, decisions, onOpen }: { docs: string[]; decisions: D
   <div>
     <SectionLabel>文档</SectionLabel>
     {docs.length === 0 ? (
-      <p className="px-4 pb-2 text-caption text-muted-foreground">.vermillion/docs 下还没有文件。</p>
+      <InlineNotice>.vermillion/docs 下还没有文件。</InlineNotice>
     ) : (
       <ul>
         {docs.map((path) => (
           <li key={path}>
-            <button type="button" onClick={() => onOpen(path)} className="block w-full truncate px-4 py-1 text-left font-mono text-caption text-foreground hover:bg-surface-hover">{path.replace(/^\.vermillion\/docs\//, "")}</button>
+            <ListRow title={path.replace(/^\.vermillion\/docs\//, "")} titleClassName="font-normal text-foreground" onClick={() => onOpen(path)} className="py-1" />
           </li>
         ))}
       </ul>
     )}
     <SectionLabel>决策记录</SectionLabel>
     {decisions.length === 0 ? (
-      <p className="px-4 pb-3 text-caption text-muted-foreground">还没有决策卡。</p>
+      <InlineNotice>还没有决策卡。</InlineNotice>
     ) : (
       <ul>
         {decisions.map((card) => (
-          <li key={card.decisionId} className="px-4 py-1.5 text-caption">
-            <span className="text-foreground">{card.question}</span>
-            <span className="ml-2 font-mono text-micro text-faint-foreground">{card.answer ? "→ " + (card.options.find((o) => o.key === card.answer!.key)?.label ?? card.answer.key) : "待回答"}</span>
+          <li key={card.decisionId}>
+            <ListRow title={card.question} titleClassName="font-normal text-foreground" trailing={card.answer ? "→ " + (card.options.find((o) => o.key === card.answer!.key)?.label ?? card.answer.key) : "待回答"} />
           </li>
         ))}
       </ul>

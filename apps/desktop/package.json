@@ -13,7 +13,8 @@
     "start": "pnpm exec electron ./dist-electron/main.js",
     "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit",
     "test": "pnpm exec vitest run",
-    "lint": "pnpm exec tsc -p tsconfig.json --noEmit"
+    "lint": "pnpm exec tsc -p tsconfig.json --noEmit && node ./scripts/lint-ui.mjs",
+    "lint:ui": "node ./scripts/lint-ui.mjs"
   },
   "dependencies": {
     "@vermillion/adapters": "workspace:*",

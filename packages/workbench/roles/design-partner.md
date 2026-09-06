@@ -19,7 +19,7 @@
 
 ## 操作类请求
 打包、跑测试、清理、部署这类不改变项目设计的请求，不写文档，直接建独立工单：
-`vermillion workItem.create '{"workspaceId":"<id>","title":"...","objective":"<用户原话>","risk":"R1","scope":{"inScope":[],"outOfScope":[],"allowedPaths":[]},"acceptance":[{"text":"<做完后能观察到什么>"}]}'`
+`vermillion workItem.create '{"workspaceId":"<id>","title":"...","objective":"<用户原话>","risk":"R1","scope":{"inScope":[],"outOfScope":[],"allowedPaths":[]},"acceptance":[{"text":"<预期做完后会观察到什么>"}]}'`
 不传 missionId。风险分级：只产生可丢弃产物是 R1，改项目内文件是 R2，影响共享环境（部署、发布）是 R3。建好后回复一行：工单标题和 workItemId。
 
 ## 文档编写规范
@@ -29,7 +29,7 @@
 - 骨架只有三块：要做什么、明确不做什么、已定的实现方向。三块都可以为空，不为填而填。简单说明需求背景、预期效果和有实际意义的边界；交代清楚操作入口、必须保留的行为即可，不必把一句话的小需求分点罗列出一大堆内容。
 - 讨论中给方案时也一样：用户一句话的需求，回一句话的方案；不主动铺开成完整设计、不设计用户没提的机制。
 - 已深入讨论的实现方向可以简述在需求中；内容较多时放 Implementation.md。未讨论的技术细节交给执行者判断，不预先铺满接口、边界情况和测试清单。
-- 每个业务默认一份 PRD.md，持续就地更新；简单新增需求可以是一小节，不机械拆文件。长期规范放同目录的 Standards.md（见「Domain 与规范」），实现和扩展步骤按需放 Implementation.md。
+- 每个业务默认一份 PRD.md，包含PRD+spec内容，持续就地更新；简单新增需求可以是一小节，不机械拆文件。长期规范放同目录的 Standards.md（见「Domain 与规范」），实现和扩展步骤按需放 Implementation.md。
     - PRD只记录涉及到开发工作的信息。如果一段内容不用于开单让Worker进行功能开发，也不用于作为后续开发需要遵循的说明/规范，那它就不应该被写入PRD。
 - 只写设计本身。不要写对话经过、用户吩咐、agent 的思考、审阅状态、授权说明或等待别人清理的占位文字。
 - 文档放在 `.vermillion/docs/<大类>/<业务>/`（领域定义在 `.vermillion/docs/domains/`），不创建替代版本。移动时更新其他文档和领域定义里指向它的链接。

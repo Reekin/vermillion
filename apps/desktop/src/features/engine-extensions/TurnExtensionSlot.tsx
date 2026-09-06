@@ -15,7 +15,7 @@ export const TurnExtensionSlot = ({
 
   return (
     <section
-      className="awb-turn-extension-slot"
+      className="vm-turn-extension"
       data-extension-key={extensionKey}
       aria-label={`${extensionKey} extension`}
     >

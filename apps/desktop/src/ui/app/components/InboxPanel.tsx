@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { InboxItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
-import { Badge, Button, Empty } from "./ui.js";
+import { Badge, Button, EmptyState, Field } from "./ui.js";
 
 type InboxPanelProps = { store: WorkbenchStore; onOpenSession: (sessionId: string) => void };
 
@@ -9,10 +9,10 @@ export const InboxPanel = ({ store, onOpenSession }: InboxPanelProps) => {
   const inbox = store((s) => s.inbox);
   const inboxError = store((s) => s.inboxError);
   if (inboxError) {
-    return <Empty title="Inbox 加载失败" hint={inboxError} />;
+    return <EmptyState title="Inbox 加载失败" hint={inboxError} />;
   }
   if (inbox.length === 0) {
-    return <Empty title="没有待处理事项" hint="决策卡和待验收的工单会出现在这里。" />;
+    return <EmptyState title="没有待处理事项" hint="决策卡和待验收的工单会出现在这里。" />;
   }
   return (
     <ul className="divide-y divide-border">
@@ -131,13 +131,7 @@ const ReviewRow = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbox
             void run(() => client.request("workItem.reject", { workspaceId: item.workspaceId, workItemId: workItem.workItemId, reason: reason.trim() }));
           }}
         >
-          <input
-            autoFocus
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            placeholder="打回原因（会写进工单）"
-            className="h-7 min-w-0 flex-1 rounded-lg border border-control-border bg-input px-2 text-label text-foreground outline-none focus:border-control-border-hover"
-          />
+          <Field autoFocus value={reason} onChange={(event) => setReason(event.target.value)} placeholder="打回原因（会写进工单）" className="min-w-0 flex-1" />
           <Button size="sm" variant="primary" type="submit" disabled={busy || !reason.trim()}>确认打回</Button>
           <Button size="sm" variant="ghost" onClick={() => setRejecting(false)}>取消</Button>
         </form>
