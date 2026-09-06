@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   createSessionRuntimeService
 } from "../src/prod-service.js";
+import { createAgentRunner } from "../../desktop/src/electron/agent-runner.js";
 
 const codexFixturePath = fileURLToPath(
   new URL("./fixtures/fake-codex-app-server.mjs", import.meta.url)
@@ -161,6 +162,67 @@ describe("prod runtime service", () => {
     expect(snapshot.terminalStreams.some((stream) =>
       stream.outputText.includes("D:/workspace")
     )).toBe(true);
+  });
+
+  it.each([
+    ["worker", null],
+    ["supervisor", "priority"],
+    ["steward", null]
+  ] as const)("uses saved execution settings for %s sends and idle steers", async (role, serviceTierId) => {
+    const baseDir = await mkdtemp(join(tmpdir(), "vermillion-agent-profile-"));
+    tempDirs.push(baseDir);
+    const requestLogPath = join(baseDir, "requests.jsonl");
+    vi.stubEnv("FAKE_CODEX_REQUEST_LOG", requestLogPath);
+    const service = createSessionRuntimeService({
+      codexCommandPath: process.execPath,
+      codexCommandArgs: [codexFixturePath],
+      persistenceBaseDir: baseDir
+    });
+    disposers.push(() => service.dispose());
+    const { workspaceId } = await service.addWorkspace({ rootPath: baseDir });
+    await service.updateSettings({
+      executionPreferencesByEngineId: {
+        codex: {
+          selectedModelId: "saved-model",
+          modelPreferences: { "saved-model": { reasoningOptionId: "high", serviceTierId } }
+        }
+      }
+    });
+    const runner = createAgentRunner(service, "codex");
+    const { sessionId } = await runner.open({
+      workspaceId,
+      cwd: baseDir,
+      developerInstructions: "Answer briefly.",
+      title: "Profile regression",
+      metadata: { role }
+    });
+    await runner.send(sessionId, "first");
+    await waitFor(() => service.getSnapshot().turns.some(
+      (turn) => turn.sessionId === sessionId && turn.status === "completed"
+    ));
+    await runner.steer(sessionId, "second");
+    await waitFor(() => service.getSnapshot().turns.filter(
+      (turn) => turn.sessionId === sessionId && turn.status === "completed"
+    ).length === 2);
+    await service.executeCommand({
+      commandId: "explicit-send",
+      command: {
+        type: "sendUserMessage", sessionId, messageId: "explicit-message",
+        content: "third", attachments: [],
+        execution: { modelId: "manual-model", reasoningOptionId: "low", serviceTierId: null }
+      }
+    });
+    const requests = (await readRequestLog(requestLogPath)).filter(
+      (request) => request.method === "turn/start"
+    );
+    expect(requests.map((request) => request.params)).toEqual([
+      expect.objectContaining({ model: "saved-model", effort: "high", serviceTier: serviceTierId }),
+      expect.objectContaining({ model: "saved-model", effort: "high", serviceTier: serviceTierId }),
+      expect.objectContaining({ model: "manual-model", effort: "low", serviceTier: null })
+    ]);
+    expect(service.getSessionMetadata(sessionId)?.sessionProfile).toMatchObject({
+      modelId: "manual-model", reasoningOptionId: "low", serviceTierId: null
+    });
   });
 
   it("borrows Codex auth for first-message title generation", async () => {
