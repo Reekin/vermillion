@@ -29,7 +29,6 @@ describe("ComposerPanel", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
         isDropTarget={false}
-        fileInputRef={{ current: null }}
         textareaRef={{ current: null }}
         draft="Refine the current turn"
         selectedSkills={[]}
@@ -39,7 +38,6 @@ describe("ComposerPanel", () => {
         status={{ kind: "running", label: "Running" }}
         intent="steer"
         supportsSteer={true}
-        supportsAttachments={true}
         models={[
           {
             modelId: "gpt-5.5-codex",
@@ -72,19 +70,16 @@ describe("ComposerPanel", () => {
         isTurnActive={true}
         canSubmit={true}
         canStop={true}
-        isDispatching={false}
         onTextareaChange={() => undefined}
         onTextareaSelect={() => undefined}
         onInputKeyDown={async () => undefined}
         onPaste={() => undefined}
-        onFileInputChange={() => undefined}
         onDragEnter={() => undefined}
         onDragOver={() => undefined}
         onDragLeave={() => undefined}
         onDrop={() => undefined}
         onRemoveSkill={() => undefined}
         onRemoveAttachment={() => undefined}
-        onPickAttachments={() => undefined}
         onPrimaryAction={async () => undefined}
         onStop={async () => undefined}
         onModelChange={() => undefined}
@@ -99,14 +94,14 @@ describe("ComposerPanel", () => {
       />
     );
 
-    expect(html).toContain('aria-label="Model"');
+    expect(html).toContain('aria-label="模型"');
     expect(html).toContain('value="gpt-5.5-codex" selected=""');
     expect(html).toContain('value="xhigh" selected=""');
-    expect(html).toContain('aria-label="Speed"');
+    expect(html).toContain('aria-label="速度"');
     expect(html).toContain('value="ultrafast" selected=""');
-    expect(html).toContain(">Standard<");
+    expect(html).toContain(">标准<");
     expect((html.match(/disabled=""/g) ?? []).length).toBeGreaterThanOrEqual(3);
-    expect(html).toContain(">Default<");
+    expect(html).toContain(">默认<");
     expect(html).toContain(">Steer<");
     expect(html).not.toContain(">Queue<");
     expect(html).toContain('class="awb-composer__resize-handle"');
@@ -123,7 +118,6 @@ describe("ComposerPanel", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
         isDropTarget={false}
-        fileInputRef={{ current: null }}
         textareaRef={{ current: null }}
         draft=""
         selectedSkills={[]}
@@ -136,17 +130,14 @@ describe("ComposerPanel", () => {
         status={{ kind: "idle", label: "Ready" }}
         intent="send"
         supportsSteer={true}
-        supportsAttachments={true}
         hasComposedInput={true}
         isTurnActive={false}
         canSubmit={true}
         canStop={false}
-        isDispatching={false}
         onTextareaChange={() => undefined}
         onTextareaSelect={() => undefined}
         onInputKeyDown={async () => undefined}
         onPaste={() => undefined}
-        onFileInputChange={() => undefined}
         onDragEnter={() => undefined}
         onDragOver={() => undefined}
         onDragLeave={() => undefined}
@@ -154,7 +145,6 @@ describe("ComposerPanel", () => {
         onRemoveSkill={() => undefined}
         onRemoveAttachment={() => undefined}
         onPreviewAttachment={() => undefined}
-        onPickAttachments={() => undefined}
         onPrimaryAction={async () => undefined}
         onStop={async () => undefined}
         onSuggestionHover={() => undefined}
@@ -170,14 +160,14 @@ describe("ComposerPanel", () => {
     expect((html.match(/class="awb-composer__attachment-preview"/g) ?? []).length).toBe(2);
     expect(html).toContain("Preview first.png");
     expect(html).toContain("Preview second.png");
-    expect(html).toContain("multiple=\"\"");
+    expect(html).not.toContain("Attach files");
+    expect(html).not.toContain('type="file"');
   });
 
   it("shows active session context usage when available", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
         isDropTarget={false}
-        fileInputRef={{ current: null }}
         textareaRef={{ current: null }}
         draft=""
         selectedSkills={[]}
@@ -196,17 +186,14 @@ describe("ComposerPanel", () => {
         }}
         intent="send"
         supportsSteer={true}
-        supportsAttachments={true}
         hasComposedInput={false}
         isTurnActive={false}
         canSubmit={true}
         canStop={false}
-        isDispatching={false}
         onTextareaChange={() => undefined}
         onTextareaSelect={() => undefined}
         onInputKeyDown={async () => undefined}
         onPaste={() => undefined}
-        onFileInputChange={() => undefined}
         onDragEnter={() => undefined}
         onDragOver={() => undefined}
         onDragLeave={() => undefined}
@@ -214,7 +201,6 @@ describe("ComposerPanel", () => {
         onRemoveSkill={() => undefined}
         onRemoveAttachment={() => undefined}
         onPreviewAttachment={() => undefined}
-        onPickAttachments={() => undefined}
         onPrimaryAction={async () => undefined}
         onStop={async () => undefined}
         onSuggestionHover={() => undefined}
@@ -236,7 +222,6 @@ describe("ComposerPanel", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
         isDropTarget={false}
-        fileInputRef={{ current: null }}
         textareaRef={{ current: null }}
         draft=""
         selectedSkills={[]}
@@ -257,17 +242,14 @@ describe("ComposerPanel", () => {
         }}
         intent="send"
         supportsSteer={true}
-        supportsAttachments={true}
         hasComposedInput={false}
         isTurnActive={false}
         canSubmit={true}
         canStop={false}
-        isDispatching={false}
         onTextareaChange={() => undefined}
         onTextareaSelect={() => undefined}
         onInputKeyDown={async () => undefined}
         onPaste={() => undefined}
-        onFileInputChange={() => undefined}
         onDragEnter={() => undefined}
         onDragOver={() => undefined}
         onDragLeave={() => undefined}
@@ -275,7 +257,6 @@ describe("ComposerPanel", () => {
         onRemoveSkill={() => undefined}
         onRemoveAttachment={() => undefined}
         onPreviewAttachment={() => undefined}
-        onPickAttachments={() => undefined}
         onPrimaryAction={async () => undefined}
         onStop={async () => undefined}
         onSuggestionHover={() => undefined}
@@ -297,7 +278,6 @@ describe("ComposerPanel", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
         isDropTarget={false}
-        fileInputRef={{ current: null }}
         textareaRef={{ current: null }}
         draft=""
         selectedSkills={[]}
@@ -319,17 +299,14 @@ describe("ComposerPanel", () => {
         ]}
         intent="send"
         supportsSteer={true}
-        supportsAttachments={true}
         hasComposedInput={false}
         isTurnActive={true}
         canSubmit={false}
         canStop={false}
-        isDispatching={false}
         onTextareaChange={() => undefined}
         onTextareaSelect={() => undefined}
         onInputKeyDown={async () => undefined}
         onPaste={() => undefined}
-        onFileInputChange={() => undefined}
         onDragEnter={() => undefined}
         onDragOver={() => undefined}
         onDragLeave={() => undefined}
@@ -337,7 +314,6 @@ describe("ComposerPanel", () => {
         onRemoveSkill={() => undefined}
         onRemoveAttachment={() => undefined}
         onPreviewAttachment={() => undefined}
-        onPickAttachments={() => undefined}
         onPrimaryAction={async () => undefined}
         onStop={async () => undefined}
         onSuggestionHover={() => undefined}

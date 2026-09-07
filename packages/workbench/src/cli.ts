@@ -8,6 +8,7 @@ import { workbenchRpc, type WorkbenchRpcMethod } from "./rpc.js";
 import { createWorkbenchRpcHandler } from "./rpc-handler.js";
 import { RoleService } from "./roles.js";
 import { WorkbenchService } from "./workbench-service.js";
+import { AppLauncher, resolveAppCommand } from "./app-launcher.js";
 
 /** Shipped role prompts sit next to this module's parent dir both in the repo (packages/workbench/roles) and in the release (resources/app/roles). */
 const shippedRoleDefaultsDir = (): string | undefined => {
@@ -33,9 +34,15 @@ export const runCli = async (argv: string[]): Promise<number> => {
   }
   const baseDir = process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion");
   const request = { method: method as WorkbenchRpcMethod, params: rawParams ? JSON.parse(rawParams) : {} };
-  const remote = await connectLocalEndpoint(baseDir);
+  // Acceptance instances belong to the CLI's checkout/release, not a running desktop's build.
+  const localAppMethod = method === "app.start" || method === "app.stop";
+  const remote = localAppMethod ? undefined : await connectLocalEndpoint(baseDir);
   const roles = new RoleService({ globalDir: join(baseDir, "roles"), defaultsDir: shippedRoleDefaultsDir() });
-  const service = remote ? undefined : new WorkbenchService({ workspaces: createFileWorkspaceSource(join(baseDir, "workspace-registry.json")), roles });
+  const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+  const service = remote ? undefined : new WorkbenchService({
+    workspaces: createFileWorkspaceSource(join(baseDir, "workspace-registry.json")), roles,
+    launcher: localAppMethod ? new AppLauncher({ command: resolveAppCommand(packageRoot), packageRoot }) : undefined
+  });
   try {
     if (service) await roles.ensureGlobal();
     const handler = remote ?? createWorkbenchRpcHandler(service!);
