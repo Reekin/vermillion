@@ -341,8 +341,9 @@ export class WorkbenchService {
   }
 
   /** Worker claimed the item; records the session and worktree it runs in. */
+  /** A (re)start begins a new turn: the pending message is claimed and any stale-turn mark from the previous run is over. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined, staleTurnId: undefined } }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
@@ -434,6 +435,28 @@ export class WorkbenchService {
       }
     }
     return updated;
+  }
+
+  /**
+   * Worker found it needs another item merged first: back to the queue with that item in dependsOn. Session, worktree
+   * and branch stay on the record and the wake-up note waits in resumeMessage, so once the prerequisite closes the
+   * scheduler resumes the same conversation. Not a failure, so attempts are untouched. The prerequisite may belong to
+   * any mission.
+   */
+  async deferWorkItem(workspaceId: string, workItemId: string, dependsOn: string, note: string): Promise<WorkItem> {
+    if (dependsOn === workItemId) throw new Error("Work item cannot depend on itself: " + workItemId);
+    const prerequisite = await this.getWorkItem(workspaceId, dependsOn);
+    if (prerequisite.status === "closed" || prerequisite.status === "cancelled") throw new Error("Work item is already " + prerequisite.status + ": " + dependsOn);
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
+      if (item.status !== "running") throw new Error("Work item is not running: " + workItemId);
+      return {
+        ...item,
+        status: "queued",
+        dependsOn: item.dependsOn.includes(dependsOn) ? item.dependsOn : [...item.dependsOn, dependsOn],
+        decisions: [...item.decisions, "等待工单 " + dependsOn + "：" + note],
+        run: { ...item.run, resumeMessage: "对工单「" + prerequisite.title + "」（" + dependsOn + "）的等待已结束。退回原因：" + note + "。先用 workItem.get 确认它的最终状态（关闭合入或被管家改掉依赖），把本分支 rebase 到主分支当前 HEAD，再接着做。" }
+      };
+    });
   }
 
   /** Orchestrator: marks/clears the turn during which a contract change landed mid-flight. */

@@ -14,10 +14,13 @@
 4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff。改动涉及界面时，由你 `app.start` 起好实例（确认是最新 build），把返回的 cdpUrl 和 dataDir 写进首条消息；verifier 不自己起实例，结束后由你 `app.stop`。任一条 fail 就修复后重跑 verifier，不修改 acceptance。
 5. 全部 pass 后，有独立 worktree 时再次读取主分支 HEAD；若已前进，重新 rebase 并更新受影响的 review、验收与证据。用 `vermillion workItem.submit` 提交基于该分支结果的 evidence、review 处置和 verify 报告，然后结束会话。合并冲突自动打回时，在原会话和原 worktree 按原因 rebase 解决，再走 review、验收、提交，等待用户再次通过；合并与清理仍由工作台执行。纯操作工单（无 allowedPaths，如打包、跑测试）可以跳过 reviewer 和 verifier，直接把命令输出作为 evidence 提交，verify.items 逐条对应 acceptance。
 
-一个会话只处理一个工单。submit 或 decision.create 之后不要再做任何事。
+一个会话只处理一个工单。submit、decision.create 或 workItem.defer 之后不要再做任何事。
 
 ## 合同变更
 管家调整工单时你会在对话中收到「工单已调整」。立即重新 `workItem.get`，按新的 objective / scope / acceptance 继续，已做但不再需要的部分回退。调整送达时正在进行的那一轮里发出的 submit 会被作废（工作台据此判断它依据的是旧合同），所以收到调整后先结束当前轮，再在下一轮提交。
+
+## 依赖另一张未合入的工单
+发现本单要建立在另一张尚未关闭的工单之上（要用它的代码、接口或产物），不要开决策卡等用户，也不要去读它的 worktree。用 `vermillion workItem.defer '{"workspaceId":…,"workItemId":<本单>,"dependsOn":<那张工单>,"note":"一句话说依赖什么"}'` 把本单退回队列并登记依赖，然后结束会话。那张工单可以属于别的任务。你的会话、worktree 和分支都保留；它关闭合入后，工作台会回到这个会话叫你接着做，此时先 rebase 到主分支再继续。
 
 ## 遇到不确定的事
 必须问用户才能继续时，用 `vermillion decision.create` 写决策卡，然后结束会话。不要猜着做高风险选择。

@@ -140,7 +140,7 @@ export class Orchestrator {
       }
       const item = run.workItemId ? await this.service.getWorkItem(workspaceId, run.workItemId).catch(() => undefined) : undefined;
       if (item?.status === "queued" && item.run.resumeMessage && item.run.sessionId === run.sessionId) {
-        await this.service.putRun(workspaceId, { ...run, status: "done", note: "用户已反馈，等待续做", endedAt: this.now() });
+        await this.service.putRun(workspaceId, { ...run, status: "done", note: "等待续做", endedAt: this.now() });
         continue;
       }
       const stillOwns = run.role === "steward" || (item?.status === "running" && item.run.sessionId === run.sessionId);
@@ -278,13 +278,17 @@ export class Orchestrator {
     const closed = new Set(items.filter((i) => i.status === "closed").map((i) => i.workItemId)); // cancelled never satisfies a dependency
     const busy = new Set(items.filter((i) => i.status === "running").flatMap((i) => i.needs));
     const ready = items.filter(
-      (i) => i.status === "queued" && i.dependsOn.every((id) => closed.has(id)) && !i.needs.some((need) => busy.has(need))
+      (i) => i.status === "queued" && i.dependsOn.every((id) => closed.has(id))
         // Inbox may receive a submit or decision before its turn ends. Deliver feedback after that turn finishes.
         && !(i.run.resumeMessage && i.run.sessionId && this.runsBySession.has(i.run.sessionId))
     );
-    for (const item of ready.slice(0, capacity)) {
+    let opened = 0;
+    for (const item of ready) {
+      if (opened >= capacity) break;
+      if (item.needs.some((need) => busy.has(need))) continue; // one slot per resource, including ones taken in this pass
       await this.openWorker(workspaceId, item);
       for (const need of item.needs) busy.add(need);
+      opened++;
     }
   }
 
@@ -303,7 +307,9 @@ export class Orchestrator {
 
   /**
    * A work item was cancelled: interrupt its worker if one held it, and when queued items depended on it, wake the
-   * steward of that mission to decide what happens to them.
+   * steward of each dependant's own mission to decide what happens to them (a worker may have deferred on an item from
+   * another mission). Standalone dependants have no steward and stay queued; the task board shows them waiting on a
+   * cancelled item.
    */
   private async onCancelled(workspaceId: string, workItemId: string, sessionId: string | undefined, dependants: string[]): Promise<void> {
     const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
@@ -313,20 +319,21 @@ export class Orchestrator {
       await this.service.putRun(workspaceId, { ...bound.run, status: "failed", note: "工单已取消", endedAt: this.now() });
     }
     if (dependants.length === 0) return;
-    const item = await this.service.getWorkItem(workspaceId, workItemId);
-    const mission = item.missionId ? (await this.service.listMissions(workspaceId)).find((m) => m.missionId === item.missionId) : undefined;
-    if (!mission) return;
-    const items = await this.service.listWorkItems(workspaceId, mission.missionId);
-    const lines = dependants.map((id) => { const w = items.find((x) => x.workItemId === id); return "- " + id + " " + (w?.title ?? "") + "（dependsOn: " + (w?.dependsOn.join(", ") ?? "") + "）"; });
-    await this.stewardTurn(workspaceId, mission, undefined, [
-      "工单「" + item.title + "」（" + workItemId + "）已取消。以下排队中的工单依赖它：",
-      ...lines,
-      "",
-      "workspaceId: " + workspaceId,
-      "missionId: " + mission.missionId,
-      "",
-      "请逐张判断：去掉依赖继续（workItem.update 改 dependsOn，带 note）、改依赖到替代工单、或一并取消（workItem.cancel）。拿不准就 decision.create。最后回复一行摘要。"
-    ].join("\n"));
+    const [item, items, missions] = await Promise.all([this.service.getWorkItem(workspaceId, workItemId), this.service.listWorkItems(workspaceId), this.service.listMissions(workspaceId)]);
+    const affected = items.filter((w) => dependants.includes(w.workItemId));
+    for (const mission of missions) {
+      const mine = affected.filter((w) => w.missionId === mission.missionId);
+      if (mine.length === 0) continue;
+      await this.stewardTurn(workspaceId, mission, undefined, [
+        "工单「" + item.title + "」（" + workItemId + "）已取消。以下排队中的工单依赖它：",
+        ...mine.map((w) => "- " + w.workItemId + " " + w.title + "（dependsOn: " + w.dependsOn.join(", ") + "）"),
+        "",
+        "workspaceId: " + workspaceId,
+        "missionId: " + mission.missionId,
+        "",
+        "请逐张判断：去掉依赖继续（workItem.update 改 dependsOn，带 note）、改依赖到替代工单、或一并取消（workItem.cancel）。拿不准就 decision.create。最后回复一行摘要。"
+      ].join("\n"));
+    }
   }
 
   private async openWorker(workspaceId: string, item: WorkItem): Promise<void> {
@@ -413,7 +420,7 @@ export class Orchestrator {
       "先用 CLI 读取完整工单：vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "'",
       ...(prior.length ? ["", "历史记录：", ...prior.map((p) => "- " + p)] : []),
       "",
-      "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create；两者之一是这个会话唯一的合法结束方式。"
+      "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create，发现依赖另一张未合入的工单时调用 workItem.defer；三者之一是这个会话唯一的合法结束方式。"
     ].join("\n"));
   }
 
@@ -448,7 +455,10 @@ export class Orchestrator {
     // The item left this session: submitted, parked on a decision, voided (and possibly already re-assigned).
     if (item.status !== "running" || item.run.sessionId !== run.sessionId) {
       this.runsBySession.delete(run.sessionId);
-      const note = item.run.sessionId !== run.sessionId && item.status !== "review" && item.status !== "closed" && item.status !== "cancelled" ? "提交作废：合同已变更" : item.status === "decision" ? "等待决策" : "已提交 (" + item.status + ")";
+      const note = item.run.sessionId !== run.sessionId && item.status !== "review" && item.status !== "closed" && item.status !== "cancelled" ? "提交作废：合同已变更"
+        : item.status === "decision" ? "等待决策"
+        : item.status === "queued" ? "退回队列"
+        : "已提交 (" + item.status + ")";
       await this.service.putRun(workspaceId, { ...run, status: "done", note, endedAt: this.now() });
       await this.schedule(workspaceId);
       return;
@@ -463,7 +473,7 @@ export class Orchestrator {
       await this.failWorker(workspaceId, run, "多轮未提交");
       return;
     }
-    await this.runner.send(run.sessionId, "工单仍是进行中。继续；完成后调用 workItem.submit，需要用户决定则调用 decision.create。");
+    await this.runner.send(run.sessionId, "工单仍是进行中。继续；完成后调用 workItem.submit，需要用户决定则调用 decision.create，依赖另一张未合入的工单则调用 workItem.defer。");
   }
 
   private async failWorker(workspaceId: string, run: AgentRun, note: string): Promise<void> {

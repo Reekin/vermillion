@@ -492,6 +492,90 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.role === "worker" && r.status === "failed" && r.note === "工单已取消"));
   });
 
+  it("a worker deferring on another item goes back to the queue with its session kept, and resumes that session once the prerequisite closes", async () => {
+    const { service, ws, sessions, complete, runner } = await setup(2);
+    const base = { objective: "o", risk: "R2" as const, scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: [{ text: "t" }] };
+    // B lives in a mission (a different group than the standalone A); its docs commit also gives worktrees a HEAD
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/b.md", "# b\n");
+    const mission = await service.createMission(ws.workspaceId, { title: "B", summary: "" });
+    await until(async () => sessions.some((s) => s.metadata.role === "steward" && s.messages.length > 0));
+    complete(sessions.find((s) => s.metadata.role === "steward")!.sessionId, "no-op");
+    const a = await service.createWorkItem(ws.workspaceId, { ...base, title: "A" });
+    await until(async () => sessions.some((s) => s.metadata.workItemId === a.workItemId && s.messages.length > 0));
+    const workerA = sessions.find((s) => s.metadata.workItemId === a.workItemId)!;
+    const before = await service.getWorkItem(ws.workspaceId, a.workItemId);
+    expect(before.run.worktreePath).toContain("worktrees");
+    const b = await service.createWorkItem(ws.workspaceId, { ...base, title: "B", missionId: mission.missionId, scope: { ...base.scope, allowedPaths: [] } });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, b.workItemId)).status === "running");
+
+    // worker A (via CLI) defers on B, then its turn ends
+    const deferred = await service.deferWorkItem(ws.workspaceId, a.workItemId, b.workItemId, "要用 B 的接口");
+    expect(deferred.status).toBe("queued");
+    expect(deferred.dependsOn).toEqual([b.workItemId]);
+    expect(deferred.run).toMatchObject({ sessionId: workerA.sessionId, worktreePath: before.run.worktreePath, branch: before.run.branch });
+    expect(deferred.run.attempts).toBeUndefined();
+    await expect(service.deferWorkItem(ws.workspaceId, a.workItemId, b.workItemId, "again")).rejects.toThrow(/not running/);
+    complete(workerA.sessionId, "已退回队列");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.workItemId === a.workItemId && r.status === "done" && r.note === "退回队列"));
+    await tick();
+    expect((await service.getWorkItem(ws.workspaceId, a.workItemId)).status).toBe("queued"); // still held by dependsOn
+    expect((await service.listDecisions(ws.workspaceId))).toHaveLength(0);
+
+    // B closes -> A is picked up again in the same session, with a resume message instead of a fresh briefing
+    const workerB = sessions.find((s) => s.metadata.workItemId === b.workItemId)!;
+    await service.submitWorkItem(ws.workspaceId, b.workItemId, { evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+    await service.approveWorkItem(ws.workspaceId, b.workItemId);
+    complete(workerB.sessionId, "done");
+    await until(async () => (await service.getWorkItem(ws.workspaceId, a.workItemId)).status === "running");
+    const resumed = await service.getWorkItem(ws.workspaceId, a.workItemId);
+    expect(resumed.run.sessionId).toBe(workerA.sessionId);
+    expect(resumed.run.worktreePath).toBe(before.run.worktreePath);
+    expect(sessions.filter((s) => s.metadata.workItemId === a.workItemId)).toHaveLength(1);
+    await until(async () => workerA.messages.length === 2);
+    expect(workerA.messages[1]).toContain("对工单「B」（" + b.workItemId + "）的等待已结束。退回原因：要用 B 的接口");
+    await access(before.run.worktreePath!);
+    expect(workerA.messages[1]).toContain("rebase");
+    expect(resumed.run.resumeMessage).toBeUndefined();
+    expect((await service.listRuns(ws.workspaceId)).filter((r) => r.workItemId === a.workItemId).map((r) => r.status).sort()).toEqual(["done", "running"]);
+
+    // when the kept session cannot be opened, a fresh worker takes over instead
+    const c = await service.createWorkItem(ws.workspaceId, { ...base, title: "C" });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, c.workItemId)).status === "running");
+    const d = await service.createWorkItem(ws.workspaceId, { ...base, title: "D" });
+    await service.deferWorkItem(ws.workspaceId, c.workItemId, d.workItemId, "等 D");
+    const gone = sessions.find((s) => s.metadata.workItemId === c.workItemId)!;
+    complete(gone.sessionId, "退回");
+    gone.sessionId = "vanished"; // runner.resume can no longer find it
+    expect(await runner.resume((await service.getWorkItem(ws.workspaceId, c.workItemId)).run.sessionId!)).toBe(false);
+    await until(async () => (await service.getWorkItem(ws.workspaceId, d.workItemId)).status === "running");
+    await service.submitWorkItem(ws.workspaceId, d.workItemId, { evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+    await service.approveWorkItem(ws.workspaceId, d.workItemId);
+    complete(sessions.find((s) => s.metadata.workItemId === d.workItemId)!.sessionId, "done");
+    await until(async () => sessions.filter((s) => s.metadata.workItemId === c.workItemId).length === 2);
+    const fresh = sessions.filter((s) => s.metadata.workItemId === c.workItemId).at(-1)!;
+    await until(async () => fresh.messages.length > 0);
+    expect(fresh.messages[0]).toContain("你负责工单「C」");
+    expect(fresh.messages[0]).toContain("已决策：等待工单 " + d.workItemId);
+
+    // a mission item deferred on a standalone one: cancelling that prerequisite wakes the dependant's own steward
+    for (const id of [a.workItemId, c.workItemId]) {
+      await service.submitWorkItem(ws.workspaceId, id, { evidence: { summary: "ok", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [], verify: { items: [], verdict: "pass" } });
+    }
+    complete(workerA.sessionId, "done");
+    complete(fresh.sessionId, "done");
+    const e = await service.createWorkItem(ws.workspaceId, { ...base, title: "E", missionId: mission.missionId, scope: { ...base.scope, allowedPaths: [] } });
+    const f = await service.createWorkItem(ws.workspaceId, { ...base, title: "F", scope: { ...base.scope, allowedPaths: [] } });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, e.workItemId)).status === "running");
+    await service.deferWorkItem(ws.workspaceId, e.workItemId, f.workItemId, "等 F");
+    complete(sessions.find((s) => s.metadata.workItemId === e.workItemId)!.sessionId, "退回");
+    const stewardCount = sessions.filter((s) => s.metadata.role === "steward").length;
+    await service.cancelWorkItem(ws.workspaceId, f.workItemId);
+    await until(async () => sessions.filter((s) => s.metadata.role === "steward").length === stewardCount + 1);
+    const steward = sessions.filter((s) => s.metadata.role === "steward").at(-1)!;
+    expect(steward.metadata.missionId).toBe(mission.missionId);
+    expect(steward.messages[0]).toContain("- " + e.workItemId + " E");
+  });
+
   it("patrols running workers with a fresh supervisor session, relays remind into the worker's turn, and requeues after too many idle turns", async () => {
     const { service, ws, sessions, complete, tools } = await setup(1, 120);
     const item = await service.createWorkItem(ws.workspaceId, { title: "Package", objective: "pnpm package", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
