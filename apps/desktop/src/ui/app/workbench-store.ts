@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, Mission, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
 
 export type Panel = "think" | "inbox" | "workspaces";
 export type WorkspaceSection = "missions" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
@@ -26,6 +26,7 @@ export type WorkspaceView = {
   roles: RoleFile[];
   scheduler: Scheduler;
   runs: AgentRun[];
+  actions: WorkflowAction[];
 };
 
 /** What the text editor modal is showing: a doc under .vermillion/docs or a role prompt override. */
@@ -48,6 +49,9 @@ export type WorkbenchState = {
   /** Why the last view load failed (a bad record, a missing workspace); cleared on the next successful load. */
   viewError: string | undefined;
   inbox: InboxItem[];
+  inboxReceipts: Extract<InboxItem, { kind: "decision" }>[];
+  retainDecision: (item: Extract<InboxItem, { kind: "decision" }>) => void;
+  dismissDecision: (workspaceId: string, decisionId: string) => void;
   inboxError: string | undefined;
   tasks: TaskSummary[];
   tasksError: string | undefined;
@@ -128,7 +132,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         return;
       }
       try {
-        const [missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs] = await Promise.all([
+        const [missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
           client.request("mission.list", { workspaceId }),
           client.request("workItem.list", { workspaceId }),
           client.request("decision.list", { workspaceId }),
@@ -136,10 +140,11 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           client.request("docs.pending", { workspaceId }),
           client.request("role.list", { workspaceId }),
           client.request("scheduler.get", { workspaceId }),
-          client.request("run.list", { workspaceId })
+          client.request("run.list", { workspaceId }),
+          client.request("action.list", { workspaceId })
         ]);
         if (generation !== viewGeneration) return;
-        set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs }, viewError: undefined });
+        set({ view: { workspaceId, missions, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
       } catch (error) {
         if (generation !== viewGeneration) return;
         set({ viewError: (error as Error).message });
@@ -166,6 +171,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       view: undefined,
       viewError: undefined,
       inbox: [],
+      inboxReceipts: [],
+      retainDecision: (item) => set((state) => ({ inboxReceipts: [...state.inboxReceipts.filter((entry) => entry.card.decisionId !== item.card.decisionId || entry.workspaceId !== item.workspaceId), item] })),
+      dismissDecision: (workspaceId, decisionId) => set((state) => ({ inboxReceipts: state.inboxReceipts.filter((entry) => entry.workspaceId !== workspaceId || entry.card.decisionId !== decisionId) })),
       inboxError: undefined,
       tasks: [],
       tasksError: undefined,
@@ -217,6 +225,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
             case "roles.changed":
             case "scheduler.changed":
             case "runs.changed":
+            case "actions.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               return;
             case "missions.changed":

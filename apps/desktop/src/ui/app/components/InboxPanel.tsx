@@ -1,12 +1,18 @@
 import { useState } from "react";
 import type { InboxItem, WorkItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
-import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotice } from "./ui.js";
+import { useWorkflowContext } from "../use-workflow-context.js";
+import { WorkItemDialog } from "./WorkItemDialog.js";
+import { actionStatusLabel, dispositionSummary, roleLabel } from "./workflow-display.js";
+import { statusLabel } from "./task-labels.js";
+import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotice, DetailSection, ListRow } from "./ui.js";
 
 type InboxPanelProps = { store: WorkbenchStore };
 
 export const InboxPanel = ({ store }: InboxPanelProps) => {
-  const inbox = store((s) => s.inbox);
+  const pending = store((s) => s.inbox);
+  const receipts = store((s) => s.inboxReceipts);
+  const inbox = [...pending, ...receipts.filter((receipt) => !pending.some((entry) => entry.kind === "decision" && entry.workspaceId === receipt.workspaceId && entry.card.decisionId === receipt.card.decisionId))];
   const inboxError = store((s) => s.inboxError);
   if (inboxError) {
     return <EmptyState title="Inbox 加载失败" hint={inboxError} />;
@@ -33,13 +39,23 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const toggleDetails = store((s) => s.toggleInboxDetails);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
-  const missionTitle = store((s) => s.view?.workspaceId === item.workspaceId ? s.view.missions.find((m) => m.missionId === item.card.missionId)?.title : undefined);
-  const { card } = item;
+  const { data, error: contextError } = useWorkflowContext(client, item.workspaceId);
+  const [detailId, setDetailId] = useState<string>();
+  const card = data?.decisions.find((entry) => entry.decisionId === item.card.decisionId) ?? item.card;
+  const action = data?.actions.find((entry) => entry.actionId === card.actionId);
+  const dispositions = action ? dispositionSummary(action) : [];
+  const relatedIds = [...new Set([...(action?.workItemIds ?? []), ...(card.workItemId ? [card.workItemId] : [])])];
+  const missionTitle = data?.missions.find((entry) => entry.missionId === card.missionId)?.title;
+  const sessionId = action?.sessionId ?? card.sessionId;
+  const retainDecision = store((s) => s.retainDecision);
+  const dismissDecision = store((s) => s.dismissDecision);
+  const answered = !!card.answer;
   const adjustments = card.adjustments ?? [];
-  // An option with the note attached, or the note alone as a free answer; both reach the worker the same way.
+  // Keep the card mounted while the pending-list event arrives, then show the persisted answer.
   const answer = async (key?: string) => {
     setBusy(true);
     setError(null);
+    retainDecision(item);
     try {
       await client.request("decision.answer", { workspaceId: item.workspaceId, decisionId: item.card.decisionId, key, note: note.trim() || undefined });
     } catch (caught) {
@@ -48,13 +64,15 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       setBusy(false);
     }
   };
+  if (card.withdrawn) return null;
   return (
+    <>
     <Card
       header={
         <>
-          <Badge tone="accent">决策</Badge>
+          <Badge tone="accent">{answered ? "已答复" : "决策"}</Badge>
           {missionTitle && <span className="truncate text-caption text-muted-foreground">{missionTitle}</span>}
-          {card.sessionId && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => showAgentSession(item.workspaceId, card.sessionId!)}>进入会话</Button>}
+          {sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>进入会话</Button>}
         </>
       }
     >
@@ -70,6 +88,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
           </ul>
         </div>
       )}
+      {!answered && <>
       <ul className="mt-3 space-y-2">
         {card.options.map((option) => {
           const recommended = option.key === card.recommended;
@@ -96,11 +115,29 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
         <Field kind="textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注" className="min-w-0 flex-1" />
         <Button type="submit" disabled={busy || !note.trim()} className="shrink-0">仅以备注答复</Button>
       </form>
+      </>}
+      {answered && <DetailSection title="答复结果">
+        <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
+        <p>{card.deliveryPending ? "答复已保存，等待交接" : "答复已记录"}</p>
+        <Button size="sm" variant="ghost" onClick={() => dismissDecision(item.workspaceId, card.decisionId)}>知道了</Button>
+      </DetailSection>}
+      {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
+        <p>{roleLabel[action.role]} · {actionStatusLabel[action.status]}</p>
+        {dispositions.length ? dispositions.slice(-5).map((summary, index) => <p key={index}>{summary}</p>) : <p>尚无已执行的自动处置。</p>}
+      </DetailSection>}
+      {relatedIds.length > 0 && <DetailSection title="相关工单">{relatedIds.map((id) => {
+        const related = data?.workItems.find((entry) => entry.workItemId === id);
+        return <ListRow key={id} title={related?.title ?? id} leading={related && <Badge>{related.risk}</Badge>}
+          trailing={related && <Badge status={related.status}>{statusLabel[related.status]}</Badge>} onClick={() => setDetailId(id)} />;
+      })}</DetailSection>}
+      {contextError && <InlineNotice tone="error">{contextError}</InlineNotice>}
       {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
-      {card.details && (
-        <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, card.decisionId)}>{card.details}</CollapsibleDetails>
+      {(card.details || action?.history.length) && (
+        <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, card.decisionId)}>{[card.details, action?.history.map((entry) => entry.at + " " + entry.message).join("\n")].filter(Boolean).join("\n\n")}</CollapsibleDetails>
       )}
     </Card>
+    {detailId && data && <WorkItemDialog client={client} workspaceId={item.workspaceId} workItemId={detailId} workItems={data.workItems} runs={data.runs} actions={data.actions} onClose={() => setDetailId(undefined)} onOpenSession={(id) => showAgentSession(item.workspaceId, id)} />}
+    </>
   );
 };
 

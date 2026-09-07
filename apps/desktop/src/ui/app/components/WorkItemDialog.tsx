@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import type { AgentRun, DecisionCard, WorkbenchClient, WorkItem } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, WorkbenchClient, WorkItem, WorkflowAction } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
 import { Badge, Button, Card, CollapsibleDetails, DetailSection, EmptyState, InlineNotice, ListRow } from "./ui.js";
+import { WorkflowDetails } from "./WorkflowDetails.js";
+import { roleLabel, waitingActions } from "./workflow-display.js";
 import { statusLabel } from "./task-labels.js";
 
 type WorkItemDialogProps = {
@@ -10,6 +12,7 @@ type WorkItemDialogProps = {
   workItemId: string;
   workItems: WorkItem[];
   runs: AgentRun[];
+  actions?: WorkflowAction[];
   onClose: () => void;
   onOpenSession: (sessionId: string) => void;
 };
@@ -17,9 +20,9 @@ type WorkItemDialogProps = {
 const lines = (values: string[]) => values.length ? values.map((value) => "• " + value).join("\n") : "无";
 const time = (value: string) => new Date(value).toLocaleString("zh-CN");
 const runStatus = { running: "进行中", done: "已结束", failed: "失败" };
-const roleLabel = { steward: "管家", worker: "Worker", supervisor: "Supervisor", "workspace-repair": "工作区修复" };
 
-export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, runs, onClose, onOpenSession }: WorkItemDialogProps) => {
+
+export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, runs, actions = [], onClose, onOpenSession }: WorkItemDialogProps) => {
   const item = workItems.find((entry) => entry.workItemId === workItemId);
   const [decisions, setDecisions] = useState<DecisionCard[]>();
   const [error, setError] = useState<string>();
@@ -43,8 +46,9 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     return () => { active = false; unsubscribe(); };
   }, [client, workspaceId]);
   const itemRuns = runs.filter((run) => run.workItemId === workItemId).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  const sessionId = item?.run.sessionId ?? itemRuns[0]?.sessionId;
-  const itemDecisions = decisions?.filter((card) => card.workItemId === workItemId || item?.decisions.includes(card.decisionId));
+  const itemActions = actions.filter((action) => action.workItemIds.includes(workItemId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const sessionId = (item && waitingActions(actions, item).find((action) => action.sessionId)?.sessionId) ?? item?.run.sessionId ?? itemRuns[0]?.sessionId;
+  const itemDecisions = decisions?.filter((card) => card.workItemId === workItemId || itemActions.some((action) => action.actionId === card.actionId) || item?.decisions.includes(card.decisionId));
   return <Modal title="工单详情" onClose={onClose} width={800}>
     {!item ? <EmptyState title="工单不存在" hint={workItemId} /> : <Card
       className="m-4"
@@ -53,6 +57,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     >
       <DetailSection title="工单">{item.title}</DetailSection>
       <DetailSection title="目标">{item.objective || "未填写"}</DetailSection>
+      <WorkflowDetails actions={itemActions} onOpenSession={(id) => { onClose(); onOpenSession(id); }} />
       <DetailSection title="范围">{lines(item.scope.inScope)}</DetailSection>
       <DetailSection title="不在范围内">{lines(item.scope.outOfScope)}</DetailSection>
       <DetailSection title="允许路径">{lines(item.scope.allowedPaths)}</DetailSection>
@@ -82,8 +87,9 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
         ...item.verify.items.map((entry) => `${entry.index + 1}. ${item.acceptance[entry.index]?.text ?? "验收项"}\n${entry.pass ? "通过" : "未通过"}：${entry.evidence}`)
       ].join("\n\n") : "尚未验收"}</DetailSection>
       <DetailSection title="决策">
-        {error ? <InlineNotice tone="error">{error}</InlineNotice> : !itemDecisions ? "加载中…" : itemDecisions.length ? itemDecisions.map((card) => <DetailSection key={card.decisionId} title={card.answer ? "已答复" : "待答复"}>{[
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : !itemDecisions ? "加载中…" : itemDecisions.length ? itemDecisions.map((card) => <DetailSection key={card.decisionId} title={card.withdrawn ? "已撤回" : card.answer ? "已答复" : "待答复"}>{[
           card.question, card.context,
+          card.withdrawn && "撤回原因：" + card.withdrawn.reason,
           ...card.options.map((option) => option.label + (option.detail ? "：" + option.detail : "") + (option.key === card.recommended ? "（推荐）" : "")),
           card.recommendation, card.details,
           ...(card.adjustments ?? []).map((entry) => "合同调整：" + entry.note),

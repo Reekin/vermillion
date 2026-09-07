@@ -9,6 +9,7 @@ import { useSessionSidebar, type SidebarSession } from "../use-session-sidebar.j
 import { useSessionActions } from "../use-session-actions.js";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, StatusDot, Tabs } from "./ui.js";
+import { roleLabel as agentRoleLabel } from "./workflow-display.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { isOpenWorkItem, MissionsSection } from "./MissionsSection.js";
 
@@ -120,7 +121,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
             {more && <ContextMenu {...more} onClose={() => setMore(undefined)} items={moreSections.map((item) => ({ key: item.id, label: item.label, onSelect: () => setSection(item.id) }))} />}
             <div className="min-h-0 flex-1 overflow-auto">
               {section === "missions" && viewError ? <EmptyState title="任务加载失败" hint={viewError} /> : section === "missions" && view && (
-                <MissionsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} onExpand={onExpand} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
+                <MissionsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} onExpand={onExpand} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
               )}
               {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} compact={compact} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
@@ -145,7 +146,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
   );
 };
 
-const agentRoleLabel: Record<string, string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
+
 
 /**
  * Sessions the workbench started in this workspace (steward / worker / supervisor): a list on the left, the selected
@@ -185,7 +186,7 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
     <div className="flex h-full">
       <aside className="flex w-1/3 min-w-0 max-w-80 shrink-0 flex-col border-r border-border">
         {sessions.length === 0 && !loading ? (
-          <EmptyState title="还没有 agent 会话" hint="管家、Worker 和 Supervisor 的会话会出现在这里。" />
+          <EmptyState title="还没有 agent 会话" hint="管家、Worker、Supervisor 和工作区修复的会话会出现在这里。" />
         ) : (
           <ul className="min-h-0 flex-1 overflow-auto py-1">
             {sessions.map((session) => renderRow(session))}
@@ -249,6 +250,8 @@ const DomainsSection = ({ client, workspaceId, docs, onOpen }: { client: Workben
   );
 };
 
+const roleLabelForFile = (role: RoleFile) => role.roleId === "workspace-repair" ? agentRoleLabel[role.roleId] : role.title;
+
 const roleSourceLabel: Record<RoleFile["source"], string> = { global: "全局", workspace: "本 workspace" };
 
 const RolesSection = ({ client, workspaceId, roles, onEdit }: { client: WorkbenchClient; workspaceId: string; roles: RoleFile[]; onEdit: (roleId: string) => void }) => (
@@ -259,7 +262,7 @@ const RolesSection = ({ client, workspaceId, roles, onEdit }: { client: Workbenc
       {roles.map((role) => (
         <li key={role.roleId}>
           <ListRow
-            title={role.title}
+            title={roleLabelForFile(role)}
             leading={<Badge tone={role.source === "workspace" ? "accent" : "neutral"}>{roleSourceLabel[role.source]}</Badge>}
             meta={role.roleId + ".md"}
             onClick={() => onEdit(role.roleId)}
@@ -296,7 +299,7 @@ const DocsSection = ({ docs, decisions, onOpen }: { docs: string[]; decisions: D
       <ul>
         {decisions.map((card) => (
           <li key={card.decisionId}>
-            <ListRow title={card.question} titleClassName="font-normal text-foreground" trailing={card.answer ? "→ " + (card.options.find((o) => o.key === card.answer!.key)?.label ?? card.answer.key) : "待回答"} />
+            <ListRow title={card.question} titleClassName="font-normal text-foreground" trailing={card.withdrawn ? "已撤回：" + card.withdrawn.reason : card.answer ? "→ " + (card.options.find((o) => o.key === card.answer!.key)?.label ?? card.answer.note ?? "已答复") : "待回答"} />
           </li>
         ))}
       </ul>

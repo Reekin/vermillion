@@ -1,13 +1,13 @@
 import { MoreHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { latestRevision, type AgentRun, type Mission, type Scheduler, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
+import { latestRevision, type AgentRun, type Mission, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction } from "@vermillion/workbench/client";
 import type { TaskTarget } from "../workbench-store.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
 import { missionStatusLabel, statusLabel } from "./task-labels.js";
 import { Badge, Button, Card, DetailSection, EmptyState, IconButton, InlineNotice, ListRow, SectionLabel, Stepper, Toggle } from "./ui.js";
 
-const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor", "workspace-repair": "工作区修复" };
+import { roleLabel, waitingActions, waitingReason } from "./workflow-display.js";
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
 
 const relativeTime = (iso: string) => {
@@ -27,13 +27,14 @@ const SessionLink = ({ sessionId, onOpenSession, children = "会话" }: { sessio
   <Button size="sm" variant="ghost" outlined onClick={() => onOpenSession(sessionId)}>{children}</Button>
 );
 
-const WorkItemRow = ({ item, run, waitingFor, compact, muted, busy, onOpenSession, onCancel, onOpen }: {
-  item: WorkItem; run?: AgentRun; waitingFor: string[]; compact: boolean; muted: boolean; busy: boolean;
+const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onOpenSession, onCancel, onOpen }: {
+  item: WorkItem; run?: AgentRun; actions: WorkflowAction[]; waitingFor: string[]; compact: boolean; muted: boolean; busy: boolean;
   onOpenSession: (sessionId: string) => void; onCancel: () => void; onOpen: () => void;
 }) => {
-  const sessionId = item.run.sessionId ?? run?.sessionId;
+  const blockers = waitingActions(actions, item);
+  const sessionId = blockers.find((action) => action.sessionId)?.sessionId ?? item.run.sessionId ?? run?.sessionId;
   const at = run?.endedAt ?? item.run.heartbeatAt ?? run?.startedAt ?? item.updatedAt;
-  const info = waitingFor.length > 0 ? "等待 " + waitingFor.join("、") : run
+  const info = run
     ? [!compact && roleLabel[run.role], run.turns + " turn", compact ? relativeTime(at) : new Date(at).toLocaleString("zh-CN")].filter(Boolean).join(" · ")
     : item.run.lastFailure ?? "";
   return (
@@ -42,6 +43,7 @@ const WorkItemRow = ({ item, run, waitingFor, compact, muted, busy, onOpenSessio
         leading={<Badge>{item.risk}</Badge>}
         title={<span title={item.title}>{item.title}</span>}
         onClick={onOpen}
+        meta={blockers.length ? blockers.map((action) => <div key={action.actionId}>{waitingReason(action)} · {roleLabel[action.role]}</div>) : waitingFor.length ? "等待 " + waitingFor.join("、") + " · 工作台" : undefined}
         titleClassName={muted || !isOpenWorkItem(item) ? "text-faint-foreground" : undefined}
         columns={{
           info: <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
@@ -55,13 +57,13 @@ const WorkItemRow = ({ item, run, waitingFor, compact, muted, busy, onOpenSessio
 };
 
 type MissionsSectionProps = {
-  client: WorkbenchClient; workspaceId: string; scheduler: Scheduler; missions: Mission[]; workItems: WorkItem[]; runs: AgentRun[];
+  client: WorkbenchClient; workspaceId: string; scheduler: Scheduler; missions: Mission[]; workItems: WorkItem[]; runs: AgentRun[]; actions: WorkflowAction[];
   onOpenSession: (sessionId: string) => void; compact: boolean; onExpand: () => void;
   /** Task picked from the status bar: keep it visible in the overlay and scroll to it once. */
   taskTarget?: TaskTarget;
 };
 
-export const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, onOpenSession, compact, onExpand, taskTarget }: MissionsSectionProps) => {
+export const MissionsSection = ({ client, workspaceId, scheduler, missions, workItems, runs, actions, onOpenSession, compact, onExpand, taskTarget }: MissionsSectionProps) => {
   const board = useRef<HTMLDivElement>(null);
   const located = useRef<TaskTarget | undefined>(undefined);
   useEffect(() => {
@@ -91,7 +93,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
   const visibleStandalone = compact ? standalone.filter((w) => isOpenWorkItem(w) || w.workItemId === taskTarget?.id) : standalone;
   const hidden = missions.length - visibleMissions.length + standalone.length - visibleStandalone.length;
   const renderItems = (items: WorkItem[], muted = false) => (
-    <ul>{items.map((item) => <WorkItemRow key={item.workItemId} item={item}
+    <ul>{items.map((item) => <WorkItemRow key={item.workItemId} item={item} actions={actions}
       run={latestRuns.find((r) => r.workItemId === item.workItemId && (!item.run.sessionId || r.sessionId === item.run.sessionId))}
       waitingFor={item.status === "queued" ? item.dependsOn.flatMap((id) => {
         const dependency = workItems.find((w) => w.workItemId === id);
@@ -158,7 +160,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
         key: "cancel", label: "取消任务", disabled: busy || menu.mission.status !== "active", onSelect: () => void cancelMission(menu.mission)
       }]} />}
       {detail?.workspaceId === workspaceId && <WorkItemDialog key={workspaceId + "/" + detail.workItemId} client={client} workspaceId={workspaceId}
-        workItemId={detail.workItemId} workItems={workItems} runs={runs} onClose={() => setDetail(undefined)} onOpenSession={onOpenSession} />}
+        workItemId={detail.workItemId} workItems={workItems} runs={runs} actions={actions} onClose={() => setDetail(undefined)} onOpenSession={onOpenSession} />}
     </div>
   );
 };
