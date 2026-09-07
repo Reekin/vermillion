@@ -253,7 +253,7 @@ export class RuntimeOrchestrator {
             !this.pendingSendEventsMatchCanonicalTurn(pendingStart, outcome.turnId)
           ) {
             this.rejectPendingSendStart(session, pendingStart, result);
-            receipt = this.accept(envelope, false);
+            receipt = { ...this.accept(envelope, false), ...(result.error ? { error: result.error } : {}) };
           } else {
             const binding = this.requireBinding(
               this.resolveSessionEngineId(session)

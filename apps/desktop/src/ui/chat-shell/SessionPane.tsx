@@ -1083,6 +1083,7 @@ export const SessionPane = ({
         </div>
 
         <ComposerContainer
+          draftKey={pendingSend?.operationId ?? operations.find((operation) => operation.targetSessionId === activeSessionId)?.operationId ?? activeSessionId}
           initializeDraftExecution={initializeDraftExecution}
           extraExecutionControls={composerExtras}
           getSendOptions={getSendOptions}

@@ -1303,6 +1303,11 @@ const zRuntimeCommandResponseSchema = z.object({
     commandId: zRequestId,
     commandType: zSessionCommandType,
     accepted: z.boolean().default(true),
+    error: z.object({
+      code: z.string(),
+      message: z.string(),
+      details: z.record(z.unknown()).optional()
+    }).optional(),
     sessionId: zSessionId.optional(),
     turnId: zTurnId.optional(),
     providerSessionId: z.string().min(1).optional()

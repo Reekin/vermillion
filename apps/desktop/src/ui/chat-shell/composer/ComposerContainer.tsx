@@ -27,6 +27,7 @@ export type ComposerContainerProps = {
   getSendOptions?: () => Pick<import("../../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   activeSession?: ChatSession;
   activeSessionId?: string;
+  draftKey?: string;
   threadGoal?: ThreadGoal;
   selectedEngineId: string;
   engineSurface?: EngineSurfaceRpc;
@@ -65,6 +66,7 @@ export const ComposerContainer = ({
   getSendOptions,
   activeSession,
   activeSessionId,
+  draftKey,
   threadGoal,
   selectedEngineId,
   engineSurface,
@@ -98,6 +100,7 @@ export const ComposerContainer = ({
     transport,
     activeSession,
     activeSessionId,
+    draftKey,
     threadGoal,
     selectedEngineId,
     engineSurface,

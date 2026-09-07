@@ -233,7 +233,7 @@ export class WrapperChatTreeService {
         messageId: randomUUID(), content: operation.content, attachments: structuredClone(operation.attachments),
         execution: structuredClone(operation.execution), thinkMode: operation.thinkMode
       } });
-      if (!receipt.accepted || !receipt.turnId) throw new Error("Branch message was not accepted.");
+      if (!receipt.accepted || !receipt.turnId) throw new Error(receipt.error?.message || "Branch message was not accepted.");
       operation.turnId = receipt.turnId;
       operation.status = "sent";
     } catch (error) {
@@ -244,4 +244,4 @@ export class WrapperChatTreeService {
   }
 }
 
-type TreeSend = (command: CommandEnvelope) => Promise<{ accepted: boolean; turnId?: string }>;
+type TreeSend = (command: CommandEnvelope) => Promise<Pick<import("./runtime-types.js").CommandReceipt, "accepted" | "turnId" | "error">>;

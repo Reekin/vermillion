@@ -57,6 +57,20 @@ async function fixture() {
 }
 
 describe("asynchronous wrapper branch sends", () => {
+  it("exposes the provider rejection reason and reuses the target on retry", async () => {
+    const f = await fixture();
+    const send = vi.fn().mockResolvedValueOnce({ accepted: false,
+      error: { code: "quota_exceeded", message: "Usage limit reached. Try again at 15:00." }
+    }).mockResolvedValue({ accepted: true, turnId: "retry-turn" });
+    const operation = f.service.submit(f.input, send);
+    await vi.waitFor(() => expect(f.service.listOperations("root")[0]).toMatchObject({
+      status: "failed", error: "Usage limit reached. Try again at 15:00.", targetSessionId: "branch-a"
+    }));
+    f.service.retry(operation.operationId, send);
+    await vi.waitFor(() => expect(f.service.listOperations("root")[0]).toMatchObject({ status: "sent", turnId: "retry-turn" }));
+    expect(f.fork).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts immediately, snapshots the send, and preserves the viewing cursor during fork and send", async () => {
     const f = await fixture();
     const forkGate = deferred<string>();
