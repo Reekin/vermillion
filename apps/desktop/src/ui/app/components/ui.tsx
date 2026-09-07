@@ -23,6 +23,7 @@ import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
+export { ConfigurationSelect, ConfigurationButton } from "../../chat-shell/composer/ConfigurationControl.js";
 
 // ---- Buttons ----
 
@@ -69,8 +70,8 @@ export const Badge = ({ children, tone = "neutral", status, muted }: { children:
   <span
     data-status={status}
     className={cn(
-      status ? "vm-status" : "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-mono text-micro uppercase tracking-eyebrow",
-      !status && tone === "neutral" && "border-border-strong text-muted-foreground",
+      status ? "vm-status" : "inline-flex shrink-0 items-center whitespace-nowrap min-h-5 rounded-sm border px-1.5 py-0.5 font-sans text-micro font-medium",
+      !status && tone === "neutral" && "border-border-strong text-foreground",
       !status && tone === "accent" && "border-control-border-hover bg-accent-soft text-strong",
       muted && "vm-status-muted"
     )}
@@ -80,7 +81,7 @@ export const Badge = ({ children, tone = "neutral", status, muted }: { children:
   </span>
 );
 
-/** Mono uppercase label that heads a panel section. */
+/** Short label that heads a panel section. */
 export const SectionLabel = ({ children, className }: { children: ReactNode; className?: string }) => (
   <div className={cn("eyebrow px-4 pb-1.5 pt-3", className)}>{children}</div>
 );
@@ -257,7 +258,7 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
   if (columns) return (
     <div className={cn("vm-list-columns", className)}>
       {leading}
-      <span className={cn("truncate text-label text-foreground", titleClassName)}>{title}</span>
+      <span className={cn("truncate text-label font-medium text-foreground", titleClassName)}>{title}</span>
       <span className="vm-list-info">{columns.info}</span>
       <span className="vm-list-status">{columns.status}</span>
       <span className="vm-list-cancel">{columns.hoverAction}</span>
@@ -268,11 +269,11 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
     <>
       <span className="flex min-w-0 items-center gap-2">
         {leading}
-        <span className={cn("truncate text-label text-strong", titleClassName)}>{title}</span>
-        {trailing && !meta && <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-micro text-faint-foreground">{trailing}</span>}
+        <span className={cn("truncate text-label font-medium text-strong", titleClassName)}>{title}</span>
+        {trailing && !meta && <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-micro text-muted-foreground">{trailing}</span>}
       </span>
       {meta && (
-        <span className="flex min-w-0 items-center gap-2 font-mono text-micro text-faint-foreground">
+        <span className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className="truncate">{meta}</span>
           {trailing && <span className="ml-auto flex shrink-0 items-center gap-2">{trailing}</span>}
         </span>

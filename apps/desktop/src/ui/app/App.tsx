@@ -13,7 +13,7 @@ import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
-import { Field, InlineNotice } from "./components/ui.js";
+import { ConfigurationSelect, InlineNotice } from "./components/ui.js";
 import { useThinkMode } from "./use-think-mode.js";
 import { WorkspacesPanel, WorkspacesSwitcher } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
@@ -154,11 +154,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               getSendOptions={thinkMode.getSendOptions}
               composerExtras={<>
                 <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? openSession?.workspaceId : undefined} />
-                <Field kind="select" compact aria-label="模式" value={thinkMode.mode} disabled={!thinkMode.ready}
+                <ConfigurationSelect label="模式" aria-label="模式" value={thinkMode.mode} disabled={!thinkMode.ready}
                   onChange={(event) => void thinkMode.choose(event.target.value as import("@vermillion/shared").ThinkMode)}>
                   <option value="dispatch">发单</option>
                   <option value="execute">现做</option>
-                </Field>
+                </ConfigurationSelect>
                 {thinkMode.error && <InlineNotice tone="error">{thinkMode.error}</InlineNotice>}
               </>}
             />

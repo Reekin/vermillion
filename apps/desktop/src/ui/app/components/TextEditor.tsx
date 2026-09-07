@@ -59,13 +59,13 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
             value={content}
             onChange={(event) => { setContent(event.target.value); setDirty(true); }}
             spellCheck={false}
-            className="min-h-0 flex-1 resize-none bg-input p-4 text-label leading-relaxed text-foreground outline-none"
-            style={{ fontFamily: "var(--awb-font-mono)" }}
+            className="min-h-0 flex-1 resize-none bg-input p-4 text-body text-foreground outline-none"
+            style={{ fontFamily: "var(--awb-font-sans)" }}
           />
         )}
         {error && <InlineNotice tone="error">{error}</InlineNotice>}
         <footer className="flex h-10 items-center gap-3 border-t border-border px-4">
-          <span className="text-caption text-faint-foreground">
+          <span className="text-caption text-muted-foreground">
             {dirty ? "未保存 · Ctrl+S" : "已保存"}
           </span>
           <Button size="sm" variant="primary" className="ml-auto" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</Button>

@@ -2,7 +2,7 @@ import { Popover } from "@base-ui/react/popover";
 import { Check, ChevronDown, Folder, FolderPlus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { WorkbenchStore } from "../workbench-store.js";
-import { cn } from "../lib/cn.js";
+import { ConfigurationButton } from "./ui.js";
 
 type WorkspacePickerProps = {
   store: WorkbenchStore;
@@ -47,12 +47,10 @@ export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: Wor
   return (
     <Popover.Root open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
       <Popover.Trigger
+        render={<ConfigurationButton />}
         disabled={disabled}
         aria-label="Workspace"
-        className={cn(
-          "flex h-[27px] max-w-52 items-center gap-1.5 rounded-sm border border-border-strong bg-input px-2 text-caption text-foreground",
-          "hover:border-control-border-hover disabled:opacity-50"
-        )}
+        className="max-w-52"
       >
         <Folder size={13} className="shrink-0 text-accent-strong" />
         <span className="truncate">{current ? current.label : "无 workspace"}</span>
