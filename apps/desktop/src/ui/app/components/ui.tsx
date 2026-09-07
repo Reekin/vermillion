@@ -318,7 +318,7 @@ export const Card = ({ header, children, footer, className, compact, rows }: { h
   </article>
 );
 
-/** Readable section for contracts, results and other multiline detail content. */
+/** Controlled card with an overview, adjacent metadata and inline detail. */
 export const DisclosureCard = ({ title, open, onToggle, status, progress, time, actions, summary, children }: {
   title: string; open: boolean; onToggle: () => void; status: ReactNode; progress: ReactNode;
   time: ReactNode; actions: ReactNode; summary?: ReactNode; children: ReactNode;

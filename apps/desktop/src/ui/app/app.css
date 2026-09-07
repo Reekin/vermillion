@@ -128,7 +128,7 @@
 .vm-disclosure-card { container-type: inline-size; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); overflow: hidden; }
 .vm-disclosure-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 14px 18px; }
 .vm-disclosure-header:hover { background: var(--color-surface-hover); }
-.vm-disclosure-title { display: flex; min-width: 0; max-width: 100%; gap: 8px; padding: 0; text-align: left; color: var(--color-strong); font-size: var(--text-label); font-weight: 500; white-space: normal; }
+.vm-disclosure-title { display: flex; justify-content: flex-start; min-width: 0; max-width: 100%; gap: 8px; padding: 0; text-align: left; color: var(--color-strong); font-size: var(--text-label); font-weight: 500; white-space: normal; }
 .vm-disclosure-title > svg { flex-shrink: 0; }
 .vm-disclosure-title > span { overflow-wrap: anywhere; }
 .vm-disclosure-status { display: flex; }
@@ -144,11 +144,13 @@
   .vm-disclosure-body { padding-left: 24px; padding-right: 12px; }
 }
 @media (max-width: 900px) {
-  .vm-list-info { max-width: 12rem; }
+  .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) 76px 22px 48px; row-gap: 0; }
+  .vm-list-columns > :not(.vm-list-info) { grid-row: 1; }
+  .vm-list-info { grid-column: 2 / -1; grid-row: 2; max-width: none; white-space: normal; overflow-wrap: anywhere; padding-bottom: 4px; }
+  .vm-list-info:empty { display: none; }
 }
 @media (max-width: 640px) {
   .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) 76px 22px 48px; gap: 4px; padding-inline: 8px; }
-  .vm-list-info { display: none; }
   .vm-tabs { overflow-x: auto; }
 }
 

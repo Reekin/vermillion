@@ -46,7 +46,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
         meta={blockers.length ? blockers.map((action) => <div key={action.actionId}>{waitingReason(action)} · {roleLabel[action.role]}</div>) : waitingFor.length ? "等待 " + waitingFor.join("、") + " · 工作台" : undefined}
         titleClassName={muted || !isOpenWorkItem(item) ? "text-faint-foreground" : undefined}
         columns={{
-          info: <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
+          info: info && <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
           status: <Badge status={item.status} muted={muted}>{statusLabel[item.status]}</Badge>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
           action: sessionId && <SessionLink sessionId={sessionId} onOpenSession={onOpenSession} />
