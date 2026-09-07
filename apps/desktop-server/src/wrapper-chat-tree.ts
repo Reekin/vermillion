@@ -101,8 +101,9 @@ export class WrapperChatTreeService {
       return sessions.find((item) => item.sessionId === right)!.updatedAt
         .localeCompare(sessions.find((item) => item.sessionId === left)!.updatedAt);
     });
-    const stored = index.getTreeView(treeId);
-    const currentSessionId = stored && paths.has(stored.sessionId) ? stored.sessionId : byActivity[0]!;
+    const view = index.getTreeView(treeId);
+    const stored = view && paths.has(view.sessionId) ? view : undefined;
+    const currentSessionId = stored?.sessionId ?? byActivity[0]!;
     // Legacy views did not distinguish automatic cursors from explicit jumps; resume tip following.
     const currentNodeId = stored?.followTip === false ? stored.nodeId : paths.get(currentSessionId)?.at(-1);
     const currentPath = paths.get(currentSessionId) ?? [];
