@@ -19,7 +19,7 @@ export const PendingBranchMessage = ({ operation, onRetry, onPreviewImage }: {
       startedAt: ""
     }} onPreviewImage={onPreviewImage} />
     {operation.status === "failed" && <>
-      <InlineNotice tone="error">{operation.error}</InlineNotice>
+      <InlineNotice tone="error" className="break-words">{operation.error}</InlineNotice>
       <Button onClick={() => void onRetry(operation.operationId)}>重试发送</Button>
     </>}
   </article>
