@@ -277,13 +277,13 @@ export class DocsService {
     return this.resolveCommit("HEAD");
   }
 
-  async dropWorktree(worktreePath: string, branch: string): Promise<void> {
+  async dropWorktree(worktreePath: string, branch: string, discard = false): Promise<void> {
     const registered = (await git(this.rootPath, ["worktree", "list", "--porcelain", "-z"]))
       .split("\0").some((field) => field.startsWith("worktree ") && samePath(field.slice(9), worktreePath));
-    if (registered || await exists(worktreePath)) await git(this.rootPath, ["worktree", "remove", worktreePath]);
+    if (registered || await exists(worktreePath)) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
     const ref = "refs/heads/" + branch;
     const branches = await git(this.rootPath, ["for-each-ref", "--format=%(refname)", ref]);
-    if (branches.split("\n").includes(ref)) await git(this.rootPath, ["branch", "-d", "--", branch]);
+    if (branches.split("\n").includes(ref)) await git(this.rootPath, ["branch", discard ? "-D" : "-d", "--", branch]);
   }
 
   async head(): Promise<string | undefined> {

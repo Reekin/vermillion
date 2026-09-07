@@ -459,6 +459,8 @@ export class WorkbenchService {
           actions.push(dependency);
         } else if (cancelled && dependency.role === "workbench") {
           await this.putAction(workspaceId, { ...dependency, role: "steward", status: "pending", stage: "open", message: "前置已取消，请落实依赖调整或取消本单：" + missing.join(", ") });
+        } else if (!cancelled && dependency.role === "steward" && dependency.status !== "decision") {
+          await this.putAction(workspaceId, { ...dependency, role: "workbench", status: "waiting", message: "依赖调整已落实，等待前置关闭：" + missing.join(", "), history: [...dependency.history, { at: this.now(), event: "dependency.updated", message: "管家已落实替代前置，交工作台等待。" }] });
         }
       } else if (dependency) await this.finishAction(workspaceId, dependency.actionId, "前置已关闭或依赖调整已落实。");
       for (const action of actions.filter((a) => a.kind === "execute" && a.workItemIds.includes(item.workItemId) && actionIsOpen(a))) {
@@ -601,11 +603,11 @@ export class WorkbenchService {
     return this.createAction(workspaceId, { kind: "repair", role: "workspace-repair", ownerKey: "workspace-repair", workItemIds: [workItemId], status: "pending", stage: "open", message });
   }
 
-  private async drainIntegrations(workspaceId: string): Promise<void> {
+  private async drainIntegrations(workspaceId: string, repairingActionId?: string): Promise<void> {
     const actions = await this.listActions(workspaceId);
     const repair = actions.find((a) => a.kind === "repair" && actionIsOpen(a));
     const pending = actions.filter((a) => a.kind === "integration" && actionIsOpen(a));
-    if (repair) {
+    if (repair && repair.actionId !== repairingActionId) {
       for (const action of pending) if (!repair.workItemIds.includes(action.workItemIds[0]!)) await this.requestRepair(workspaceId, action.workItemIds[0]!, "同一工作区等待恢复：" + action.stage);
       return;
     }
@@ -640,7 +642,7 @@ export class WorkbenchService {
           item = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, merge: { ...current.merge!, rollbackCommit: commit, acknowledgedAt: this.now() } }));
         }
         if (action.stage === "cleanup") {
-          if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch);
+          if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch, integration.operation === "cancel");
           await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: integration.operation === "cancel" ? "cancelled" : integration.operation === "rollback" ? "queued" : "closed",
             merge: integration.operation === "merge" ? { commit: integration.commit, diffStat: integration.diffStat, mergedAt: current.merge?.mergedAt ?? this.now() }
               : integration.operation === "rollback" ? { ...current.merge!, rollbackCommit: integration.commit, acknowledgedAt: this.now() } : current.merge,
@@ -675,10 +677,10 @@ export class WorkbenchService {
         await this.putAction(workspaceId, { ...action, failure: reason, history: [...action.history, { at: this.now(), event: "repair.check.failed", message: reason }] });
         return { pass: false, message: reason, action: await this.getAction(workspaceId, actionId) };
       }
-      await this.finishAction(workspaceId, actionId, input.summary);
-      await this.drainIntegrations(workspaceId);
-      const remaining = (await this.listActions(workspaceId)).find((a) => a.kind === "repair" && actionIsOpen(a));
-      return { pass: !remaining, message: remaining ? "后续阶段仍受阻，回原修复会话继续。" : "工作台检查通过，已续接待处理阶段。", action: remaining ?? await this.getAction(workspaceId, actionId) };
+      await this.drainIntegrations(workspaceId, actionId);
+      const remaining = (await this.listActions(workspaceId)).some((a) => a.kind === "integration" && actionIsOpen(a));
+      if (!remaining) await this.finishAction(workspaceId, actionId, input.summary);
+      return { pass: !remaining, message: remaining ? "后续阶段仍受阻，原问题与恢复预算保留，回原修复会话继续。" : "工作台检查通过，已续接待处理阶段。", action: await this.getAction(workspaceId, actionId) };
     });
   }
 
