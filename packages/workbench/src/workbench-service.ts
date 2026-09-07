@@ -341,8 +341,9 @@ export class WorkbenchService {
   }
 
   /** Worker claimed the item; records the session and worktree it runs in. */
+  /** A (re)start begins a new turn: the pending message is claimed and any stale-turn mark from the previous run is over. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined, staleTurnId: undefined } }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
