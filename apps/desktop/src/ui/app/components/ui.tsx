@@ -208,12 +208,12 @@ export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ i
  * Read-only detail that floats beside `children` while the pointer rests on them (or they hold focus).
  * The trigger is a plain block wrapper, so the decorated layout never changes.
  */
-export const HoverCard = ({ children, content, side = "right", className }: { children: ReactNode; content: ReactNode; side?: "top" | "right" | "bottom" | "left"; className?: string }) => (
+export const HoverCard = ({ children, content }: { children: ReactNode; content: ReactNode }) => (
   <Tooltip.Root>
     <Tooltip.Trigger render={<div />} delay={200}>{children}</Tooltip.Trigger>
     <Tooltip.Portal>
-      <Tooltip.Positioner side={side} align="start" sideOffset={4} className="z-50">
-        <Tooltip.Popup className={cn(floatingPanelClass, className)}>
+      <Tooltip.Positioner side="right" align="start" sideOffset={4} className="z-50">
+        <Tooltip.Popup className={floatingPanelClass}>
           {content}
         </Tooltip.Popup>
       </Tooltip.Positioner>

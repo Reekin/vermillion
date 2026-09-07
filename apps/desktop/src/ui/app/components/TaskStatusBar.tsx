@@ -1,11 +1,11 @@
 import { ListTodo } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { TaskSummary, WorkbenchStore } from "../workbench-store.js";
+import type { TaskWorkItem, WorkbenchStore } from "../workbench-store.js";
 import { Badge, EmptyState, HoverCard, InlineNotice, ListRow, PanelHeader, StatusBar } from "./ui.js";
 import { statusLabel, taskStatusLabel } from "./task-labels.js";
 
 /** Work items under a mission, shown while the pointer rests on the mission row. */
-const MissionItems = ({ items }: { items: NonNullable<TaskSummary["workItems"]> }) =>
+const MissionItems = ({ items }: { items: TaskWorkItem[] }) =>
   items.length === 0 ? (
     <InlineNotice className="pt-2">还没有工单</InlineNotice>
   ) : (
@@ -45,13 +45,13 @@ export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
             <ListRow
               title={task.title}
               meta={workspaces.find((w) => w.workspaceId === task.workspaceId)?.label}
-              trailing={<>{task.workItems && <span>工单 {task.workItems.filter((w) => w.status === "closed").length}/{task.workItems.length}</span>}<Badge>{taskStatusLabel[task.status]}</Badge></>}
+              trailing={<>{task.kind === "mission" && <span>工单 {task.workItems.filter((w) => w.status === "closed").length}/{task.workItems.length}</span>}<Badge>{taskStatusLabel[task.status]}</Badge></>}
               onClick={() => { setOpen(false); showTask(task); }}
             />
           );
           return (
             <li key={task.workspaceId + ":" + task.id}>
-              {task.workItems ? <HoverCard content={<MissionItems items={task.workItems} />}>{row}</HoverCard> : row}
+              {task.kind === "mission" ? <HoverCard content={<MissionItems items={task.workItems} />}>{row}</HoverCard> : row}
             </li>
           );
         })}

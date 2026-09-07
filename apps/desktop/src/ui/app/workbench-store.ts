@@ -10,8 +10,10 @@ export type CommitOutcome =
 
 export type TaskTarget = { workspaceId: string; kind: "mission" | "workItem"; id: string };
 export type TaskWorkItem = Pick<WorkItem, "workItemId" | "title" | "status">;
-/** Missions carry their work items (board order) so the status bar can show progress and the hover list. */
-export type TaskSummary = TaskTarget & { title: string; status: Mission["status"] | WorkItem["status"]; workItems?: TaskWorkItem[] };
+/** One status bar entry. Missions carry their work items (board order) for the progress count and the hover list. */
+export type TaskSummary =
+  | { workspaceId: string; kind: "mission"; id: string; title: string; status: Mission["status"]; workItems: TaskWorkItem[] }
+  | { workspaceId: string; kind: "workItem"; id: string; title: string; status: WorkItem["status"] };
 
 /** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
 export type WorkspaceView = {
