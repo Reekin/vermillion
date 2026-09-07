@@ -70,7 +70,7 @@ export type WorkbenchState = {
   setDraftWorkspace: (workspaceId: string | undefined) => void;
   browseWorkspace: (workspaceId: string | undefined) => void;
   openEditor: (target: EditorTarget | undefined) => void;
-  selectAgentSession: (sessionId: string) => void;
+  selectAgentSession: (sessionId: string | undefined) => void;
   /** Switches to the Workspaces page, 会话 tab, showing this agent session in its workspace. */
   showAgentSession: (workspaceId: string, sessionId: string) => void;
   /** Subscribes to workbench events and loads initial state. Returns an unsubscribe. */

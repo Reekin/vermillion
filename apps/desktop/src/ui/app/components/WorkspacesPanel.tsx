@@ -1,4 +1,4 @@
-import { ChevronDown, CornerDownRight, Plus, X } from "lucide-react";
+import { ChevronDown, CornerDownRight, Pin, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { type DecisionCard, type RoleFile, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { RendererStore } from "../../../store/store.js";
@@ -6,6 +6,8 @@ import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { SessionPane, formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { WorkbenchStore, WorkspaceSection } from "../workbench-store.js";
 import { useSessionSidebar, type SidebarSession } from "../use-session-sidebar.js";
+import { useSessionActions } from "../use-session-actions.js";
+import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, StatusDot, Tabs } from "./ui.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { isOpenWorkItem, MissionsSection } from "./MissionsSection.js";
@@ -120,7 +122,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
               {section === "missions" && viewError ? <EmptyState title="任务加载失败" hint={viewError} /> : section === "missions" && view && (
                 <MissionsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} onExpand={onExpand} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
               )}
-              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} />}
+              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} compact={compact} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
                 <DomainsSection client={client} workspaceId={activeWorkspaceId} docs={view?.docs.map((d) => d.path) ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
@@ -149,15 +151,23 @@ const agentRoleLabel: Record<string, string> = { steward: "管家", worker: "Wor
  * Sessions the workbench started in this workspace (steward / worker / supervisor): a list on the left, the selected
  * session's transcript and composer on the right. Same reading surface as Think, scoped to agents.
  */
-const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, onSelect }: { transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; selected: string | undefined; onSelect: (sessionId: string) => void }) => {
+const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, onSelect, compact }: { transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; selected: string | undefined; onSelect: (sessionId: string | undefined) => void; compact: boolean }) => {
   const workspaceIds = useMemo(() => [workspaceId], [workspaceId]);
-  const { sessions, hasMore, loading, loadMore } = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "agent" });
+  const { sessions, hasMore, loading, loadMore, reload, findSession } = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "agent" });
+  const [reloadSignal, setReloadSignal] = useState(0);
+  const actions = useSessionActions({
+    transport,
+    reloadSidebar: reload,
+    onArchived: (id) => { if (selected === id || (selected && findSession(selected)?.sessionId === id)) onSelect(undefined); },
+    onResumed: () => setReloadSignal((n) => n + 1)
+  });
   const renderRow = (session: SidebarSession, depth = 0) => (
     <li key={session.sessionId}>
       <ListRow
         depth={depth}
         selected={selected === session.sessionId || Boolean(selected && session.memberSessionIds?.includes(selected))}
         onClick={() => onSelect(session.sessionId)}
+        onContextMenu={(event) => void actions.openMenu(event, session.sessionId)}
         leading={
           <>
             {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
@@ -165,7 +175,7 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
             {session.role && <Badge>{agentRoleLabel[session.role] ?? session.role}</Badge>}
           </>
         }
-        title={session.role ? session.title.replace(/^[^·]+ · /, "") : session.title}
+        title={<>{session.role ? session.title.replace(/^[^·]+ · /, "") : session.title}{session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 text-faint-foreground" aria-label="pinned" />}</>}
         trailing={formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}
       />
       {session.subagents.length > 0 && <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>}
@@ -173,7 +183,7 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
   );
   return (
     <div className="flex h-full">
-      <aside className="flex w-[320px] shrink-0 flex-col border-r border-border">
+      <aside className="flex w-1/3 min-w-0 max-w-80 shrink-0 flex-col border-r border-border">
         {sessions.length === 0 && !loading ? (
           <EmptyState title="还没有 agent 会话" hint="管家、Worker 和 Supervisor 的会话会出现在这里。" />
         ) : (
@@ -182,10 +192,11 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
             {hasMore && <li className="px-3 py-2"><Button size="sm" variant="ghost" className="w-full" disabled={loading} onClick={() => void loadMore()}>{loading ? "加载中…" : "加载更多"}</Button></li>}
           </ul>
         )}
+        <SessionActionFeedback menu={actions.menu} onCloseMenu={actions.closeMenu} onRunAction={(id, action) => void actions.run(id, action)} notice={actions.notice} onClearNotice={actions.clearNotice} />
       </aside>
       <main className="relative min-w-0 flex-1">
         {selected ? (
-          <SessionPane store={sessionStore} transport={transport} sessionId={selected} createSession={async () => { throw new Error("Agent sessions are started by the workbench."); }} />
+          <SessionPane store={sessionStore} transport={transport} sessionId={selected} reloadSignal={reloadSignal} allowChatTree={!compact} createSession={async () => { throw new Error("Agent sessions are started by the workbench."); }} />
         ) : (
           <EmptyState title="选择一个会话" hint="左侧是这个 workspace 里 agent 的会话。" />
         )}

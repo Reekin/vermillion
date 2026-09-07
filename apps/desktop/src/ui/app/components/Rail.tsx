@@ -7,6 +7,7 @@ type RailProps = {
   overlay: Panel | undefined;
   inboxCount: number;
   onSelect: (panel: Panel) => void;
+  onOpenPage: (panel: Panel) => void;
 };
 
 const items: Array<{ id: Panel; label: string; icon: typeof Inbox }> = [
@@ -15,8 +16,8 @@ const items: Array<{ id: Panel; label: string; icon: typeof Inbox }> = [
   { id: "workspaces", label: "Workspaces", icon: FolderKanban }
 ];
 
-export const Rail = ({ panel, overlay, inboxCount, onSelect }: RailProps) => (
-  <nav className="flex h-full w-12 flex-col items-center gap-1 border-r border-border-strong bg-app-shell pt-3" aria-label="主导航">
+export const Rail = ({ panel, overlay, inboxCount, onSelect, onOpenPage }: RailProps) => (
+  <nav className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-border-strong bg-app-shell pt-3" aria-label="主导航">
     {items.map(({ id, label, icon: Icon }) => {
       const active = overlay ? overlay === id : panel === id;
       return (
@@ -27,6 +28,7 @@ export const Rail = ({ panel, overlay, inboxCount, onSelect }: RailProps) => (
           aria-label={label}
           aria-current={active ? "page" : undefined}
           onClick={() => onSelect(id)}
+          onDoubleClick={() => onOpenPage(id)}
           className={cn(
             "relative flex h-9 w-9 items-center justify-center rounded-lg text-faint-foreground transition-colors",
             "hover:bg-surface-hover hover:text-foreground",
