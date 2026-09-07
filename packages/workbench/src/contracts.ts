@@ -157,6 +157,7 @@ export const zDecisionCard = z.object({
   sessionId: z.string().optional(),
   actionId: z.string().optional(),
   withdrawn: z.object({ reason: z.string().min(1), at: z.string(), sessionId: z.string() }).optional(),
+  deliveryPending: z.boolean().optional(),
   /** Who raised it: a worker (default) or the workbench after repeated failures. */
   kind: z.enum(["worker", "attempts"]).optional(),
   /** One plain sentence: what is blocked. */
@@ -287,7 +288,7 @@ export const zWorkflowAction = z.object({
     diffStat: z.string(),
     reason: z.string().optional()
   }).optional(),
-  history: z.array(z.object({ at: z.string(), event: z.string(), message: z.string() })),
+  history: z.array(z.object({ at: z.string(), event: z.string(), message: z.string(), decisionId: z.string().optional() })),
   createdAt: z.string(),
   updatedAt: z.string()
 });

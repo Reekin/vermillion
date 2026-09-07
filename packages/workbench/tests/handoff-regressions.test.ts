@@ -82,3 +82,48 @@ it("returns a replaced cancelled dependency to workbench waiting", async () => {
   expect((await t.service.listActions(t.ws)).find((a) => a.actionId === action.actionId)).toMatchObject({ role: "workbench", status: "waiting", attempts: 0 });
   expect(await t.service.isWorkItemBlocked(t.ws, item.workItemId)).toBe(true);
 });
+
+it("recovers a verified merging item whose integration action was not written", async () => {
+  const t = await setup();
+  const item = await result(t);
+  const create = vi.spyOn(t.service, "createAction").mockRejectedValueOnce(new Error("interrupted before action write"));
+  await expect(t.service.submitWorkItem(t.ws, item.workItemId, submission)).rejects.toThrow("interrupted");
+  create.mockRestore();
+  expect((await t.service.getWorkItem(t.ws, item.workItemId)).status).toBe("merging");
+  await t.service.refreshActions(t.ws);
+  await t.service.continueIntegrations(t.ws);
+  expect((await t.service.getWorkItem(t.ws, item.workItemId)).status).toBe("closed");
+  expect((await t.service.listActions(t.ws)).filter((a) => a.kind === "integration")).toHaveLength(1);
+});
+
+it("replays answered and withdrawn decisions after interruption without duplicate delivery", async () => {
+  const t = await setup();
+  const item = await t.service.createWorkItem(t.ws, contract);
+  for (const mode of ["answer", "withdraw"]) {
+    const card = await t.service.createDecision(t.ws, { workItemId: item.workItemId, sessionId: "worker", question: mode, context: "choose", options: [{ key: "yes", label: "yes" }] });
+    const write = vi.spyOn(t.service, "putAction").mockRejectedValueOnce(new Error("interrupted delivery"));
+    await expect(mode === "answer" ? t.service.answerDecision(t.ws, card.decisionId, { key: "yes", note: "chosen" }) : t.service.withdrawDecision(t.ws, card.decisionId, "worker", "clarified")).rejects.toThrow("interrupted delivery");
+    write.mockRestore();
+    expect((await t.service.listDecisions(t.ws)).find((c) => c.decisionId === card.decisionId)?.deliveryPending).toBe(true);
+    await t.service.refreshActions(t.ws);
+    await t.service.refreshActions(t.ws);
+    expect((await t.service.listDecisions(t.ws)).find((c) => c.decisionId === card.decisionId)?.deliveryPending).toBe(false);
+    const action = (await t.service.listActions(t.ws)).find((a) => a.actionId === card.actionId)!;
+    expect(action.history.filter((h) => h.decisionId === card.decisionId)).toHaveLength(1);
+    expect(action.status).toBe("pending");
+  }
+});
+
+it("keeps the steward responsible for a decision after the contract itself was updated", async () => {
+  const t = await setup();
+  const item = await t.service.createWorkItem(t.ws, contract);
+  await t.service.escalateWorkItem(t.ws, item.workItemId, "clarify objective", { requiredChanges: ["objective"] });
+  const action = (await t.service.listActions(t.ws)).find((a) => a.kind === "contract")!;
+  await t.service.putAction(t.ws, { ...action, sessionId: "steward" });
+  const card = await t.service.createDecision(t.ws, { actionId: action.actionId, workItemId: item.workItemId, sessionId: "steward", question: "which wording?", context: "choose", options: [] });
+  await t.service.updateWorkItem(t.ws, item.workItemId, { objective: "concrete output", note: "objective clarified", resolution: { actionId: action.actionId, disposition: "updated", reason: "objective changed" } });
+  expect((await t.service.listActions(t.ws)).find((a) => a.actionId === action.actionId)?.status).toBe("decision");
+  await t.service.answerDecision(t.ws, card.decisionId, { note: "use the concrete output" });
+  expect((await t.service.listActions(t.ws)).find((a) => a.actionId === action.actionId)).toMatchObject({ role: "steward", sessionId: "steward", status: "pending", stage: "deliver" });
+  expect(await t.service.isWorkItemBlocked(t.ws, item.workItemId)).toBe(true);
+});
