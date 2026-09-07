@@ -411,7 +411,8 @@ export class Orchestrator {
       ...(action.failure ? ["上次失败: " + action.failure] : []),
       "读取当前处置与关联决定：vermillion action.list '" + JSON.stringify({ workspaceId }) + "'",
       "vermillion decision.list '" + JSON.stringify({ workspaceId }) + "'",
-      this.completion(action)
+      this.completion(action),
+      "决策卡主文只说明业务问题、当前影响与可选动作；源码路径、命令、SHA 和诊断日志放 details。技术恢复由当前处理者落实，不要求用户在会话间转述。"
     ];
     if (action.role === "worker" && items[0]) return [await this.workerMessage(workspaceId, items[0], cwd), ...context].join("\n");
     context.push(await this.relatedSessionContext(workspaceId, { missionId: action.missionId, workItemId: action.workItemIds[0] }));

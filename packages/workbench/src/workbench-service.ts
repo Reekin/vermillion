@@ -429,7 +429,7 @@ export class WorkbenchService {
     }
     if (delay === undefined && !(await this.listDecisions(workspaceId)).some((card) => card.actionId === actionId && !card.answer && !card.withdrawn)) {
       await this.createDecision(workspaceId, { actionId, kind: "attempts", workItemId: action.workItemIds[0], missionId: action.missionId, sessionId: action.sessionId,
-        question: "自动恢复已用尽，要再试还是取消当前工作？", context: "当前处理者：" + action.role + "。最近失败：" + failure + "。原会话与成果保留。",
+        question: "自动恢复已用尽，要再试还是取消当前工作？", context: "工作台已尝试自动恢复四次，仍未完成当前处理。原会话与成果保留，选择再试后会从未完成的动作继续。",
         details: "阶段：" + action.stage + "\n受影响工单：" + action.workItemIds.join(", ") + "\n" + failed.history.filter((h) => h.event.startsWith("failed:")).map((h) => h.at + " " + h.message).join("\n"),
         options: [{ key: "retry", label: "再试", detail: "清零此处理过程的失败计数，从未完成动作继续。" }, { key: "cancel", label: "取消当前工作", detail: "取消该过程关联的工单；已合入成果保持保留。" }], recommended: "retry", recommendation: "故障已排除时可沿原处理过程继续。" });
     }
