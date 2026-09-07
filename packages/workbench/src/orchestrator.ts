@@ -158,10 +158,11 @@ export class Orchestrator {
         const resumedRun = await this.service.putRun(workspaceId, { ...run, note: "进程重启后恢复会话" });
         this.runsBySession.set(run.sessionId, { workspaceId, run: resumedRun, idleTurns: 0 });
         if (run.role === "worker" && item?.status === "running") this.ensurePatrol(workspaceId, run.missionId ?? run.workItemId!);
-        await this.runner.send(run.sessionId, run.role === "worker"
+        const related = await this.relatedSessionContext(workspaceId, run);
+        await this.runner.send(run.sessionId, related + "\n" + (run.role === "worker"
           ? item?.status === "queued" ? "工作台重启过，你的会话已恢复。先读取原工单和用户答复，仅理解答复并通过 workItem.escalate 向管家上报；合同更新前暂停开发与提交。" : "工作台重启过，你的会话已恢复。先看 worktree 当前状态（git status / diff）和你上一条回复停在哪，再继续处理工单；完成后仍然 workItem.submit。"
           : run.workItemId ? "工作台重启过，你的会话已恢复。先用 workItem.get 读取独立工单 " + run.workItemId + "、阻塞原因和用户决定，继续处理原单合同。保持无 Mission，不重新拆单或补建 Mission；用 workItem.update、workItem.cancel 或 decision.create 处置。"
-          : "工作台重启过，你的会话已恢复。检查 workItem.list 里已建的工单，把没做完的处理完，最后回复一行摘要。");
+          : "工作台重启过，你的会话已恢复。检查 workItem.list 里已建的工单，把没做完的处理完，最后回复一行摘要。"));
         continue;
       }
       await this.service.putRun(workspaceId, { ...run, status: "failed", note: "进程重启，会话无法恢复", endedAt: this.now() });
@@ -200,6 +201,21 @@ export class Orchestrator {
   }
 
   // ---- steward ----
+
+  private async relatedSessionContext(workspaceId: string, owner: { missionId?: string; workItemId?: string }): Promise<string> {
+    const [missions, runs] = await Promise.all([
+      owner.missionId ? this.service.listMissions(workspaceId) : Promise.resolve([]),
+      this.service.listRuns(workspaceId)
+    ]);
+    const mission = missions.find((entry) => entry.missionId === owner.missionId);
+    return [
+      ...((mission?.revisions ?? []).flatMap((revision) => revision.sessionId
+        ? [`设计伙伴 sessionId: ${revision.sessionId}（revision: ${revision.commit}）`] : [])),
+      ...[...new Set(runs.filter((run) => run.role === "steward" &&
+        (owner.missionId ? run.missionId === owner.missionId : !!owner.workItemId && run.workItemId === owner.workItemId))
+        .map((run) => run.sessionId))].map((sessionId) => `管家 sessionId: ${sessionId}`)
+    ].join("\n");
+  }
 
   /** One revision per steward run. A running steward gets the next revision steered into its session rather than a new one. */
   private async steward(workspaceId: string): Promise<void> {
@@ -248,7 +264,7 @@ export class Orchestrator {
       if (revision) {
         active.run = await this.service.putRun(workspaceId, { ...active.run, revision });
       }
-      await this.runner.steer(active.run.sessionId, "（追加）" + message);
+      await this.runner.steer(active.run.sessionId, "（追加）" + message + "\n" + await this.relatedSessionContext(workspaceId, owner));
       return;
     }
     const root = await this.service.workspaceRoot(workspaceId);
@@ -275,7 +291,7 @@ export class Orchestrator {
       startedAt: this.now()
     });
     this.runsBySession.set(sessionId, { workspaceId, run, idleTurns: 0 });
-    await this.runner.send(sessionId, message);
+    await this.runner.send(sessionId, message + "\n" + await this.relatedSessionContext(workspaceId, owner));
   }
 
 
@@ -350,6 +366,7 @@ export class Orchestrator {
     bound.idleTurns = 0; // a new contract restarts the progress budget
     const { turnId } = await this.runner.steer(sessionId, [
       "工单已调整：" + note,
+      await this.relatedSessionContext(bound.workspaceId, bound.run),
       "立即重新执行 vermillion workItem.get 读取最新合同（objective / scope / acceptance 已变），按新合同继续；已完成但不再需要的部分回退。"
     ].join("\n"));
     // Landed mid-turn: a submit from this same turn was made against the old contract.
@@ -445,9 +462,11 @@ export class Orchestrator {
     });
     this.runsBySession.set(sessionId, { workspaceId, run, idleTurns: 0 });
     if (!item.contractIssue || item.contractIssue.resolvedAt) this.ensurePatrol(workspaceId, item.missionId ?? item.workItemId);
+    const related = await this.relatedSessionContext(workspaceId, item);
     if (resumed) {
       await this.runner.send(sessionId, [
         item.run.resumeMessage,
+        related,
         "请在当前会话和原 worktree 中继续处理。先用 vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "' 读取工单，完成后重新提交 evidence、review 处置和 verify 报告。"
       ].join("\n"));
       return;
@@ -462,6 +481,7 @@ export class Orchestrator {
       "你负责工单「" + item.title + "」。",
       "workspaceId: " + workspaceId,
       "workItemId: " + item.workItemId,
+      related,
       "工作目录: " + cwd + (isolated ? "（独立 worktree，分支 " + branch + "）" : "（workspace 根目录，不开分支）"),
       ...(isolated ? [
         "workspace 根目录（只读主分支）: " + root,

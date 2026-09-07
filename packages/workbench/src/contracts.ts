@@ -248,9 +248,22 @@ export const zAgentRun = z.object({
 });
 export type AgentRun = z.infer<typeof zAgentRun>;
 
+export const zSessionNavigation = z.object({
+  navigationId: z.string().min(1),
+  sessionId: z.string().min(1),
+  turnId: z.string().min(1),
+  targetSessionId: z.string().min(1),
+  targetWorkspaceId: z.string().min(1),
+  title: z.string(),
+  role: z.string().min(1),
+  reason: z.string().optional()
+});
+export type SessionNavigation = z.infer<typeof zSessionNavigation>;
+
 /** Change notifications emitted by the workbench service after every write, and by the docs watcher. */
 export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workspaces.changed") }),
+  z.object({ type: z.literal("sessionNavigation.changed"), sessionId: z.string(), workspaceId: z.string() }),
   z.object({ type: z.literal("docs.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("missions.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),

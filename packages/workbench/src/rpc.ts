@@ -24,6 +24,7 @@ import {
   zWorkItem,
   zWorkbenchEvent,
   zWorkspace,
+  zSessionNavigation,
   type WorkbenchEvent
 } from "./contracts.js";
 
@@ -33,6 +34,14 @@ const zEmpty = z.object({});
 
 /** Single method registry: name -> params/result schemas. Handler and client are both derived from it. */
 export const workbenchRpc = {
+  "sessionNavigation.create": {
+    params: z.object({ sessionId: z.string().min(1), targetSessionId: z.string().min(1), reason: z.string().trim().optional() }),
+    result: zSessionNavigation
+  },
+  "sessionNavigation.list": {
+    params: z.object({ sessionId: z.string().min(1), turnId: z.string().min(1) }),
+    result: z.array(zSessionNavigation)
+  },
   "workspace.list": { params: zEmpty, result: z.array(zWorkspace) },
   "workspace.add": { params: z.object({ rootPath: z.string().min(1), label: z.string().optional() }), result: zWorkspace },
   "workspace.remove": { params: zWs, result: zEmpty },

@@ -34,6 +34,7 @@ import type {
 } from "../../transport/desktop-transport.js";
 import { connectDesktopTransportToStore } from "../../transport/store-bridge.js";
 import { renderTurnExtensions } from "../../features/engine-extensions/turn-extension-registry.js";
+import { SessionNavigationSlot } from "../app/session-navigation.js";
 import { ImageLightbox, type ImageLightboxState } from "./ImageLightbox.js";
 import { MessageMarkdownView } from "./MessageMarkdownView.js";
 import {
@@ -543,6 +544,9 @@ const TranscriptPane = memo(
                     refreshSignal: engineExtensionRefreshSignal
                   })
                 : null}
+              {!isUserTurn && !isFollowedBySameTurn && <SessionNavigationSlot
+                sessionId={visibleRow.turn.sessionId} turnId={visibleRow.turn.turnId}
+              />}
             </article>
           );
         })}

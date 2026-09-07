@@ -21,6 +21,8 @@ import { useSessionActions } from "./use-session-actions.js";
 import { createWorkbenchStore, type Panel } from "./workbench-store.js";
 import { createRendererWorkbenchClient } from "./workbench-client.js";
 import "./app.css";
+import { SessionNavigationContext } from "./session-navigation.js";
+import type { SessionNavigation } from "@vermillion/workbench/client";
 
 type AppProps = {
   sessionStore: RendererStore;
@@ -47,6 +49,20 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
+  const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
+  const navigation = useMemo(() => ({
+    client: store.getState().client,
+    open: (target: SessionNavigation) => {
+      if (target.role === "design-partner") {
+        setNavigationTarget({ sessionId: target.targetSessionId, workspaceId: target.targetWorkspaceId });
+        setSessionId(target.targetSessionId);
+        store.getState().browseWorkspace(target.targetWorkspaceId);
+        store.getState().setPanel("think");
+      } else {
+        store.getState().showAgentSession(target.targetWorkspaceId, target.targetSessionId);
+      }
+    }
+  }), [store]);
   const thinkMode = useThinkMode(transport, sessionId);
   const workspaceIds = useMemo(() => workspaces.map((w) => w.workspaceId), [workspaces]);
   // Think shows only the user's own design sessions; agent sessions live under Workspaces → 会话.
@@ -63,9 +79,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   // Docs panel follows the open session's workspace; in draft it follows the picker.
   const openSession = sessionId ? sidebar.findSession(sessionId) : undefined;
+  const sessionWorkspaceId = openSession?.workspaceId ?? (navigationTarget?.sessionId === sessionId ? navigationTarget?.workspaceId : undefined);
   useEffect(() => {
-    browseWorkspace(sessionId ? openSession?.workspaceId : draftWorkspaceId);
-  }, [sessionId, openSession?.workspaceId, draftWorkspaceId, browseWorkspace]);
+    if (panel === "think") browseWorkspace(sessionId ? sessionWorkspaceId : draftWorkspaceId);
+  }, [panel, sessionId, sessionWorkspaceId, draftWorkspaceId, browseWorkspace]);
 
   const [draftRevision, setDraftRevision] = useState(0);
   const initializeDraftExecution = useCallback(async () => {
@@ -123,6 +140,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} compact={compact} onExpand={() => store.getState().showTaskBoard()} />;
 
   return (
+    <SessionNavigationContext.Provider value={navigation}>
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-page-canvas text-foreground">
       <div className="flex min-h-0 flex-1">
       <Rail panel={panel} overlay={overlay} inboxCount={inboxCount} onSelect={onSelect} onOpenPage={setPanel} />
@@ -153,7 +171,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               initializeDraftExecution={initializeDraftExecution}
               getSendOptions={thinkMode.getSendOptions}
               composerExtras={<>
-                <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? openSession?.workspaceId : undefined} />
+                <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                 <ConfigurationSelect label="模式" aria-label="模式" value={thinkMode.mode} disabled={!thinkMode.ready}
                   onChange={(event) => void thinkMode.choose(event.target.value as import("@vermillion/shared").ThinkMode)}>
                   <option value="dispatch">发单</option>
@@ -180,5 +198,6 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       <TextEditor store={store} />
       <RoleEditor store={store} transport={transport} />
     </div>
+    </SessionNavigationContext.Provider>
   );
 };

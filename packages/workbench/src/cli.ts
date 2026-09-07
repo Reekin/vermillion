@@ -34,6 +34,11 @@ export const runCli = async (argv: string[]): Promise<number> => {
   }
   const baseDir = process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion");
   const request = { method: method as WorkbenchRpcMethod, params: rawParams ? JSON.parse(rawParams) : {} };
+  if ((method === "mission.create" || method === "mission.addRevision") &&
+      (typeof request.params?.sessionId !== "string" || !request.params.sessionId.trim())) {
+    process.stderr.write(method + " 必须提供当前上下文中的非空 sessionId。\n");
+    return 1;
+  }
   // Acceptance instances belong to the CLI's checkout/release, not a running desktop's build.
   const localAppMethod = method === "app.start" || method === "app.stop";
   const remote = localAppMethod ? undefined : await connectLocalEndpoint(baseDir);
