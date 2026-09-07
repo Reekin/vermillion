@@ -167,7 +167,7 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
         ) : (
           <>
             <Button variant="primary" disabled={busy} onClick={() => void run(() => client.request("inbox.acknowledge", { workspaceId: item.workspaceId, workItemId: workItem.workItemId }))}>知道了</Button>
-            <Button disabled={busy} onClick={() => setRollingBack(true)}>附理由回滚</Button>
+            {workItem.merge?.commit && <Button disabled={busy} onClick={() => setRollingBack(true)}>附理由回滚</Button>}
             {workItem.run.sessionId && <Button variant="ghost" size="sm" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, workItem.run.sessionId!)}>会话</Button>}
           </>
         )
