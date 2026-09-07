@@ -47,7 +47,8 @@ const sessionIndexDocumentSchema = z.object({
   treeModes: z.record(z.string(), zThinkMode).default({}),
   treeViews: z.record(z.string(), z.object({
     sessionId: z.string(),
-    nodeId: z.string().optional()
+    nodeId: z.string().optional(),
+    followTip: z.boolean().optional()
   })).default({})
 });
 
@@ -290,7 +291,7 @@ export class SessionIndexStore {
     return members;
   }
 
-  public getTreeView(sessionId: string): { sessionId: string; nodeId?: string } | undefined {
+  public getTreeView(sessionId: string): SessionIndexDocument["treeViews"][string] | undefined {
     return this.document.treeViews[this.getTreeId(sessionId)];
   }
 
@@ -308,7 +309,7 @@ export class SessionIndexStore {
     await this.persist();
   }
 
-  public async setTreeView(sessionId: string, view: { sessionId: string; nodeId?: string }): Promise<void> {
+  public async setTreeView(sessionId: string, view: SessionIndexDocument["treeViews"][string]): Promise<void> {
     this.document = {
       ...this.document,
       treeViews: { ...this.document.treeViews, [this.getTreeId(sessionId)]: view }

@@ -5,13 +5,10 @@ import type { SessionRuntimeService } from "./runtime-service.js";
 import type { SessionReconciliationService } from "./session-discovery.js";
 import { buildSessionWindowSnapshotFromPage } from "./session-window.js";
 
-type TreeView = { sessionId: string; nodeId?: string };
-
 /** Fork membership and the viewing cursor belong to the wrapper, independently of running turns. */
 export class WrapperChatTreeService {
   private readonly loaded = new Set<string>();
   private readonly loading = new Map<string, Promise<void>>();
-  private readonly followNextTurn = new Map<string, TreeView>();
   private readonly unsubscribe: () => void;
 
   public constructor(private readonly options: {
@@ -25,13 +22,9 @@ export class WrapperChatTreeService {
       const index = options.sessionIndexStore;
       const treeId = index.getTreeId(event.sessionId);
       const view = index.getTreeView(treeId);
-      const pending = this.followNextTurn.get(treeId);
-      if (view?.sessionId === event.sessionId &&
-          ((!view.nodeId && !pending) ||
-           (pending?.sessionId === event.sessionId && pending.nodeId === view.nodeId))) {
-        void index.setTreeView(treeId, { sessionId: event.sessionId, nodeId: event.turnId });
+      if (view?.sessionId === event.sessionId && view.followTip !== false) {
+        void index.setTreeView(treeId, { sessionId: event.sessionId, nodeId: event.turnId, followTip: true });
       }
-      if (pending?.sessionId === event.sessionId) this.followNextTurn.delete(treeId);
     });
   }
 
@@ -110,7 +103,8 @@ export class WrapperChatTreeService {
     });
     const stored = index.getTreeView(treeId);
     const currentSessionId = stored && paths.has(stored.sessionId) ? stored.sessionId : byActivity[0]!;
-    const currentNodeId = stored?.nodeId ?? paths.get(currentSessionId)?.at(-1);
+    // Legacy views did not distinguish automatic cursors from explicit jumps; resume tip following.
+    const currentNodeId = stored?.followTip === false ? stored.nodeId : paths.get(currentSessionId)?.at(-1);
     const currentPath = paths.get(currentSessionId) ?? [];
     const visibleTurnIds = currentNodeId ? currentPath.slice(0, currentPath.indexOf(currentNodeId) + 1) : [];
     const tree: ChatTreeSnapshot = {
@@ -132,7 +126,7 @@ export class WrapperChatTreeService {
     const { tree } = this.project(sessionId);
     if (!this.options.sessionIndexStore.getTreeView(sessionId)) {
       await this.options.sessionIndexStore.setTreeView(sessionId, {
-        sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId
+        sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true
       });
     }
     return tree;
@@ -140,12 +134,11 @@ export class WrapperChatTreeService {
 
   public async jump(sessionId: string, nodeId: string): Promise<{ jumped: boolean }> {
     // The graph is already loaded when a user picks a node; no engine operation belongs here.
-    const { tree, paths, byActivity } = this.project(sessionId);
+    const { paths, byActivity } = this.project(sessionId);
     const member = byActivity.find((id) => paths.get(id)?.at(-1) === nodeId) ??
       byActivity.find((id) => paths.get(id)?.includes(nodeId));
     if (!member) throw new Error(`Unknown tree node: ${nodeId}`);
-    this.followNextTurn.delete(tree.treeId!);
-    await this.options.sessionIndexStore.setTreeView(sessionId, { sessionId: member, nodeId });
+    await this.options.sessionIndexStore.setTreeView(sessionId, { sessionId: member, nodeId, followTip: false });
     return { jumped: true };
   }
 
@@ -164,9 +157,8 @@ export class WrapperChatTreeService {
       member = await this.options.fork(member, target);
       await this.loadMember(member);
     }
-    const view = { sessionId: member, nodeId: target };
+    const view = { sessionId: member, nodeId: target, followTip: true };
     await this.options.sessionIndexStore.setTreeView(sessionId, view);
-    this.followNextTurn.set(tree.treeId!, view);
     return { sessionId: member };
   }
 }
