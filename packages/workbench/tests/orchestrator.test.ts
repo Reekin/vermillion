@@ -409,7 +409,7 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     // cancelling the prerequisite does not release the dependant; the mission's steward is asked instead
     const stewardCount = sessions.filter((s) => s.metadata.role === "steward").length;
     await service.cancelWorkItem(ws.workspaceId, first.workItemId);
-    await until(async () => sessions.filter((s) => s.metadata.role === "steward").length === stewardCount + 1);
+    await until(async () => sessions.filter((s) => s.metadata.role === "steward").length === stewardCount + 1 && sessions.filter((s) => s.metadata.role === "steward").at(-1)!.messages.length > 0);
     const steward = sessions.filter((s) => s.metadata.role === "steward").at(-1)!;
     expect(steward.messages[0]).toContain("已取消");
     expect(steward.messages[0]).toContain(second.workItemId);
@@ -570,7 +570,7 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     complete(sessions.find((s) => s.metadata.workItemId === e.workItemId)!.sessionId, "退回");
     const stewardCount = sessions.filter((s) => s.metadata.role === "steward").length;
     await service.cancelWorkItem(ws.workspaceId, f.workItemId);
-    await until(async () => sessions.filter((s) => s.metadata.role === "steward").length === stewardCount + 1);
+    await until(async () => sessions.filter((s) => s.metadata.role === "steward").length === stewardCount + 1 && sessions.filter((s) => s.metadata.role === "steward").at(-1)!.messages.length > 0);
     const steward = sessions.filter((s) => s.metadata.role === "steward").at(-1)!;
     expect(steward.metadata.missionId).toBe(mission.missionId);
     expect(steward.messages[0]).toContain("- " + e.workItemId + " E");
