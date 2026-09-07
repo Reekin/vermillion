@@ -14,12 +14,23 @@ export class WorktreeMergeConflict extends Error {
   }
 }
 
+export class WorktreeNotReady extends Error {}
+
+export class WorkspaceNotReady extends Error {}
+
 export const STATE_DIR = ".vermillion";
 export const DOCS_DIR = STATE_DIR + "/docs";
 
 const git = async (cwd: string, args: string[]): Promise<string> => {
   const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
   return stdout;
+};
+
+const exists = async (path: string): Promise<boolean> => {
+  try { await stat(path); return true; } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 };
 
 const toPosix = (value: string): string => value.split(sep).join("/");
@@ -167,46 +178,112 @@ export class DocsService {
     return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
   }
 
-  /** Commits everything in a work item's worktree onto its branch, merges into the workspace branch, and removes the worktree. */
-  async mergeWorktree(worktreePath: string, branch: string, message: string): Promise<{ commit?: string; diffStat: string }> {
-    const unresolved = await git(this.rootPath, ["ls-files", "--unmerged"]);
-    if (unresolved) throw new Error("主工作区存在尚未解决的冲突，请先完成当前 Git 操作。");
-    await git(worktreePath, ["add", "-A"]);
-    const staged = (await git(worktreePath, ["status", "--porcelain=v1"])).trim();
-    if (staged) await git(worktreePath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message]);
-    const before = await this.head();
+  /** Read-only preflight; the caller serializes integration and workspace repair. */
+  async checkIntegrationReady(): Promise<void> {
+    const markers = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer", "BISECT_LOG"];
+    for (const marker of markers) {
+      const path = (await git(this.rootPath, ["rev-parse", "--git-path", marker])).trim();
+      if (await exists(resolve(this.rootPath, path))) throw new WorkspaceNotReady("Git operation in progress: " + marker);
+    }
+    const checkLocks = async (directory: string, recursive = false): Promise<void> => {
+      if (!await exists(directory)) return;
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.name.endsWith(".lock")) throw new WorkspaceNotReady("Git lock exists: " + path);
+        if (entry.isDirectory() && (recursive || entry.name === "refs")) await checkLocks(path, true);
+      }
+    };
+    for (const flag of ["--git-dir", "--git-common-dir"]) {
+      await checkLocks(resolve(this.rootPath, (await git(this.rootPath, ["rev-parse", flag])).trim()));
+    }
+    if (await git(this.rootPath, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"])) {
+      throw new WorkspaceNotReady("Main workspace has uncommitted changes.");
+    }
+  }
+
+  async integrationSnapshot(branch: string): Promise<{ head: string; target: string; diffStat: string }> {
+    const head = await this.resolveCommit("HEAD");
+    const target = await this.resolveCommit(branch);
+    const diffStat = await git(this.rootPath, ["diff", "--stat", head + "..." + target]);
+    return { head, target, diffStat };
+  }
+
+  async getMergeCommit(target: string, before: string): Promise<string | undefined> {
+    if (await this.isAncestor(target, before)) return undefined;
+    const history = await git(this.rootPath, ["rev-list", "--first-parent", "--reverse", "--parents", before + "..HEAD"]);
+    return history.split("\n").map((line) => line.split(" ")).find((entry) => entry.slice(2).includes(target))?.[0];
+  }
+
+  private async resolveCommit(commit: string): Promise<string> {
+    return (await git(this.rootPath, ["rev-parse", "--verify", "--end-of-options", commit + "^{commit}"])).trim();
+  }
+
+  private async isAncestor(commit: string, descendant: string): Promise<boolean> {
+    try { await git(this.rootPath, ["merge-base", "--is-ancestor", commit, descendant]); return true; } catch (error) {
+      if ((error as { code?: number }).code === 1) return false;
+      throw error;
+    }
+  }
+
+  /** Merge committed worker output; cleanup is a separate recoverable action. */
+  async mergeWorktree(worktreePath: string, branch: string, message: string, targetCommit?: string): Promise<{ commit?: string; diffStat: string }> {
+    const before = await this.resolveCommit("HEAD");
+    const target = await this.resolveCommit(targetCommit ?? branch);
+    if (await this.isAncestor(target, before)) return { diffStat: "" };
+    await this.checkIntegrationReady();
+    if (await git(worktreePath, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"])) {
+      throw new WorktreeNotReady("Worker must commit its worktree before integration.");
+    }
     try {
-      await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "merge", "--no-ff", "-q", "-m", "Merge " + message, branch]);
+      await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "merge", "--no-ff", "-q", "-m", "Merge " + message, target]);
     } catch (error) {
       const files = (await git(this.rootPath, ["diff", "--name-only", "--diff-filter=U", "-z"])).split("\0").filter(Boolean);
       if (!files.length) throw error;
       await git(this.rootPath, ["merge", "--abort"]);
       throw new WorktreeMergeConflict(files);
     }
-    const commit = (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
-    const diffStat = await git(this.rootPath, ["diff", "--stat", before!, commit]);
-    await this.dropWorktree(worktreePath, branch);
-    return { commit: commit === before ? undefined : commit, diffStat };
+    const commit = await this.resolveCommit("HEAD");
+    return { commit, diffStat: await git(this.rootPath, ["diff", "--stat", before, commit]) };
   }
 
-  async rollbackMerge(commit: string): Promise<string> {
-    if (await git(this.rootPath, ["ls-files", "--unmerged"])) throw new Error("主工作区存在尚未解决的冲突，请先完成当前 Git 操作。");
+  /** Find Git's standard merge-revert record on the mainline since the saved starting point. */
+  async getRollbackCommit(commit: string, before: string): Promise<string | undefined> {
+    const target = await this.resolveCommit(commit);
+    const start = await this.resolveCommit(before);
+    if (!await this.isAncestor(start, "HEAD")) throw new WorkspaceNotReady("Rollback starting point is no longer on HEAD history.");
+    const log = await git(this.rootPath, ["log", "--first-parent", "--format=%H%x00%B%x00", start + "..HEAD"]);
+    const entries = log.split("\0");
+    for (let i = 0; i + 1 < entries.length; i += 2) {
+      if (entries[i + 1]!.split("\n").some((line) => line === "This reverts commit " + target + ", reversing")) return entries[i]!.trim();
+    }
+    return undefined;
+  }
+
+  async rollbackMerge(commit: string, before?: string): Promise<string> {
+    const target = await this.resolveCommit(commit);
+    const completed = await this.getRollbackCommit(target, before ?? target);
+    if (completed) return completed;
+    await this.checkIntegrationReady();
     try {
-      await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "revert", "--no-edit", "-m", "1", commit]);
+      await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "revert", "--no-edit", "-m", "1", target]);
     } catch (error) {
       const files = (await git(this.rootPath, ["diff", "--name-only", "--diff-filter=U", "-z"])).split("\0").filter(Boolean);
       if (files.length) {
         await git(this.rootPath, ["revert", "--abort"]);
-        throw new Error("回滚冲突：\n" + files.join("\n"));
+        throw new WorkspaceNotReady("Rollback conflict: " + files.join(", "));
       }
       throw error;
     }
-    return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
+    return this.resolveCommit("HEAD");
   }
 
-  async dropWorktree(worktreePath: string, branch: string): Promise<void> {
-    await git(this.rootPath, ["worktree", "remove", "--force", worktreePath]).catch(() => undefined);
-    await git(this.rootPath, ["branch", "-D", branch]).catch(() => undefined);
+  async dropWorktree(worktreePath: string, branch: string, discard = false): Promise<void> {
+    const registered = (await git(this.rootPath, ["worktree", "list", "--porcelain", "-z"]))
+      .split("\0").some((field) => field.startsWith("worktree ") && samePath(field.slice(9), worktreePath));
+    if (registered || await exists(worktreePath)) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
+    const ref = "refs/heads/" + branch;
+    const branches = await git(this.rootPath, ["for-each-ref", "--format=%(refname)", ref]);
+    if (branches.split("\n").includes(ref)) await git(this.rootPath, ["branch", discard ? "-D" : "-d", "--", branch]);
   }
 
   async head(): Promise<string | undefined> {

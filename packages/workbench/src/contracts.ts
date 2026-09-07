@@ -41,7 +41,7 @@ export type Mission = z.infer<typeof zMission>;
 export const latestRevision = (mission: Mission): MissionRevision => mission.revisions[mission.revisions.length - 1]!;
 
 /** queued -> running -> closed; decision parks a work item until the user answers. */
-export const workItemStatuses = ["queued", "running", "decision", "closed", "cancelled"] as const;
+export const workItemStatuses = ["queued", "running", "merging", "decision", "closed", "cancelled"] as const;
 export const zWorkItemStatus = z.enum(workItemStatuses);
 export type WorkItemStatus = z.infer<typeof zWorkItemStatus>;
 
@@ -155,6 +155,9 @@ export const zDecisionCard = z.object({
   workItemId: z.string().optional(),
   missionId: z.string().optional(),
   sessionId: z.string().optional(),
+  actionId: z.string().optional(),
+  withdrawn: z.object({ reason: z.string().min(1), at: z.string(), sessionId: z.string() }).optional(),
+  deliveryPending: z.boolean().optional(),
   /** Who raised it: a worker (default) or the workbench after repeated failures. */
   kind: z.enum(["worker", "attempts"]).optional(),
   /** One plain sentence: what is blocked. */
@@ -231,7 +234,7 @@ export const zScheduler = z.object({
 });
 export type Scheduler = z.infer<typeof zScheduler>;
 
-export const agentRoles = ["steward", "worker", "supervisor"] as const;
+export const agentRoles = ["steward", "worker", "supervisor", "workspace-repair"] as const;
 export const zAgentRole = z.enum(agentRoles);
 export type AgentRole = z.infer<typeof zAgentRole>;
 
@@ -242,6 +245,7 @@ export const zAgentRun = z.object({
   sessionId: z.string().min(1),
   missionId: z.string().optional(),
   workItemId: z.string().optional(),
+  actionId: z.string().optional(),
   /** Steward: the revision commit this run processed. */
   revision: z.string().optional(),
   /** Snapshot of the revision and work item states sent for a closure judgment. */
@@ -253,6 +257,43 @@ export const zAgentRun = z.object({
   endedAt: z.string().optional()
 });
 export type AgentRun = z.infer<typeof zAgentRun>;
+
+/** A durable unit of responsibility. Delivery and turn completion do not satisfy its completion condition. */
+export const zWorkflowAction = z.object({
+  actionId: z.string(),
+  kind: z.enum(["execute", "contract", "dependency", "revision", "repair", "integration"]),
+  role: z.enum(["worker", "steward", "workspace-repair", "workbench"]),
+  ownerKey: z.string(),
+  workItemIds: z.array(z.string()),
+  missionId: z.string().optional(),
+  revision: z.string().optional(),
+  /** Revision/work-state snapshot delivered for a mission closure judgment. */
+  closureKey: z.string().optional(),
+  status: z.enum(["pending", "running", "waiting", "retry", "decision", "done", "cancelled"]),
+  stage: z.enum(["worktree", "open", "deliver", "execute", "merge", "rollback", "cleanup"]),
+  message: z.string(),
+  sessionId: z.string().optional(),
+  runId: z.string().optional(),
+  deliveredAt: z.string().optional(),
+  attempts: z.number().int().nonnegative(),
+  idleTurns: z.number().int().nonnegative(),
+  retryAt: z.string().optional(),
+  failure: z.string().optional(),
+  requiredChanges: z.array(z.enum(["objective", "scope", "acceptance", "dependsOn", "needs"])).optional(),
+  integration: z.object({
+    operation: z.enum(["merge", "rollback", "cancel"]),
+    before: z.string().optional(),
+    target: z.string().optional(),
+    commit: z.string().optional(),
+    diffStat: z.string(),
+    reason: z.string().optional()
+  }).optional(),
+  history: z.array(z.object({ at: z.string(), event: z.string(), message: z.string(), decisionId: z.string().optional() })),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type WorkflowAction = z.infer<typeof zWorkflowAction>;
+export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
 
 export const zSessionNavigation = z.object({
   navigationId: z.string().min(1),
@@ -280,6 +321,7 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workItem.updated"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string(), note: z.string() }),
   /** A work item was cancelled. sessionId when a worker held it (interrupted); dependants are queued items that listed it in dependsOn. */
   z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string().optional(), dependants: z.array(z.string()) }),
-  z.object({ type: z.literal("runs.changed"), workspaceId: z.string() })
+  z.object({ type: z.literal("runs.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("actions.changed"), workspaceId: z.string() })
 ]);
 export type WorkbenchEvent = z.infer<typeof zWorkbenchEvent>;

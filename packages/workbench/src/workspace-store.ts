@@ -8,6 +8,8 @@ import {
   zDecisionCard,
   zMission,
   zWorkItem,
+  zWorkflowAction,
+  type WorkflowAction,
   type AgentRun,
   type Scheduler,
   type DecisionCard,
@@ -91,6 +93,7 @@ export class WorkspaceStore {
   readonly workItems: Collection<WorkItem>;
   readonly decisions: Collection<DecisionCard>;
   readonly runs: Collection<AgentRun>;
+  readonly actions: Collection<WorkflowAction>;
   private readonly schedulerPath: string;
 
   constructor(rootPath: string) {
@@ -100,6 +103,7 @@ export class WorkspaceStore {
     this.workItems = createCollection(join(this.stateDir, "workitems"), zWorkItem, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
     this.runs = createCollection(join(this.stateDir, "runs"), zAgentRun, "runId");
+    this.actions = createCollection(join(this.stateDir, "actions"), zWorkflowAction, "actionId");
     this.schedulerPath = join(this.stateDir, "scheduler.json");
   }
 

@@ -96,15 +96,12 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     await shell.executeCommand({ commandId: createId(), command: { type: "interruptTurn", sessionId, turnId: turn.turnId } });
   },
   resume: async (sessionId) => {
-    try {
-      // Background recovery must not participate in the UI's cancellable session-opening sequence.
-      if (!await shell.ensureSessionLoadedForRead(sessionId)) return false;
-      const result = await shell.runSessionAction({ sessionId, action: "resume" });
-      return result.action === "resume" && result.resumed;
-    } catch {
-      return false;
-    }
+    // Background recovery must not participate in the UI's cancellable session-opening sequence.
+    if (!await shell.ensureSessionLoadedForRead(sessionId)) return false;
+    const result = await shell.runSessionAction({ sessionId, action: "resume" });
+    return result.action === "resume" && result.resumed;
   },
+  isActive: (sessionId) => shell.getSnapshot().turns.some((turn) => turn.sessionId === sessionId && turn.status !== "completed"),
   lastReply: (sessionId) => lastAssistantText(shell, sessionId),
   turnMessages: (sessionId) => turnAssistantTexts(shell, sessionId, true),
   registerTool: (tool) => {
