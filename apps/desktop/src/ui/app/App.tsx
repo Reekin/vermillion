@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { mergeSessionExecutionProfile, resolveEngineExecutionPreference } from "@vermillion/shared";
+import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { SessionPane } from "../chat-shell/SessionPane.js";
@@ -66,24 +67,30 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     browseWorkspace(sessionId ? openSession?.workspaceId : draftWorkspaceId);
   }, [sessionId, openSession?.workspaceId, draftWorkspaceId, browseWorkspace]);
 
+  const [draftRevision, setDraftRevision] = useState(0);
+  const initializeDraftExecution = useCallback(async () => {
+    const settings = await transport.settings.get();
+    const role = draftWorkspaceId
+      ? await store.getState().client.request("role.resolve", { workspaceId: draftWorkspaceId, roleId: "design-partner" })
+      : undefined;
+    return mergeSessionExecutionProfile(
+      resolveEngineExecutionPreference(settings.executionPreferencesByEngineId.codex),
+      role?.modelConfig
+    );
+  }, [draftWorkspaceId, draftRevision, transport, store]);
+
   const createSession = useCallback(
-    async ({ content, attachments }: { content: string; attachments: import("@vermillion/shared").Attachment[] }) => {
+    async ({ execution }: { execution?: SessionExecutionProfileInput }) => {
       const workspace = draftWorkspaceId ? workspaceById.get(draftWorkspaceId) : undefined;
       if (!workspace) throw new Error("请先在 Composer 里选择一个 workspace。");
       const engineId = (await transport.engine.list()).find((e) => e.engineId === "codex")?.engineId ?? "codex";
       const role = await store.getState().client.request("role.resolve", { workspaceId: workspace.workspaceId, roleId: "design-partner" });
-      const settings = await transport.settings.get();
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
         engineId,
-        sessionProfile: mergeSessionExecutionProfile(
-          resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]),
-          role.modelConfig
-        ),
+        sessionProfile: execution,
         metadata: { cwd: workspace.rootPath, developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
       });
-      void content;
-      void attachments;
       await transport.chatTree.setMode({ sessionId: created.sessionId, mode: thinkMode.mode });
       setSessionId(created.sessionId);
       return created.sessionId;
@@ -128,7 +135,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             isDraft={sessionId === undefined}
             workspaceLabelById={workspaceLabelById}
             onOpen={setSessionId}
-            onNewChat={() => setSessionId(undefined)}
+            onNewChat={() => { setSessionId(undefined); setDraftRevision((n) => n + 1); }}
             menu={sessionActions.menu}
             onOpenMenu={(event, id) => void sessionActions.openMenu(event, id)}
             onCloseMenu={sessionActions.closeMenu}
@@ -143,6 +150,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               sessionId={sessionId}
               reloadSignal={reloadSignal}
               createSession={createSession}
+              initializeDraftExecution={initializeDraftExecution}
               getSendOptions={thinkMode.getSendOptions}
               composerExtras={<>
                 <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? openSession?.workspaceId : undefined} />

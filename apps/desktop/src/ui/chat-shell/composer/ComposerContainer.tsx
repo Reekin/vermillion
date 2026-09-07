@@ -1,3 +1,4 @@
+import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { ReactElement, ReactNode } from "react";
 import type {
   ApprovalRequest,
@@ -43,7 +44,8 @@ export type ComposerContainerProps = {
   statusNotice?: ComposerStatusNotice;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   onPreviewImage?: (input: ImageLightboxState) => void;
-  createSession?: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
+  createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
+  initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   prepareSend?: () => Promise<string>;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
@@ -80,6 +82,7 @@ export const ComposerContainer = ({
   onStatusNotice,
   onPreviewImage,
   createSession,
+  initializeDraftExecution,
   prepareSend,
   autoSendQueuedMessages,
   onResumeSession,
@@ -109,6 +112,7 @@ export const ComposerContainer = ({
     statusNotice,
     onStatusNotice,
     createSession,
+    initializeDraftExecution,
     prepareSend,
     autoSendQueuedMessages,
     onResumeSession,
