@@ -1,8 +1,22 @@
 import { ListTodo } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { WorkbenchStore } from "../workbench-store.js";
-import { Badge, EmptyState, InlineNotice, ListRow, PanelHeader, StatusBar } from "./ui.js";
-import { taskStatusLabel } from "./task-labels.js";
+import type { TaskSummary, WorkbenchStore } from "../workbench-store.js";
+import { Badge, EmptyState, HoverCard, InlineNotice, ListRow, PanelHeader, StatusBar } from "./ui.js";
+import { statusLabel, taskStatusLabel } from "./task-labels.js";
+
+/** Work items under a mission, shown while the pointer rests on the mission row. */
+const MissionItems = ({ items }: { items: NonNullable<TaskSummary["workItems"]> }) =>
+  items.length === 0 ? (
+    <InlineNotice className="pt-2">还没有工单</InlineNotice>
+  ) : (
+    <ul>
+      {items.map((item) => (
+        <li key={item.workItemId}>
+          <ListRow title={<span title={item.title}>{item.title}</span>} trailing={<Badge status={item.status}>{statusLabel[item.status]}</Badge>} />
+        </li>
+      ))}
+    </ul>
+  );
 
 export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
   const tasks = store((s) => s.tasks);
@@ -26,16 +40,21 @@ export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
       <PanelHeader title="当前任务" />
       {error ? <InlineNotice tone="error">任务加载失败：{error}</InlineNotice> : tasks.length === 0 && <EmptyState title="当前没有任务" />}
       <ul>
-        {tasks.map((task) => (
-          <li key={task.workspaceId + ":" + task.id}>
+        {tasks.map((task) => {
+          const row = (
             <ListRow
               title={task.title}
               meta={workspaces.find((w) => w.workspaceId === task.workspaceId)?.label}
-              trailing={<>{task.progress !== undefined && <span>工单 {task.progress}</span>}<Badge>{taskStatusLabel[task.status]}</Badge></>}
+              trailing={<>{task.workItems && <span>工单 {task.workItems.filter((w) => w.status === "closed").length}/{task.workItems.length}</span>}<Badge>{taskStatusLabel[task.status]}</Badge></>}
               onClick={() => { setOpen(false); showTask(task); }}
             />
-          </li>
-        ))}
+          );
+          return (
+            <li key={task.workspaceId + ":" + task.id}>
+              {task.workItems ? <HoverCard content={<MissionItems items={task.workItems} />}>{row}</HoverCard> : row}
+            </li>
+          );
+        })}
       </ul>
     </StatusBar>
   );

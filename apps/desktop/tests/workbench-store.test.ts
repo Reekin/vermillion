@@ -30,8 +30,12 @@ describe("global task summary", () => {
     });
     await vi.waitFor(() => expect(store.getState().tasks).toHaveLength(7));
     expect(store.getState().tasks.map((t) => t.id)).toEqual(["empty", "finished-children", "q", "active", "r", "v", "d"]);
-    expect(store.getState().tasks.find((t) => t.id === "finished-children")?.progress).toBe("1/2");
-    expect(store.getState().tasks.find((t) => t.id === "empty")?.progress).toBe("0/0");
+    expect(store.getState().tasks.find((t) => t.id === "finished-children")?.workItems).toEqual([
+      { workItemId: "child", title: "child", status: "closed" },
+      { workItemId: "cancelled-child", title: "cancelled-child", status: "cancelled" }
+    ]);
+    expect(store.getState().tasks.find((t) => t.id === "empty")?.workItems).toEqual([]);
+    expect(store.getState().tasks.find((t) => t.id === "q")?.workItems).toBeUndefined();
   });
 
   it("refreshes other workspaces from events and drops a superseded summary response", async () => {

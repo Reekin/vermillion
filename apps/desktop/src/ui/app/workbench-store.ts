@@ -9,7 +9,9 @@ export type CommitOutcome =
   | { kind: "mission"; missionId: string; title: string; appended: boolean };
 
 export type TaskTarget = { workspaceId: string; kind: "mission" | "workItem"; id: string };
-export type TaskSummary = TaskTarget & { title: string; status: Mission["status"] | WorkItem["status"]; progress?: string };
+export type TaskWorkItem = Pick<WorkItem, "workItemId" | "title" | "status">;
+/** Missions carry their work items (board order) so the status bar can show progress and the hover list. */
+export type TaskSummary = TaskTarget & { title: string; status: Mission["status"] | WorkItem["status"]; workItems?: TaskWorkItem[] };
 
 /** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
 export type WorkspaceView = {
@@ -88,11 +90,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
             client.request("mission.list", { workspaceId }),
             client.request("workItem.list", { workspaceId })
           ]);
-          const tasks: TaskSummary[] = missions.filter((m) => m.status === "active").map((mission) => {
-            const items = workItems.filter((w) => w.missionId === mission.missionId);
-            return { workspaceId, kind: "mission", id: mission.missionId, title: mission.title, status: mission.status,
-              progress: `${items.filter((w) => w.status === "closed").length}/${items.length}` };
-          });
+          const tasks: TaskSummary[] = missions.filter((m) => m.status === "active").map((mission) => ({
+            workspaceId, kind: "mission", id: mission.missionId, title: mission.title, status: mission.status,
+            workItems: workItems.filter((w) => w.missionId === mission.missionId).map(({ workItemId, title, status }) => ({ workItemId, title, status }))
+          }));
           for (const item of workItems) {
             if (!item.missionId && ["queued", "running", "review", "decision"].includes(item.status)) {
               tasks.push({ workspaceId, kind: "workItem", id: item.workItemId, title: item.title, status: item.status });
