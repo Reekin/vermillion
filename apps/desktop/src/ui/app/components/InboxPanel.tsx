@@ -118,7 +118,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       </>}
       {answered && <DetailSection title="答复结果">
         <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
-        <p>{card.deliveryPending ? "答复已保存，等待交接" : "答复已记录"}{action ? " · " + roleLabel[action.role] + " · " + actionStatusLabel[action.status] : ""}</p>
+        <p>{card.deliveryPending ? "答复已保存，等待交接" : "答复已记录"}</p>
         <Button size="sm" variant="ghost" onClick={() => dismissDecision(item.workspaceId, card.decisionId)}>知道了</Button>
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
