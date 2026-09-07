@@ -130,7 +130,7 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
           {error && <InlineNotice tone="error">{error}</InlineNotice>}
         </div>
         <footer className="flex h-10 shrink-0 items-center gap-3 border-t border-border px-4">
-          <span className="text-caption text-faint-foreground">保存到本 workspace · {dirty ? "未保存 · Ctrl+S" : "已保存"}</span>
+          <span className="text-caption text-muted-foreground">保存到本 workspace · {dirty ? "未保存 · Ctrl+S" : "已保存"}</span>
           <Button size="sm" variant="primary" className="ml-auto" disabled={!document || !dirty || saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</Button>
         </footer>
       </div>

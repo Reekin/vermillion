@@ -122,7 +122,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
               <Card compact header={<>
                 <Badge tone={mission.status === "active" ? "accent" : "neutral"}>{missionStatusLabel[mission.status]}</Badge>
                 <span className="min-w-0 flex-1 truncate text-body font-medium text-strong" title={mission.title}>{mission.title}</span>
-                <span className="shrink-0 font-mono text-caption text-faint-foreground" title={new Date(mission.updatedAt).toLocaleString("zh-CN")}>
+                <span className="shrink-0 font-mono text-caption text-muted-foreground" title={new Date(mission.updatedAt).toLocaleString("zh-CN")}>
                   {!compact && <span>{mission.revisions.length} 个 revision · {latestRevision(mission).commit.slice(0, 8)} · </span>}{relativeTime(mission.updatedAt)}
                 </span>
                 {steward && <SessionLink sessionId={steward.sessionId} onOpenSession={onOpenSession}>管家会话</SessionLink>}
@@ -134,7 +134,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
               </>} rows={items.length > 0 && renderItems(items, mission.status !== "active")}>
                 {(mission.summary || steward?.note) && <>
                   {mission.summary && <p className="line-clamp-2 text-label text-muted-foreground">{mission.summary}</p>}
-                  {steward?.note && <p className="mt-1 truncate text-caption text-faint-foreground" title={steward.note}>管家：{steward.note}</p>}
+                  {steward?.note && <p className="mt-1 truncate text-caption text-muted-foreground" title={steward.note}>管家：{steward.note}</p>}
                 </>}
               </Card>
             </div>;

@@ -80,7 +80,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
               </Button>
               <div className="min-w-0 pt-1.5 text-label text-muted-foreground">
                 {option.detail && <span>{option.detail}</span>}
-                {recommended && card.recommendation && <span className="block text-caption text-faint-foreground">推荐：{card.recommendation}</span>}
+                {recommended && card.recommendation && <span className="block text-caption text-muted-foreground">推荐：{card.recommendation}</span>}
               </div>
             </li>
           );

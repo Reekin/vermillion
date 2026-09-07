@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
 import type {
-  ChangeEvent as ReactChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
   CSSProperties,
   DragEvent as ReactDragEvent,
@@ -29,6 +28,7 @@ import {
   InteractionFlowView,
   type InteractionResponseInput
 } from "../InteractionFlowView.js";
+import { ConfigurationSelect } from "./ConfigurationControl.js";
 import { ComposerQueue } from "./ComposerQueue.js";
 import { ComposerStatusBar } from "./ComposerStatusBar.js";
 import { ComposerSuggestions } from "./ComposerSuggestions.js";
@@ -96,7 +96,6 @@ const formatThreadGoalUsage = (goal: ThreadGoal): string | undefined => {
 
 export const ComposerPanel = ({
   isDropTarget,
-  fileInputRef,
   textareaRef,
   draft,
   selectedSkills,
@@ -112,7 +111,6 @@ export const ComposerPanel = ({
   extraExecutionControls,
   intent,
   supportsSteer,
-  supportsAttachments,
   models = [],
   selectedExecution,
   reasoningOptions = [],
@@ -123,12 +121,10 @@ export const ComposerPanel = ({
   isTurnActive,
   canSubmit,
   canStop,
-  isDispatching,
   onTextareaChange,
   onTextareaSelect,
   onInputKeyDown,
   onPaste,
-  onFileInputChange,
   onDragEnter,
   onDragOver,
   onDragLeave,
@@ -136,7 +132,6 @@ export const ComposerPanel = ({
   onRemoveSkill,
   onRemoveAttachment,
   onPreviewAttachment,
-  onPickAttachments,
   onPrimaryAction,
   onStop,
   onModelChange,
@@ -152,7 +147,6 @@ export const ComposerPanel = ({
   onRespondInteraction
 }: {
   isDropTarget: boolean;
-  fileInputRef: RefObject<HTMLInputElement | null>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   draft: string;
   selectedSkills: ComposerSkillReference[];
@@ -169,7 +163,6 @@ export const ComposerPanel = ({
   extraExecutionControls?: ReactNode;
   intent: ComposerIntent;
   supportsSteer: boolean;
-  supportsAttachments: boolean;
   models: EngineModelRpc[];
   selectedExecution?: ComposerExecutionSelection;
   reasoningOptions: EngineReasoningOptionRpc[];
@@ -180,14 +173,12 @@ export const ComposerPanel = ({
   isTurnActive: boolean;
   canSubmit: boolean;
   canStop: boolean;
-  isDispatching: boolean;
   onTextareaChange: (value: string, selectionStart?: number | null) => void;
   onTextareaSelect: (selectionStart: number) => void;
   onInputKeyDown: (
     event: ReactKeyboardEvent<HTMLTextAreaElement>
   ) => Promise<void>;
   onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
-  onFileInputChange: (event: ReactChangeEvent<HTMLInputElement>) => void;
   onDragEnter: (event: ReactDragEvent<HTMLElement>) => void;
   onDragOver: (event: ReactDragEvent<HTMLElement>) => void;
   onDragLeave: (event: ReactDragEvent<HTMLElement>) => void;
@@ -195,7 +186,6 @@ export const ComposerPanel = ({
   onRemoveSkill: (skillId: string) => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onPreviewAttachment?: (input: ImageLightboxState) => void;
-  onPickAttachments: () => void;
   onPrimaryAction: () => Promise<void>;
   onStop: () => Promise<void>;
   onModelChange: (modelId: string) => void;
@@ -282,13 +272,6 @@ export const ComposerPanel = ({
     >
       <span aria-hidden="true" />
     </div>
-    <input
-      ref={fileInputRef}
-      className="awb-composer__file-input"
-      type="file"
-      multiple
-      onChange={onFileInputChange}
-    />
     <ComposerQueue
       queue={queue}
       currentIntent={intent}
@@ -443,78 +426,59 @@ export const ComposerPanel = ({
         ) : null}
       </div>
       <div className="awb-composer__right-rail">
-        {supportsAttachments ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onPickAttachments}
-            disabled={isDispatching}
-          >
-            Attach files
-          </Button>
-        ) : null}
         {isExecutionLoading || models.length > 0 || extraExecutionControls ? (
           <div className="awb-composer-execution" aria-label="Turn configuration">
             {extraExecutionControls}
-            <label>
-              <span>Model</span>
-              <select
-                aria-label="Model"
-                value={selectedExecution?.modelId ?? ""}
-                onChange={(event) => onModelChange(event.target.value)}
-                disabled={isExecutionDisabled || isExecutionLoading || models.length === 0}
+            <ConfigurationSelect label="模型"
+              aria-label="模型"
+              value={selectedExecution?.modelId ?? ""}
+              onChange={(event) => onModelChange(event.target.value)}
+              disabled={isExecutionDisabled || isExecutionLoading || models.length === 0}
               >
-                {isExecutionLoading ? <option value="">Loading…</option> : null}
-                {models.map((model) => (
-                  <option key={model.modelId} value={model.modelId}>
-                    {model.displayName}
+              {isExecutionLoading ? <option value="">加载中…</option> : null}
+              {models.map((model) => (
+                <option key={model.modelId} value={model.modelId}>
+                  {model.displayName}
+                </option>
+              ))}
+              </ConfigurationSelect>
+            {reasoningOptions.length > 0 ? (
+              <ConfigurationSelect label="推理"
+                aria-label="推理"
+                value={selectedExecution?.reasoningOptionId ?? ""}
+                onChange={(event) => onReasoningOptionChange(event.target.value)}
+                disabled={isExecutionDisabled}
+              >
+                <option value="">
+                  {defaultReasoningLabel
+                    ? `默认 (${defaultReasoningLabel})`
+                    : "默认"}
+                </option>
+                {reasoningOptions.map((option) => (
+                  <option key={option.optionId} value={option.optionId}>
+                    {option.displayName}
                   </option>
                 ))}
-              </select>
-            </label>
-            {reasoningOptions.length > 0 ? (
-              <label>
-                <span>Reasoning</span>
-                <select
-                  aria-label="Reasoning"
-                  value={selectedExecution?.reasoningOptionId ?? ""}
-                  onChange={(event) => onReasoningOptionChange(event.target.value)}
-                  disabled={isExecutionDisabled}
-                >
-                  <option value="">
-                    {defaultReasoningLabel
-                      ? `Default (${defaultReasoningLabel})`
-                      : "Default"}
-                  </option>
-                  {reasoningOptions.map((option) => (
-                    <option key={option.optionId} value={option.optionId}>
-                      {option.displayName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              </ConfigurationSelect>
             ) : null}
             {serviceTiers.length > 0 ? (
-              <label>
-                <span>Speed</span>
-                <select
-                  aria-label="Speed"
-                  value={selectedExecution?.serviceTierId ?? ""}
-                  onChange={(event) => onServiceTierChange(event.target.value)}
-                  disabled={isExecutionDisabled}
-                >
-                  <option value="">Standard</option>
-                  {serviceTiers.map((tier) => (
-                    <option
-                      key={tier.tierId}
-                      value={tier.tierId}
-                      title={tier.description}
-                    >
-                      {tier.displayName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <ConfigurationSelect label="速度"
+                aria-label="速度"
+                value={selectedExecution?.serviceTierId ?? ""}
+                onChange={(event) => onServiceTierChange(event.target.value)}
+                disabled={isExecutionDisabled}
+              >
+                <option value="">标准</option>
+                {serviceTiers.map((tier) => (
+                  <option
+                    key={tier.tierId}
+                    value={tier.tierId}
+                    title={tier.description}
+                  >
+                    {tier.displayName}
+                  </option>
+                ))}
+              </ConfigurationSelect>
             ) : null}
           </div>
         ) : null}

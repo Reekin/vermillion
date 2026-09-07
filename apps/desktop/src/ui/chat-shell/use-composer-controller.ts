@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
-  type ChangeEvent as ReactChangeEvent,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject
@@ -378,7 +377,6 @@ type UseComposerControllerInput = {
 };
 
 export type UseComposerControllerResult = ComposerViewModel & {
-  composerFileInputRef: RefObject<HTMLInputElement | null>;
   composerTextareaRef: RefObject<HTMLTextAreaElement | null>;
   isDropTarget: boolean;
   onDraftChange: (
@@ -394,9 +392,6 @@ export type UseComposerControllerResult = ComposerViewModel & {
   onInputKeyDown: (
     event: ReactKeyboardEvent<HTMLTextAreaElement>
   ) => Promise<void>;
-  onComposerInputChange: (
-    event: ReactChangeEvent<HTMLInputElement>
-  ) => void;
   onComposerPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
   onComposerDragEnter: (event: ReactDragEvent<HTMLElement>) => void;
   onComposerDragOver: (event: ReactDragEvent<HTMLElement>) => void;
@@ -404,7 +399,6 @@ export type UseComposerControllerResult = ComposerViewModel & {
   onComposerDrop: (event: ReactDragEvent<HTMLElement>) => void;
   onRemoveSkill: (skillId: string) => void;
   onRemoveAttachment: (attachmentId: string) => void;
-  onPickAttachments: () => void;
   onEditQueuedMessage: (messageId: string) => void;
   onDeleteQueuedMessage: (messageId: string) => void;
   onSendQueuedMessageNow: (messageId: string) => Promise<void>;
@@ -453,7 +447,6 @@ export const useComposerController = (
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
   const previousSessionIdRef = useRef<string | undefined>(undefined);
-  const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -1293,24 +1286,6 @@ export const useComposerController = (
     });
   };
 
-  const onComposerInputChange = (
-    event: ReactChangeEvent<HTMLInputElement>
-  ): void => {
-    const files = Array.from(event.target.files ?? []);
-    event.target.value = "";
-    if (files.length === 0) {
-      return;
-    }
-    void appendComposerAttachments(files, "picker").catch((error) => {
-      input.onStatusNotice({
-        message: `Attachment failed: ${(error as Error).message}`,
-        persistent: true,
-        source: "send",
-        ...statusNoticeErrorDetails(error)
-      });
-    });
-  };
-
   const onComposerPaste = (
     event: ReactClipboardEvent<HTMLTextAreaElement>
   ): void => {
@@ -1414,10 +1389,6 @@ export const useComposerController = (
     replaceSelectedSkills(
       selectedSkillsRef.current.filter((skill) => skill.id !== skillId)
     );
-  };
-
-  const onPickAttachments = (): void => {
-    composerFileInputRef.current?.click();
   };
 
   const onEditQueuedMessage = (messageId: string): void => {
@@ -1577,7 +1548,6 @@ export const useComposerController = (
     canQueue,
     canStop,
     activeTurnId,
-    composerFileInputRef,
     composerTextareaRef,
     isDropTarget,
     onDraftChange,
@@ -1588,7 +1558,6 @@ export const useComposerController = (
     onSuggestionHover: setHighlightedSuggestionIndex,
     onSuggestionSelect,
     onInputKeyDown,
-    onComposerInputChange,
     onComposerPaste,
     onComposerDragEnter,
     onComposerDragOver,
@@ -1596,7 +1565,6 @@ export const useComposerController = (
     onComposerDrop,
     onRemoveSkill,
     onRemoveAttachment,
-    onPickAttachments,
     onEditQueuedMessage,
     onDeleteQueuedMessage,
     onSendQueuedMessageNow,

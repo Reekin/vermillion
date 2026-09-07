@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* Design tokens map onto the session shell's palette so both layers share one language:
-   flat monochrome surfaces, hairline rules, 4-5px radii, mono uppercase section labels. */
+   flat monochrome surfaces, hairline rules, 4-5px radii, readable sans-serif section labels. */
 @theme inline {
   --font-sans: var(--awb-font-sans);
   --font-mono: var(--awb-font-mono);
@@ -30,19 +30,25 @@
 }
 
 @theme {
-  --tracking-eyebrow: 0.12em;
+  --tracking-eyebrow: normal;
   --shadow-halo: 0 0 0 3px var(--awb-accent-soft);
-  --text-micro: 0.7rem;
+  --text-micro: var(--awb-text-micro);
+  --text-micro--font-weight: 500;
   --text-micro--line-height: 1;
-  --text-caption: 0.76rem;
+  --text-caption: var(--awb-text-caption);
+  --text-caption--font-weight: 400;
   --text-caption--line-height: 1.45;
-  --text-label: 0.82rem;
+  --text-label: var(--awb-text-label);
+  --text-label--font-weight: 500;
   --text-label--line-height: 1.45;
-  --text-body: 0.9rem;
+  --text-body: var(--awb-text-body);
+  --text-body--font-weight: 400;
   --text-body--line-height: 1.55;
-  --text-title-sm: 1rem;
+  --text-title-sm: var(--awb-text-title-sm);
+  --text-title-sm--font-weight: 400;
   --text-title-sm--line-height: 1.3;
-  --text-title: 1.1rem;
+  --text-title: var(--awb-text-title);
+  --text-title--font-weight: 600;
   --text-title--line-height: 1.3;
 }
 
@@ -56,27 +62,27 @@
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* Section eyebrow, same as the session shell's ATTENTION / SESSIONS headers. */
+/* Short section labels share the micro type scale. */
 @utility eyebrow {
-  font-family: var(--awb-font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--awb-ink-faint);
+  font-family: var(--awb-font-sans);
+  font-size: var(--text-micro);
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--awb-ink-muted);
 }
 
 /* Dense boards reuse the same slots and controls across cards and standalone lists. */
 .vm-button-outlined { border: 1px solid var(--color-control-border); color: var(--color-foreground); }
 .vm-button-outlined:hover { border-color: var(--color-control-border-hover); }
 .vm-field-compact { height: 28px; padding-inline: 8px; font-size: var(--text-label); }
-.vm-status { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 6px; width: 76px; height: 22px; border: 1px solid transparent; border-radius: var(--radius-sm); font-size: var(--text-caption); white-space: nowrap; color: var(--color-faint-foreground); }
+.vm-status { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 6px; width: 76px; height: 22px; border: 1px solid transparent; border-radius: var(--radius-sm); font-size: var(--text-micro); font-weight: 500; letter-spacing: normal; white-space: nowrap; color: var(--color-muted-foreground); }
 .vm-status-marker { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; }
 .vm-status[data-status="decision"] { border-color: var(--color-accent-strong); color: var(--color-strong); }
 .vm-status[data-status="decision"] .vm-status-marker { background: currentColor; }
 .vm-status[data-status="running"] { color: var(--color-foreground); }
 .vm-status[data-status="running"] .vm-status-marker { border: 2px solid currentColor; }
 .vm-status[data-status="queued"] .vm-status-marker { border: 1px solid currentColor; }
-.vm-status.vm-status-muted { color: var(--color-faint-foreground); }
+.vm-status.vm-status-muted { color: var(--color-muted-foreground); }
 .vm-toggle { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; color: var(--color-foreground); }
 .vm-toggle-track { display: inline-flex; align-items: center; width: 28px; height: 16px; padding: 2px; border-radius: 999px; background: var(--color-input); border: 1px solid var(--color-control-border); }
 .vm-toggle-track > span { width: 10px; height: 10px; border-radius: 50%; background: var(--color-muted-foreground); }
@@ -91,10 +97,10 @@
 .vm-tabs > button { margin-bottom: -1px; padding: 10px 8px; border-bottom: 1px solid transparent; font-size: var(--text-label); color: var(--color-muted-foreground); white-space: nowrap; }
 .vm-tabs > button:hover { color: var(--color-foreground); }
 .vm-tabs > button[aria-current="page"] { border-bottom-color: var(--color-accent-strong); color: var(--color-strong); }
-.vm-tab-count { margin-left: 5px; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-faint-foreground); }
+.vm-tab-count { margin-left: 5px; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }
 .vm-list-columns { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) 76px 22px 48px; align-items: center; gap: 8px; height: 36px; padding-inline: 12px; }
 .vm-list-columns:hover { background: var(--color-surface-hover); }
-.vm-list-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem; font-family: var(--font-mono); font-size: var(--text-caption); color: var(--color-faint-foreground); }
+.vm-list-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem; font-family: var(--font-mono); font-size: var(--text-caption); color: var(--color-muted-foreground); }
 .vm-list-status, .vm-list-action { display: flex; justify-content: flex-end; }
 .vm-list-cancel { width: 22px; opacity: 0; }
 .vm-list-cancel > button { width: 22px; height: 22px; }
@@ -120,7 +126,7 @@
 /* Changed-files block under an assistant turn: one row per file, click opens the diff dialog. */
 .vm-changes { margin-top: 12px; border: 1px solid var(--awb-rule); border-radius: var(--awb-radius-soft); background: var(--awb-panel); text-align: left; }
 .vm-changes__header { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--awb-rule); }
-.vm-changes__title { font-size: var(--text-label); font-weight: 600; color: var(--awb-ink-strong); }
+.vm-changes__title { font-size: var(--text-label); font-weight: 500; color: var(--awb-ink-strong); }
 .vm-changes__stats { display: inline-flex; gap: 8px; font-family: var(--awb-font-mono); font-size: var(--text-caption); }
 .vm-changes__stats .is-add { color: var(--awb-accent-strong); }
 .vm-changes__stats .is-delete { color: var(--awb-ink-muted); }
@@ -129,7 +135,7 @@
 .vm-changes__list { margin: 0; padding: 4px 0; list-style: none; }
 .vm-changes__file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 4px 12px; border: 0; background: transparent; color: var(--awb-ink); font: inherit; text-align: left; cursor: pointer; }
 .vm-changes__file:hover { background: var(--awb-accent-soft); color: var(--awb-ink-strong); }
-.vm-changes__kind { width: 14px; font-family: var(--awb-font-mono); font-size: var(--text-caption); color: var(--awb-ink-faint); text-align: center; }
+.vm-changes__kind { width: 14px; font-family: var(--awb-font-mono); font-size: var(--text-caption); color: var(--awb-ink-muted); text-align: center; }
 .vm-changes__kind.is-add { color: var(--awb-accent-strong); }
 .vm-changes__path { display: flex; min-width: 0; font-family: var(--awb-font-mono); font-size: var(--text-caption); }
 .vm-changes__dir { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; color: var(--awb-ink-muted); }
@@ -141,7 +147,7 @@
 .vm-run__summary::-webkit-details-marker { display: none; }
 .vm-run__summary:hover { background: var(--awb-accent-soft); color: var(--awb-ink-strong); }
 .vm-run__title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--awb-font-mono); font-size: var(--text-caption); }
-.vm-run__status { font-family: var(--awb-font-mono); font-size: var(--text-micro); letter-spacing: 0.08em; text-transform: uppercase; color: var(--awb-ink-faint); }
+.vm-run__status { font-family: var(--awb-font-sans); font-size: var(--text-micro); font-weight: 500; letter-spacing: normal; color: var(--awb-ink-muted); }
 .vm-run__status.is-running { color: var(--awb-ink-strong); }
 .vm-run__body { display: grid; gap: 6px; padding: 2px 12px 8px 26px; }
 .vm-run__meta { display: grid; gap: 4px; margin: 0; font-size: var(--text-caption); color: var(--awb-ink-muted); }
@@ -153,13 +159,13 @@
 .vm-diff__files button { max-width: 100%; overflow-wrap: anywhere; }
 .vm-diff__files [aria-pressed="true"] { background: var(--awb-accent-soft); color: var(--awb-ink-strong); }
 .vm-diff__heading { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--awb-rule-strong); font-family: var(--awb-font-mono); }
-.vm-diff__heading strong { overflow-wrap: anywhere; font-size: 13px; color: var(--awb-ink-strong); }
-.vm-diff__heading span { font-size: 11px; color: var(--awb-ink-muted); }
+.vm-diff__heading strong { overflow-wrap: anywhere; font-size: var(--text-label); color: var(--awb-ink-strong); }
+.vm-diff__heading span { font-size: var(--text-micro); color: var(--awb-ink-muted); }
 .vm-diff__content { flex: 1; min-height: 0; overflow: auto; background: var(--awb-panel); }
 .vm-diff__content p { padding: 16px; }
-.vm-diff__content pre { margin: 0; min-width: max-content; font: 12px/1.7 var(--awb-font-mono); tab-size: 4; }
-.vm-diff__hunk { padding: 6px 16px; background: var(--awb-panel-soft); color: var(--awb-ink-muted); font: 11px/1.7 var(--awb-font-mono); white-space: pre; }
+.vm-diff__content pre { margin: 0; min-width: max-content; font: var(--text-micro)/1.7 var(--awb-font-mono); tab-size: 4; }
+.vm-diff__hunk { padding: 6px 16px; background: var(--awb-panel-soft); color: var(--awb-ink-muted); font: var(--text-micro)/1.7 var(--awb-font-mono); white-space: pre; }
 .vm-diff__line { padding: 0 16px; border-left: 3px solid transparent; white-space: pre; }
 .vm-diff__line.is-add { background: var(--awb-accent-soft); color: var(--awb-ink-strong); border-left-color: var(--awb-accent-strong); }
-.vm-diff__line.is-delete { background: rgba(255, 255, 255, 0.04); color: var(--awb-ink-muted); text-decoration: line-through; text-decoration-color: var(--awb-ink-faint); border-left: 3px solid var(--awb-ink-muted); }
+.vm-diff__line.is-delete { background: rgba(255, 255, 255, 0.04); color: var(--awb-ink-muted); text-decoration: line-through; text-decoration-color: var(--awb-ink-muted); border-left: 3px solid var(--awb-ink-muted); }
 .vm-diff__line.is-context { color: var(--awb-ink-muted); }
