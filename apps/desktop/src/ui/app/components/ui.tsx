@@ -260,7 +260,8 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
   if (columns) return (
     <div className={cn("vm-list-columns", className)}>
       {leading}
-      <span className={cn("truncate text-label font-medium text-foreground", titleClassName)}>{title}</span>
+      {onClick ? <button type="button" onClick={onClick} className={cn("truncate text-left text-label font-medium text-foreground hover:underline", titleClassName)}>{title}</button>
+        : <span className={cn("truncate text-label font-medium text-foreground", titleClassName)}>{title}</span>}
       <span className="vm-list-info">{columns.info}</span>
       <span className="vm-list-status">{columns.status}</span>
       <span className="vm-list-cancel">{columns.hoverAction}</span>
@@ -312,6 +313,14 @@ export const Card = ({ header, children, footer, className, compact, rows }: { h
     {rows && <div className="border-t border-border">{rows}</div>}
     {footer && <footer className="flex items-center gap-2 border-t border-border px-4 py-2.5">{footer}</footer>}
   </article>
+);
+
+/** Readable section for contracts, results and other multiline detail content. */
+export const DetailSection = ({ title, children }: { title: string; children: ReactNode }) => (
+  <section>
+    <SectionLabel className="px-0">{title}</SectionLabel>
+    <div className="whitespace-pre-wrap break-words text-label text-foreground">{children}</div>
+  </section>
 );
 
 /** Controlled disclosure for supplementary technical text; parents retain expansion across panel changes. */

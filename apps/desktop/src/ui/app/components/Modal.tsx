@@ -1,5 +1,5 @@
 import { Maximize2, X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { IconButton } from "./ui.js";
 import { cn } from "../lib/cn.js";
 
@@ -17,10 +17,11 @@ type ModalProps = {
 
 /** Single modal frame for every overlay so they share position, backdrop and chrome. */
 export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, children, presentation = "modal", contained = false }: ModalProps) => {
+  const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (presentation !== "modal") return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) onClose();
+      if (event.key === "Escape" && !event.defaultPrevented && Array.from(document.querySelectorAll('[role="dialog"]')).at(-1) === dialog.current) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -29,6 +30,7 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
   return (
     <div className={cn(presentation === "hidden" ? "hidden" : presentation === "page" ? "h-full" : "inset-0 z-40 flex items-start justify-center bg-black/55 px-3 pt-[10vh]", presentation === "modal" && (contained ? "absolute" : "fixed"))} onMouseDown={presentation === "modal" ? onClose : undefined} role="presentation">
       <div
+        ref={dialog}
         role={presentation === "modal" ? "dialog" : undefined}
         aria-label={title}
         className={cn("flex flex-col overflow-hidden", presentation === "modal" ? "max-h-[78vh] max-w-full rounded-lg border border-border-strong bg-surface-raised floating-shadow" : "h-full")}

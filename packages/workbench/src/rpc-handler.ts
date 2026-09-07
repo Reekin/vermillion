@@ -37,6 +37,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "mission.create": (p) => service.createMission(p.workspaceId, p),
     "mission.addRevision": (p) => service.addMissionRevision(p.workspaceId, p),
     "mission.setStatus": (p) => service.setMissionStatus(p.workspaceId, p.missionId, p.status),
+    "mission.setResult": (p) => service.setMissionResult(p.workspaceId, p.missionId, p),
 
     "workItem.list": (p) => service.listWorkItems(p.workspaceId, p.missionId),
     "workItem.get": (p) => service.getWorkItem(p.workspaceId, p.workItemId),

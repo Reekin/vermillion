@@ -269,7 +269,6 @@ export class WorkbenchService {
     const { docs, store } = await this.context(workspaceId);
     const mission = await store.missions.get(input.missionId);
     if (!mission) throw new Error("Unknown mission: " + input.missionId);
-    if (mission.status === "cancelled") throw new Error("Mission is cancelled: " + input.missionId);
     const revision = await this.commitRevision(docs, input.message.trim() || mission.title, input.paths, input.sessionId);
     const updated = await store.missions.put({ ...mission, status: "active", revisions: [...mission.revisions, revision], updatedAt: this.now() });
     this.emit({ type: "docs.changed", workspaceId });
@@ -304,7 +303,31 @@ export class WorkbenchService {
     const { store } = await this.context(workspaceId);
     const mission = await store.missions.get(missionId);
     if (!mission) throw new Error("Unknown mission: " + missionId);
+    const open = (await store.workItems.list()).filter((item) => item.missionId === missionId && item.status !== "closed" && item.status !== "cancelled");
+    if (status === "done" && open.length) throw new Error("Mission has unfinished work items: " + open.map((item) => item.workItemId).join(", "));
+    if (status === "done") {
+      for (const id of mission.relatedWorkItemIds ?? []) {
+        if ((await this.getWorkItem(workspaceId, id)).status !== "closed") throw new Error("Related work item is not closed: " + id);
+      }
+    }
+    if (status === "cancelled") {
+      for (const item of open) await this.cancelWorkItem(workspaceId, item.workItemId);
+    }
     const updated = await store.missions.put({ ...mission, status, updatedAt: this.now() });
+    this.emit({ type: "missions.changed", workspaceId });
+    return updated;
+  }
+
+  async setMissionResult(workspaceId: string, missionId: string, input: { resultSummary?: string; relatedWorkItemIds?: string[] }): Promise<Mission> {
+    const { store } = await this.context(workspaceId);
+    const mission = await store.missions.get(missionId);
+    if (!mission) throw new Error("Unknown mission: " + missionId);
+    const relatedWorkItemIds = input.relatedWorkItemIds === undefined ? mission.relatedWorkItemIds : [...new Set(input.relatedWorkItemIds)];
+    for (const id of relatedWorkItemIds ?? []) {
+      const item = await this.getWorkItem(workspaceId, id);
+      if (!item.missionId || item.missionId === missionId) throw new Error("Related work item must belong to another mission: " + id);
+    }
+    const updated = await store.missions.put({ ...mission, relatedWorkItemIds, resultSummary: input.resultSummary ?? mission.resultSummary, updatedAt: this.now() });
     this.emit({ type: "missions.changed", workspaceId });
     return updated;
   }
