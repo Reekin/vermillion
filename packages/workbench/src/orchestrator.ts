@@ -187,7 +187,7 @@ export class Orchestrator {
       const revision = latestRevision(mission);
       const closureKey = JSON.stringify([revision, own.map((i) => [i.workItemId, i.status]), related.map((i, index) => [mission.relatedWorkItemIds![index], i?.status])]);
       const lastClosure = stewards.filter((r) => r.closureKey).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-      if (lastClosure?.closureKey === closureKey && lastClosure.status !== "failed") continue;
+      if (lastClosure?.closureKey === closureKey) continue;
       const describe = (item: WorkItem) => ({ workItemId: item.workItemId, missionId: item.missionId, title: item.title, objective: item.objective, status: item.status, refs: item.refs, evidence: item.evidence, verify: item.verify, decisions: item.decisions });
       const message = [
         "任务收尾判断请求：" + mission.title,

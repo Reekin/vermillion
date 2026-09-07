@@ -224,4 +224,18 @@ describe("Mission closure", { timeout: 30000 }, () => {
     const runs = await service.listRuns(workspaceId);
     expect(runs.find((r) => r.sessionId === fourth.sessionId)!.closureKey).toBe(runs.find((r) => r.sessionId === second.sessionId)!.closureKey);
   });
+
+  it("does not restart a failed closure for the same snapshot", async () => {
+    const { service, workspaceId, mission, item, processed, start, closures } = await setup();
+    await service.cancelWorkItem(workspaceId, (await item(mission.missionId)).workItemId);
+    await processed();
+    const orchestrator = await start();
+    await waitFor(() => expect(closures()).toHaveLength(1));
+    orchestrator.dispose();
+    const run = (await service.listRuns(workspaceId)).find((entry) => entry.closureKey)!;
+    await service.putRun(workspaceId, { ...run, status: "failed", endedAt: new Date().toISOString() });
+    await start();
+    await delay(250);
+    expect(closures()).toHaveLength(1);
+  });
 });
