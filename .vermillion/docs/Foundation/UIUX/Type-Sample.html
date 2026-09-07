@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>界面文字打样</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: oklch(0.18 0.005 285.823);
+  --shell: oklch(0.155 0.005 285.823);
+  --raised: oklch(0.235 0.007 285.885);
+  --input: oklch(0.14 0.005 285.823);
+  --input-soft: oklch(0.16 0.005 285.823);
+  --strong: #f0f0ee;
+  --ink: #cdcdc9;
+  --muted: #9a9a96;
+  --faint: #777773;
+  --rule: oklch(1 0 0 / 6%);
+  --rule-strong: oklch(1 0 0 / 10%);
+  --accent: #8c8f8d;
+  --accent-strong: #b6b9b7;
+  --accent-soft: rgba(140, 143, 141, 0.14);
+  --selected: rgba(140, 143, 141, 0.12);
+  --control-border: rgba(182, 185, 183, 0.18);
+  --sans-now: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --mono-now: "IBM Plex Mono", "Cascadia Code", monospace;
+  --sans: "IBM Plex Sans", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Code", "Microsoft YaHei UI", "PingFang SC", monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px 40px 64px; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 0.92rem; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+h1 { margin: 0 0 6px; font-size: 1.25rem; font-weight: 600; color: var(--strong); }
+.lead { margin: 0 0 28px; color: var(--muted); max-width: 64rem; }
+h2 { margin: 36px 0 10px; font-size: 1rem; font-weight: 600; color: var(--strong); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 72rem; }
+.stack { display: grid; gap: 16px; max-width: 72rem; }
+.cfg > * { flex-shrink: 0; white-space: nowrap; }
+.col > .tag { margin-bottom: 8px; font-size: 0.8rem; font-weight: 500; color: var(--muted); }
+.frame { border: 1px solid var(--rule-strong); border-radius: 5px; background: var(--shell); overflow: hidden; }
+.note { margin: 10px 0 0; max-width: 72rem; color: var(--muted); font-size: 0.85rem; }
+.note b { color: var(--ink); font-weight: 500; }
+table { border-collapse: collapse; max-width: 72rem; width: 100%; font-size: 0.85rem; }
+th, td { padding: 8px 12px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+td code { font-family: var(--mono); font-size: 0.8rem; color: var(--strong); }
+
+/* 现状 */
+.now { font-family: var(--sans-now); }
+.now .eyebrow { font-family: var(--mono-now); font-size: 0.66rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); }
+.now .row { display: flex; flex-direction: column; gap: 2px; padding: 8px 16px; }
+.now .row.sel { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
+.now .title { font-size: 0.82rem; color: var(--strong); }
+.now .meta { display: flex; font-family: var(--mono-now); font-size: 0.7rem; color: var(--faint); }
+.now .meta .t { margin-left: auto; }
+.now .cfg { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--rule); }
+.now .ghost { font-size: 0.79rem; color: var(--ink); padding: 4px 8px; }
+.now .pill { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 8px; border: 1px solid var(--rule-strong); border-radius: 3px; background: var(--input); font-size: 0.76rem; color: var(--ink); }
+.now .lab { font-family: var(--mono-now); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+.now .sel-box { height: 27px; padding: 3px 24px 3px 7px; border: 1px solid var(--rule-strong); border-radius: 3px; background: var(--input-soft); color: var(--ink); font-size: 0.72rem; display: inline-flex; align-items: center; }
+.now .badge { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 3px; font-family: var(--mono-now); font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.now .badge.acc { border-color: rgba(182,185,183,0.34); background: var(--accent-soft); color: var(--strong); }
+.now .cap { font-size: 0.76rem; color: var(--muted); }
+
+/* 方案 */
+.next { font-family: var(--sans); }
+.next .eyebrow { font-family: var(--mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.next .row { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 16px; }
+.next .row.sel { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
+.next .row .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.875rem; color: var(--strong); }
+.next .row .t { flex-shrink: 0; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+.next .row .hint { flex-shrink: 0; font-size: 0.8rem; color: var(--muted); }
+.next .group { padding: 14px 16px 4px; }
+.next .cfg { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--rule); }
+.next .ctl { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--control-border); border-radius: 4px; background: var(--input); font-size: 0.875rem; font-weight: 500; color: var(--strong); }
+.next .ctl .k { color: var(--muted); }
+.next .ctl .k::after { content: ""; display: inline-block; width: 1px; height: 12px; margin: 0 2px 0 8px; background: var(--rule-strong); vertical-align: -2px; }
+.next .ctl svg { color: var(--muted); }
+.next .badge { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 1px solid var(--rule-strong); border-radius: 3px; font-size: 0.75rem; font-weight: 500; color: var(--ink); }
+.next .badge.code { font-family: var(--mono); letter-spacing: 0.04em; }
+.next .badge.acc { border-color: rgba(182,185,183,0.34); background: var(--accent-soft); color: var(--strong); }
+.next .cap { font-size: 0.8rem; color: var(--muted); }
+.inbox { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.inbox .h { display: flex; align-items: center; gap: 8px; }
+.inbox .h .title { font-size: 0.875rem; color: var(--strong); }
+.now .inbox .h .title { font-size: 0.82rem; }
+.spec { display: flex; flex-wrap: wrap; gap: 24px 40px; padding: 16px; }
+.spec .s { display: flex; flex-direction: column; gap: 4px; }
+.spec .s small { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+.spec .body { font-size: 0.9375rem; color: var(--ink); }
+.spec .label { font-size: 0.875rem; color: var(--strong); }
+.spec .caption { font-size: 0.8rem; color: var(--muted); }
+.spec .micro { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+.spec .title { font-size: 1.0625rem; font-weight: 600; color: var(--strong); }
+.next .cfg { flex-wrap: wrap; }
+.next .row .title { font-weight: 500; }
+.next .eyebrow { font-family: var(--sans); letter-spacing: normal; }
+.inbox .h { flex-wrap: wrap; }
+@media (max-width: 800px) {
+  body { padding: 20px 16px 40px; }
+  .pair { grid-template-columns: minmax(0, 1fr); }
+  .now .cfg { overflow-x: auto; }
+  .next .row:has(.hint) { height: auto; min-height: 36px; flex-wrap: wrap; padding-block: 8px; }
+}
+</style>
+</head>
+<body>
+<h1>界面文字打样</h1>
+<p class="lead">会话列表、配置控件与短标签的原尺寸打样。桌面宽度下左右对照；配置行上下对照。现状按源码样式复现，方案展示目标视觉。</p>
+
+<h2>1. 会话列表</h2>
+<div class="pair">
+  <div class="col"><div class="tag">现状</div>
+    <div class="frame now">
+      <div class="group" style="padding:12px 16px 4px"><span class="eyebrow">思考</span></div>
+      <div class="row sel"><span class="title">新对话</span><span class="meta"><span>发送第一条消息后创建</span></span></div>
+      <div class="row"><span class="title">任务完成后的验收与自动合入流程</span><span class="meta"><span>vermillion</span><span class="t">9m</span></span></div>
+      <div class="row"><span class="title">修复Workspace弹窗与会话交互问题</span><span class="meta"><span>vermillion</span><span class="t">28m</span></span></div>
+      <div class="row"><span class="title">让任务持续运行并自动处理收尾</span><span class="meta"><span>vermillion</span><span class="t">47m</span></span></div>
+      <div class="row"><span class="title">Inbox 中 Chattree 任务通过无反应</span><span class="meta"><span>vermillion</span><span class="t">19h</span></span></div>
+    </div>
+  </div>
+  <div class="col"><div class="tag">方案</div>
+    <div class="frame next">
+      <div class="group"><span class="eyebrow">思考</span></div>
+      <div class="row sel"><span class="title">新对话</span><span class="hint">发送第一条消息后创建</span></div>
+      <div class="row"><span class="title">任务完成后的验收与自动合入流程</span><span class="t">9 分钟前</span></div>
+      <div class="row"><span class="title">修复Workspace弹窗与会话交互问题</span><span class="t">28 分钟前</span></div>
+      <div class="row"><span class="title">让任务持续运行并自动处理收尾</span><span class="t">47 分钟前</span></div>
+      <div class="row"><span class="title">Inbox 中 Chattree 任务通过无反应</span><span class="t">昨天 22:10</span></div>
+    </div>
+  </div>
+</div>
+<p class="note">会话行展示标题和相对时间。workspace 名集中在分组标题中。中文说明使用明确的中文无衬线字体回退，字号 12.8px；标题使用 14px、中等字重。</p>
+
+<h2>2. 输入器配置行</h2>
+<div class="stack">
+  <div class="col"><div class="tag">现状</div>
+    <div class="frame now">
+      <div class="cfg"><span class="ghost">Attach files</span><span class="pill"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg> vermillion <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span><span class="lab">Model</span><span class="sel-box">Fable 5</span><span class="lab">Reasoning</span><span class="sel-box">Default (medium)</span><span class="lab">Speed</span><span class="sel-box">Standard</span></div>
+    </div>
+  </div>
+  <div class="col"><div class="tag">方案</div>
+    <div class="frame next">
+      <div class="cfg">
+        <span class="ctl"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg> vermillion <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+        <span class="ctl"><span class="k">模式</span>发单 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+        <span class="ctl"><span class="k">模型</span>Fable 5 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+        <span class="ctl"><span class="k">推理</span>默认 (medium) <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+        <span class="ctl"><span class="k">速度</span>标准 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="note">标签和值在同一个控件内，均为 14px、中等字重；标签灰、值亮。控件高 32px，空间不足时按完整控件换行。附件仍可拖拽或粘贴到输入器。</p>
+
+<h2>3. 短标签（Badge）与说明文字</h2>
+<div class="pair">
+  <div class="col"><div class="tag">现状</div>
+    <div class="frame now">
+      <div class="inbox">
+        <div class="h"><span class="badge acc">验收</span><span class="badge">R2</span><span class="badge">第 2 轮</span><span class="title">任务完成后的验收与自动合入流程</span></div>
+        <div class="cap">Worker 提交了证据，等待你验收。</div>
+      </div>
+      <div class="inbox" style="border-top:1px solid var(--rule)">
+        <div class="h"><span class="badge">Worker</span><span class="title">修复 Workspace 弹窗</span></div>
+        <div class="cap">3 分钟前 · 进行中</div>
+      </div>
+    </div>
+  </div>
+  <div class="col"><div class="tag">方案</div>
+    <div class="frame next">
+      <div class="inbox">
+        <div class="h"><span class="badge acc">验收</span><span class="badge code">R2</span><span class="badge">第 2 轮</span><span class="title">任务完成后的验收与自动合入流程</span></div>
+        <div class="cap">Worker 提交了证据，等待你验收。</div>
+      </div>
+      <div class="inbox" style="border-top:1px solid var(--rule)">
+        <div class="h"><span class="badge">Worker</span><span class="title">修复 Workspace 弹窗</span></div>
+        <div class="cap">3 分钟前 · 进行中</div>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="note">短标签使用 12px、500 字重和正常字距，配合浅底色或细边框。代码标识 R2 使用等宽字体。说明文字为 12.8px、中灰。</p>
+
+<h2>4. 字号档位</h2>
+<div class="frame next" style="max-width:72rem">
+  <div class="spec">
+    <div class="s"><span class="title">标题 17px</span><small>title · 弹窗标题、页面标题</small></div>
+    <div class="s"><span class="body">正文 15px</span><small>body · 消息、文档正文</small></div>
+    <div class="s"><span class="label">标签 14px</span><small>label · 列表标题、控件、按钮</small></div>
+    <div class="s"><span class="caption">说明 12.8px</span><small>caption · 次行、提示、空态</small></div>
+    <div class="s"><span class="micro">MICRO 12px</span><small>micro · 时间、id、区块眉题</small></div>
+  </div>
+</div>
+<table style="margin-top:12px">
+  <tr><th>档位</th><th>现在</th><th>方案</th><th>用在哪</th></tr>
+  <tr><td><code>micro</code></td><td>11.2px（eyebrow 10.6px，配置行标签 9.9px）</td><td>12px，短标签和区块标题字重 500，正常字距</td><td>时间、id、短标签、区块标题</td></tr>
+  <tr><td><code>caption</code></td><td>12.2px</td><td>12.8px</td><td>次行、提示、空态、说明</td></tr>
+  <tr><td><code>label</code></td><td>13.1px</td><td>14px</td><td>列表标题、控件、按钮</td></tr>
+  <tr><td><code>body</code></td><td>14.4px</td><td>15px</td><td>消息与文档正文</td></tr>
+  <tr><td><code>title</code></td><td>17.6px</td><td>17px，字重 600</td><td>弹窗、页面标题</td></tr>
+</table>
+<p class="note">界面文字最小 12px。需要阅读的辅助文字使用 <b>#9a9a96</b>，低明度留给装饰和禁用状态。自然语言使用无衬线字体；等宽用于代码、路径和标识。两类字体栈均指定中文回退 Microsoft YaHei UI / PingFang SC。</p>
+</body>
+</html>
