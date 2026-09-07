@@ -283,7 +283,8 @@ export class SessionIndexStore {
     const members = [this.getTreeId(sessionId)];
     for (let index = 0; index < members.length; index += 1) {
       for (const relation of this.document.relations) {
-        if (relation.relationType === "fork" && relation.parentSessionId === members[index]) {
+        if (relation.relationType === "fork" && relation.parentSessionId === members[index] &&
+            !this.getEntry(relation.childSessionId)?.archivedAt) {
           members.push(relation.childSessionId);
         }
       }
