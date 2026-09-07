@@ -5,12 +5,16 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type ReactElement
 } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import type { MessageBlock } from "@vermillion/shared";
+import { fileUriToPath } from "@vermillion/shared";
+import { createDesktopTransport } from "../../transport/desktop-transport.js";
+import { localMarkdownFileUrl } from "./local-markdown-target.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { writeClipboardText } from "./clipboard.js";
 
@@ -24,7 +28,7 @@ const sanitizeSchema = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
-    href: defaultSchema.protocols?.href,
+    href: [...(defaultSchema.protocols?.href ?? []), "file"],
     src: [...(defaultSchema.protocols?.src ?? []), "file", "data"]
   }
 };
@@ -50,10 +54,17 @@ type HtmlAstNode = {
 const protectUnsupportedLinkTargets = () => {
   const visit = (node: HtmlAstNode): void => {
     const href = node.tagName === "a" ? node.properties?.href : undefined;
-    if (typeof href === "string" && href.length > 0 && !isExternalLinkHref(href)) {
+    const src = node.tagName === "img" ? node.properties?.src : undefined;
+    if (typeof src === "string" && node.properties) {
+      node.properties.src = localMarkdownFileUrl(src) ?? src;
+    }
+    const localHref = typeof href === "string" ? localMarkdownFileUrl(href) : undefined;
+    if (localHref && node.properties) {
+      node.properties.href = localHref;
+    } else if (typeof href === "string" && href.length > 0 && !isExternalLinkHref(href)) {
       node.properties = {
         ...node.properties,
-        href: `${unsupportedLinkHrefPrefix}${encodeURIComponent(decodeURI(href))}`
+        href: `${unsupportedLinkHrefPrefix}${encodeURIComponent(href)}`
       };
     }
     node.children?.forEach(visit);
@@ -397,6 +408,25 @@ type MarkdownRendererProps = {
   onPreviewImage?: (input: { src: string; alt: string }) => void;
 };
 
+const LocalFileLink = ({ href, children }: { href: string; children: ReactNode }): ReactElement => {
+  const [error, setError] = useState<string>();
+  const open = async (): Promise<void> => {
+    setError(undefined);
+    try {
+      const path = fileUriToPath(href);
+      if (!window.session || !path) throw new Error("无法打开本地文件。");
+      const result = await createDesktopTransport(window.session).file.runAction({ path, action: "open" });
+      if (!result.ok) throw new Error(result.errorMessage ?? "无法打开本地文件。");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法打开本地文件。");
+    }
+  };
+  return <>
+    <a href={href} onClick={(event) => { event.preventDefault(); void open(); }}>{children}</a>
+    {error && <span role="alert">{error}</span>}
+  </>;
+};
+
 const MarkdownRenderer = memo(({
   text,
   cacheKey,
@@ -408,6 +438,9 @@ const MarkdownRenderer = memo(({
     urlTransform={allowLocalFileUrls}
     components={{
       a: ({ href, children, node: _ignoredNode, ...props }) => {
+        if (href && fileUriToPath(href) !== undefined) {
+          return <LocalFileLink href={href}>{children}</LocalFileLink>;
+        }
         const unsupportedTarget = href?.startsWith(unsupportedLinkHrefPrefix)
           ? decodeURIComponent(href.slice(unsupportedLinkHrefPrefix.length))
           : undefined;
