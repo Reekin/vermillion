@@ -5,8 +5,16 @@ export const actionStatusLabel: Record<WorkflowAction["status"], string> = { pen
 export const actionKindLabel: Record<WorkflowAction["kind"], string> = { execute: "执行恢复", contract: "合同处置", dependency: "依赖处置", repair: "主工作区修复", integration: "合入处置", revision: "任务处置" };
 const stageLabel: Record<WorkflowAction["stage"], string> = { worktree: "准备工作目录", open: "打开会话", deliver: "送达消息", execute: "执行", merge: "合入", rollback: "回滚", cleanup: "清理" };
 
+export const dispositionSummary = (action: WorkflowAction): string[] => action.history.flatMap((entry) => {
+  const stage = entry.event.startsWith("failed:") ? entry.event.slice(7) : "";
+  if (stage in stageLabel) return ["尝试" + stageLabel[stage as WorkflowAction["stage"]] + "，未完成。"];
+  if (["repair.submitted", "contract.updated", "dependency.updated", "resolved"].includes(entry.event)) return [entry.message.split("\n")[0]!];
+  if (entry.event === "repair.check.failed") return ["已提交修复，工作台检查仍未通过。"];
+  return [];
+});
+
 export const waitingActions = (actions: WorkflowAction[], item: WorkItem) => actions.filter((action) =>
-  action.workItemIds.includes(item.workItemId) && actionIsOpen(action) && (action.kind !== "execute" || ["waiting", "retry", "decision"].includes(action.status))
+  action.workItemIds.includes(item.workItemId) && actionIsOpen(action) && (!["execute", "integration"].includes(action.kind) || ["waiting", "retry", "decision"].includes(action.status))
 ).sort((a, b) => Number(b.kind === "repair") - Number(a.kind === "repair") || b.updatedAt.localeCompare(a.updatedAt));
 
 export const waitingReason = (action: WorkflowAction) => {

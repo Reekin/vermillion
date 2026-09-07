@@ -3,7 +3,7 @@ import type { InboxItem, WorkItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { useWorkflowContext } from "../use-workflow-context.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { actionStatusLabel, roleLabel } from "./workflow-display.js";
+import { actionStatusLabel, dispositionSummary, roleLabel } from "./workflow-display.js";
 import { statusLabel } from "./task-labels.js";
 import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotice, DetailSection, ListRow } from "./ui.js";
 
@@ -43,6 +43,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const [detailId, setDetailId] = useState<string>();
   const card = data?.decisions.find((entry) => entry.decisionId === item.card.decisionId) ?? item.card;
   const action = data?.actions.find((entry) => entry.actionId === card.actionId);
+  const dispositions = action ? dispositionSummary(action) : [];
   const relatedIds = [...new Set([...(action?.workItemIds ?? []), ...(card.workItemId ? [card.workItemId] : [])])];
   const missionTitle = data?.missions.find((entry) => entry.missionId === card.missionId)?.title;
   const sessionId = action?.sessionId ?? card.sessionId;
@@ -122,7 +123,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
         <p>{roleLabel[action.role]} · {actionStatusLabel[action.status]}</p>
-        <p>{action.attempts > 0 ? "当前处理已失败 " + action.attempts + " 次，原会话与成果保留。" : "处置记录可在技术详情中查看。"}</p>
+        {dispositions.length ? dispositions.slice(-5).map((summary, index) => <p key={index}>{summary}</p>) : <p>尚无已执行的自动处置。</p>}
       </DetailSection>}
       {relatedIds.length > 0 && <DetailSection title="相关工单">{relatedIds.map((id) => {
         const related = data?.workItems.find((entry) => entry.workItemId === id);
