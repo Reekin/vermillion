@@ -124,6 +124,25 @@
 .vm-list-action > button { width: 48px; min-height: 24px; padding: 0 6px; }
 .vm-card-compact { background: var(--color-surface-raised); overflow: hidden; }
 .vm-card-compact > header { border-bottom: 0; padding: 9px 12px 6px; }
+/* Controlled cards keep their overview and readable detail in one surface. */
+.vm-disclosure-card { container-type: inline-size; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); overflow: hidden; }
+.vm-disclosure-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 14px 18px; }
+.vm-disclosure-header:hover { background: var(--color-surface-hover); }
+.vm-disclosure-title { display: flex; min-width: 0; max-width: 100%; gap: 8px; padding: 0; text-align: left; color: var(--color-strong); font-size: var(--text-label); font-weight: 500; white-space: normal; }
+.vm-disclosure-title > svg { flex-shrink: 0; }
+.vm-disclosure-title > span { overflow-wrap: anywhere; }
+.vm-disclosure-status { display: flex; }
+.vm-disclosure-progress { border-left: 1px solid var(--color-border-strong); padding-left: 12px; }
+.vm-disclosure-progress, .vm-disclosure-time { white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }
+.vm-disclosure-time { margin-left: auto; }
+.vm-disclosure-summary { flex-basis: 100%; min-width: 0; padding-left: 22px; font-size: var(--text-caption); color: var(--color-muted-foreground); }
+.vm-disclosure-body { border-top: 1px solid var(--color-border); padding: 4px 18px 16px 40px; }
+@container (max-width: 640px) {
+  .vm-disclosure-header { padding: 14px; }
+  .vm-disclosure-title { flex-basis: 100%; }
+  .vm-disclosure-status { margin-left: 22px; }
+  .vm-disclosure-body { padding-left: 24px; padding-right: 12px; }
+}
 @media (max-width: 900px) {
   .vm-list-info { max-width: 12rem; }
 }

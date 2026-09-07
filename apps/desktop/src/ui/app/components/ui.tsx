@@ -7,7 +7,7 @@
  * Buttons       Button, IconButton
  * Text          Badge, SectionLabel, InlineNotice, StatusDot
  * Fields        Field (input / textarea / select / number), Toggle, Stepper
- * Structure     PanelHeader, Tabs, ListRow, Card, CollapsibleDetails, EmptyState, StatusBar
+ * Structure     PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
@@ -315,6 +315,26 @@ export const Card = ({ header, children, footer, className, compact, rows }: { h
     {children && <div className={compact ? "px-3 pb-2.5" : "px-4 py-3"}>{children}</div>}
     {rows && <div className="border-t border-border">{rows}</div>}
     {footer && <footer className="flex items-center gap-2 border-t border-border px-4 py-2.5">{footer}</footer>}
+  </article>
+);
+
+/** Readable section for contracts, results and other multiline detail content. */
+export const DisclosureCard = ({ title, open, onToggle, status, progress, time, actions, summary, children }: {
+  title: string; open: boolean; onToggle: () => void; status: ReactNode; progress: ReactNode;
+  time: ReactNode; actions: ReactNode; summary?: ReactNode; children: ReactNode;
+}) => (
+  <article className="vm-disclosure-card">
+    <header className="vm-disclosure-header">
+      <Button variant="ghost" className="vm-disclosure-title" aria-expanded={open} onClick={onToggle}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span>{title}</span>
+      </Button>
+      <span className="vm-disclosure-status">{status}</span>
+      <span className="vm-disclosure-progress">{progress}</span>
+      <span className="vm-disclosure-time">{time}</span>
+      {actions}
+      {summary && <div className="vm-disclosure-summary">{summary}</div>}
+    </header>
+    {open && <div className="vm-disclosure-body">{children}</div>}
   </article>
 );
 
