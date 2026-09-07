@@ -294,7 +294,7 @@ export type DesktopTransport = {
         forceProviderHydration?: boolean;
       }
     ) => Promise<{ page: SessionWindowRpc }>;
-    activate: (sessionId: string) => Promise<{ sessionId: string }>;
+    activate: (sessionId: string, options?: { focusTree?: boolean }) => Promise<{ sessionId: string }>;
     loadOlder: (input: {
       sessionId: string;
       beforeTurnId?: string;
@@ -799,9 +799,10 @@ export const createDesktopTransport = (
           sessionId,
           forceProviderHydration: options?.forceProviderHydration
         }),
-      activate: (sessionId: string) =>
+      activate: (sessionId: string, options?: { focusTree?: boolean }) =>
         rpc.request("sessionBrowser.activate", {
-          sessionId
+          sessionId,
+          ...(options?.focusTree !== undefined ? { focusTree: options.focusTree } : {})
         }),
       loadOlder: (input) => rpc.request("sessionBrowser.loadOlder", input),
       getActions: (sessionId: string) =>

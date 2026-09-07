@@ -307,7 +307,9 @@ export const createWorkbenchRpcHandler = (
               id: request.id,
               method: request.method,
               ok: true,
-              result: await shellService.activateSession(request.params.sessionId)
+              result: request.params.focusTree
+                ? await shellService.activateSession(request.params.sessionId, { focusTree: true })
+                : await shellService.activateSession(request.params.sessionId)
             });
           case "sessionBrowser.loadOlder":
             if (!shellService) {

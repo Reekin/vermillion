@@ -52,7 +52,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
   const navigation = useMemo(() => ({
     client: store.getState().client,
-    open: (target: SessionNavigation) => {
+    open: async (target: SessionNavigation) => {
+      await transport.sessionBrowser.activate(target.targetSessionId, { focusTree: true });
       if (target.role === "design-partner") {
         setNavigationTarget({ sessionId: target.targetSessionId, workspaceId: target.targetWorkspaceId });
         setSessionId(target.targetSessionId);
@@ -62,7 +63,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         store.getState().showAgentSession(target.targetWorkspaceId, target.targetSessionId);
       }
     }
-  }), [store]);
+  }), [store, transport]);
   const thinkMode = useThinkMode(transport, sessionId);
   const workspaceIds = useMemo(() => workspaces.map((w) => w.workspaceId), [workspaces]);
   // Think shows only the user's own design sessions; agent sessions live under Workspaces → 会话.

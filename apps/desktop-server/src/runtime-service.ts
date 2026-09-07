@@ -240,6 +240,13 @@ export class SessionRuntimeService {
     return this.sessionBrowserRevision;
   }
 
+  public notifyChatTreeChanged(sessionId: string, visibleTurnIds: string[]): void {
+    this.publishRuntimeEvent({
+      type: "conversationGraph.updated", sessionId,
+      currentNodeId: visibleTurnIds.at(-1), visibleNodeIds: visibleTurnIds, visibleTurnIds
+    });
+  }
+
   public subscribe(
     listener: (envelope: EventEnvelope) => void,
     filter: RuntimeEventFilter = {}

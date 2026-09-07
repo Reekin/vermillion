@@ -4,7 +4,7 @@ import { Badge, Button, InlineNotice, ListRow } from "./components/ui.js";
 
 export const SessionNavigationContext = createContext<{
   client: WorkbenchClient;
-  open: (navigation: SessionNavigation) => void;
+  open: (navigation: SessionNavigation) => Promise<void>;
 } | undefined>(undefined);
 
 const roleLabels: Record<string, string> = {
@@ -38,12 +38,17 @@ export const SessionNavigationSlot = ({ sessionId, turnId }: { sessionId: string
     return () => { disposed = true; unsubscribe(); };
   }, [context, sessionId, turnId]);
   if (!context || (!links.length && !error)) return null;
+  const open = async (link: SessionNavigation) => {
+    setError(undefined);
+    try { await context.open(link); }
+    catch (caught) { setError((caught as Error).message); }
+  };
   return <div aria-label="会话导航">
     {links.map((link) => <ListRow key={link.navigationId}
       leading={<Badge>{roleLabels[link.role] ?? link.role}</Badge>}
       title={link.title}
       meta={link.reason}
-      trailing={<Button variant="ghost" outlined size="sm" onClick={() => context.open(link)}>前往会话</Button>}
+      trailing={<Button variant="ghost" outlined size="sm" onClick={() => void open(link)}>前往会话</Button>}
     />)}
     {error && <InlineNotice tone="error">{error}</InlineNotice>}
   </div>;
