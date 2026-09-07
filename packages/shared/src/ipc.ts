@@ -643,7 +643,8 @@ const zSessionBrowserActivateRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("sessionBrowser.activate"),
   params: z.object({
-    sessionId: zSessionId
+    sessionId: zSessionId,
+    focusTree: z.boolean().optional()
   })
 });
 

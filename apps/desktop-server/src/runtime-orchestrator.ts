@@ -703,13 +703,12 @@ export class RuntimeOrchestrator {
             metadata: session.metadata
           })
         : undefined;
-    if (!cwd && !providerSessionId && !developerInstructions && !execution) {
-      return envelope;
-    }
+    const workspaceId = this.domainService.getConversation(session.conversationId)?.workspaceId;
     return {
       ...envelope,
       command: {
         ...envelope.command,
+        ...(workspaceId ? { workspaceId } : {}),
         ...(cwd ? { cwd } : {}),
         ...(providerSessionId ? { providerSessionId } : {}),
         ...(developerInstructions ? { developerInstructions } : {}),

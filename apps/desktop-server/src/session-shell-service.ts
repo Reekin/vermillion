@@ -654,13 +654,14 @@ export class SessionShellService {
     };
   }
 
-  public async activateSession(sessionId: string): Promise<{ sessionId: string }> {
+  public async activateSession(sessionId: string, options?: { focusTree?: boolean }): Promise<{ sessionId: string }> {
     const generation = ++this.openSessionGeneration;
     const isCancelled = () => generation !== this.openSessionGeneration;
     const context = this.sessionIdentity.resolveContext(sessionId);
     if (!context.session && !context.indexEntry && !context.providerHandle) {
       throw new Error(`Session not found: ${sessionId}`);
     }
+    if (options?.focusTree) await this.wrapperChatTree?.selectSession(sessionId);
     await this.activateOpenedSession(sessionId, { isCancelled });
     return {
       sessionId

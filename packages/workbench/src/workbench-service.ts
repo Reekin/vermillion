@@ -14,6 +14,7 @@ import type {
   WorkbenchEvent,
   Workspace
 } from "./contracts.js";
+import type { SessionNavigationPort } from "./session-navigation.js";
 import { DocsService, WorktreeMergeConflict } from "./docs.js";
 import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
@@ -39,6 +40,7 @@ export type WorkbenchServiceOptions = {
   workspaces: WorkspaceSource;
   roles: RoleService;
   ask?: SessionAsk;
+  sessionNavigation?: SessionNavigationPort;
   /** Starts isolated app instances for acceptance; absent when running without a desktop build around. */
   launcher?: AppLauncher;
   now?: () => string;
@@ -50,6 +52,7 @@ export class WorkbenchService {
   private readonly workspaces: WorkspaceSource;
   private readonly roles: RoleService;
   private readonly ask?: SessionAsk;
+  private readonly sessionNavigation?: SessionNavigationPort;
   private readonly launcher?: AppLauncher;
   private readonly now: () => string;
   private readonly contexts = new Map<string, WorkspaceContext>();
@@ -60,6 +63,7 @@ export class WorkbenchService {
     this.workspaces = options.workspaces;
     this.roles = options.roles;
     this.ask = options.ask;
+    this.sessionNavigation = options.sessionNavigation;
     this.launcher = options.launcher;
     this.now = options.now ?? (() => new Date().toISOString());
   }
@@ -88,6 +92,18 @@ export class WorkbenchService {
   }
 
   // ---- workspaces ----
+
+  async createSessionNavigation(input: { sessionId: string; targetSessionId: string; reason?: string }) {
+    if (!this.sessionNavigation) throw new Error("sessionNavigation.create requires a running desktop instance");
+    const { navigation, workspaceId } = await this.sessionNavigation.create(input);
+    this.emit({ type: "sessionNavigation.changed", sessionId: input.sessionId, workspaceId });
+    return navigation;
+  }
+
+  async listSessionNavigations(input: { sessionId: string; turnId: string }) {
+    if (!this.sessionNavigation) throw new Error("sessionNavigation.list requires a running desktop instance");
+    return this.sessionNavigation.list(input);
+  }
 
   async listWorkspaces(): Promise<Workspace[]> {
     const list = await this.workspaces.list();
@@ -689,7 +705,7 @@ const describeAnswer = (card: DecisionCard, answer: { key?: string; note?: strin
   return card.question + " -> " + chosen + adjustments;
 };
 
-const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { workItemId: string }>["type"] | undefined> = {
+const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { sessionId: string } | { workItemId: string }>["type"] | undefined> = {
   docs: "docs.changed",
   roles: "roles.changed",
   missions: "missions.changed",

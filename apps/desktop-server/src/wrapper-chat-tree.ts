@@ -133,6 +133,15 @@ export class WrapperChatTreeService {
     return tree;
   }
 
+  public async selectSession(sessionId: string): Promise<void> {
+    await this.get(sessionId);
+    const { paths } = this.project(sessionId);
+    await this.options.sessionIndexStore.setTreeView(sessionId, {
+      sessionId, nodeId: paths.get(sessionId)?.at(-1), followTip: true
+    });
+    this.options.runtimeService.notifyChatTreeChanged(sessionId, paths.get(sessionId) ?? []);
+  }
+
   public async jump(sessionId: string, nodeId: string): Promise<{ jumped: boolean }> {
     // The graph is already loaded when a user picks a node; no engine operation belongs here.
     const { paths, byActivity } = this.project(sessionId);

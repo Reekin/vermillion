@@ -26,6 +26,7 @@ import {
 import { createSessionIpcRouter } from "./session-ipc-router.js";
 import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, resolveAppCommand, startLocalEndpoint, type InboxItem } from "@vermillion/workbench";
 import { createAgentRunner, createSessionAsk } from "./agent-runner.js";
+import { createSessionNavigation } from "./session-navigation.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
   resolveWillNavigate,
@@ -747,6 +748,7 @@ const boot = async (): Promise<void> => {
   const workbenchService = new WorkbenchService({
     roles: roleService,
     ask: createSessionAsk(service),
+    sessionNavigation: createSessionNavigation(service, persistenceBaseDir),
     launcher: new AppLauncher({ command: resolveAppCommand(appRoot), packageRoot: launcherPackageRoot }),
     workspaces: {
       list: async () =>

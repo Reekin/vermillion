@@ -1614,7 +1614,7 @@ export class CodexAppServerRuntimePort
     const startTurn = async (targetThreadId: string): Promise<TurnStartResponse> => {
       this.pendingTurnSessionIdByThreadId.set(targetThreadId, sessionId);
       try {
-        await this.injectThinkMode(targetThreadId, payload.params.thinkMode, options);
+        await this.injectWorkbenchContext(targetThreadId, payload.params, options);
         const params: Record<string, unknown> = {
           threadId: targetThreadId,
           input,
@@ -1672,13 +1672,22 @@ export class CodexAppServerRuntimePort
     };
   }
 
-  private async injectThinkMode(threadId: string, mode: unknown, options: RuntimeOperationOptions): Promise<void> {
-    if (mode !== "dispatch" && mode !== "execute") return;
+  private async injectWorkbenchContext(threadId: string, params: CodexRuntimeRequest["params"], options: RuntimeOperationOptions): Promise<void> {
+    const mode = params.thinkMode;
+    if (typeof params.workspaceId !== "string" && mode !== "dispatch" && mode !== "execute") return;
+    const text = [
+      "当前工作台会话（wrapper ID，用于 CLI）：",
+      `sessionId: ${params.sessionId}`,
+      ...(typeof params.workspaceId === "string" ? [`workspaceId: ${params.workspaceId}`] : []),
+      ...(mode === "dispatch" || mode === "execute"
+        ? [`本轮工作台模式：${mode === "dispatch" ? "发单" : "现做"}。按设计伙伴角色中的对应模式规则处理本轮需求。此前轮次的模式不适用于本轮。`]
+        : [])
+    ].join("\n");
     await this.rpc("thread/inject_items", {
       threadId,
       items: [{
         type: "message", role: "developer",
-        content: [{ type: "input_text", text: `本轮工作台模式：${mode === "dispatch" ? "发单" : "现做"}。按设计伙伴角色中的对应模式规则处理本轮需求。此前轮次的模式不适用于本轮。` }]
+        content: [{ type: "input_text", text }]
       }]
     }, options);
   }
@@ -1698,7 +1707,7 @@ export class CodexAppServerRuntimePort
       return;
     }
     const input = buildCodexTurnInput(content, attachments);
-    await this.injectThinkMode(threadId, payload.params.thinkMode, options);
+    await this.injectWorkbenchContext(threadId, payload.params, options);
     await this.rpc(
       "turn/steer",
       {
