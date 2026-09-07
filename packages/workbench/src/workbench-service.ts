@@ -480,8 +480,13 @@ export class WorkbenchService {
   ): Promise<WorkItem> {
     const { note, ...changes } = input;
     const resourcesOnly = changes.needs !== undefined && Object.keys(changes).every((key) => key === "needs");
+    const occupied = changes.needs?.length
+      ? new Set((await this.listWorkItems(workspaceId)).filter((item) => item.workItemId !== workItemId && item.status === "running").flatMap((item) => item.needs))
+      : new Set<string>();
     const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
+      const conflict = item.status === "running" ? changes.needs?.find((need) => occupied.has(need)) : undefined;
+      if (conflict !== undefined) throw new Error("Resource is in use: " + conflict + ". Release it before updating this running work item.");
       const status = item.status;
       // While parked the note lives on the decision card and reaches the worker inside the answer line.
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];

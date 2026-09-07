@@ -99,6 +99,8 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await service.updateWorkItem(ws.workspaceId, second.workItemId, { needs: [], note: "独立实例" });
     await until(async () => (await service.getWorkItem(ws.workspaceId, second.workItemId)).status === "running");
     await service.updateWorkItem(ws.workspaceId, first.workItemId, { needs: ["shared:staging-db"], note: "具体共享对象" });
+    await expect(service.updateWorkItem(ws.workspaceId, second.workItemId, { needs: ["shared:staging-db"], note: "请求已占用对象" })).rejects.toThrow("Resource is in use");
+    expect((await service.getWorkItem(ws.workspaceId, second.workItemId)).needs).toEqual([]);
     const third = await service.createWorkItem(ws.workspaceId, { ...base, title: "C", needs: ["shared:staging-db"] });
     const dependent = await service.createWorkItem(ws.workspaceId, { ...base, title: "D", dependsOn: [first.workItemId] });
     await tick();
