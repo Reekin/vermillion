@@ -141,7 +141,8 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
                   {mission.relatedWorkItemIds.map((id) => {
                     const related = workItems.find((item) => item.workItemId === id);
                     return <ListRow key={id} title={related?.title ?? id} leading={related && <Badge>{related.risk}</Badge>}
-                      trailing={related && <Badge status={related.status}>{statusLabel[related.status]}</Badge>} onClick={() => openDetail(id)} />;
+                      titleClassName={mission.status !== "active" ? "text-faint-foreground" : undefined}
+                      trailing={related && <Badge status={related.status} muted={mission.status !== "active"}>{statusLabel[related.status]}</Badge>} onClick={() => openDetail(id)} />;
                   })}
                 </DetailSection>}
               </Card>
