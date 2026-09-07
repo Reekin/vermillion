@@ -22,44 +22,63 @@ export const useChatTreeController = (input: {
   const [failedSessionId, setFailedSessionId] = useState<string>();
   const sessionIdRef = useRef(sessionId);
   const requestIdRef = useRef(0);
-  const activatedSessionIdRef = useRef<string | undefined>(undefined);
+  const activationRef = useRef<{ sessionId: string; promise: Promise<void> } | undefined>(undefined);
   sessionIdRef.current = sessionId;
 
   const refreshChatTree = useCallback(async (): Promise<void> => {
     if (!sessionId || sessionIdRef.current !== sessionId) return;
     const requestId = ++requestIdRef.current;
-    const tree = await transport.chatTree.get(sessionId);
-    if (sessionIdRef.current !== sessionId || requestId !== requestIdRef.current) return;
-    const viewedSessionId = tree.currentSessionId ?? sessionId;
-    if (activatedSessionIdRef.current !== viewedSessionId) {
-      await transport.sessionBrowser.activate(viewedSessionId);
-      if (sessionIdRef.current !== sessionId || requestId !== requestIdRef.current) return;
-      activatedSessionIdRef.current = viewedSessionId;
-      store.dispatch({ type: "store/sessionBrowserChanged" });
+    const isCurrent = () => sessionIdRef.current === sessionId && requestId === requestIdRef.current;
+    try {
+      const tree = await transport.chatTree.get(sessionId);
+      if (!isCurrent()) return;
+      const viewedSessionId = tree.currentSessionId ?? sessionId;
+      // Keep the pending activation as well as its result across refreshes.
+      if (activationRef.current?.sessionId !== viewedSessionId) {
+        const activation = {
+          sessionId: viewedSessionId,
+          promise: transport.sessionBrowser.activate(viewedSessionId).then(() => {
+            if (activationRef.current === activation) {
+              store.dispatch({ type: "store/sessionBrowserChanged" });
+            }
+          }).catch((error) => {
+            if (activationRef.current === activation) activationRef.current = undefined;
+            throw error;
+          })
+        };
+        activationRef.current = activation;
+      }
+      await activationRef.current.promise;
+      if (!isCurrent()) return;
+      for (const window of tree.windows ?? []) {
+        store.hydrateSessionWindow(window.sessionId, window.snapshot, "replace", window.cursor);
+      }
+      // The shell keeps selecting the tree entry; only this pane changes its viewed member.
+      const entry = store.getDomainReadModel().getSession(sessionId);
+      if (entry) {
+        store.dispatch({ type: "store/setActiveConversation", conversationId: entry.conversationId });
+        store.dispatch({ type: "store/setActiveSession", sessionId });
+      }
+      setLoaded({ entrySessionId: sessionId, tree });
+      setFailedSessionId(undefined);
+    } catch (error) {
+      if (!isCurrent()) return;
+      throw error;
     }
-    for (const window of tree.windows ?? []) {
-      store.hydrateSessionWindow(window.sessionId, window.snapshot, "replace", window.cursor);
-    }
-    // The shell keeps selecting the tree entry; only this pane changes its viewed member.
-    const entry = store.getDomainReadModel().getSession(sessionId);
-    if (entry) {
-      store.dispatch({ type: "store/setActiveConversation", conversationId: entry.conversationId });
-      store.dispatch({ type: "store/setActiveSession", sessionId });
-    }
-    setLoaded({ entrySessionId: sessionId, tree });
-    setFailedSessionId(undefined);
   }, [sessionId, store, transport]);
 
   useEffect(() => {
-    activatedSessionIdRef.current = undefined;
+    activationRef.current = undefined;
     setLoaded(undefined);
     setFailedSessionId(undefined);
     return () => { requestIdRef.current += 1; };
   }, [sessionId]);
 
   useEffect(() => {
-    void refreshChatTree().catch((error) => {
-      if (sessionIdRef.current !== sessionId) return;
+    const refresh = refreshChatTree();
+    const requestId = requestIdRef.current;
+    void refresh.catch((error) => {
+      if (sessionIdRef.current !== sessionId || requestId !== requestIdRef.current) return;
       setFailedSessionId(sessionId);
       onStatusNotice({
         message: `Chat tree refresh failed: ${(error as Error).message}`,
