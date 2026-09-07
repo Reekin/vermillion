@@ -1613,6 +1613,11 @@ label.awb-configuration-control > span {
   background: var(--awb-accent);
 }
 
+.awb-chat-tree__graph-node[data-virtual="true"] .awb-chat-tree__graph-node-dot {
+  border-style: dashed;
+  background: var(--awb-panel);
+}
+
 .awb-tool-timeline,
 .awb-terminal-list,
 .awb-approval-list {

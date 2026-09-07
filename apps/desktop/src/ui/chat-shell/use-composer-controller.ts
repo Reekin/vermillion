@@ -366,6 +366,7 @@ type UseComposerControllerInput = {
   createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   prepareSend?: () => Promise<string>;
+  submitBranch?: (payload: Omit<import("../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
@@ -959,6 +960,13 @@ export const useComposerController = (
     try {
       // Draft state: the first message creates the session, then becomes its first turn.
       const sendOptions = input.getSendOptions?.();
+      if (payload.mode === "send" && input.submitBranch && await input.submitBranch({
+        ...sendOptions, content, attachments, execution: payload.execution
+      })) {
+        input.onStatusNotice(undefined);
+        if (input.activeSessionId) input.onRequestTranscriptBottom?.(input.activeSessionId);
+        return true;
+      }
       const sessionId = input.activeSessionId
         ? payload.mode === "send" && input.prepareSend
           ? await input.prepareSend()

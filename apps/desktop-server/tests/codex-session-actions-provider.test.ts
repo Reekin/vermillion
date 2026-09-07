@@ -8,6 +8,29 @@ const codexProviderHandle = (providerSessionId = "thread-1") => ({
 });
 
 describe("CodexSessionActionsProvider", () => {
+  it("registers a background fork without overwriting the user's active selection", async () => {
+    const setLastActiveSelection = vi.fn();
+    const upsertSession = vi.fn();
+    const upsertRelation = vi.fn();
+    const provider = new CodexSessionActionsProvider({ codexRuntimePort: {
+      forkThread: vi.fn().mockResolvedValue({ id: "child", createdAt: 1_776_470_402,
+        updatedAt: 1_776_470_403, turns: [], cwd: "I:/project", preview: "" }),
+      attachThreadToSession: vi.fn()
+    } as unknown as CodexAppServerRuntimePort });
+    const result = await provider.runAction({
+      sessionId: "root", engineId: "codex", action: "fork", fromTurnId: "turn-a", activateFork: false,
+      providerHandle: codexProviderHandle(),
+      indexEntry: { sessionId: "root", workspaceId: "workspace", conversationId: "conversation" } as never,
+      sessionIndexStore: { upsertSession, upsertRelation } as never,
+      runtimeService: { getWorkspaceRegistry: () => ({ setLastActiveSelection }) } as never
+    });
+    expect(result).toMatchObject({ action: "fork", status: "forked", forkedSessionId: "codex-thread:child" });
+    expect(upsertSession).toHaveBeenCalledOnce();
+    expect(upsertRelation).toHaveBeenCalledWith(expect.objectContaining({ parentSessionId: "root",
+      childSessionId: "codex-thread:child", sourceTurnId: "turn-a" }));
+    expect(setLastActiveSelection).not.toHaveBeenCalled();
+  });
+
   it("copies the canonical provider session id from the registry handle", () => {
     const provider = new CodexSessionActionsProvider({
       codexRuntimePort: {} as unknown as CodexAppServerRuntimePort

@@ -171,8 +171,6 @@ export const createTransportRpcHelper = (
       response
     });
 
-    return (response as {
-      result: RpcSuccessResponseFor<M>["result"];
-    }).result;
+    return response.result as RpcSuccessResponseFor<M>["result"];
   }
 });

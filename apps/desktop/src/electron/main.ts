@@ -10,6 +10,7 @@ import {
   Tray
 } from "electron";
 import { createSessionRuntimeService } from "@vermillion/desktop-server";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -797,7 +798,15 @@ const boot = async (): Promise<void> => {
       });
     }
   });
-  const localEndpoint = await startLocalEndpoint(persistenceBaseDir, workbenchRpc);
+  const localEndpoint = await startLocalEndpoint(persistenceBaseDir, async (request) => {
+    if (["chatTree.submit", "chatTree.retry", "chatTree.operations"].includes(request.method)) {
+      const response = await router.handleRequest({ ...request, id: randomUUID() });
+      return response.ok
+        ? { ok: true, result: response.result }
+        : { ok: false, error: response.error.message };
+    }
+    return workbenchRpc(request);
+  });
   const orchestrator = new Orchestrator({
     service: workbenchService,
     roles: roleService,

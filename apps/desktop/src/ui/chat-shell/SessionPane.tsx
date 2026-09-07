@@ -22,6 +22,8 @@ import type {
   Turn,
   SessionWindowRpc
 } from "@vermillion/shared";
+import type { ChatTreeSendOperation } from "@vermillion/shared";
+import { PendingBranchMessage } from "./PendingBranchMessage.js";
 import {
   resolveEngineExecutionPreference,
   writeEngineExecutionPreference
@@ -104,6 +106,8 @@ export type SessionPaneProps = {
 };
 
 type TranscriptPaneProps = {
+  pendingSend?: ChatTreeSendOperation;
+  onRetrySend: (operationId: string) => Promise<void>;
   transcriptRef: RefObject<HTMLElement | null>;
   transcriptContentRef: RefObject<HTMLDivElement | null>;
   renderedTranscriptRows: ReturnType<typeof buildTurnTranscriptRows>;
@@ -364,7 +368,9 @@ const TranscriptPane = memo(
     onToggleProcess,
     onPreviewImage,
     onRespondApproval,
-    onRespondInteraction
+    onRespondInteraction,
+    pendingSend,
+    onRetrySend
   }: TranscriptPaneProps): ReactElement => (
     <section
       className="awb-transcript"
@@ -374,7 +380,7 @@ const TranscriptPane = memo(
       tabIndex={0}
     >
       <div className="awb-transcript__content" ref={transcriptContentRef}>
-        {renderedTranscriptRows.length === 0 && (isOpeningSelectedSession || !isSwitchPending) && (
+        {!pendingSend && renderedTranscriptRows.length === 0 && (isOpeningSelectedSession || !isSwitchPending) && (
           <div className="awb-transcript__empty">
             {isOpeningSelectedSession && <div className="awb-loading-spinner" aria-hidden="true" />}
             <h3>
@@ -550,10 +556,13 @@ const TranscriptPane = memo(
             </article>
           );
         })}
+        {pendingSend && <PendingBranchMessage operation={pendingSend} onRetry={onRetrySend} onPreviewImage={onPreviewImage} />}
       </div>
     </section>
   ),
   (previous, next) =>
+    previous.pendingSend === next.pendingSend &&
+    previous.onRetrySend === next.onRetrySend &&
     previous.renderedTranscriptRows === next.renderedTranscriptRows &&
     previous.participantDirectory === next.participantDirectory &&
     previous.transport === next.transport &&
@@ -681,7 +690,11 @@ export const SessionPane = ({
     isOpening: isOpeningSelectedSession,
     refreshChatTree,
     onJumpChatTree,
-    prepareSend
+    prepareSend,
+    submitBranch,
+    operations,
+    pendingSend,
+    retrySend
   } = useChatTreeController({
     store,
     transport,
@@ -1030,6 +1043,8 @@ export const SessionPane = ({
         <div className="awb-main__body">
           <div className="awb-transcript-column">
           <TranscriptPane
+            pendingSend={pendingSend}
+            onRetrySend={retrySend}
             transcriptRef={viewport.transcriptRef}
             transcriptContentRef={viewport.transcriptContentRef}
             renderedTranscriptRows={renderedTranscriptRows}
@@ -1056,6 +1071,7 @@ export const SessionPane = ({
             <aside className="awb-chat-tree-column" aria-label="对话树">
               <section className="awb-detail__graph">
                 <ChatTreePanel
+                  operations={operations}
                   chatTree={activeChatTree}
                   onJump={sessionId ? (nodeId) => {
                     void onJumpChatTree(nodeId).then(() => viewport.scrollToBottom(sessionId));
@@ -1102,6 +1118,7 @@ export const SessionPane = ({
           onPreviewImage={onPreviewImage}
           createSession={sessionId ? undefined : createSession}
           prepareSend={sessionId ? prepareSend : undefined}
+          submitBranch={sessionId ? submitBranch : undefined}
           autoSendQueuedMessages={currentTurn?.turnId === displayedSession?.lastTurnId}
           onResumeSession={viewSessionId ? async () => {
             await transport.sessionBrowser.open(viewSessionId);

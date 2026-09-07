@@ -242,7 +242,7 @@ export const createSessionRuntimeService = (
       reconciliation: sessionReconciliation,
       fork: async (sessionId, fromTurnId) => {
         const result = await new CodexSessionActionsProvider({ codexRuntimePort }).runAction({
-          ...capabilities.resolveContext(sessionId), action: "fork", fromTurnId
+          ...capabilities.resolveContext(sessionId), action: "fork", fromTurnId, activateFork: false
         });
         if (result?.action !== "fork" || result.status !== "forked") {
           throw new Error("Unable to fork this turn.");

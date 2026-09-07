@@ -1,11 +1,13 @@
 import { useMemo, type ReactElement } from "react";
-import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
+import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import { buildChatTreeGraphLayout } from "./chat-tree-layout.js";
+import { Badge } from "../app/components/ui.js";
 
 const NODE_RADIUS = 7;
 const CONNECTOR_CURVE_OFFSET = 24;
 
 export type ChatTreePanelProps = {
+  operations?: ChatTreeSendOperation[];
   chatTree?: ChatTreeSnapshotRpc;
   loading?: boolean;
   error?: string;
@@ -21,6 +23,7 @@ export const ChatTreePanel = ({
   chatTree,
   loading = false,
   error,
+  operations = [],
   onJump
 }: ChatTreePanelProps): ReactElement => {
   const graph = useMemo(() => buildChatTreeGraphLayout(chatTree), [chatTree]);
@@ -56,7 +59,7 @@ export const ChatTreePanel = ({
         <div
           className="awb-chat-tree__graph-canvas"
           style={{
-            minWidth: `${graph.width}px`,
+            minWidth: `${Math.max(graph.width, 180)}px`,
             minHeight: `${graph.height}px`
           }}
         >
@@ -94,9 +97,15 @@ export const ChatTreePanel = ({
               );
             })}
           </svg>
-          {graph.nodes.map((entry) => (
+          {graph.nodes.map((entry) => {
+            const operation = operations.find((op) => op.operationId === entry.node.nodeId || (op.turnId && op.turnId === entry.node.turnId));
+            const virtual = operation && !entry.node.turnId;
+            const status = virtual ? operation.status === "failed" ? "发送失败"
+              : operation.status === "creating" ? "正在创建分支" : "正在发送" : undefined;
+            return (
             <button
-              key={entry.node.nodeId}
+              key={operation?.operationId ?? entry.node.nodeId}
+              data-virtual={virtual ? "true" : undefined}
               type="button"
               className={`awb-chat-tree__graph-node${entry.isCurrent ? " is-current" : ""}${entry.node.status === "pending" ? " is-running" : ""}`}
               style={{
@@ -104,15 +113,16 @@ export const ChatTreePanel = ({
                 top: `${entry.y}px`
               }}
               onDoubleClick={() => onJump?.(entry.node.nodeId)}
-              title={`${shortLabel(entry.node)}${
+              title={`${shortLabel(entry.node)}${status ? `\n${status}` : ""}${
                 entry.isCurrent ? "\nCurrent position." : "\nDouble-click to switch."
               }${entry.node.status === "pending" ? "\nRunning." : ""}`}
-              aria-label={`${shortLabel(entry.node)}${entry.isCurrent ? ", current position" : ""}${entry.node.status === "pending" ? ", running" : ""}`}
+              aria-label={`${shortLabel(entry.node)}${status ? `, ${status}` : ""}${entry.isCurrent ? ", current position" : ""}${entry.node.status === "pending" ? ", running" : ""}`}
               aria-current={entry.isCurrent ? "step" : undefined}
             >
               <span className="awb-chat-tree__graph-node-dot" />
+              {status && entry.isCurrent && <span className="absolute left-0 top-full"><Badge>{status}</Badge></span>}
             </button>
-          ))}
+          ); })}
         </div>
       </div>
     </div>

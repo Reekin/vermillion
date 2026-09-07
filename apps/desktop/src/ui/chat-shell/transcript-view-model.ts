@@ -620,7 +620,7 @@ export const buildTurnTranscriptRows = (
   const legacyIndexes = legacyState
     ? buildTranscriptEntityIndexes(legacyState, turns)
     : undefined;
-  return sortTurnsForTranscript(turns).flatMap((turn) => {
+  return sortTurnsForTranscript(turns).flatMap<TurnTranscriptRow>((turn) => {
     const blocks = domain
       ? (() => {
           const referenced = turn.messageIds

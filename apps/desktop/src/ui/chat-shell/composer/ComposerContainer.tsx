@@ -47,6 +47,7 @@ export type ComposerContainerProps = {
   createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   prepareSend?: () => Promise<string>;
+  submitBranch?: (payload: Omit<import("../../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
@@ -84,6 +85,7 @@ export const ComposerContainer = ({
   createSession,
   initializeDraftExecution,
   prepareSend,
+  submitBranch,
   autoSendQueuedMessages,
   onResumeSession,
   onRequestTranscriptBottom,
@@ -114,6 +116,7 @@ export const ComposerContainer = ({
     createSession,
     initializeDraftExecution,
     prepareSend,
+    submitBranch,
     autoSendQueuedMessages,
     onResumeSession,
     onRequestTranscriptBottom,
