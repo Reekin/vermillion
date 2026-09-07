@@ -20,7 +20,7 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
   useEffect(() => {
     if (presentation !== "modal") return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
