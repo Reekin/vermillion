@@ -476,18 +476,24 @@ export class WorkbenchService {
   async updateWorkItem(
     workspaceId: string,
     workItemId: string,
-    input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk" | "dependsOn">> & { note: string }
+    input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk" | "needs" | "dependsOn">> & { note: string }
   ): Promise<WorkItem> {
     const { note, ...changes } = input;
+    const resourcesOnly = changes.needs !== undefined && Object.keys(changes).every((key) => key === "needs");
+    const occupied = changes.needs?.length
+      ? new Set((await this.listWorkItems(workspaceId)).filter((item) => item.workItemId !== workItemId && item.status === "running").flatMap((item) => item.needs))
+      : new Set<string>();
     const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
+      const conflict = item.status === "running" ? changes.needs?.find((need) => occupied.has(need)) : undefined;
+      if (conflict !== undefined) throw new Error("Resource is in use: " + conflict + ". Release it before updating this running work item.");
       const status = item.status;
       // While parked the note lives on the decision card and reaches the worker inside the answer line.
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
       return {
         ...item, ...changes, status, decisions,
-        contractIssue: item.contractIssue ? { ...item.contractIssue, resolvedAt: this.now() } : undefined,
-        run: status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt
+        contractIssue: item.contractIssue && !resourcesOnly ? { ...item.contractIssue, resolvedAt: this.now() } : item.contractIssue,
+        run: !resourcesOnly && status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt
           ? { ...item.run, resumeMessage: [item.run.resumeMessage, "工单已调整：" + note + "。重新读取合同，先 rebase 到主分支当前 HEAD，再继续执行。"].filter(Boolean).join("\n") }
           : item.run
       };

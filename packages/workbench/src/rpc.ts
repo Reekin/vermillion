@@ -111,6 +111,7 @@ export const workbenchRpc = {
       refs: z.array(zDocRef).optional(),
       scope: zScope.optional(),
       acceptance: z.array(zAcceptanceItem).optional(),
+      needs: z.array(z.string()).optional(),
       dependsOn: z.array(z.string()).optional()
     }),
     result: zWorkItem

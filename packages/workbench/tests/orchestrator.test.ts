@@ -88,6 +88,47 @@ const setup = async (maxWorkers = 1, patrolIntervalMs = 60_000) => {
 };
 
 describe("Orchestrator", { timeout: 60000 }, () => {
+  it("reschedules updated resource claims while retaining dependency and contract holds", async () => {
+    const { service, ws, sessions } = await setup(4);
+    const base = { objective: "o", risk: "R1" as const, scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] };
+    const first = await service.createWorkItem(ws.workspaceId, { ...base, title: "A", needs: ["browser"] });
+    const second = await service.createWorkItem(ws.workspaceId, { ...base, title: "B", needs: ["browser"] });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, first.workItemId)).status === "running");
+    await tick();
+    expect((await service.getWorkItem(ws.workspaceId, second.workItemId)).status).toBe("queued");
+    await service.updateWorkItem(ws.workspaceId, second.workItemId, { needs: [], note: "独立实例" });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, second.workItemId)).status === "running");
+    await service.updateWorkItem(ws.workspaceId, first.workItemId, { needs: ["shared:staging-db"], note: "具体共享对象" });
+    await expect(service.updateWorkItem(ws.workspaceId, second.workItemId, { needs: ["shared:staging-db"], note: "请求已占用对象" })).rejects.toThrow("Resource is in use");
+    expect((await service.getWorkItem(ws.workspaceId, second.workItemId)).needs).toEqual([]);
+    const third = await service.createWorkItem(ws.workspaceId, { ...base, title: "C", needs: ["shared:staging-db"] });
+    const dependent = await service.createWorkItem(ws.workspaceId, { ...base, title: "D", dependsOn: [first.workItemId] });
+    await tick();
+    expect((await service.getWorkItem(ws.workspaceId, third.workItemId)).status).toBe("queued");
+    expect((await service.getWorkItem(ws.workspaceId, dependent.workItemId)).status).toBe("queued");
+    await service.updateWorkItem(ws.workspaceId, first.workItemId, { needs: [], note: "释放共享对象" });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, third.workItemId)).status === "running");
+    expect((await service.getWorkItem(ws.workspaceId, dependent.workItemId)).status).toBe("queued");
+    // Submit from the next worker turn after the resource updates were delivered.
+    await service.startWorkItem(ws.workspaceId, first.workItemId, {});
+    await service.submitWorkItem(ws.workspaceId, first.workItemId, {
+      evidence: { summary: "done", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] }, review: [],
+      verify: { verdict: "pass", items: [{ index: 0, pass: true, evidence: "done" }] }
+    });
+    await until(async () => (await service.getWorkItem(ws.workspaceId, dependent.workItemId)).status === "running");
+    await service.escalateWorkItem(ws.workspaceId, second.workItemId, "角色前置未满足");
+    await until(async () => !!(await service.getWorkItem(ws.workspaceId, second.workItemId)).contractIssue?.notifiedAt);
+    const held = await service.getWorkItem(ws.workspaceId, second.workItemId);
+    const messages = sessions.find((s) => s.sessionId === held.run.sessionId)!.messages.length;
+    await service.updateWorkItem(ws.workspaceId, second.workItemId, { needs: [], note: "仅调整资源" });
+    await tick();
+    const updated = await service.getWorkItem(ws.workspaceId, second.workItemId);
+    expect(updated.status).toBe("queued");
+    expect(updated.contractIssue).toEqual(held.contractIssue);
+    expect(updated.run).toEqual(held.run);
+    expect(sessions.find((s) => s.sessionId === held.run.sessionId)!.messages).toHaveLength(messages);
+  });
+
   it.each(["update", "cancel", "decision"])("holds contract problems for the steward and resumes the original worker after %s", async (action) => {
     const { service, ws, sessions, complete, orchestrator, roles, runner } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# contract\n");

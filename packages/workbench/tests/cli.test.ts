@@ -15,6 +15,31 @@ afterEach(async () => {
 });
 
 describe("vermillion cli", () => {
+  it("updates, preserves and clears resource claims through workItem.update", async () => {
+    const base = await mkdtemp(join(tmpdir(), "verm-cli-needs-"));
+    const root = await mkdtemp(join(tmpdir(), "verm-cli-needs-ws-"));
+    dirs.push(base, root);
+    process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+    const out: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+    const call = async (method: string, params: object) => {
+      expect(await runCli([method, JSON.stringify(params)])).toBe(0);
+      return JSON.parse(out.pop()!);
+    };
+    const { workspaceId } = await call("workspace.add", { rootPath: root });
+    const { workItemId } = await call("workItem.create", {
+      workspaceId, title: "Resources", objective: "isolated acceptance", risk: "R1", needs: ["browser"],
+      scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "done" }]
+    });
+    const id = { workspaceId, workItemId };
+    await call("workItem.update", { ...id, needs: ["shared:staging-db"], note: "具体对象" });
+    expect((await call("workItem.get", id)).needs).toEqual(["shared:staging-db"]);
+    await call("workItem.update", { ...id, title: "Renamed", note: "标题" });
+    expect((await call("workItem.get", id)).needs).toEqual(["shared:staging-db"]);
+    await call("workItem.update", { ...id, needs: [], note: "独立实例" });
+    expect((await call("workItem.get", id)).needs).toEqual([]);
+  });
+
   it("starts and stops its own build without forwarding app methods to a desktop endpoint", async () => {
     const base = await mkdtemp(join(tmpdir(), "verm-cli-launch-"));
     dirs.push(base);
