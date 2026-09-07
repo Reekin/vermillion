@@ -346,6 +346,8 @@ type UseComposerControllerInput = {
   transport: DesktopTransport;
   activeSession?: ChatSession;
   activeSessionId?: string;
+  /** Stable through the transition from an accepted branch operation to its session. */
+  draftKey?: string;
   threadGoal?: ThreadGoal;
   selectedEngineId: string;
   engineSurface?: EngineSurfaceRpc;
@@ -366,6 +368,7 @@ type UseComposerControllerInput = {
   createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   prepareSend?: () => Promise<string>;
+  submitBranch?: (payload: Omit<import("../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
@@ -411,6 +414,7 @@ export type UseComposerControllerResult = ComposerViewModel & {
 export const useComposerController = (
   input: UseComposerControllerInput
 ): UseComposerControllerResult => {
+  const draftKey = input.draftKey ?? input.activeSessionId;
   const [draftBySessionId, setDraftBySessionId] = useState<Record<string, string>>({});
   const [detachedDraft, setDetachedDraft] = useState("");
   const [detachedAttachments, setDetachedAttachments] = useState<ComposerAttachment[]>([]);
@@ -490,17 +494,17 @@ export const useComposerController = (
     [input.activeSession, input.interruptTurns]
   );
 
-  const draft = input.activeSessionId
-    ? (draftBySessionId[input.activeSessionId] ?? "")
+  const draft = draftKey
+    ? (draftBySessionId[draftKey] ?? "")
     : detachedDraft;
-  const attachments = input.activeSessionId
-    ? (attachmentDrafts[input.activeSessionId] ?? [])
+  const attachments = draftKey
+    ? (attachmentDrafts[draftKey] ?? [])
     : detachedAttachments;
   const queue = input.activeSessionId
     ? (queueBySessionId[input.activeSessionId] ?? [])
     : [];
-  const currentModelId = input.activeSessionId
-    ? modelIdBySessionId[input.activeSessionId]
+  const currentModelId = draftKey
+    ? modelIdBySessionId[draftKey]
     : detachedModelId;
   const supportsTurnConfiguration = Boolean(
     input.engineSurface?.sharedCapabilities.includes("turnConfiguration")
@@ -615,13 +619,13 @@ export const useComposerController = (
   }, []);
 
   useEffect(() => {
-    if (previousSessionIdRef.current === input.activeSessionId) {
+    if (previousSessionIdRef.current === draftKey) {
       return;
     }
-    previousSessionIdRef.current = input.activeSessionId;
+    previousSessionIdRef.current = draftKey;
     selectedSkillsRef.current = [];
     setSelectedSkills([]);
-  }, [input.activeSessionId]);
+  }, [draftKey]);
 
   useEffect(() => {
     if (!input.selectedEngineId || !supportsTurnConfiguration) {
@@ -731,10 +735,10 @@ export const useComposerController = (
   }, [input.skillsCwd, input.onStatusNotice, input.transport]);
 
   const setDraft = (value: string): void => {
-    if (input.activeSessionId) {
+    if (draftKey) {
       setDraftBySessionId((current) => ({
         ...current,
-        [input.activeSessionId!]: value
+        [draftKey]: value
       }));
       return;
     }
@@ -824,7 +828,7 @@ export const useComposerController = (
   }, [suggestionQuery?.trigger, suggestionQuery?.query]);
 
   const getAttachmentsForSession = (
-    sessionId = input.activeSessionId
+    sessionId = draftKey
   ): ComposerAttachment[] =>
     sessionId ? (attachmentDraftsRef.current[sessionId] ?? []) : detachedAttachmentsRef.current;
 
@@ -922,7 +926,7 @@ export const useComposerController = (
     });
     replaceSelectedSkills([]);
     if (input.activeSessionId) {
-      replaceAttachmentsForSession(input.activeSessionId, [], {
+      replaceAttachmentsForSession(draftKey, [], {
         releaseCurrent: false
       });
     }
@@ -959,6 +963,13 @@ export const useComposerController = (
     try {
       // Draft state: the first message creates the session, then becomes its first turn.
       const sendOptions = input.getSendOptions?.();
+      if (payload.mode === "send" && input.submitBranch && await input.submitBranch({
+        ...sendOptions, content, attachments, execution: payload.execution
+      })) {
+        input.onStatusNotice(undefined);
+        if (input.activeSessionId) input.onRequestTranscriptBottom?.(input.activeSessionId);
+        return true;
+      }
       const sessionId = input.activeSessionId
         ? payload.mode === "send" && input.prepareSend
           ? await input.prepareSend()
@@ -1134,7 +1145,7 @@ export const useComposerController = (
     }
     onDraftChange("");
     replaceSelectedSkills([]);
-    replaceAttachmentsForSession(input.activeSessionId, [], {
+    replaceAttachmentsForSession(draftKey, [], {
       releaseCurrent: true
     });
   };
@@ -1259,7 +1270,7 @@ export const useComposerController = (
     files: Iterable<File>,
     origin: "picker" | "drop" | "paste"
   ): Promise<void> => {
-    const targetSessionId = input.activeSessionId;
+    const targetSessionId = draftKey;
     if (input.isOpeningSelectedSession || isDispatching) {
       return;
     }
@@ -1380,7 +1391,7 @@ export const useComposerController = (
     const next = currentAttachments.filter(
       (attachment) => attachment.attachment.attachmentId !== attachmentId
     );
-    replaceAttachmentsForSession(input.activeSessionId, next, {
+    replaceAttachmentsForSession(draftKey, next, {
       releaseCurrent: false
     });
   };
@@ -1398,7 +1409,7 @@ export const useComposerController = (
     }
     onDraftChange(item.text);
     replaceSelectedSkills(item.skills);
-    replaceAttachmentsForSession(input.activeSessionId, item.attachments, {
+    replaceAttachmentsForSession(draftKey, item.attachments, {
       releaseCurrent: true
     });
     if (item.execution) {
@@ -1483,7 +1494,7 @@ export const useComposerController = (
     if (input.activeSessionId) {
       setModelIdBySessionId((current) => ({
         ...current,
-        [input.activeSessionId!]: nextExecution.modelId
+        [draftKey!]: nextExecution.modelId
       }));
       return;
     }

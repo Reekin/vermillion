@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentAdapter } from "@vermillion/adapters";
 import { MAX_STREAM_EVENT_CHUNK_LENGTH } from "@vermillion/shared";
+import { parseSessionRpcResponse } from "@vermillion/shared";
 import { SessionIndexStore } from "../src/session-index.js";
 import { SessionRuntimeService } from "../src/runtime-service.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";
@@ -637,6 +638,31 @@ describe("SessionRuntimeService", () => {
     expect(block?.text).toBe(
       "Please review these files.\n\n![reference.png](file:///C:/Users/TestUser/Pictures/reference.png)\n[README.md](file:///D:/workspace/vermillion/README.md)"
     );
+  });
+
+  it("preserves adapter send rejection details in the runtime and RPC receipt", async () => {
+    const error = { code: "quota_exceeded", message: "Usage limit reached.", details: { retryAfter: 60 } };
+    const adapter: AgentAdapter = {
+      id: "codex-adapter", kind: "codex", getLifecycleState: () => "idle",
+      initialize: async () => {}, subscribe: () => () => {}, dispose: async () => {},
+      executeCommand: async (envelope) => ({ commandId: envelope.commandId, commandType: envelope.command.type,
+        accepted: envelope.command.type !== "sendUserMessage",
+        ...(envelope.command.type === "sendUserMessage" ? { error } : {}) })
+    };
+    const service = createService({ agentBindings: [{
+      descriptor: { engineId: "codex", displayName: "Codex", capabilities: ["chat"] }, adapter, providerKind: "codex-thread"
+    }] });
+    await service.executeCommand({ commandId: "create", command: {
+      type: "createSession", engineId: "codex", workspaceId: "workspace-1"
+    } });
+    const receipt = await service.executeCommand({ commandId: "send", command: {
+      type: "sendUserMessage", sessionId: "session-1", messageId: "message", content: "question", attachments: []
+    } });
+    expect(receipt).toEqual({ commandId: "send", commandType: "sendUserMessage", accepted: false, error });
+    expect(parseSessionRpcResponse({ id: "rpc", method: "runtime.command", ok: true, result: receipt }))
+      .toMatchObject({ result: { accepted: false, error } });
+    expect(service.getSnapshot().sessions.find((session) => session.sessionId === "session-1")?.status).toBe("idle");
+    expect(service.getSnapshot().turns).toEqual([]);
   });
 
   it("keeps a session running after sendUserMessage when the adapter accepts but has not emitted runtime events yet", async () => {

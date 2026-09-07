@@ -27,6 +27,7 @@ export type ComposerContainerProps = {
   getSendOptions?: () => Pick<import("../../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   activeSession?: ChatSession;
   activeSessionId?: string;
+  draftKey?: string;
   threadGoal?: ThreadGoal;
   selectedEngineId: string;
   engineSurface?: EngineSurfaceRpc;
@@ -47,6 +48,7 @@ export type ComposerContainerProps = {
   createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   prepareSend?: () => Promise<string>;
+  submitBranch?: (payload: Omit<import("../../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
@@ -64,6 +66,7 @@ export const ComposerContainer = ({
   getSendOptions,
   activeSession,
   activeSessionId,
+  draftKey,
   threadGoal,
   selectedEngineId,
   engineSurface,
@@ -84,6 +87,7 @@ export const ComposerContainer = ({
   createSession,
   initializeDraftExecution,
   prepareSend,
+  submitBranch,
   autoSendQueuedMessages,
   onResumeSession,
   onRequestTranscriptBottom,
@@ -96,6 +100,7 @@ export const ComposerContainer = ({
     transport,
     activeSession,
     activeSessionId,
+    draftKey,
     threadGoal,
     selectedEngineId,
     engineSurface,
@@ -114,6 +119,7 @@ export const ComposerContainer = ({
     createSession,
     initializeDraftExecution,
     prepareSend,
+    submitBranch,
     autoSendQueuedMessages,
     onResumeSession,
     onRequestTranscriptBottom,

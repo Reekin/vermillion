@@ -321,6 +321,9 @@ export type DesktopTransport = {
     }) => Promise<SkillDescriptorRpc[]>;
   };
   chatTree: {
+    submit: (input: import("@vermillion/shared").ChatTreeSendInput) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
+    retry: (input: { operationId: string }) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
+    operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
     setMode: (input: { sessionId: string; mode: import("@vermillion/shared").ThinkMode }) => Promise<{ mode: import("@vermillion/shared").ThinkMode }>;
     get: (sessionId: string) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
@@ -870,6 +873,9 @@ export const createDesktopTransport = (
       }
     },
     chatTree: {
+      submit: (input) => rpc.request("chatTree.submit", input),
+      retry: (input) => rpc.request("chatTree.retry", input),
+      operations: (input) => rpc.request("chatTree.operations", input),
       setMode: (input) => rpc.request("chatTree.setMode", input),
       get: async (sessionId: string) => {
         const result = await rpc.request("chatTree.get", {

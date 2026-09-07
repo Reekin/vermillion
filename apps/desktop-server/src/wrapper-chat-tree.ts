@@ -1,4 +1,5 @@
-import type { Turn } from "@vermillion/shared";
+import { randomUUID } from "node:crypto";
+import type { Turn, ChatTreeSendInput, ChatTreeSendOperation, CommandEnvelope } from "@vermillion/shared";
 import type { ChatTreeSnapshot, ChatTreeNodeSnapshot } from "./chat-tree-provider.js";
 import type { SessionIndexStore } from "./session-index.js";
 import type { SessionRuntimeService } from "./runtime-service.js";
@@ -9,6 +10,7 @@ import { buildSessionWindowSnapshotFromPage } from "./session-window.js";
 export class WrapperChatTreeService {
   private readonly loaded = new Set<string>();
   private readonly loading = new Map<string, Promise<void>>();
+  private readonly operations = new Map<string, ChatTreeSendOperation>();
   private readonly unsubscribe: () => void;
 
   public constructor(private readonly options: {
@@ -55,7 +57,7 @@ export class WrapperChatTreeService {
   private project(sessionId: string) {
     const { runtimeService, sessionIndexStore: index } = this.options;
     const treeId = index.getTreeId(sessionId);
-    const members = index.getTreeMembers(sessionId);
+    const members = index.getTreeMembers(sessionId).filter((id) => this.loaded.has(id));
     const snapshot = runtimeService.getSnapshot();
     const relations = index.listRelations();
     const paths = new Map<string, string[]>();
@@ -121,8 +123,13 @@ export class WrapperChatTreeService {
 
   public async get(sessionId: string): Promise<ChatTreeSnapshot> {
     await this.options.sessionIndexStore.ready();
-    for (const member of this.options.sessionIndexStore.getTreeMembers(sessionId)) {
-      await this.loadMember(member);
+    const members = this.options.sessionIndexStore.getTreeMembers(sessionId);
+    if (!members.some((id) => this.loaded.has(id))) {
+      await Promise.all(members.map((id) => this.loadMember(id)));
+    } else {
+      for (const id of members.filter((id) => !this.loaded.has(id) && !this.loading.has(id))) {
+        void this.loadMember(id).then(() => this.changed(sessionId)).catch(() => {});
+      }
     }
     const { tree } = this.project(sessionId);
     if (!this.options.sessionIndexStore.getTreeView(sessionId)) {
@@ -171,4 +178,70 @@ export class WrapperChatTreeService {
     await this.options.sessionIndexStore.setTreeView(sessionId, view);
     return { sessionId: member };
   }
+
+  private changed(sessionId: string): void {
+    const view = this.options.sessionIndexStore.getTreeView(sessionId);
+    this.options.runtimeService.notifyChatTreeChanged(sessionId, view?.nodeId ? [view.nodeId] : []);
+  }
+
+  public listOperations(sessionId: string): ChatTreeSendOperation[] {
+    const index = this.options.sessionIndexStore;
+    return structuredClone([...this.operations.values()].filter((operation) =>
+      index.getTreeId(operation.sessionId) === index.getTreeId(sessionId)));
+  }
+
+  public submit(input: ChatTreeSendInput, send: TreeSend): ChatTreeSendOperation {
+    const operation: ChatTreeSendOperation = { ...structuredClone(input), operationId: randomUUID(), status: "creating" };
+    this.operations.set(operation.operationId, operation);
+    return this.start(operation, send);
+  }
+
+  public retry(operationId: string, send: TreeSend): ChatTreeSendOperation {
+    const operation = this.operations.get(operationId);
+    if (!operation) throw new Error(`Unknown send operation: ${operationId}`);
+    if (operation.status !== "failed") return structuredClone(operation);
+    operation.status = "creating";
+    delete operation.error;
+    return this.start(operation, send);
+  }
+
+  private start(operation: ChatTreeSendOperation, send: TreeSend): ChatTreeSendOperation {
+    const snapshot = structuredClone(operation);
+    this.changed(operation.sessionId);
+    void this.run(operation, send);
+    return snapshot;
+  }
+
+  private async run(operation: ChatTreeSendOperation, send: TreeSend): Promise<void> {
+    try {
+      if (!operation.targetSessionId) {
+        await this.get(operation.sessionId);
+        const { paths, turnsById, byActivity } = this.project(operation.sessionId);
+        if (turnsById.get(operation.nodeId)?.status !== "completed") {
+          throw new Error("Wait for this turn to finish before branching.");
+        }
+        const source = byActivity.find((id) => paths.get(id)?.includes(operation.nodeId));
+        if (!source) throw new Error(`Unknown tree node: ${operation.nodeId}`);
+        operation.targetSessionId = await this.options.fork(source, operation.nodeId);
+        this.changed(operation.sessionId);
+      }
+      await this.loadMember(operation.targetSessionId);
+      operation.status = "sending";
+      this.changed(operation.sessionId);
+      const receipt = await send({ commandId: randomUUID(), command: {
+        type: "sendUserMessage", sessionId: operation.targetSessionId,
+        messageId: randomUUID(), content: operation.content, attachments: structuredClone(operation.attachments),
+        execution: structuredClone(operation.execution), thinkMode: operation.thinkMode
+      } });
+      if (!receipt.accepted || !receipt.turnId) throw new Error(receipt.error?.message || "Branch message was not accepted.");
+      operation.turnId = receipt.turnId;
+      operation.status = "sent";
+    } catch (error) {
+      operation.status = "failed";
+      operation.error = error instanceof Error ? error.message : String(error);
+    }
+    this.changed(operation.sessionId);
+  }
 }
+
+type TreeSend = (command: CommandEnvelope) => Promise<Pick<import("./runtime-types.js").CommandReceipt, "accepted" | "turnId" | "error">>;

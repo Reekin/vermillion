@@ -158,7 +158,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
   }
 
   public async runAction(
-    input: SessionActionProviderContext & { action: SessionActionKind; fromTurnId?: string }
+    input: SessionActionProviderContext & { action: SessionActionKind; fromTurnId?: string; activateFork?: boolean }
   ): Promise<SessionActionResult | undefined> {
     const threadId = resolveCodexThreadId(input);
 
@@ -252,10 +252,12 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         sourceTurnId: input.fromTurnId ?? thread.turns.at(-1)?.id,
         createdAt
       });
-      await input.runtimeService.getWorkspaceRegistry()?.setLastActiveSelection({
-        workspaceId,
-        sessionId: childSessionId
-      });
+      if (input.activateFork !== false) {
+        await input.runtimeService.getWorkspaceRegistry()?.setLastActiveSelection({
+          workspaceId,
+          sessionId: childSessionId
+        });
+      }
       return {
         action: "fork",
         status: "forked",

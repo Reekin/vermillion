@@ -785,6 +785,21 @@ export class SessionShellService {
     return this.wrapperChatTree.prepareSend(input.sessionId, input.nodeId);
   }
 
+  public submitChatTreeSend(input: import("@vermillion/shared").ChatTreeSendInput) {
+    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
+    return this.wrapperChatTree.submit(input, (command) => this.executeCommand(command));
+  }
+
+  public retryChatTreeSend(input: { operationId: string }) {
+    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
+    return this.wrapperChatTree.retry(input.operationId, (command) => this.executeCommand(command));
+  }
+
+  public getChatTreeOperations(input: { sessionId: string }) {
+    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
+    return { operations: this.wrapperChatTree.listOperations(input.sessionId) };
+  }
+
   public async setChatTreeMode(input: { sessionId: string; mode: import("@vermillion/shared").ThinkMode }) {
     if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
     return this.wrapperChatTree.setMode(input.sessionId, input.mode);

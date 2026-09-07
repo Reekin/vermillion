@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
+import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
+import type { ChatSendInput } from "../../transport/desktop-transport.js";
+import { projectChatTreeSends } from "./chat-tree-send-projection.js";
 import {
   statusNoticeErrorDetails,
   type ComposerStatusNotice
@@ -20,6 +22,14 @@ export const useChatTreeController = (input: {
     tree: ChatTreeSnapshotRpc;
   }>();
   const [failedSessionId, setFailedSessionId] = useState<string>();
+  const [sends, setSends] = useState<{ sessionId: string; operations: ChatTreeSendOperation[] }>();
+  const [selectedSend, setSelectedSend] = useState<string>();
+  const selectedSendRef = useRef<string | undefined>(undefined);
+  const navigationRef = useRef(0);
+  const selectSend = (operationId: string | undefined) => {
+    selectedSendRef.current = operationId;
+    setSelectedSend(operationId);
+  };
   const sessionIdRef = useRef(sessionId);
   const requestIdRef = useRef(0);
   const activationRef = useRef<{ sessionId: string; promise: Promise<void> } | undefined>(undefined);
@@ -30,8 +40,21 @@ export const useChatTreeController = (input: {
     const requestId = ++requestIdRef.current;
     const isCurrent = () => sessionIdRef.current === sessionId && requestId === requestIdRef.current;
     try {
-      const tree = await transport.chatTree.get(sessionId);
+      const [initialTree, result] = await Promise.all([
+        transport.chatTree.get(sessionId),
+        transport.chatTree.operations({ sessionId })
+      ]);
       if (!isCurrent()) return;
+      setSends({ sessionId, operations: result.operations });
+      let tree = initialTree;
+      const selected = result.operations.find((op) => op.operationId === selectedSendRef.current);
+      if (selected?.turnId && tree.nodes.some((node) => node.turnId === selected.turnId)) {
+        const navigation = navigationRef.current;
+        await transport.chatTree.jump({ sessionId, nodeId: selected.turnId });
+        if (!isCurrent() || navigationRef.current !== navigation) return;
+        tree = await transport.chatTree.get(sessionId);
+        if (!isCurrent() || navigationRef.current !== navigation) return;
+      }
       const viewedSessionId = tree.currentSessionId ?? sessionId;
       // Keep the pending activation as well as its result across refreshes.
       if (activationRef.current?.sessionId !== viewedSessionId) {
@@ -60,6 +83,9 @@ export const useChatTreeController = (input: {
         store.dispatch({ type: "store/setActiveSession", sessionId });
       }
       setLoaded({ entrySessionId: sessionId, tree });
+      if (selected?.turnId && tree.currentNodeId === selected.turnId && selectedSendRef.current === selected.operationId) {
+        selectSend(undefined);
+      }
       setFailedSessionId(undefined);
     } catch (error) {
       if (!isCurrent()) return;
@@ -71,6 +97,9 @@ export const useChatTreeController = (input: {
     activationRef.current = undefined;
     setLoaded(undefined);
     setFailedSessionId(undefined);
+    setSends(undefined);
+    selectSend(undefined);
+    navigationRef.current += 1;
     return () => { requestIdRef.current += 1; };
   }, [sessionId]);
 
@@ -88,7 +117,24 @@ export const useChatTreeController = (input: {
     });
   }, [refreshChatTree, input.refreshSignal, onStatusNotice]);
 
-  const chatTree = loaded && loaded.entrySessionId === sessionId ? loaded.tree : undefined;
+  const operations = sends && sends.sessionId === sessionId ? sends.operations : [];
+  const chatTree = projectChatTreeSends(
+    loaded && loaded.entrySessionId === sessionId ? loaded.tree : undefined,
+    operations,
+    selectedSend
+  );
+  const pendingSend = operations.find((op) =>
+    (op.operationId === chatTree?.currentNodeId || op.turnId === chatTree?.currentNodeId) &&
+    (!op.turnId || !chatTree?.nodes.some((node) => node.turnId === op.turnId)));
+
+  const receiveSend = (operation: ChatTreeSendOperation) => {
+    setSends((current) => ({
+      sessionId: sessionId!,
+      operations: current && current.sessionId === sessionId && current.operations.some((item) => item.operationId === operation.operationId)
+        ? current.operations.map((item) => item.operationId === operation.operationId ? operation : item)
+        : [...(current && current.sessionId === sessionId ? current.operations : []), operation]
+    }));
+  };
   // A session the store already holds renders at once; the tree refresh then narrows the view to the saved position.
   const isOpening = Boolean(
     sessionId && !chatTree && failedSessionId !== sessionId && !store.getDomainReadModel().getSession(sessionId)
@@ -96,12 +142,22 @@ export const useChatTreeController = (input: {
 
   return {
     chatTree,
+    operations,
+    pendingSend,
     isOpening,
     viewSessionId: chatTree?.currentSessionId ?? sessionId,
     refreshChatTree,
     onJumpChatTree: async (nodeId: string): Promise<void> => {
       if (!sessionId || isOpening) return;
+      navigationRef.current += 1;
       requestIdRef.current += 1;
+      const operation = operations.find((op) => op.operationId === nodeId);
+      if (operation) {
+        selectSend(operation.operationId);
+        void refreshChatTree().catch(() => undefined);
+        return;
+      }
+      selectSend(undefined);
       try {
         await transport.chatTree.jump({ sessionId, nodeId });
         await refreshChatTree();
@@ -113,6 +169,31 @@ export const useChatTreeController = (input: {
           source: "chat-tree",
           ...statusNoticeErrorDetails(error)
         });
+      }
+    },
+    submitBranch: async (payload: Omit<ChatSendInput, "sessionId">): Promise<boolean> => {
+      if (!sessionId || !chatTree) return false;
+      if (pendingSend) throw new Error("请等待该消息发送完成，或切换到其他节点提问。");
+      const nodeId = chatTree.currentNodeId;
+      if (!nodeId || !chatTree.nodes.some((node) => node.parentNodeId === nodeId)) return false;
+      const navigation = ++navigationRef.current;
+      const operation = await transport.chatTree.submit({ ...payload, attachments: payload.attachments ?? [], sessionId, nodeId });
+      if (sessionIdRef.current === sessionId) {
+        receiveSend(operation);
+        if (navigationRef.current === navigation) selectSend(operation.operationId);
+        void refreshChatTree().catch(() => undefined);
+      }
+      return true;
+    },
+    retrySend: async (operationId: string): Promise<void> => {
+      try {
+        const operation = await transport.chatTree.retry({ operationId });
+        if (sessionIdRef.current !== sessionId) return;
+        receiveSend(operation);
+        void refreshChatTree().catch(() => undefined);
+      } catch (error) {
+        setSends((current) => current && ({ ...current, operations: current.operations.map((op) =>
+          op.operationId === operationId ? { ...op, error: (error as Error).message } : op) }));
       }
     },
     prepareSend: async (): Promise<string> => {

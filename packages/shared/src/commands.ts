@@ -96,6 +96,21 @@ const zSendUserMessageCommand = z.object({
   developerInstructions: z.string().min(1).optional()
 });
 
+export const zChatTreeSendInputSchema = zSendUserMessageCommand.pick({
+  sessionId: true, content: true, attachments: true, execution: true, thinkMode: true
+}).extend({ nodeId: zTurnId });
+
+export const zChatTreeSendOperationSchema = zChatTreeSendInputSchema.extend({
+  operationId: z.string().min(1),
+  status: z.enum(["creating", "sending", "sent", "failed"]),
+  targetSessionId: zSessionId.optional(),
+  turnId: zTurnId.optional(),
+  error: z.string().optional()
+});
+
+export type ChatTreeSendInput = z.infer<typeof zChatTreeSendInputSchema>;
+export type ChatTreeSendOperation = z.infer<typeof zChatTreeSendOperationSchema>;
+
 const zSteerTurnCommand = z.object({
   type: z.literal("steerTurn"),
   thinkMode: zThinkMode.optional(),
