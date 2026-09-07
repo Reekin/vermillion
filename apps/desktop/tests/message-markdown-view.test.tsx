@@ -171,7 +171,7 @@ describe("MessageMarkdownView", () => {
     );
   });
 
-  it("shows unsupported link targets without making them navigable", () => {
+  it("renders Windows path links as local file targets", () => {
     const html = renderToStaticMarkup(
       <MessageMarkdownView
         block={{
@@ -192,12 +192,11 @@ describe("MessageMarkdownView", () => {
       />
     );
 
-    expect(html).toContain('class="awb-message__unsupported-link"');
+    expect(html).not.toContain('class="awb-message__unsupported-link"');
     expect(html).toContain(">recovery<");
     expect(html).toContain(
-      '<code class="awb-message__unsupported-link-target">I:\\gpt-projects\\agent-wrappers\\vermillion\\recovery\\awb-session-index-20260830</code>'
+      'href="file:///I:/gpt-projects/agent-wrappers/vermillion/recovery/awb-session-index-20260830"'
     );
-    expect(html).not.toContain("href=");
   });
 
   it("renders web links as external browser targets", () => {
