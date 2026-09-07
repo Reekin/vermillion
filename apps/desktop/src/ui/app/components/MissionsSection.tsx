@@ -108,7 +108,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
         <Toggle label="调度" checked={scheduler.enabled} disabled={busy} onChange={(enabled) => setScheduler({ enabled })} />
         <Stepper label="并发" value={scheduler.maxWorkers} min={1} max={8} disabled={busy} onChange={(maxWorkers) => setScheduler({ maxWorkers })} />
         <span className="border-l border-border-strong pl-3 font-mono text-faint-foreground">
-          {workItems.filter((w) => w.status === "running").length} 进行中 · {workItems.filter((w) => w.status === "review").length} 待验收 · {workItems.filter((w) => !isOpenWorkItem(w)).length} 已结束
+          {workItems.filter((w) => w.status === "running").length} 进行中 · {workItems.filter((w) => !isOpenWorkItem(w)).length} 已结束
         </span>
         {hidden > 0 && <Button size="sm" variant="ghost" className="ml-auto underline underline-offset-4" onClick={onExpand}>另有 {hidden} 项已结束</Button>}
       </div>

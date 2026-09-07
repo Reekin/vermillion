@@ -7,7 +7,7 @@
  * Buttons       Button, IconButton
  * Text          Badge, SectionLabel, InlineNotice, StatusDot
  * Fields        Field (input / textarea / select / number), Toggle, Stepper
- * Structure     PanelHeader, Tabs, ListRow, Card, EmptyState, StatusBar
+ * Structure     PanelHeader, Tabs, ListRow, Card, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
@@ -18,7 +18,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes
 } from "react";
-import { Minus, Plus, type LucideIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Minus, Plus, type LucideIcon } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
@@ -65,7 +65,7 @@ export const IconButton = ({ icon: Icon, label, size = 14, active, className, ..
 
 // ---- Text ----
 
-export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "review" | "decision" | "running" | "queued" | "closed" | "cancelled"; muted?: boolean }) => (
+export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "decision" | "running" | "queued" | "closed" | "cancelled"; muted?: boolean }) => (
   <span
     data-status={status}
     className={cn(
@@ -301,7 +301,7 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
   );
 };
 
-/** Bordered container for one self-contained item (a decision, a mission, a review). Header line + body + optional footer actions. */
+/** Bordered container for one self-contained item. Header line + body + optional footer actions. */
 export const Card = ({ header, children, footer, className, compact, rows }: { header?: ReactNode; children?: ReactNode; footer?: ReactNode; className?: string; compact?: boolean; rows?: ReactNode }) => (
   <article className={cn("rounded-lg border border-border-strong bg-surface", compact && "vm-card-compact", className)}>
     {header && <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">{header}</header>}
@@ -309,6 +309,16 @@ export const Card = ({ header, children, footer, className, compact, rows }: { h
     {rows && <div className="border-t border-border">{rows}</div>}
     {footer && <footer className="flex items-center gap-2 border-t border-border px-4 py-2.5">{footer}</footer>}
   </article>
+);
+
+/** Controlled disclosure for supplementary technical text; parents retain expansion across panel changes. */
+export const CollapsibleDetails = ({ title = "技术详情", open, onToggle, children }: { title?: string; open: boolean; onToggle: () => void; children: string }) => (
+  <div className="mt-3">
+    <Button type="button" variant="ghost" size="sm" aria-expanded={open} onClick={onToggle}>
+      {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}{title}
+    </Button>
+    {open && <pre className="mt-1.5 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-input px-3 py-2 font-mono text-caption leading-relaxed text-muted-foreground">{children}</pre>}
+  </div>
 );
 
 /** Current state, why, and (optionally) the one thing to do next. One per view; never stack several. */

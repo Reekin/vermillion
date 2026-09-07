@@ -9,7 +9,6 @@ import type {
   DocFile,
   InboxItem,
   Mission,
-  Risk,
   RoleFile,
   WorkItem,
   WorkbenchEvent,
@@ -55,6 +54,7 @@ export class WorkbenchService {
   private readonly now: () => string;
   private readonly contexts = new Map<string, WorkspaceContext>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
+  private readonly integrations = new Map<string, Promise<unknown>>();
 
   constructor(options: WorkbenchServiceOptions) {
     this.workspaces = options.workspaces;
@@ -71,6 +71,15 @@ export class WorkbenchService {
 
   private emit(event: WorkbenchEvent): void {
     for (const listener of this.listeners) listener(event);
+  }
+
+  /** Workers share the workspace Git index; integrate their results one at a time. */
+  private async integrate<T>(workspaceId: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.integrations.get(workspaceId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(action);
+    this.integrations.set(workspaceId, next);
+    try { return await next; }
+    finally { if (this.integrations.get(workspaceId) === next) this.integrations.delete(workspaceId); }
   }
 
   dispose(): void {
@@ -299,7 +308,7 @@ export class WorkbenchService {
 
   async createWorkItem(
     workspaceId: string,
-    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { missionId?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[]; autoClose?: boolean }
+    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { missionId?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[] }
   ): Promise<WorkItem> {
     const now = this.now();
     const { store } = await this.context(workspaceId);
@@ -315,7 +324,6 @@ export class WorkbenchService {
       objective: input.objective,
       status: "queued",
       risk: input.risk,
-      autoClose: input.autoClose ?? isLowRisk(input.risk),
       needs: input.needs ?? [],
       dependsOn: input.dependsOn ?? [],
       refs: input.refs ?? [],
@@ -350,51 +358,84 @@ export class WorkbenchService {
     return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, lastTurnId: lastTurnId ?? item.run.lastTurnId, heartbeatAt: this.now() } }));
   }
 
-  /** Worker finished: evidence + review dispositions + verify report. Auto-close only when verify passed and item allows it. */
+  /** Verified work merges immediately; unsuccessful submissions return to the same worker. */
   async submitWorkItem(
     workspaceId: string,
     workItemId: string,
     input: { evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
   ): Promise<WorkItem> {
+    return this.integrate(workspaceId, () => this.submitResult(workspaceId, workItemId, input));
+  }
+
+  private async submitResult(workspaceId: string, workItemId: string, input: Parameters<WorkbenchService["submitWorkItem"]>[2]): Promise<WorkItem> {
     const now = this.now();
+    const current = await this.getWorkItem(workspaceId, workItemId);
+    if (current.status !== "running") throw new Error("Work item is not running: " + workItemId);
+    if (current.run.staleTurnId) {
+      return this.returnWorkItem(workspaceId, workItemId, "提交作废：合同在本轮进行中被调整");
+    }
     const submitted = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
-      if (item.run.staleTurnId) {
-        // The contract changed during the turn this submit came from: void it, back to the queue, same worktree.
-        return { ...item, status: "queued", decisions: [...item.decisions, "提交作废：合同在本轮进行中被调整"], run: { ...item.run, sessionId: undefined, staleTurnId: undefined } };
-      }
       const verify = { ...input.verify, verifiedAt: now };
       return {
         ...item,
         evidence: { ...input.evidence, submittedAt: now },
         review: input.review,
-        verify,
-        status: verify.verdict === "rework" ? "queued" : "review"
+        verify
       };
     });
-    return submitted.status === "review" && submitted.autoClose ? this.approveWorkItem(workspaceId, workItemId) : submitted;
+    const failed = input.verify.items.filter((entry) => !entry.pass);
+    const missing = submitted.acceptance.some((_, index) => !input.verify.items.some((entry) => entry.index === index));
+    if (input.verify.verdict !== "pass" || failed.length || missing) {
+      const reason = "验收未通过：" + (failed.map((entry) => entry.evidence).join("\n") || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
+      return this.returnWorkItem(workspaceId, workItemId, reason);
+    }
+    return this.mergeWorkItem(workspaceId, workItemId);
   }
 
   /** Accepts the work: merges the worker's branch into the workspace (when it ran in a worktree) and closes the item. */
-  async approveWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+  private async mergeWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
     const { docs } = await this.context(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
-    if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
+    let result: { commit?: string; diffStat: string } = { diffStat: "" };
     if (item.run.worktreePath && item.run.branch) {
       try {
-        await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
+        result = await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
       } catch (error) {
-        if (!(error instanceof WorktreeMergeConflict)) throw error;
-        return this.rejectWorkItem(workspaceId, workItemId, "合并冲突：\n" + error.files.map((file) => "- " + file).join("\n") + "\n在原 worktree 的工单分支上 rebase 到 workspace 当前主分支，解决冲突后重新 review、验收并提交；由用户再次验收，合并仍由工作台完成。");
+        const reason = error instanceof WorktreeMergeConflict ? "合并冲突：\n" + error.files.map((file) => "- " + file).join("\n") : "合并失败：" + String(error);
+        return this.returnWorkItem(workspaceId, workItemId, reason + "\n在原 worktree 继续修改，完成后重新提交。");
       }
     }
-    return this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", merge: { ...result, mergedAt: this.now() }, run: { ...current.run, worktreePath: undefined, branch: undefined } }));
   }
 
-  async rejectWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
+  private async returnWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
     return this.mutateWorkItem(workspaceId, workItemId, (item) => {
-      if (item.status !== "review") throw new Error("Work item is not awaiting review: " + workItemId);
-      return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }], run: { ...item.run, resumeMessage: "用户打回：" + reason } };
+      return { ...item, status: "queued", rejections: [...item.rejections, { reason, at: this.now() }], run: { ...item.run, staleTurnId: undefined, resumeMessage: reason } };
     });
+  }
+
+  async acknowledgeWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
+      if (item.status !== "closed" || !item.merge) throw new Error("Work item has no merged notification");
+      return { ...item, merge: { ...item.merge, acknowledgedAt: this.now() } };
+    });
+  }
+
+  async rollbackWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
+    return this.integrate(workspaceId, () => this.rollbackResult(workspaceId, workItemId, reason));
+  }
+
+  private async rollbackResult(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
+    if (!reason.trim()) throw new Error("请填写回滚理由");
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    if (item.status !== "closed" || !item.merge?.commit) throw new Error("Work item has no merge to roll back");
+    const { docs, store } = await this.context(workspaceId);
+    const rollbackCommit = await docs.rollbackMerge(item.merge.commit);
+    // The closed item's worktree was removed. The scheduler creates its original path from current HEAD,
+    // so the worker can implement the reverted changes as new commits in the same session.
+    await store.workItems.put({ ...item, merge: { ...item.merge, rollbackCommit, acknowledgedAt: this.now() } });
+    if (item.missionId) await this.setMissionStatus(workspaceId, item.missionId, "active");
+    return this.returnWorkItem(workspaceId, workItemId, "用户回滚：" + reason.trim());
   }
 
   async cancelWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
@@ -409,7 +450,7 @@ export class WorkbenchService {
 
   /**
    * Steward adjusts a contract after a new revision. A running item keeps its session and worktree and its worker is
-   * steered immediately; a submission awaiting review goes back to the queue; anything else just gets the new contract.
+   * steered immediately; anything else just gets the new contract.
    */
   async updateWorkItem(
     workspaceId: string,
@@ -419,7 +460,7 @@ export class WorkbenchService {
     const { note, ...changes } = input;
     const updated = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
       if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
-      const status = item.status === "review" ? "queued" : item.status;
+      const status = item.status;
       // While parked the note lives on the decision card and reaches the worker inside the answer line.
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
       return {
@@ -625,15 +666,13 @@ export class WorkbenchService {
       }
       const missions = await store.missions.list();
       for (const workItem of await store.workItems.list()) {
-        if (workItem.status !== "review") continue;
-        items.push({ kind: "review", workspaceId: workspace.workspaceId, workItem, mission: missions.find((m) => m.missionId === workItem.missionId) });
+        if (workItem.status !== "closed" || !workItem.merge || workItem.merge.acknowledgedAt) continue;
+        items.push({ kind: "merged", workspaceId: workspace.workspaceId, workItem, mission: missions.find((m) => m.missionId === workItem.missionId) });
       }
     }
     return items;
   }
 }
-
-const isLowRisk = (risk: Risk): boolean => risk === "R0" || risk === "R1";
 
 /** "question -> chosen option (note)" or "question -> 备注：note", followed by the contract changes made while the card waited. */
 const describeAnswer = (card: DecisionCard, answer: { key?: string; note?: string }): string => {

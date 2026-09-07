@@ -155,12 +155,13 @@ export class DocsService {
   }
 
   /** Commits everything in a work item's worktree onto its branch, merges into the workspace branch, and removes the worktree. */
-  async mergeWorktree(worktreePath: string, branch: string, message: string): Promise<string> {
+  async mergeWorktree(worktreePath: string, branch: string, message: string): Promise<{ commit?: string; diffStat: string }> {
     const unresolved = await git(this.rootPath, ["ls-files", "--unmerged"]);
     if (unresolved) throw new Error("主工作区存在尚未解决的冲突，请先完成当前 Git 操作。");
     await git(worktreePath, ["add", "-A"]);
     const staged = (await git(worktreePath, ["status", "--porcelain=v1"])).trim();
     if (staged) await git(worktreePath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "-q", "-m", message]);
+    const before = await this.head();
     try {
       await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "merge", "--no-ff", "-q", "-m", "Merge " + message, branch]);
     } catch (error) {
@@ -169,7 +170,24 @@ export class DocsService {
       await git(this.rootPath, ["merge", "--abort"]);
       throw new WorktreeMergeConflict(files);
     }
+    const commit = (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
+    const diffStat = await git(this.rootPath, ["diff", "--stat", before!, commit]);
     await this.dropWorktree(worktreePath, branch);
+    return { commit: commit === before ? undefined : commit, diffStat };
+  }
+
+  async rollbackMerge(commit: string): Promise<string> {
+    if (await git(this.rootPath, ["ls-files", "--unmerged"])) throw new Error("主工作区存在尚未解决的冲突，请先完成当前 Git 操作。");
+    try {
+      await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "revert", "--no-edit", "-m", "1", commit]);
+    } catch (error) {
+      const files = (await git(this.rootPath, ["diff", "--name-only", "--diff-filter=U", "-z"])).split("\0").filter(Boolean);
+      if (files.length) {
+        await git(this.rootPath, ["revert", "--abort"]);
+        throw new Error("回滚冲突：\n" + files.join("\n"));
+      }
+      throw error;
+    }
     return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
   }
 
