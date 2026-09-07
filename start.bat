@@ -1,10 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not exist node_modules (
-  echo Installing dependencies...
-  call pnpm install || exit /b 1
-)
+echo Checking dependencies...
+call pnpm install --frozen-lockfile || exit /b 1
 node scripts/needs-build.mjs
 if errorlevel 1 (
   echo Building...
