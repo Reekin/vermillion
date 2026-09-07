@@ -41,9 +41,14 @@ const readJsonDir = async <T>(dir: string, schema: z.ZodType<T>): Promise<T[]> =
   return records;
 };
 
-/** Windows briefly locks a file while a watcher or reader has it open; rename then fails with EPERM. Retry a few times. */
+let writeSeq = 0;
+
+/**
+ * Writes go through a per-call temp file (so concurrent writers of the same record never share one) and are renamed over the target.
+ * Windows briefly locks a file while a watcher or reader has it open; rename then fails with EPERM. Retry a few times.
+ */
 const writeJsonAtomic = async (path: string, value: unknown): Promise<void> => {
-  const tmp = path + ".tmp";
+  const tmp = `${path}.${process.pid}-${writeSeq++}.tmp`;
   await writeFile(tmp, JSON.stringify(value, null, 2) + "\n", "utf8");
   for (let attempt = 0; ; attempt += 1) {
     try {
