@@ -28,6 +28,8 @@ export const zMission = z.object({
   title: z.string().min(1),
   status: zMissionStatus,
   summary: z.string(),
+  resultSummary: z.string().optional(),
+  relatedWorkItemIds: z.array(z.string().min(1)).optional(),
   /** Session the mission was first created from. */
   sessionId: z.string().optional(),
   revisions: z.array(zMissionRevision).min(1),
@@ -242,6 +244,8 @@ export const zAgentRun = z.object({
   workItemId: z.string().optional(),
   /** Steward: the revision commit this run processed. */
   revision: z.string().optional(),
+  /** Snapshot of the revision and work item states sent for a closure judgment. */
+  closureKey: z.string().optional(),
   status: z.enum(["running", "done", "failed"]),
   turns: z.number().int().nonnegative(),
   note: z.string().optional(),

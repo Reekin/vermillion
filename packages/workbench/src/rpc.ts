@@ -74,6 +74,10 @@ export const workbenchRpc = {
     result: zMission
   },
   "mission.setStatus": { params: zWs.extend({ missionId: z.string().min(1), status: zMissionStatus }), result: zMission },
+  "mission.setResult": {
+    params: zWs.extend({ missionId: z.string().min(1), resultSummary: z.string().optional(), relatedWorkItemIds: z.array(z.string().min(1)).optional() }),
+    result: zMission
+  },
 
   "workItem.list": { params: zWs.extend({ missionId: z.string().optional() }), result: z.array(zWorkItem) },
   "workItem.get": { params: zWi, result: zWorkItem },

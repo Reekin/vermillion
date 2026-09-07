@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { latestRevision, type AgentRun, type Mission, type Scheduler, type WorkItem, type WorkbenchClient } from "@vermillion/workbench/client";
 import type { TaskTarget } from "../workbench-store.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { WorkItemDialog } from "./WorkItemDialog.js";
 import { missionStatusLabel, statusLabel } from "./task-labels.js";
-import { Badge, Button, Card, EmptyState, IconButton, InlineNotice, ListRow, SectionLabel, Stepper, Toggle } from "./ui.js";
+import { Badge, Button, Card, DetailSection, EmptyState, IconButton, InlineNotice, ListRow, SectionLabel, Stepper, Toggle } from "./ui.js";
 
 const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
@@ -26,9 +27,9 @@ const SessionLink = ({ sessionId, onOpenSession, children = "会话" }: { sessio
   <Button size="sm" variant="ghost" outlined onClick={() => onOpenSession(sessionId)}>{children}</Button>
 );
 
-const WorkItemRow = ({ item, run, waitingFor, compact, muted, busy, onOpenSession, onCancel }: {
+const WorkItemRow = ({ item, run, waitingFor, compact, muted, busy, onOpenSession, onCancel, onOpen }: {
   item: WorkItem; run?: AgentRun; waitingFor: string[]; compact: boolean; muted: boolean; busy: boolean;
-  onOpenSession: (sessionId: string) => void; onCancel: () => void;
+  onOpenSession: (sessionId: string) => void; onCancel: () => void; onOpen: () => void;
 }) => {
   const sessionId = item.run.sessionId ?? run?.sessionId;
   const at = run?.endedAt ?? item.run.heartbeatAt ?? run?.startedAt ?? item.updatedAt;
@@ -40,6 +41,7 @@ const WorkItemRow = ({ item, run, waitingFor, compact, muted, busy, onOpenSessio
       <ListRow
         leading={<Badge>{item.risk}</Badge>}
         title={<span title={item.title}>{item.title}</span>}
+        onClick={onOpen}
         titleClassName={muted || !isOpenWorkItem(item) ? "text-faint-foreground" : undefined}
         columns={{
           info: <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
@@ -73,6 +75,8 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [menu, setMenu] = useState<{ x: number; y: number; mission: Mission }>();
+  const [detail, setDetail] = useState<{ workspaceId: string; workItemId: string }>();
+  const openDetail = (workItemId: string) => setDetail({ workspaceId, workItemId });
   const perform = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(undefined);
@@ -80,12 +84,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
     finally { setBusy(false); }
   };
   const setScheduler = (value: Partial<Scheduler>) => void perform(() => client.request("scheduler.set", { workspaceId, value: { ...scheduler, ...value } }));
-  const cancelMission = (mission: Mission) => perform(async () => {
-    for (const item of workItems.filter((w) => w.missionId === mission.missionId && isOpenWorkItem(w))) {
-      await client.request("workItem.cancel", { workspaceId, workItemId: item.workItemId });
-    }
-    await client.request("mission.setStatus", { workspaceId, missionId: mission.missionId, status: "cancelled" });
-  });
+  const cancelMission = (mission: Mission) => perform(() => client.request("mission.setStatus", { workspaceId, missionId: mission.missionId, status: "cancelled" }));
   const latestRuns = [...runs].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   const standalone = workItems.filter((w) => !w.missionId);
   const visibleMissions = compact ? missions.filter((m) => m.status === "active" || m.missionId === taskTarget?.id) : missions;
@@ -99,6 +98,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
         return dependency?.status === "closed" ? [] : [dependency ? dependency.title + (dependency.status === "cancelled" ? "（已取消）" : "") : id];
       }) : []}
       compact={compact} muted={muted} busy={busy} onOpenSession={onOpenSession}
+      onOpen={() => openDetail(item.workItemId)}
       onCancel={() => void perform(() => client.request("workItem.cancel", { workspaceId, workItemId: item.workItemId }))}
     />)}</ul>
   );
@@ -136,6 +136,14 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
                   {mission.summary && <p className="line-clamp-2 text-label text-muted-foreground">{mission.summary}</p>}
                   {steward?.note && <p className="mt-1 truncate text-caption text-muted-foreground" title={steward.note}>管家：{steward.note}</p>}
                 </>}
+                {mission.resultSummary && <DetailSection title="结果">{mission.resultSummary}</DetailSection>}
+                {!!mission.relatedWorkItemIds?.length && <DetailSection title="关联工单">
+                  {mission.relatedWorkItemIds.map((id) => {
+                    const related = workItems.find((item) => item.workItemId === id);
+                    return <ListRow key={id} title={related?.title ?? id} leading={related && <Badge>{related.risk}</Badge>}
+                      trailing={related && <Badge status={related.status}>{statusLabel[related.status]}</Badge>} onClick={() => openDetail(id)} />;
+                  })}
+                </DetailSection>}
               </Card>
             </div>;
           })}
@@ -148,6 +156,8 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(undefined)} items={[{
         key: "cancel", label: "取消任务", disabled: busy || menu.mission.status !== "active", onSelect: () => void cancelMission(menu.mission)
       }]} />}
+      {detail?.workspaceId === workspaceId && <WorkItemDialog key={workspaceId + "/" + detail.workItemId} client={client} workspaceId={workspaceId}
+        workItemId={detail.workItemId} workItems={workItems} runs={runs} onClose={() => setDetail(undefined)} onOpenSession={onOpenSession} />}
     </div>
   );
 };

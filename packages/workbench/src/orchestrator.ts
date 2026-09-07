@@ -123,7 +123,6 @@ export class Orchestrator {
 
   /** Runs whatever the files say is pending: unprocessed revisions, then queued items. Also the restart entry point. */
   private async reconcile(workspaceId: string): Promise<void> {
-    await this.settleMissions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
     if (!scheduler.enabled) {
       this.clearRetryTimer(workspaceId);
@@ -131,6 +130,7 @@ export class Orchestrator {
     }
     await this.recoverStaleRuns(workspaceId);
     await this.steward(workspaceId);
+    await this.settleMissions(workspaceId);
     await this.schedule(workspaceId);
   }
 
@@ -172,21 +172,37 @@ export class Orchestrator {
 
   // ---- missions ----
 
-  /**
-   * A mission is done once no work item under it is still open, at least one was closed (a mission whose items were
-   * all cancelled has produced nothing, like one with no items), and the steward has finished with its latest
-   * revision: a steward still issuing items, or a revision it has not picked up yet, keeps the mission active.
-   * A further revision reopens it (WorkbenchService.addMissionRevision). Runs on every work item and run change, so
-   * a steward finishing (its run is written as done) settles its mission.
-   */
+  /** Notify the steward once per revision/work-state snapshot; only its judgment can finish a mission. */
   private async settleMissions(workspaceId: string): Promise<void> {
+    if (!(await this.service.getScheduler(workspaceId)).enabled) return;
     const [missions, items, runs] = await Promise.all([this.service.listMissions(workspaceId), this.service.listWorkItems(workspaceId), this.service.listRuns(workspaceId)]);
     for (const mission of missions.filter((m) => m.status === "active")) {
       const own = items.filter((i) => i.missionId === mission.missionId);
-      if (!own.some((i) => i.status === "closed") || own.some((i) => i.status !== "closed" && i.status !== "cancelled")) continue;
+      const related = (mission.relatedWorkItemIds ?? []).map((id) => items.find((i) => i.workItemId === id));
+      if (!own.length && !related.length) continue;
       const stewards = runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
       if (stewards.some((r) => r.status === "running") || !this.stewarded(mission, stewards)) continue;
-      await this.service.setMissionStatus(workspaceId, mission.missionId, "done");
+      const allEnded = own.every((i) => i.status === "closed" || i.status === "cancelled");
+      if (!allEnded && !related.length) continue;
+      const revision = latestRevision(mission);
+      const closureKey = JSON.stringify([revision, own.map((i) => [i.workItemId, i.status]), related.map((i, index) => [mission.relatedWorkItemIds![index], i?.status])]);
+      const lastClosure = stewards.filter((r) => r.closureKey).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+      if (lastClosure?.closureKey === closureKey && lastClosure.status !== "failed") continue;
+      const describe = (item: WorkItem) => ({ workItemId: item.workItemId, missionId: item.missionId, title: item.title, objective: item.objective, status: item.status, refs: item.refs, evidence: item.evidence, verify: item.verify, decisions: item.decisions });
+      const message = [
+        "任务收尾判断请求：" + mission.title,
+        "workspaceId: " + workspaceId,
+        "missionId: " + mission.missionId,
+        "任务摘要: " + mission.summary,
+        "revision: " + JSON.stringify(revision),
+        "本任务工单全部结束: " + allEnded,
+        "本任务工单与执行结果: " + JSON.stringify(own.map(describe)),
+        "已登记承接工单与执行结果: " + JSON.stringify(related.filter((i): i is WorkItem => Boolean(i)).map(describe)),
+        "已保存的结果说明: " + (mission.resultSummary ?? ""),
+        "其他任务工单索引（供核实承接工作）: " + JSON.stringify(items.filter((i) => i.missionId && i.missionId !== mission.missionId).map((i) => ({ workItemId: i.workItemId, missionId: i.missionId, title: i.title, status: i.status }))),
+        "任务保持进行中，等待管家按角色职责判断。"
+      ].join("\n");
+      await this.stewardTurn(workspaceId, mission, undefined, message, closureKey);
     }
   }
 
@@ -257,7 +273,7 @@ export class Orchestrator {
   /**
    * Delivers to the owning steward. Standalone items reuse their persisted session across contract issues.
    */
-  private async stewardTurn(workspaceId: string, owner: { title: string; missionId?: string; workItemId?: string }, revision: string | undefined, message: string): Promise<void> {
+  private async stewardTurn(workspaceId: string, owner: { title: string; missionId?: string; workItemId?: string }, revision: string | undefined, message: string, closureKey?: string): Promise<void> {
     const owns = (run: AgentRun) => run.role === "steward" && (owner.missionId ? run.missionId === owner.missionId : run.workItemId === owner.workItemId);
     const active = [...this.runsBySession.values()].find((b) => b.workspaceId === workspaceId && owns(b.run));
     if (active) {
@@ -286,6 +302,7 @@ export class Orchestrator {
       missionId: owner.missionId,
       workItemId: owner.workItemId,
       revision,
+      closureKey,
       status: "running",
       turns: 0,
       startedAt: this.now()
