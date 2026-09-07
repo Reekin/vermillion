@@ -36,7 +36,7 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-          <h2 className="shrink-0 text-title font-semibold text-strong">{title}</h2>
+          <h2 className="min-w-0 truncate text-title font-semibold text-strong" title={title}>{title}</h2>
           {presentation === "modal" && titleContent}
           {presentation === "modal" && <div className="ml-auto flex items-center gap-0.5">
             {onExpand && (

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { isUtf8 } from "node:buffer";
 import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -22,6 +23,10 @@ const git = async (cwd: string, args: string[]): Promise<string> => {
 };
 
 const toPosix = (value: string): string => value.split(sep).join("/");
+
+/** Documents are UTF-8 text; whitespace controls are allowed, binary controls are not. */
+const isTextContent = (bytes: Buffer): boolean =>
+  isUtf8(bytes) && !bytes.some((byte) => byte < 9 || (byte > 13 && byte < 32) || byte === 127);
 
 const samePath = (a: string, b: string): boolean =>
   toPosix(resolve(a)).toLowerCase() === toPosix(resolve(b)).toLowerCase();
@@ -84,7 +89,8 @@ export class DocsService {
           await walk(full);
         } else if (entry.isFile()) {
           const info = await stat(full);
-          out.push({ path: toPosix(relative(this.rootPath, full)), size: info.size, modifiedAt: info.mtime.toISOString() });
+          const isText = isTextContent(await readFile(full));
+          out.push({ path: toPosix(relative(this.rootPath, full)), size: info.size, modifiedAt: info.mtime.toISOString(), isText });
         }
       }
     };
@@ -94,11 +100,18 @@ export class DocsService {
 
   async read(path: string, commit?: string): Promise<string> {
     assertDocPath(path);
+    let bytes: Buffer;
     if (commit !== undefined) {
       const revision = (await git(this.rootPath, ["rev-parse", "--verify", "--end-of-options", commit + "^{commit}"])).trim();
-      return git(this.rootPath, ["show", revision + ":" + toPosix(path)]);
+      const { stdout } = await execFileAsync("git", ["show", revision + ":" + toPosix(path)], {
+        cwd: this.rootPath, encoding: "buffer", maxBuffer: 16 * 1024 * 1024
+      });
+      bytes = stdout;
+    } else {
+      bytes = await readFile(join(this.rootPath, path));
     }
-    return readFile(join(this.rootPath, path), "utf8");
+    if (!isTextContent(bytes)) throw new Error("文档不是 UTF-8 文本文件，无法打开：" + path);
+    return bytes.toString("utf8");
   }
 
   async write(path: string, content: string): Promise<void> {

@@ -176,7 +176,9 @@ export type DecisionCard = z.infer<typeof zDecisionCard>;
 export const zDocFile = z.object({
   path: z.string().min(1),
   size: z.number().int().nonnegative(),
-  modifiedAt: z.string()
+  modifiedAt: z.string(),
+  /** Always provided by docs.list; absent on older callers' document metadata. */
+  isText: z.boolean().optional()
 });
 export type DocFile = z.infer<typeof zDocFile>;
 

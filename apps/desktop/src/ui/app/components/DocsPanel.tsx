@@ -115,7 +115,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
       <li key={node.path}>
         <button
           type="button"
-          onClick={() => (isDir ? toggle(node.path) : openEditor({ kind: "doc", path: node.path }))}
+          onClick={() => { if (isDir) toggle(node.path); else if (docs.find((doc) => doc.path === node.path)?.isText) openEditor({ kind: "doc", path: node.path }); }}
           onContextMenu={(event) => onContextMenu(event, node.path)}
           className={cn(
             "flex h-[26px] w-full items-center gap-1.5 pr-3 text-left text-label text-foreground hover:bg-surface-hover",
