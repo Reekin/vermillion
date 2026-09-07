@@ -278,13 +278,17 @@ export class Orchestrator {
     const closed = new Set(items.filter((i) => i.status === "closed").map((i) => i.workItemId)); // cancelled never satisfies a dependency
     const busy = new Set(items.filter((i) => i.status === "running").flatMap((i) => i.needs));
     const ready = items.filter(
-      (i) => i.status === "queued" && i.dependsOn.every((id) => closed.has(id)) && !i.needs.some((need) => busy.has(need))
+      (i) => i.status === "queued" && i.dependsOn.every((id) => closed.has(id))
         // Inbox may receive a submit or decision before its turn ends. Deliver feedback after that turn finishes.
         && !(i.run.resumeMessage && i.run.sessionId && this.runsBySession.has(i.run.sessionId))
     );
-    for (const item of ready.slice(0, capacity)) {
+    let opened = 0;
+    for (const item of ready) {
+      if (opened >= capacity) break;
+      if (item.needs.some((need) => busy.has(need))) continue; // one slot per resource, including ones taken in this pass
       await this.openWorker(workspaceId, item);
       for (const need of item.needs) busy.add(need);
+      opened++;
     }
   }
 
