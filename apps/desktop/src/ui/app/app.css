@@ -94,7 +94,7 @@
 .vm-stepper-control > button { width: 22px; height: 22px; }
 .vm-stepper output { min-width: 22px; text-align: center; font-family: var(--font-mono); color: var(--color-strong); }
 .vm-tabs { display: flex; align-items: center; gap: 2px; padding-inline: 10px; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
-.vm-tabs > button { margin-bottom: -1px; padding: 10px 8px; border-bottom: 1px solid transparent; font-size: var(--text-label); color: var(--color-muted-foreground); white-space: nowrap; }
+.vm-tabs > button { font-weight: 500; margin-bottom: -1px; padding: 10px 8px; border-bottom: 1px solid transparent; font-size: var(--text-label); color: var(--color-muted-foreground); white-space: nowrap; }
 .vm-tabs > button:hover { color: var(--color-foreground); }
 .vm-tabs > button[aria-current="page"] { border-bottom-color: var(--color-accent-strong); color: var(--color-strong); }
 .vm-tab-count { margin-left: 5px; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }

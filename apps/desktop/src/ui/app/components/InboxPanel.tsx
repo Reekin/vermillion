@@ -78,7 +78,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
               <Button variant={recommended ? "primary" : "secondary"} disabled={busy} className="shrink-0" onClick={() => void answer(option.key)}>
                 {option.label}
               </Button>
-              <div className="min-w-0 pt-1.5 text-label text-muted-foreground">
+              <div className="min-w-0 pt-1.5 text-caption text-muted-foreground">
                 {option.detail && <span>{option.detail}</span>}
                 {recommended && card.recommendation && <span className="block text-caption text-muted-foreground">推荐：{card.recommendation}</span>}
               </div>
