@@ -12,6 +12,8 @@ import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
+import { Field, InlineNotice } from "./components/ui.js";
+import { useThinkMode } from "./use-think-mode.js";
 import { WorkspacesPanel, WorkspacesSwitcher } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
@@ -44,6 +46,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
+  const thinkMode = useThinkMode(transport, sessionId);
   const workspaceIds = useMemo(() => workspaces.map((w) => w.workspaceId), [workspaces]);
   // Think shows only the user's own design sessions; agent sessions live under Workspaces → 会话.
   const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "user" });
@@ -81,10 +84,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       });
       void content;
       void attachments;
+      await transport.chatTree.setMode({ sessionId: created.sessionId, mode: thinkMode.mode });
       setSessionId(created.sessionId);
       return created.sessionId;
     },
-    [draftWorkspaceId, workspaceById, transport, store]
+    [draftWorkspaceId, workspaceById, transport, store, thinkMode.mode]
   );
 
   const onSelect = useCallback(
@@ -139,7 +143,16 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               sessionId={sessionId}
               reloadSignal={reloadSignal}
               createSession={createSession}
-              composerExtras={<WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? openSession?.workspaceId : undefined} />}
+              getSendOptions={thinkMode.getSendOptions}
+              composerExtras={<>
+                <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? openSession?.workspaceId : undefined} />
+                <Field kind="select" compact aria-label="模式" value={thinkMode.mode} disabled={!thinkMode.ready}
+                  onChange={(event) => void thinkMode.choose(event.target.value as import("@vermillion/shared").ThinkMode)}>
+                  <option value="dispatch">发单</option>
+                  <option value="execute">现做</option>
+                </Field>
+                {thinkMode.error && <InlineNotice tone="error">{thinkMode.error}</InlineNotice>}
+              </>}
             />
           </main>
           <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">

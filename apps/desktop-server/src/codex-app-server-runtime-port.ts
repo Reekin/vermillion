@@ -1614,6 +1614,7 @@ export class CodexAppServerRuntimePort
     const startTurn = async (targetThreadId: string): Promise<TurnStartResponse> => {
       this.pendingTurnSessionIdByThreadId.set(targetThreadId, sessionId);
       try {
+        await this.injectThinkMode(targetThreadId, payload.params.thinkMode, options);
         const params: Record<string, unknown> = {
           threadId: targetThreadId,
           input,
@@ -1671,6 +1672,17 @@ export class CodexAppServerRuntimePort
     };
   }
 
+  private async injectThinkMode(threadId: string, mode: unknown, options: RuntimeOperationOptions): Promise<void> {
+    if (mode !== "dispatch" && mode !== "execute") return;
+    await this.rpc("thread/inject_items", {
+      threadId,
+      items: [{
+        type: "message", role: "developer",
+        content: [{ type: "input_text", text: `本轮工作台模式：${mode === "dispatch" ? "发单" : "现做"}。按设计伙伴角色中的对应模式规则处理本轮需求。此前轮次的模式不适用于本轮。` }]
+      }]
+    }, options);
+  }
+
   private async handleTurnSteer(
     payload: CodexRuntimeRequest,
     options: RuntimeOperationOptions
@@ -1686,6 +1698,7 @@ export class CodexAppServerRuntimePort
       return;
     }
     const input = buildCodexTurnInput(content, attachments);
+    await this.injectThinkMode(threadId, payload.params.thinkMode, options);
     await this.rpc(
       "turn/steer",
       {

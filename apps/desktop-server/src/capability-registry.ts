@@ -67,6 +67,7 @@ export type ConversationGraphNodeSnapshot = {
 export type ConversationGraphSnapshot = {
   sessionId: string;
   treeId?: string;
+  thinkMode?: import("@vermillion/shared").ThinkMode;
   currentSessionId?: string;
   memberSessionIds?: string[];
   windows?: SessionWindowSnapshot[];

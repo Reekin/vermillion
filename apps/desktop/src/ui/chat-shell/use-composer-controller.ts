@@ -366,6 +366,7 @@ type UseComposerControllerInput = {
   /** Draft state only: creates the session for the first message and returns its id. */
   createSession?: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
   prepareSend?: () => Promise<string>;
+  getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
@@ -934,6 +935,7 @@ export const useComposerController = (
     });
     try {
       // Draft state: the first message creates the session, then becomes its first turn.
+      const sendOptions = input.getSendOptions?.();
       const sessionId = input.activeSessionId
         ? payload.mode === "send" && input.prepareSend
           ? await input.prepareSend()
@@ -941,6 +943,7 @@ export const useComposerController = (
         : await input.createSession!({ content, attachments });
       if (payload.mode === "steer" && payload.turnId) {
         const receipt = await input.transport.chat.steer({
+          ...sendOptions,
           sessionId,
           turnId: payload.turnId,
           content,
@@ -951,6 +954,7 @@ export const useComposerController = (
         }
       } else {
         const receipt = await input.transport.chat.send({
+          ...sendOptions,
           sessionId,
           content,
           attachments,

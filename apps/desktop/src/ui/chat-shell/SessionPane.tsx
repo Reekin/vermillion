@@ -95,6 +95,7 @@ export type SessionPaneProps = {
   createSession: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
+  getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
 };
@@ -572,6 +573,7 @@ export const SessionPane = ({
   reloadSignal,
   createSession,
   composerExtras,
+  getSendOptions,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
   const state = useRendererStoreState(store);
@@ -1059,6 +1061,7 @@ export const SessionPane = ({
 
         <ComposerContainer
           extraExecutionControls={composerExtras}
+          getSendOptions={getSendOptions}
           transport={transport}
           activeSession={activeSession}
           activeSessionId={activeSessionId}
