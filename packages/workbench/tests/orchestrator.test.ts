@@ -3,7 +3,8 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { setTimeout as delay } from "node:timers/promises";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryWorkspaceSource } from "../src/memory-workspace-source.js";
 import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
 import { RoleService } from "../src/roles.js";
@@ -14,18 +15,30 @@ const dirs: string[] = [];
 const cleanup: Array<() => void> = [];
 afterEach(async () => {
   for (const fn of cleanup.splice(0)) fn();
+  vi.useRealTimers();
   await new Promise((r) => setTimeout(r, 100)); // let the recursive fs watcher release its handle
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5 })));
 });
 
-const tick = () => new Promise((r) => setTimeout(r, 30));
+const tick = () => delay(30);
 const until = async (check: () => Promise<boolean>) => {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + 15000;
+  while (performance.now() < deadline) {
     if (await check()) return;
     await tick();
   }
   throw new Error("timeout");
+};
+
+const advanceBackoff = async (service: WorkbenchService, workspaceId: string, workItemId: string, minutes: number) => {
+  const item = await service.getWorkItem(workspaceId, workItemId);
+  expect(Date.parse(item.run.retryAt!) - Date.now()).toBe(minutes * 60_000);
+  await tick(); // allow the persisted change event to arm the scheduler timer
+  await vi.advanceTimersByTimeAsync(minutes * 60_000 - 1);
+  await tick();
+  expect((await service.getWorkItem(workspaceId, workItemId)).status).toBe("queued");
+  await vi.advanceTimersByTimeAsync(1);
+  await until(async () => (await service.getWorkItem(workspaceId, workItemId)).status === "running");
 };
 
 /** Scripted runner: records opened sessions and messages; test completes turns by hand. */
@@ -364,15 +377,23 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.sessionId).toBe(active.sessionId);
   });
 
-  it("resumes the last idle worker when retrying the scheduler's three-failure decision", async () => {
+  it("backs off idle workers four times and resumes the fifth worker after the decision", async () => {
     const { service, ws, sessions, runner, complete } = await setup();
-    const item = await service.createWorkItem(ws.workspaceId, { title: "Retry", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
-    for (let attempt = 0; attempt < 3; attempt++) {
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# base\n");
+    await service.commitDocs(ws.workspaceId, { message: "base" });
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Retry", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: ["progress.txt"] }, acceptance: [{ text: "t" }] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    for (let attempt = 0; attempt < 5; attempt++) {
       await until(async () => sessions.length === attempt + 1 && sessions[attempt]!.messages.length > 0);
       const worker = sessions[attempt]!;
+      if (attempt === 0) await writeFile(join(worker.cwd, "progress.txt"), "unfinished work");
+      expect(worker.cwd).toBe(sessions[0]!.cwd);
+      expect(await readFile(join(worker.cwd, "progress.txt"), "utf8")).toBe("unfinished work");
       complete(worker.sessionId, "unfinished");
       await until(async () => worker.messages.length === 2);
       complete(worker.sessionId, "still unfinished");
+      await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts === attempt + 1);
+      if (attempt < 4) await advanceBackoff(service, ws.workspaceId, item.workItemId, [1, 5, 30, 300][attempt]!);
     }
     await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "decision");
     const [card] = await service.listDecisions(ws.workspaceId);
@@ -380,14 +401,46 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     const resumed: string[] = [];
     runner.resume = async (id) => { resumed.push(id); return true; };
     await service.answerDecision(ws.workspaceId, card!.decisionId, { key: "retry", note: "try once more" });
-    await until(async () => sessions[2]!.messages.length === 3);
-    expect(sessions).toHaveLength(3);
-    expect(resumed).toEqual([sessions[2]!.sessionId]);
-    expect(sessions[2]!.messages.at(-1)).toContain("再试一次 (try once more)");
+    await until(async () => sessions[4]!.messages.length === 3);
+    expect(sessions).toHaveLength(5);
+    expect(resumed).toEqual([sessions[4]!.sessionId]);
+    expect(sessions[4]!.messages.at(-1)).toContain("再试一次 (try once more)");
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts).toBe(0);
   });
 
-  it.each(["failed", "interrupted"] as const)("preserves the conversation and worktree after %s, including retry after three failures", async (reason) => {
+  it("restores the persisted retry deadline after restart and respects the scheduler switch", async () => {
+    const { service, ws, roles, runner, sessions, complete, orchestrator } = await setup();
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Restart backoff", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [] });
+    await until(async () => sessions[0]?.messages.length === 1);
+    const worker = sessions[0]!;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    complete(worker.sessionId, "", "failed", "network down");
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "queued");
+    await tick();
+    const retryAt = (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.retryAt;
+    orchestrator.dispose();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const second = new Orchestrator({ service, roles, runner });
+    second.start();
+    cleanup.push(() => second.dispose());
+    await tick();
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.retryAt).toBe(retryAt);
+    await vi.advanceTimersByTimeAsync(29_999);
+    await tick();
+    expect(worker.messages).toHaveLength(1);
+    await service.setScheduler(ws.workspaceId, { enabled: false, maxWorkers: 1 });
+    await tick();
+    await vi.advanceTimersByTimeAsync(1);
+    await tick();
+    expect(worker.messages).toHaveLength(1);
+    await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+    await until(async () => worker.messages.length === 2);
+    expect(sessions).toHaveLength(1);
+    expect(worker.messages[1]).toContain("network down");
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.retryAt).toBeUndefined();
+  });
+
+  it.each(["failed", "interrupted"] as const)("backs off four times after %s, preserving conversation and worktree through manual retry", async (reason) => {
     const { service, ws, sessions, complete } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# base\n");
     await service.commitDocs(ws.workspaceId, { message: "base" });
@@ -395,16 +448,16 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await until(async () => sessions.length === 1 && sessions[0]!.messages.length === 1);
     const worker = sessions[0]!;
     await writeFile(join(worker.cwd, "progress.txt"), "unfinished work");
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await service.setScheduler(ws.workspaceId, { enabled: false, maxWorkers: 1 });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    for (let attempt = 1; attempt <= 5; attempt++) {
       complete(worker.sessionId, "working", reason, "failure " + attempt);
       await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts === attempt);
       const failed = await service.getWorkItem(ws.workspaceId, item.workItemId);
       expect(failed.run.sessionId).toBe(worker.sessionId);
       expect(failed.run.worktreePath).toBe(worker.cwd);
-      if (attempt < 3) {
+      if (attempt < 5) {
         expect(failed.status).toBe("queued");
-        await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+        await advanceBackoff(service, ws.workspaceId, item.workItemId, [1, 5, 30, 300][attempt - 1]!);
         await until(async () => worker.messages.length === attempt + 1);
         expect(worker.messages.at(-1)).toContain("turn " + reason + ": failure " + attempt);
       }
@@ -412,12 +465,12 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "decision");
     const [card] = await service.listDecisions(ws.workspaceId);
     expect(card!.sessionId).toBe(worker.sessionId);
-    expect(card!.context).toContain("failure 3");
+    expect(card!.context).toContain("failure 5");
     await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
     await tick();
-    expect(worker.messages).toHaveLength(3);
+    expect(worker.messages).toHaveLength(5);
     await service.answerDecision(ws.workspaceId, card!.decisionId, { key: "retry", note: "quota restored" });
-    await until(async () => worker.messages.length === 4);
+    await until(async () => worker.messages.length === 6);
     expect(worker.messages.at(-1)).toContain("再试一次 (quota restored)");
     expect(sessions).toHaveLength(1);
     expect(await readFile(join(worker.cwd, "progress.txt"), "utf8")).toBe("unfinished work");
@@ -643,7 +696,10 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     await until(async () => worker.messages.some((m) => m.includes("工单仍是进行中")));
     complete(worker.sessionId, "still going");
     await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.lastFailure === "多轮未提交");
-    // requeued and immediately picked up again by a fresh worker session
+    // A fresh worker starts only after backoff.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.retryAt!);
+    await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
     await until(async () => sessions.filter((s) => s.metadata.role === "worker").length === 2 && sessions[sessions.length - 1]!.messages.length > 0);
     const retried = await service.getWorkItem(ws.workspaceId, item.workItemId);
     expect(retried.status).toBe("running");

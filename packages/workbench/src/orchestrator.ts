@@ -63,6 +63,8 @@ export class Orchestrator {
   private readonly queues = new Map<string, Promise<void>>();
   /** sessionId -> run, for sessions opened in this process. */
   private readonly runsBySession = new Map<string, WorkerBinding>();
+  private readonly retryTimers = new Map<string, NodeJS.Timeout>();
+  private disposed = false;
 
   constructor(options: OrchestratorOptions) {
     this.service = options.service;
@@ -81,6 +83,7 @@ export class Orchestrator {
   }
 
   start(): void {
+    this.disposed = false;
     this.disposers.push(
       this.service.subscribe((event) => {
         if (!("workspaceId" in event)) return;
@@ -102,9 +105,12 @@ export class Orchestrator {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const dispose of this.disposers.splice(0)) dispose();
     for (const patrol of this.patrols.values()) clearInterval(patrol.timer);
     this.patrols.clear();
+    for (const timer of this.retryTimers.values()) clearTimeout(timer);
+    this.retryTimers.clear();
   }
 
   private enqueue(workspaceId: string, task: () => Promise<void>): void {
@@ -119,7 +125,10 @@ export class Orchestrator {
   private async reconcile(workspaceId: string): Promise<void> {
     await this.settleMissions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
-    if (!scheduler.enabled) return;
+    if (!scheduler.enabled) {
+      this.clearRetryTimer(workspaceId);
+      return;
+    }
     await this.recoverStaleRuns(workspaceId);
     await this.steward(workspaceId);
     await this.schedule(workspaceId);
@@ -269,9 +278,20 @@ export class Orchestrator {
   // ---- scheduler ----
 
   private async schedule(workspaceId: string): Promise<void> {
+    this.clearRetryTimer(workspaceId);
+    if (this.disposed) return;
     const scheduler = await this.service.getScheduler(workspaceId);
     if (!scheduler.enabled) return;
     const items = await this.service.listWorkItems(workspaceId);
+    const now = Date.parse(this.now());
+    const pending = items.filter((i) => i.status === "queued" && i.run.retryAt && Date.parse(i.run.retryAt) > now);
+    if (pending.length && !this.disposed) {
+      const next = Math.min(...pending.map((i) => Date.parse(i.run.retryAt!)));
+      this.retryTimers.set(workspaceId, setTimeout(() => {
+        this.retryTimers.delete(workspaceId);
+        this.enqueue(workspaceId, () => this.schedule(workspaceId));
+      }, next - now));
+    }
     const running = items.filter((i) => i.status === "running").length;
     const capacity = scheduler.maxWorkers - running;
     if (capacity <= 0) return;
@@ -279,6 +299,7 @@ export class Orchestrator {
     const busy = new Set(items.filter((i) => i.status === "running").flatMap((i) => i.needs));
     const ready = items.filter(
       (i) => i.status === "queued" && i.dependsOn.every((id) => closed.has(id))
+        && (!i.run.retryAt || Date.parse(i.run.retryAt) <= now)
         // Inbox may receive a submit or decision before its turn ends. Deliver feedback after that turn finishes.
         && !(i.run.resumeMessage && i.run.sessionId && this.runsBySession.has(i.run.sessionId))
     );
@@ -290,6 +311,12 @@ export class Orchestrator {
       for (const need of item.needs) busy.add(need);
       opened++;
     }
+  }
+
+  private clearRetryTimer(workspaceId: string): void {
+    const timer = this.retryTimers.get(workspaceId);
+    if (timer) clearTimeout(timer);
+    this.retryTimers.delete(workspaceId);
   }
 
   /** The steward changed a running item's contract: tell the worker now, mid-turn if needed. */
