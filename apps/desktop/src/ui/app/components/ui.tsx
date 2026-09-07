@@ -68,9 +68,9 @@ export const IconButton = ({ icon: Icon, label, size = 14, active, className, ..
 
 // ---- Text ----
 
-export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "decision" | "running" | "queued" | "closed" | "cancelled"; muted?: boolean }) => (
+export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "decision" | "running" | "queued" | "merging" | "closed" | "cancelled"; muted?: boolean }) => (
   <span
-    data-status={status}
+    data-status={status === "merging" ? "queued" : status}
     className={cn(
       status ? "vm-status" : "inline-flex shrink-0 items-center whitespace-nowrap min-h-5 rounded-sm border px-1.5 py-0.5 font-sans text-micro font-medium",
       !status && tone === "neutral" && "border-border-strong text-foreground",

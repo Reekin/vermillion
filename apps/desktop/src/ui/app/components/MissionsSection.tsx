@@ -7,7 +7,7 @@ import { WorkItemDialog } from "./WorkItemDialog.js";
 import { missionStatusLabel, statusLabel } from "./task-labels.js";
 import { Badge, Button, Card, DetailSection, EmptyState, IconButton, InlineNotice, ListRow, SectionLabel, Stepper, Toggle } from "./ui.js";
 
-const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
+const roleLabel: Record<AgentRun["role"], string> = { steward: "管家", worker: "Worker", supervisor: "Supervisor", "workspace-repair": "工作区修复" };
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
 
 const relativeTime = (iso: string) => {

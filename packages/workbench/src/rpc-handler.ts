@@ -49,7 +49,10 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workItem.rollback": (p) => service.rollbackWorkItem(p.workspaceId, p.workItemId, p.reason),
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
     "workItem.defer": (p) => service.deferWorkItem(p.workspaceId, p.workItemId, p.dependsOn, p.note),
-    "workItem.escalate": (p) => service.escalateWorkItem(p.workspaceId, p.workItemId, p.message),
+    "workItem.escalate": (p) => service.escalateWorkItem(p.workspaceId, p.workItemId, p.message, p),
+    "workItem.recover": (p) => service.recoverWorkItem(p.workspaceId, p.workItemId),
+    "action.list": (p) => service.listActions(p.workspaceId),
+    "workspace.repair.submit": (p) => service.submitWorkspaceRepair(p.workspaceId, p.actionId, p),
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
     "scheduler.get": (p) => service.getScheduler(p.workspaceId),
@@ -59,6 +62,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "decision.list": (p) => service.listDecisions(p.workspaceId),
     "decision.create": (p) => service.createDecision(p.workspaceId, p),
     "decision.answer": (p) => service.answerDecision(p.workspaceId, p.decisionId, { key: p.key, note: p.note }),
+    "decision.withdraw": (p) => service.withdrawDecision(p.workspaceId, p.decisionId, p.sessionId, p.reason),
 
     "inbox.list": () => service.listInbox(),
 

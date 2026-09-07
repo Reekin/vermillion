@@ -14,14 +14,14 @@ import type {
   WorkbenchEvent,
   Workspace
 } from "./contracts.js";
+import { actionIsOpen, latestRevision, type WorkflowAction } from "./contracts.js";
 import type { SessionNavigationPort } from "./session-navigation.js";
-import { DocsService, WorktreeMergeConflict } from "./docs.js";
+import { DocsService, WorktreeMergeConflict, WorktreeNotReady } from "./docs.js";
 import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
 
 const RETRY_MINUTES = [1, 5, 30, 300];
-const MAX_ATTEMPTS = RETRY_MINUTES.length + 1;
 
 const createId = (prefix: string): string =>
   prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -58,6 +58,7 @@ export class WorkbenchService {
   private readonly contexts = new Map<string, WorkspaceContext>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
   private readonly integrations = new Map<string, Promise<unknown>>();
+  private recoveryHandler?: (workspaceId: string) => Promise<void>;
 
   constructor(options: WorkbenchServiceOptions) {
     this.workspaces = options.workspaces;
@@ -345,6 +346,142 @@ export class WorkbenchService {
     return item;
   }
 
+  async listActions(workspaceId: string): Promise<WorkflowAction[]> {
+    return (await this.context(workspaceId)).store.actions.list();
+  }
+
+  async createAction(workspaceId: string, input: Omit<WorkflowAction, "actionId" | "history" | "createdAt" | "updatedAt" | "attempts" | "idleTurns">): Promise<WorkflowAction> {
+    const now = this.now();
+    return this.putAction(workspaceId, { ...input, actionId: createId("action"), attempts: 0, idleTurns: 0, history: [{ at: now, event: "created", message: input.message }], createdAt: now, updatedAt: now });
+  }
+
+  async putAction(workspaceId: string, action: WorkflowAction): Promise<WorkflowAction> {
+    const { store } = await this.context(workspaceId);
+    const current = await store.actions.get(action.actionId);
+    // A handler can finish or request a decision while a send is in flight.
+    if (current && current.updatedAt !== action.updatedAt && (!actionIsOpen(current) || current.status === "decision")) return current;
+    const saved = await store.actions.put({ ...action, updatedAt: this.now() });
+    this.emit({ type: "actions.changed", workspaceId });
+    return saved;
+  }
+
+  private async getAction(workspaceId: string, actionId: string): Promise<WorkflowAction> {
+    const action = await (await this.context(workspaceId)).store.actions.get(actionId);
+    if (!action) throw new Error("Unknown action: " + actionId);
+    return action;
+  }
+
+  async finishAction(workspaceId: string, actionId: string, note: string): Promise<WorkflowAction> {
+    const action = await this.getAction(workspaceId, actionId);
+    return this.putAction(workspaceId, { ...action, status: "done", retryAt: undefined, history: [...action.history, { at: this.now(), event: "resolved", message: note }] });
+  }
+
+  async isWorkItemBlocked(workspaceId: string, workItemId: string): Promise<boolean> {
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    const items = await this.listWorkItems(workspaceId);
+    return !!(item.contractIssue && !item.contractIssue.resolvedAt)
+      || item.dependsOn.some((id) => items.find((other) => other.workItemId === id)?.status !== "closed")
+      || (await this.listActions(workspaceId)).some((action) => actionIsOpen(action) && action.workItemIds.includes(workItemId) && ["contract", "dependency", "repair", "integration"].includes(action.kind))
+      || (await this.listDecisions(workspaceId)).some((card) => card.workItemId === workItemId && !card.answer && !card.withdrawn);
+  }
+
+  async patchWorkItemRun(workspaceId: string, workItemId: string, patch: WorkItem["run"]): Promise<WorkItem> {
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, run: { ...item.run, ...patch } }));
+  }
+
+  setRecoveryHandler(handler: (workspaceId: string) => Promise<void>): () => void {
+    this.recoveryHandler = handler;
+    return () => { if (this.recoveryHandler === handler) this.recoveryHandler = undefined; };
+  }
+
+  async recoverWorkItem(workspaceId: string, workItemId: string) {
+    await this.getWorkItem(workspaceId, workItemId);
+    for (const action of await this.listActions(workspaceId)) {
+      if (action.workItemIds.includes(workItemId) && action.status === "retry") {
+        await this.putAction(workspaceId, { ...action, retryAt: this.now() });
+      }
+    }
+    await this.refreshActions(workspaceId);
+    await this.recoveryHandler?.(workspaceId);
+    return { workItem: await this.getWorkItem(workspaceId, workItemId), actions: (await this.listActions(workspaceId)).filter((a) => a.workItemIds.includes(workItemId)), dispatched: !!this.recoveryHandler,
+      message: this.recoveryHandler ? "已核对当前动作；未解决的合同、依赖与决策继续等待。" : "记录已保存，调度器不在线，尚未派发。" };
+  }
+
+  async failAction(workspaceId: string, actionId: string, failure: string): Promise<WorkflowAction> {
+    const action = await this.getAction(workspaceId, actionId);
+    if (!actionIsOpen(action) || action.status === "decision") return action;
+    const attempts = action.attempts + 1;
+    const delay = RETRY_MINUTES[attempts - 1];
+    const failed = await this.putAction(workspaceId, { ...action, attempts, failure, status: delay === undefined ? "decision" : "retry",
+      retryAt: delay === undefined ? undefined : new Date(Date.parse(this.now()) + delay * 60_000).toISOString(),
+      history: [...action.history, { at: this.now(), event: "failed:" + action.stage, message: failure }] });
+    if (action.kind === "execute") {
+      for (const id of action.workItemIds) await this.mutateWorkItem(workspaceId, id, (item) => ({ ...item, status: "queued", run: { ...item.run, lastFailure: failure, attempts, retryAt: failed.retryAt, resumeMessage: "上次运行异常：" + failure } }));
+    }
+    if (delay === undefined && !(await this.listDecisions(workspaceId)).some((card) => card.actionId === actionId && !card.answer && !card.withdrawn)) {
+      await this.createDecision(workspaceId, { actionId, kind: "attempts", workItemId: action.workItemIds[0], missionId: action.missionId, sessionId: action.sessionId,
+        question: "自动恢复已用尽，要再试还是取消当前工作？", context: "当前处理者：" + action.role + "。最近失败：" + failure + "。原会话与成果保留。",
+        details: "阶段：" + action.stage + "\n受影响工单：" + action.workItemIds.join(", ") + "\n" + failed.history.filter((h) => h.event.startsWith("failed:")).map((h) => h.at + " " + h.message).join("\n"),
+        options: [{ key: "retry", label: "再试", detail: "清零此处理过程的失败计数，从未完成动作继续。" }, { key: "cancel", label: "取消当前工作", detail: "取消该过程关联的工单；已合入成果保持保留。" }], recommended: "retry", recommendation: "故障已排除时可沿原处理过程继续。" });
+    }
+    return this.getAction(workspaceId, actionId);
+  }
+
+  /** Dependencies and agent actions share one durable queue; facts, not delivery receipts, release waiting work. */
+  async refreshActions(workspaceId: string): Promise<void> {
+    const items = await this.listWorkItems(workspaceId);
+    let actions = await this.listActions(workspaceId);
+    for (const item of items) {
+      if (item.status === "closed" || item.status === "cancelled") {
+        for (const action of actions.filter((a) => a.workItemIds.includes(item.workItemId) && actionIsOpen(a) && !["integration", "repair"].includes(a.kind))) {
+          await this.finishAction(workspaceId, action.actionId, "工单已结束。");
+        }
+        continue;
+      }
+      if (item.contractIssue && !item.contractIssue.resolvedAt && !actions.some((a) => a.kind === "contract" && a.workItemIds.includes(item.workItemId) && actionIsOpen(a))) {
+        const action = await this.createAction(workspaceId, { kind: "contract", role: "steward", ownerKey: "steward:" + (item.missionId ?? item.workItemId), missionId: item.missionId, workItemIds: [item.workItemId], status: "pending", stage: "open", message: item.contractIssue.message });
+        actions.push(action);
+      }
+      const missing = item.dependsOn.filter((id) => items.find((other) => other.workItemId === id)?.status !== "closed");
+      let dependency = actions.find((a) => a.kind === "dependency" && a.workItemIds.includes(item.workItemId) && actionIsOpen(a));
+      if (missing.length) {
+        const cancelled = missing.some((id) => items.find((other) => other.workItemId === id)?.status === "cancelled");
+        if (!dependency) {
+          dependency = await this.createAction(workspaceId, { kind: "dependency", role: cancelled ? "steward" : "workbench", ownerKey: "steward:" + (item.missionId ?? item.workItemId), missionId: item.missionId, workItemIds: [item.workItemId], status: cancelled ? "pending" : "waiting", stage: "open", message: "等待前置关闭：" + missing.join(", ") + (cancelled ? "。前置已取消，请调整依赖或取消本单。" : "") });
+          actions.push(dependency);
+        } else if (cancelled && dependency.role === "workbench") {
+          await this.putAction(workspaceId, { ...dependency, role: "steward", status: "pending", stage: "open", message: "前置已取消，请落实依赖调整或取消本单：" + missing.join(", ") });
+        }
+      } else if (dependency) await this.finishAction(workspaceId, dependency.actionId, "前置已关闭或依赖调整已落实。");
+      for (const action of actions.filter((a) => a.kind === "execute" && a.workItemIds.includes(item.workItemId) && actionIsOpen(a))) {
+        if (["closed", "cancelled", "merging"].includes(item.status) || (await this.isWorkItemBlocked(workspaceId, item.workItemId) && action.status !== "decision")) {
+          await this.finishAction(workspaceId, action.actionId, "执行已交接，保留原 Worker 会话与成果。");
+        }
+      }
+      if ((item.status === "queued" || item.status === "running") && !(await this.isWorkItemBlocked(workspaceId, item.workItemId)) && !(await this.listActions(workspaceId)).some((a) => a.kind === "execute" && a.workItemIds.includes(item.workItemId) && actionIsOpen(a))) {
+        await this.createAction(workspaceId, { kind: "execute", role: "worker", ownerKey: "worker:" + item.workItemId, missionId: item.missionId, workItemIds: [item.workItemId], status: "pending", stage: item.status === "running" && item.run.sessionId ? "execute" : item.run.worktreePath || !item.scope.allowedPaths.length ? "open" : "worktree", sessionId: item.run.sessionId, message: item.run.resumeMessage ?? "读取工单，在允许范围内执行并提交验收结果。" });
+      }
+    }
+    // Bind outstanding cards from the persisted work-item model to their current responsibility.
+    const { store } = await this.context(workspaceId);
+    for (const card of (await this.listDecisions(workspaceId)).filter((c) => c.workItemId && !c.actionId && !c.answer && !c.withdrawn)) {
+      const item = items.find((entry) => entry.workItemId === card.workItemId);
+      if (!item || ["closed", "cancelled"].includes(item.status)) continue;
+      let action = (await this.listActions(workspaceId)).find((a) => a.workItemIds.includes(item.workItemId) && a.role !== "workbench" && actionIsOpen(a));
+      action ??= await this.createAction(workspaceId, { kind: "execute", role: "worker", ownerKey: "worker:" + item.workItemId, workItemIds: [item.workItemId], missionId: item.missionId, status: "decision", stage: "deliver", sessionId: item.run.sessionId, message: "理解决策后继续原工单。" });
+      await store.decisions.put({ ...card, actionId: action.actionId });
+      await this.putAction(workspaceId, { ...action, status: "decision" });
+    }
+    actions = await this.listActions(workspaceId);
+    for (const mission of await this.listMissions(workspaceId)) {
+      const revision = latestRevision(mission);
+      if (mission.status !== "active" || actions.some((a) => a.kind === "revision" && a.missionId === mission.missionId && a.revision === revision.commit && a.createdAt >= revision.at)) continue;
+      // Existing completed/running revisions already have their persisted receipt.
+      if ((await this.listRuns(workspaceId)).some((r) => r.role === "steward" && r.missionId === mission.missionId && r.revision === revision.commit && (r.status === "running" || (r.endedAt ?? r.startedAt) >= revision.at))) continue;
+      await this.createAction(workspaceId, { kind: "revision", role: "steward", ownerKey: "steward:" + mission.missionId, missionId: mission.missionId, revision: revision.commit, workItemIds: [], status: "pending", stage: "open", message: "处理任务 revision：" + JSON.stringify(mission) });
+    }
+  }
+
   async createWorkItem(
     workspaceId: string,
     input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { missionId?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[] }
@@ -352,10 +489,7 @@ export class WorkbenchService {
     const now = this.now();
     const { store } = await this.context(workspaceId);
     if (input.missionId && !(await store.missions.get(input.missionId))) throw new Error("Unknown mission: " + input.missionId);
-    for (const id of input.dependsOn ?? []) {
-      const dep = await store.workItems.get(id);
-      if (!dep || dep.missionId !== input.missionId) throw new Error("dependsOn must reference a work item in the same mission: " + id);
-    }
+    await this.checkDependencies(workspaceId, "(new)", input.dependsOn ?? []);
     const item = await store.workItems.put({
       workItemId: createId("wi"),
       missionId: input.missionId,
@@ -390,11 +524,16 @@ export class WorkbenchService {
   /** Worker claimed the item; records the session and worktree it runs in. */
   /** A (re)start begins a new turn: the pending message is claimed and any stale-turn mark from the previous run is over. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
+    const current = await this.getWorkItem(workspaceId, workItemId);
+    if (current.status !== "queued" && !(current.status === "running" && current.run.sessionId === run.sessionId)) throw new Error("只有可执行的排队工单可以启动，已结束或等待合入的工单不能重新认领。");
+    if (await this.isWorkItemBlocked(workspaceId, workItemId)) throw new Error("工单仍有未解决的等待条件，请读取 action.list。");
+    const occupied = (await this.listWorkItems(workspaceId)).filter((item) => item.workItemId !== workItemId && item.status === "running");
+    const scheduler = await this.getScheduler(workspaceId);
+    if (occupied.length >= scheduler.maxWorkers || occupied.some((item) => item.needs.some((need) => current.needs.includes(need)))) throw new Error("并发或共享资源尚未释放，保持排队。");
     return this.mutateWorkItem(workspaceId, workItemId, (item) => ({
       ...item,
-      status: item.contractIssue && !item.contractIssue.resolvedAt ? "queued" : "running",
-      contractIssue: item.contractIssue ? { ...item.contractIssue, answerPending: undefined } : undefined,
-      run: { ...item.run, ...run, resumeMessage: undefined, retryAt: undefined, staleTurnId: undefined }
+      status: "running",
+      run: { ...item.run, ...run, retryAt: undefined, staleTurnId: undefined }
     }));
   }
 
@@ -415,6 +554,7 @@ export class WorkbenchService {
     const now = this.now();
     const current = await this.getWorkItem(workspaceId, workItemId);
     if (current.status !== "running") throw new Error("Work item is not running: " + workItemId);
+    if (await this.isWorkItemBlocked(workspaceId, workItemId)) throw new Error("仍有未解决的等待条件，不能提交。");
     if (current.run.staleTurnId) {
       return this.returnWorkItem(workspaceId, workItemId, "提交作废：合同在本轮进行中被调整");
     }
@@ -433,23 +573,105 @@ export class WorkbenchService {
       const reason = "验收未通过：" + (failed.map((entry) => entry.evidence).join("\n") || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
       return this.returnWorkItem(workspaceId, workItemId, reason);
     }
-    return this.mergeWorkItem(workspaceId, workItemId);
+    await this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "merging" }));
+    await this.createAction(workspaceId, { kind: "integration", role: "workbench", ownerKey: "integration", workItemIds: [workItemId], missionId: submitted.missionId, status: "pending", stage: "merge", message: "验收通过，等待合入。", integration: { operation: "merge", diffStat: "" } });
+    await this.drainIntegrations(workspaceId);
+    return this.getWorkItem(workspaceId, workItemId);
   }
 
   /** Accepts the work: merges the worker's branch into the workspace (when it ran in a worktree) and closes the item. */
-  private async mergeWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+  async continueIntegrations(workspaceId: string): Promise<void> {
+    await this.integrate(workspaceId, () => this.drainIntegrations(workspaceId));
+  }
+
+  private async requestRepair(workspaceId: string, workItemId: string, message: string): Promise<WorkflowAction> {
+    const existing = (await this.listActions(workspaceId)).find((a) => a.kind === "repair" && actionIsOpen(a));
+    if (existing) {
+      if (existing.workItemIds.includes(workItemId) && existing.history.some((h) => h.message === message)) return existing;
+      return this.putAction(workspaceId, { ...existing, workItemIds: [...new Set([...existing.workItemIds, workItemId])], message: existing.message + "\n" + message, history: [...existing.history, { at: this.now(), event: "affected", message }] });
+    }
+    return this.createAction(workspaceId, { kind: "repair", role: "workspace-repair", ownerKey: "workspace-repair", workItemIds: [workItemId], status: "pending", stage: "open", message });
+  }
+
+  private async drainIntegrations(workspaceId: string): Promise<void> {
+    const actions = await this.listActions(workspaceId);
+    const repair = actions.find((a) => a.kind === "repair" && actionIsOpen(a));
+    const pending = actions.filter((a) => a.kind === "integration" && actionIsOpen(a));
+    if (repair) {
+      for (const action of pending) if (!repair.workItemIds.includes(action.workItemIds[0]!)) await this.requestRepair(workspaceId, action.workItemIds[0]!, "同一工作区等待恢复：" + action.stage);
+      return;
+    }
     const { docs } = await this.context(workspaceId);
-    const item = await this.getWorkItem(workspaceId, workItemId);
-    let result: { commit?: string; diffStat: string } = { diffStat: "" };
-    if (item.run.worktreePath && item.run.branch) {
+    for (let action of pending) {
+      const workItemId = action.workItemIds[0]!;
+      let item = await this.getWorkItem(workspaceId, workItemId);
       try {
-        result = await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title);
+        let integration = action.integration!;
+        if (action.stage === "merge") {
+          if (item.run.worktreePath && item.run.branch) {
+            if (!integration.target) {
+              const snapshot = await docs.integrationSnapshot(item.run.branch);
+              integration = { ...integration, before: snapshot.head, target: snapshot.target, diffStat: snapshot.diffStat };
+              action = await this.putAction(workspaceId, { ...action, integration });
+            }
+            const result = await docs.mergeWorktree(item.run.worktreePath, item.run.branch, item.title, integration.target);
+            // Recovering an already merged target still uses the original frozen diff and commit.
+            integration = { ...integration, commit: result.commit ?? await docs.getMergeCommit(integration.target!, integration.before!) };
+          }
+          action = await this.putAction(workspaceId, { ...action, integration, stage: "cleanup" });
+          item = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, merge: { commit: integration.commit, diffStat: integration.diffStat, mergedAt: this.now() } }));
+        }
+        if (action.stage === "rollback") {
+          if (!integration.before) {
+            integration = { ...integration, before: await docs.head() };
+            action = await this.putAction(workspaceId, { ...action, integration });
+          }
+          const commit = await docs.rollbackMerge(integration.target!, integration.before);
+          integration = { ...integration, commit };
+          action = await this.putAction(workspaceId, { ...action, integration, stage: "cleanup" });
+          item = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, merge: { ...current.merge!, rollbackCommit: commit, acknowledgedAt: this.now() } }));
+        }
+        if (action.stage === "cleanup") {
+          if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch);
+          await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: integration.operation === "cancel" ? "cancelled" : integration.operation === "rollback" ? "queued" : "closed",
+            merge: integration.operation === "merge" ? { commit: integration.commit, diffStat: integration.diffStat, mergedAt: current.merge?.mergedAt ?? this.now() }
+              : integration.operation === "rollback" ? { ...current.merge!, rollbackCommit: integration.commit, acknowledgedAt: this.now() } : current.merge,
+            run: { ...current.run, worktreePath: undefined, branch: undefined, resumeMessage: integration.operation === "rollback" ? "用户回滚：" + integration.reason : current.run.resumeMessage } }));
+          if (integration.operation === "rollback" && item.missionId) await this.setMissionStatus(workspaceId, item.missionId, "active");
+          await this.finishAction(workspaceId, action.actionId, "已完成 " + integration.operation + " 及清理。");
+        }
       } catch (error) {
-        const reason = error instanceof WorktreeMergeConflict ? "合并冲突：\n" + error.files.map((file) => "- " + file).join("\n") : "合并失败：" + String(error);
-        return this.returnWorkItem(workspaceId, workItemId, reason + "\n在原 worktree 继续修改，完成后重新提交。");
+        const reason = error instanceof Error ? error.message : String(error);
+        if (error instanceof WorktreeMergeConflict || error instanceof WorktreeNotReady) {
+          await this.finishAction(workspaceId, action.actionId, "转回原 Worker：" + reason);
+          await this.returnWorkItem(workspaceId, workItemId, reason + "\n在原 worktree rebase 并更新受影响验证后重新提交。");
+        } else {
+          await this.putAction(workspaceId, { ...action, status: "waiting", failure: reason, history: [...action.history, { at: this.now(), event: "failed:" + action.stage, message: reason }] });
+          await this.requestRepair(workspaceId, workItemId, "失败阶段：" + action.stage + "\n工单：" + workItemId + "\n" + reason);
+          return;
+        }
       }
     }
-    return this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "closed", merge: { ...result, mergedAt: this.now() }, run: { ...current.run, worktreePath: undefined, branch: undefined } }));
+  }
+
+  async submitWorkspaceRepair(workspaceId: string, actionId: string, input: { sessionId: string; summary: string; evidence: string[] }) {
+    return this.integrate(workspaceId, async () => {
+      let action = await this.getAction(workspaceId, actionId);
+      if (action.kind !== "repair" || !actionIsOpen(action) || action.sessionId !== input.sessionId) throw new Error("请从当前修复会话提交其未完成的修复动作。");
+      if (!input.summary.trim() || !input.evidence.length) throw new Error("修复结果需要说明与实际检查证据。");
+      if ((await this.listDecisions(workspaceId)).some((card) => card.actionId === actionId && !card.answer && !card.withdrawn)) throw new Error("修复仍在等待决策，不能解除其他等待条件。");
+      action = await this.putAction(workspaceId, { ...action, history: [...action.history, { at: this.now(), event: "repair.submitted", message: input.summary + "\n" + input.evidence.join("\n") }] });
+      try { await (await this.context(workspaceId)).docs.checkIntegrationReady(); }
+      catch (error) {
+        const reason = String(error);
+        await this.putAction(workspaceId, { ...action, failure: reason, history: [...action.history, { at: this.now(), event: "repair.check.failed", message: reason }] });
+        return { pass: false, message: reason, action: await this.getAction(workspaceId, actionId) };
+      }
+      await this.finishAction(workspaceId, actionId, input.summary);
+      await this.drainIntegrations(workspaceId);
+      const remaining = (await this.listActions(workspaceId)).find((a) => a.kind === "repair" && actionIsOpen(a));
+      return { pass: !remaining, message: remaining ? "后续阶段仍受阻，回原修复会话继续。" : "工作台检查通过，已续接待处理阶段。", action: remaining ?? await this.getAction(workspaceId, actionId) };
+    });
   }
 
   private async returnWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
@@ -473,22 +695,26 @@ export class WorkbenchService {
     if (!reason.trim()) throw new Error("请填写回滚理由");
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.status !== "closed" || !item.merge?.commit) throw new Error("Work item has no merge to roll back");
-    const { docs, store } = await this.context(workspaceId);
-    const rollbackCommit = await docs.rollbackMerge(item.merge.commit);
-    // The closed item's worktree was removed. The scheduler creates its original path from current HEAD,
-    // so the worker can implement the reverted changes as new commits in the same session.
-    await store.workItems.put({ ...item, merge: { ...item.merge, rollbackCommit, acknowledgedAt: this.now() } });
-    if (item.missionId) await this.setMissionStatus(workspaceId, item.missionId, "active");
-    return this.returnWorkItem(workspaceId, workItemId, "用户回滚：" + reason.trim());
+    if (!(await this.listActions(workspaceId)).some((a) => a.kind === "integration" && a.workItemIds.includes(workItemId) && actionIsOpen(a))) {
+      await this.createAction(workspaceId, { kind: "integration", role: "workbench", ownerKey: "integration", workItemIds: [workItemId], missionId: item.missionId, status: "pending", stage: "rollback", message: "用户回滚：" + reason.trim(), integration: { operation: "rollback", target: item.merge.commit, diffStat: "", reason: reason.trim() } });
+    }
+    await this.drainIntegrations(workspaceId);
+    return this.getWorkItem(workspaceId, workItemId);
   }
 
   async cancelWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
-    const { docs } = await this.context(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
-    if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch);
-    const cancelled = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "cancelled", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
-    const dependants = (await this.listWorkItems(workspaceId)).filter((w) => w.status === "queued" && w.dependsOn.includes(workItemId)).map((w) => w.workItemId);
+    if (item.status === "closed") throw new Error("已合入工单请使用回滚入口，不能取消已完成成果。");
+    const cancelled = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "cancelled" }));
+    for (const action of await this.listActions(workspaceId)) {
+      if (action.workItemIds.includes(workItemId) && actionIsOpen(action) && action.workItemIds.length === 1 && action.kind !== "repair") await this.putAction(workspaceId, { ...action, status: "cancelled" });
+    }
+    const dependants = (await this.listWorkItems(workspaceId)).filter((w) => !["closed", "cancelled"].includes(w.status) && w.dependsOn.includes(workItemId)).map((w) => w.workItemId);
     this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants });
+    if (item.run.worktreePath && item.run.branch) {
+      await this.createAction(workspaceId, { kind: "integration", role: "workbench", ownerKey: "integration", workItemIds: [workItemId], status: "pending", stage: "cleanup", message: "取消后的工作目录清理。", integration: { operation: "cancel", diffStat: "" } });
+      await this.continueIntegrations(workspaceId);
+    }
     return cancelled;
   }
 
@@ -499,10 +725,21 @@ export class WorkbenchService {
   async updateWorkItem(
     workspaceId: string,
     workItemId: string,
-    input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk" | "needs" | "dependsOn">> & { note: string }
+    input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk" | "needs" | "dependsOn">> & { note: string; resolution?: { actionId: string; disposition: "updated" | "clarified"; reason: string } }
   ): Promise<WorkItem> {
-    const { note, ...changes } = input;
-    const resourcesOnly = changes.needs !== undefined && Object.keys(changes).every((key) => key === "needs");
+    const { note, resolution, ...changes } = input;
+    const current = await this.getWorkItem(workspaceId, workItemId);
+    if (changes.dependsOn) await this.checkDependencies(workspaceId, workItemId, changes.dependsOn);
+    let resolved: WorkflowAction | undefined;
+    if (resolution) {
+      resolved = await this.getAction(workspaceId, resolution.actionId);
+      if (!actionIsOpen(resolved) || resolved.kind !== "contract" || !resolved.workItemIds.includes(workItemId)) throw new Error("resolution 必须引用本单未解决的合同问题。");
+      if (!resolution.reason.trim()) throw new Error("请说明具体处置及恢复依据。");
+      const fields = resolved.requiredChanges ?? ["objective", "scope", "acceptance", "dependsOn", "needs"];
+      if (resolution.disposition === "updated" && !fields.some((field) => changes[field] !== undefined && JSON.stringify(changes[field]) !== JSON.stringify(current[field]))) {
+        throw new Error("未落实问题所需的合同修改；标题、引用和说明不能解除阻塞。无需修改时请用 clarified 明确记录澄清依据。");
+      }
+    }
     const occupied = changes.needs?.length
       ? new Set((await this.listWorkItems(workspaceId)).filter((item) => item.workItemId !== workItemId && item.status === "running").flatMap((item) => item.needs))
       : new Set<string>();
@@ -515,23 +752,39 @@ export class WorkbenchService {
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
       return {
         ...item, ...changes, status, decisions,
-        contractIssue: item.contractIssue && !resourcesOnly ? { ...item.contractIssue, resolvedAt: this.now() } : item.contractIssue,
-        run: !resourcesOnly && status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt
+        contractIssue: item.contractIssue && resolved ? { ...item.contractIssue, resolvedAt: this.now() } : item.contractIssue,
+        run: resolved && status === "queued"
           ? { ...item.run, resumeMessage: [item.run.resumeMessage, "工单已调整：" + note + "。重新读取合同，先 rebase 到主分支当前 HEAD，再继续执行。"].filter(Boolean).join("\n") }
           : item.run
       };
     });
+    if (resolved) await this.finishAction(workspaceId, resolved.actionId, resolution!.disposition + "：" + resolution!.reason);
+    if (changes.dependsOn?.some((id) => !current.dependsOn.includes(id)) && updated.status === "running") {
+      await this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "queued", run: { ...item.run, resumeMessage: "依赖调整已落实。前置关闭后读取最新合同，rebase 后继续。" } }));
+    }
     if (updated.status === "running" && updated.run.sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId, sessionId: updated.run.sessionId, note });
     // Parked on a decision: the user reads the change on the card before answering; the answer carries it to the worker.
     if (updated.status === "decision") {
       const { store } = await this.context(workspaceId);
-      const card = (await store.decisions.list()).find((c) => c.workItemId === workItemId && !c.answer);
-      if (card) {
+      for (const card of (await store.decisions.list()).filter((c) => c.workItemId === workItemId && !c.answer && !c.withdrawn)) {
         await store.decisions.put({ ...card, adjustments: [...(card.adjustments ?? []), { note, at: this.now() }] });
         this.emit({ type: "decisions.changed", workspaceId });
       }
     }
-    return updated;
+    return this.getWorkItem(workspaceId, workItemId);
+  }
+
+  private async checkDependencies(workspaceId: string, workItemId: string, dependsOn: string[]): Promise<void> {
+    const items = await this.listWorkItems(workspaceId);
+    const graph = new Map(items.map((item) => [item.workItemId, item.dependsOn]));
+    graph.set(workItemId, dependsOn);
+    const visit = (id: string, chain: string[]): void => {
+      if (chain.includes(id)) throw new Error("循环依赖：" + [...chain, id].join(" → "));
+      const children = graph.get(id);
+      if (!children) throw new Error("前置工单不存在：" + id + "。请由管家调整依赖。");
+      for (const child of children) visit(child, [...chain, id]);
+    };
+    visit(workItemId, []);
   }
 
   /**
@@ -541,7 +794,8 @@ export class WorkbenchService {
    * any mission.
    */
   async deferWorkItem(workspaceId: string, workItemId: string, dependsOn: string, note: string): Promise<WorkItem> {
-    if (dependsOn === workItemId) throw new Error("Work item cannot depend on itself: " + workItemId);
+    const current = await this.getWorkItem(workspaceId, workItemId);
+    await this.checkDependencies(workspaceId, workItemId, [...new Set([...current.dependsOn, dependsOn])]);
     const prerequisite = await this.getWorkItem(workspaceId, dependsOn);
     if (prerequisite.status === "closed" || prerequisite.status === "cancelled") throw new Error("Work item is already " + prerequisite.status + ": " + dependsOn);
     return this.mutateWorkItem(workspaceId, workItemId, (item) => {
@@ -556,13 +810,23 @@ export class WorkbenchService {
     });
   }
 
-  async escalateWorkItem(workspaceId: string, workItemId: string, message: string): Promise<WorkItem> {
+  async escalateWorkItem(workspaceId: string, workItemId: string, message: string, options: { kind?: "contract" | "workspace"; evidence?: string[]; requiredChanges?: WorkflowAction["requiredChanges"] } = {}): Promise<WorkItem> {
     if (!message.trim()) throw new Error("Contract problem needs a message");
+    const current = await this.getWorkItem(workspaceId, workItemId);
+    if (["closed", "cancelled"].includes(current.status)) throw new Error("工单已结束，无法上报执行阻塞。");
+    if (options.kind === "workspace") {
+      if (!(await this.listActions(workspaceId)).some((a) => a.kind === "integration" && a.workItemIds.includes(workItemId) && actionIsOpen(a))) throw new Error("主工作区修复仅处理合入、回滚或清理阶段故障；执行环境问题请交管家。");
+      await this.requestRepair(workspaceId, workItemId, message);
+      return this.getWorkItem(workspaceId, workItemId);
+    }
+    const existing = (await this.listActions(workspaceId)).find((a) => a.kind === "contract" && a.workItemIds.includes(workItemId) && actionIsOpen(a));
+    if (existing) {
+      if (!existing.history.some((entry) => entry.message === message)) await this.putAction(workspaceId, { ...existing, history: [...existing.history, { at: this.now(), event: "reported", message }], message: existing.message + "\n补充：" + message });
+    } else await this.createAction(workspaceId, { kind: "contract", role: "steward", ownerKey: "steward:" + (current.missionId ?? workItemId), workItemIds: [workItemId], missionId: current.missionId, status: "pending", stage: "open", requiredChanges: options.requiredChanges, message: [message, ...(options.evidence ?? [])].join("\n") });
     return this.mutateWorkItem(workspaceId, workItemId, (item) => {
-      if (item.status !== "running" && !(item.status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt)) throw new Error("Work item is not running or held on a contract issue: " + workItemId);
       return {
         ...item, status: "queued",
-        contractIssue: { message, at: this.now() },
+        contractIssue: item.contractIssue && !item.contractIssue.resolvedAt ? item.contractIssue : { message, at: this.now() },
         decisions: [...item.decisions, "合同问题：" + message],
         run: { ...item.run, resumeMessage: "合同问题已交管家处置：" + message }
       };
@@ -586,38 +850,10 @@ export class WorkbenchService {
    * Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted; after
    * four delayed retries the item is parked on a decision card instead so the user sees it.
    */
-  async requeueWorkItem(workspaceId: string, workItemId: string, failure: string, newSession = false): Promise<WorkItem> {
-    const item = await this.mutateWorkItem(workspaceId, workItemId, (current) => {
-      const attempts = (current.run.attempts ?? 0) + 1;
-      const delay = RETRY_MINUTES[attempts - 1];
-      return {
-        ...current,
-        status: delay === undefined ? "decision" : "queued",
-        run: {
-          ...current.run,
-          sessionId: newSession && delay !== undefined ? undefined : current.run.sessionId,
-          resumeMessage: "上次运行异常结束：" + failure,
-          lastFailure: failure,
-          attempts,
-          retryAt: delay === undefined ? undefined : new Date(Date.parse(this.now()) + delay * 60_000).toISOString()
-        }
-      };
-    });
-    if ((item.run.attempts ?? 0) < MAX_ATTEMPTS) return item;
-    await this.createDecision(workspaceId, {
-      kind: "attempts",
-      workItemId,
-      missionId: item.missionId,
-      sessionId: item.run.sessionId,
-      question: "工单「" + item.title + "」连续 " + MAX_ATTEMPTS + " 次没有完成，要继续吗？",
-      context: "最近一次失败：" + failure + "。工单已暂停自动重派，原会话和 worktree 已保留。",
-      options: [
-        { key: "retry", label: "再试一次", detail: "失败计数清零，立即回原会话和 worktree 继续" },
-        { key: "cancel", label: "取消工单", detail: "关闭工单并清理它的 worktree；需要的话由管家或你重新建单" }
-      ],
-      recommended: "cancel",
-      recommendation: "先查看最近一次失败原因；问题已排除时可以再试一次"
-    });
+  async requeueWorkItem(workspaceId: string, workItemId: string, failure: string): Promise<WorkItem> {
+    await this.refreshActions(workspaceId);
+    const action = (await this.listActions(workspaceId)).find((entry) => entry.kind === "execute" && entry.workItemIds.includes(workItemId) && actionIsOpen(entry));
+    if (action) await this.failAction(workspaceId, action.actionId, failure);
     return this.getWorkItem(workspaceId, workItemId);
   }
 
@@ -657,9 +893,17 @@ export class WorkbenchService {
   /** Parks the linked work item (if any) until the user answers. */
   async createDecision(workspaceId: string, input: Omit<DecisionCard, "decisionId" | "createdAt" | "answer">): Promise<DecisionCard> {
     const { store } = await this.context(workspaceId);
-    const card = await store.decisions.put({ ...input, decisionId: createId("d"), createdAt: this.now() });
+    let action = input.actionId ? await this.getAction(workspaceId, input.actionId) : (await this.listActions(workspaceId)).find((a) => actionIsOpen(a) && a.role !== "workbench" && (input.workItemId ? a.workItemIds.includes(input.workItemId) && a.kind !== "execute" : a.sessionId === input.sessionId));
+    action ??= (await this.listActions(workspaceId)).find((a) => actionIsOpen(a) && a.kind === "execute" && a.workItemIds.includes(input.workItemId ?? ""));
+    if (action && !actionIsOpen(action)) throw new Error("处理过程已结束，不能再挂起决策。");
+    if (!action && input.workItemId) {
+      const item = await this.getWorkItem(workspaceId, input.workItemId);
+      action = await this.createAction(workspaceId, { kind: "execute", role: "worker", ownerKey: "worker:" + item.workItemId, workItemIds: [item.workItemId], missionId: item.missionId, sessionId: input.sessionId ?? item.run.sessionId, status: "running", stage: "execute", message: "理解用户决定并继续原工单。" });
+    }
+    const card = await store.decisions.put({ ...input, actionId: action?.actionId, decisionId: createId("d"), createdAt: this.now() });
+    if (action) await this.putAction(workspaceId, { ...action, status: "decision", history: [...action.history, { at: this.now(), event: "decision.created", message: card.decisionId + " " + card.question }] });
     if (input.workItemId) {
-      await this.mutateWorkItem(workspaceId, input.workItemId, (item) => (item.status === "running" || item.status === "queued" ? { ...item, status: "decision" } : item));
+      await this.mutateWorkItem(workspaceId, input.workItemId, (item) => (action?.kind === "execute" && (item.status === "running" || item.status === "queued") ? { ...item, status: "decision" } : item));
     }
     this.emit({ type: "decisions.changed", workspaceId });
     return card;
@@ -674,36 +918,47 @@ export class WorkbenchService {
     const { store } = await this.context(workspaceId);
     const card = await store.decisions.get(decisionId);
     if (!card) throw new Error("Unknown decision: " + decisionId);
+    if (card.answer || card.withdrawn) throw new Error("决策已答复或撤回，不能重复答复。");
     if (!answer.key && !answer.note?.trim()) throw new Error("Answer needs an option key or a note");
     if (answer.key && !card.options.some((o) => o.key === answer.key)) throw new Error("Unknown option: " + answer.key);
     const answered = await store.decisions.put({ ...card, answer: { ...answer, at: this.now() } });
-    if (card.workItemId) {
-      const line = describeAnswer(card, answer);
-      if (card.kind === "attempts" && answer.key === "cancel") {
-        await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item, decisions: [...item.decisions, line] }));
-        await this.cancelWorkItem(workspaceId, card.workItemId);
-      } else {
-        const resetAttempts = card.kind === "attempts";
-        await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({
-          ...item,
-          status: item.status === "decision" ? "queued" : item.status,
-          contractIssue: item.status === "decision" && item.contractIssue && !item.contractIssue.resolvedAt
-            ? { ...item.contractIssue, answerPending: true }
-            : item.contractIssue,
-          decisions: [...item.decisions, line],
-          run: item.status === "decision"
-            ? {
-                ...item.run,
-                sessionId: item.run.sessionId,
-                resumeMessage: "用户决策答复：" + line + "\n先读取当前工单并理解选项和备注；无需调整合同且没有未解决的合同问题则继续执行。涉及目标、范围或验收变化，或已有合同问题尚未解决时，先调用 workItem.escalate 向管家上报你的理解并结束本轮，合同更新前暂停开发与提交。",
-                ...(resetAttempts ? { attempts: 0, lastFailure: undefined, retryAt: undefined } : {})
-              }
-            : item.run
-        }));
-      }
-    }
+    await this.deliverDecision(workspaceId, answered, "用户决策答复：" + describeAnswer(card, answer), card.kind === "attempts" ? answer.key : undefined);
     this.emit({ type: "decisions.changed", workspaceId });
     return answered;
+  }
+
+  async withdrawDecision(workspaceId: string, decisionId: string, sessionId: string, reason: string): Promise<DecisionCard> {
+    const { store } = await this.context(workspaceId);
+    const card = await store.decisions.get(decisionId);
+    if (!card) throw new Error("Unknown decision: " + decisionId);
+    if (card.answer || card.withdrawn) throw new Error("只能撤回尚未答复的决策。");
+    if (!reason.trim() || !card.sessionId || card.sessionId !== sessionId) throw new Error("需由发起会话附原因撤回。");
+    const withdrawn = await store.decisions.put({ ...card, withdrawn: { reason: reason.trim(), sessionId, at: this.now() } });
+    await this.deliverDecision(workspaceId, withdrawn, "发起者撤回决策「" + card.question + "」：" + reason.trim() + "。没有用户答复，继续处理原问题。其他等待条件仍有效。");
+    this.emit({ type: "decisions.changed", workspaceId });
+    return withdrawn;
+  }
+
+  private async deliverDecision(workspaceId: string, card: DecisionCard, message: string, recoveryChoice?: string): Promise<void> {
+    const action = card.actionId ? await this.getAction(workspaceId, card.actionId) : undefined;
+    const cards = await this.listDecisions(workspaceId);
+    if (card.workItemId) await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({ ...item,
+      status: item.status === "decision" && !cards.some((other) => other.workItemId === item.workItemId && !other.answer && !other.withdrawn) ? "queued" : item.status,
+      decisions: [...item.decisions, message], run: action?.kind === "execute" ? { ...item.run, resumeMessage: message } : item.run }));
+    if (!action || !actionIsOpen(action)) return;
+    if (recoveryChoice === "cancel") {
+      await this.putAction(workspaceId, { ...action, status: "cancelled", history: [...action.history, { at: this.now(), event: "decision.cancelled", message }] });
+      for (const id of action.workItemIds) {
+        const item = await this.getWorkItem(workspaceId, id);
+        if (item.status !== "closed" && item.status !== "cancelled") await this.cancelWorkItem(workspaceId, id);
+        else for (const pending of await this.listActions(workspaceId)) if (pending.kind === "integration" && pending.workItemIds.includes(id) && actionIsOpen(pending)) await this.putAction(workspaceId, { ...pending, status: "cancelled" });
+      }
+      return;
+    }
+    const waiting = cards.some((other) => other.actionId === action.actionId && !other.answer && !other.withdrawn);
+    await this.putAction(workspaceId, { ...action, status: waiting ? "decision" : "pending", stage: action.sessionId ? "deliver" : action.stage,
+      message: action.message + "\n" + message, ...(recoveryChoice === "retry" ? { attempts: 0, idleTurns: 0, failure: undefined, retryAt: undefined } : {}),
+      history: [...action.history, { at: this.now(), event: card.withdrawn ? "decision.withdrawn" : "decision.answered", message }] });
   }
 
   // ---- inbox ----
@@ -713,7 +968,7 @@ export class WorkbenchService {
     for (const workspace of await this.listWorkspaces()) {
       const { store } = await this.context(workspace.workspaceId);
       for (const card of await store.decisions.list()) {
-        if (!card.answer) items.push({ kind: "decision", workspaceId: workspace.workspaceId, card });
+        if (!card.answer && !card.withdrawn) items.push({ kind: "decision", workspaceId: workspace.workspaceId, card });
       }
       const missions = await store.missions.list();
       for (const workItem of await store.workItems.list()) {
@@ -741,5 +996,6 @@ const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId
   workitems: "workItems.changed",
   decisions: "decisions.changed",
   runs: "runs.changed",
+  actions: "actions.changed",
   "scheduler.json": "scheduler.changed"
 };

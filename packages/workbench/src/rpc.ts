@@ -3,6 +3,7 @@ import { zRoleDocument } from "./role-document.js";
 import {
   zAcceptanceItem,
   zAgentRun,
+  zWorkflowAction,
   zScheduler,
   zDecisionCard,
   zDecisionOption,
@@ -105,10 +106,14 @@ export const workbenchRpc = {
   "inbox.acknowledge": { params: zWi, result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
   "workItem.defer": { params: zWi.extend({ dependsOn: z.string().min(1), note: z.string().min(1) }), result: zWorkItem },
-  "workItem.escalate": { params: zWi.extend({ message: z.string().trim().min(1) }), result: zWorkItem },
+  "workItem.escalate": { params: zWi.extend({ message: z.string().trim().min(1), kind: z.enum(["contract", "workspace"]).optional(), evidence: z.array(z.string()).optional(), requiredChanges: zWorkflowAction.shape.requiredChanges }), result: zWorkItem },
+  "workItem.recover": { params: zWi, result: z.object({ workItem: zWorkItem, actions: z.array(zWorkflowAction), dispatched: z.boolean(), message: z.string() }) },
+  "action.list": { params: zWs, result: z.array(zWorkflowAction) },
+  "workspace.repair.submit": { params: zWs.extend({ actionId: z.string().min(1), sessionId: z.string().min(1), summary: z.string().trim().min(1), evidence: z.array(z.string().min(1)).min(1) }), result: z.object({ pass: z.boolean(), message: z.string(), action: zWorkflowAction }) },
   "workItem.update": {
     params: zWi.extend({
       note: z.string().min(1),
+      resolution: z.object({ actionId: z.string().min(1), disposition: z.enum(["updated", "clarified"]), reason: z.string().trim().min(1) }).optional(),
       title: z.string().min(1).optional(),
       objective: z.string().optional(),
       risk: zRisk.optional(),
@@ -129,6 +134,7 @@ export const workbenchRpc = {
   "decision.create": {
     params: zWs.extend({
       kind: z.enum(["worker", "attempts"]).optional(),
+      actionId: z.string().optional(),
       question: z.string().min(1),
       context: z.string(),
       details: z.string().optional(),
@@ -143,6 +149,7 @@ export const workbenchRpc = {
   },
   /** Pick an option (key), write a free answer (note only), or both. */
   "decision.answer": { params: zWs.extend({ decisionId: z.string().min(1), key: z.string().min(1).optional(), note: z.string().optional() }), result: zDecisionCard },
+  "decision.withdraw": { params: zWs.extend({ decisionId: z.string().min(1), sessionId: z.string().min(1), reason: z.string().trim().min(1) }), result: zDecisionCard },
 
   "inbox.list": { params: zEmpty, result: z.array(zInboxItem) },
 
