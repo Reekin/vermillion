@@ -351,7 +351,12 @@ export class WorkbenchService {
   /** Worker claimed the item; records the session and worktree it runs in. */
   /** A (re)start begins a new turn: the pending message is claimed and any stale-turn mark from the previous run is over. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined, retryAt: undefined, staleTurnId: undefined } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({
+      ...item,
+      status: item.contractIssue && !item.contractIssue.resolvedAt ? "queued" : "running",
+      contractIssue: item.contractIssue ? { ...item.contractIssue, answerPending: undefined } : undefined,
+      run: { ...item.run, ...run, resumeMessage: undefined, retryAt: undefined, staleTurnId: undefined }
+    }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
@@ -467,7 +472,7 @@ export class WorkbenchService {
         ...item, ...changes, status, decisions,
         contractIssue: item.contractIssue ? { ...item.contractIssue, resolvedAt: this.now() } : undefined,
         run: status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt
-          ? { ...item.run, resumeMessage: "工单已调整：" + note + "。重新读取合同，先 rebase 到主分支当前 HEAD，再继续执行。" }
+          ? { ...item.run, resumeMessage: [item.run.resumeMessage, "工单已调整：" + note + "。重新读取合同，先 rebase 到主分支当前 HEAD，再继续执行。"].filter(Boolean).join("\n") }
           : item.run
       };
     });
@@ -509,8 +514,7 @@ export class WorkbenchService {
   async escalateWorkItem(workspaceId: string, workItemId: string, message: string): Promise<WorkItem> {
     if (!message.trim()) throw new Error("Contract problem needs a message");
     return this.mutateWorkItem(workspaceId, workItemId, (item) => {
-      if (!item.missionId) throw new Error("Standalone work item has no steward: " + workItemId);
-      if (item.status !== "running") throw new Error("Work item is not running: " + workItemId);
+      if (item.status !== "running" && !(item.status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt)) throw new Error("Work item is not running or held on a contract issue: " + workItemId);
       return {
         ...item, status: "queued",
         contractIssue: { message, at: this.now() },
@@ -638,13 +642,15 @@ export class WorkbenchService {
         await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({
           ...item,
           status: item.status === "decision" ? "queued" : item.status,
-          contractIssue: item.status === "decision" && item.contractIssue ? { ...item.contractIssue, resolvedAt: this.now() } : item.contractIssue,
+          contractIssue: item.status === "decision" && item.contractIssue && !item.contractIssue.resolvedAt
+            ? { ...item.contractIssue, answerPending: true }
+            : item.contractIssue,
           decisions: [...item.decisions, line],
           run: item.status === "decision"
             ? {
                 ...item.run,
-                sessionId: item.run.sessionId ?? card.sessionId,
-                resumeMessage: "用户决策答复：" + line,
+                sessionId: item.run.sessionId,
+                resumeMessage: "用户决策答复：" + line + "\n先读取当前工单并理解选项和备注；无需调整合同且没有未解决的合同问题则继续执行。涉及目标、范围或验收变化，或已有合同问题尚未解决时，先调用 workItem.escalate 向管家上报你的理解并结束本轮，合同更新前暂停开发与提交。",
                 ...(resetAttempts ? { attempts: 0, lastFailure: undefined, retryAt: undefined } : {})
               }
             : item.run
