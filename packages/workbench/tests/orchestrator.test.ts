@@ -88,6 +88,72 @@ const setup = async (maxWorkers = 1, patrolIntervalMs = 60_000) => {
 };
 
 describe("Orchestrator", { timeout: 60000 }, () => {
+  it.each(["update", "cancel", "decision"])("holds contract problems for the steward and resumes the original worker after %s", async (action) => {
+    const { service, ws, sessions, complete, orchestrator, roles, runner } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# contract\n");
+    const mission = await service.createMission(ws.workspaceId, { title: "Contract", summary: "" });
+    await until(async () => sessions.some((s) => s.metadata.role === "steward" && s.messages.length > 0));
+    const steward = sessions.find((s) => s.metadata.role === "steward")!;
+    const item = await service.createWorkItem(ws.workspaceId, {
+      missionId: mission.missionId, title: "Worker", objective: "fix", risk: "R2",
+      scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: [{ text: "fixed" }]
+    });
+    await until(async () => sessions.some((s) => s.metadata.workItemId === item.workItemId && s.messages.length > 0));
+    const worker = sessions.find((s) => s.metadata.workItemId === item.workItemId)!;
+    const before = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    await service.escalateWorkItem(ws.workspaceId, item.workItemId, "需要调整允许路径");
+    await until(async () => steward.messages.some((m) => m.includes("需要调整允许路径")));
+    expect(steward.messages.at(-1)).toContain(item.workItemId);
+    complete(worker.sessionId, "已上报");
+    await until(async () => (await service.listRuns(ws.workspaceId)).some((r) => r.workItemId === item.workItemId && r.status === "done"));
+    const held = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    expect(held.status).toBe("queued");
+    expect(held.contractIssue).toMatchObject({ message: "需要调整允许路径", notifiedAt: expect.any(String) });
+    expect(held.run).toMatchObject({ sessionId: worker.sessionId, worktreePath: before.run.worktreePath, branch: before.run.branch });
+    expect(held.run.attempts).toBeUndefined();
+    await access(before.run.worktreePath!);
+    expect(await service.listDecisions(ws.workspaceId)).toHaveLength(0);
+
+    // A restart reads the persisted hold and does not reassign the worker or redeliver the problem.
+    orchestrator.dispose();
+    const restarted = new Orchestrator({ service, roles, runner });
+    cleanup.push(() => restarted.dispose());
+    restarted.start();
+    await until(async () => steward.messages.some((m) => m.includes("工作台重启过")));
+    await tick();
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("queued");
+    expect(steward.messages.filter((m) => m.includes("需要调整允许路径"))).toHaveLength(1);
+
+    if (action === "cancel") {
+      await service.cancelWorkItem(ws.workspaceId, item.workItemId);
+      await tick();
+      expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("cancelled");
+      await expect(access(before.run.worktreePath!)).rejects.toThrow();
+      expect(worker.messages).toHaveLength(1);
+      return;
+    }
+    if (action === "update") {
+      await service.updateWorkItem(ws.workspaceId, item.workItemId, { note: "允许修复保存代码", scope: { ...item.scope, allowedPaths: ["src/", "storage/"] } });
+    } else {
+      const card = await service.createDecision(ws.workspaceId, {
+        workItemId: item.workItemId, missionId: mission.missionId, sessionId: steward.sessionId,
+        question: "是否扩大修复范围？", context: "保存代码需要一同修复。", details: "保存入口：storage/save.ts",
+        options: [{ key: "yes", label: "继续修复", detail: "一并修复保存代码" }]
+      });
+      expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("decision");
+      const inbox = await service.listInbox();
+      expect(inbox.some((i) => i.kind === "decision" && i.card.decisionId === card.decisionId)).toBe(true);
+      await service.answerDecision(ws.workspaceId, card.decisionId, { note: "继续修复" });
+    }
+    await until(async () => worker.messages.length === 2);
+    const resumed = await service.getWorkItem(ws.workspaceId, item.workItemId);
+    expect(resumed.status).toBe("running");
+    expect(resumed.run.sessionId).toBe(worker.sessionId);
+    expect(resumed.run.worktreePath).toBe(before.run.worktreePath);
+    expect(sessions.filter((s) => s.metadata.workItemId === item.workItemId)).toHaveLength(1);
+    expect(worker.messages[1]).toContain(action === "update" ? "工单已调整：允许修复保存代码" : "用户决策答复：");
+  });
+
   it("delivers current-main rebase instructions even with a custom worker role", async () => {
     const { service, ws, sessions } = await setup();
     await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# base\n");
