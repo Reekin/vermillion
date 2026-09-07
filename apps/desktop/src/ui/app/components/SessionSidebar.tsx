@@ -4,9 +4,8 @@ import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
-import { cn } from "../lib/cn.js";
+import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { Button, IconButton, ListRow, SectionLabel, StatusDot } from "./ui.js";
-import { ContextMenu } from "./ContextMenu.js";
 
 type SessionSidebarProps = {
   sessions: SidebarSession[];
@@ -97,26 +96,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           </li>
         )}
       </ul>
-      {notice && (
-        <div role="status" className={cn("flex items-start gap-2 border-t border-border px-4 py-2 text-caption", notice.error ? "text-strong" : "text-muted-foreground")}>
-          <span className="min-w-0 flex-1 break-words">{notice.text}</span>
-          {notice.error && <button type="button" className="shrink-0 text-faint-foreground hover:text-foreground" onClick={onClearNotice}>关闭</button>}
-        </div>
-      )}
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          onClose={onCloseMenu}
-          items={menu.actions.map((action) => ({
-            key: action.action,
-            label: action.label,
-            disabled: action.disabled,
-            title: action.reason,
-            onSelect: () => onRunAction(menu.sessionId, action.action)
-          }))}
-        />
-      )}
+      <SessionActionFeedback menu={menu} onCloseMenu={onCloseMenu} onRunAction={onRunAction} notice={notice} onClearNotice={onClearNotice} />
     </aside>
   );
 };

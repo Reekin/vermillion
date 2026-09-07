@@ -90,10 +90,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const onSelect = useCallback(
     (next: Panel) => {
       if (next === "think") setPanel("think");
-      else if (panel === next) setPanel(next);
+      else if (overlay === next) closeOverlay();
       else openOverlay(next);
     },
-    [panel, setPanel, openOverlay]
+    [overlay, setPanel, openOverlay, closeOverlay]
   );
 
   const pickDirectory = useCallback(async () => {
@@ -114,7 +114,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-page-canvas text-foreground">
       <div className="flex min-h-0 flex-1">
-      <Rail panel={panel} overlay={overlay} inboxCount={inboxCount} onSelect={onSelect} />
+      <Rail panel={panel} overlay={overlay} inboxCount={inboxCount} onSelect={onSelect} onOpenPage={setPanel} />
       <div className="relative min-w-0 flex-1">
         {/* The think page stays mounted so switching panels never loses chat state. */}
         <div className={panel === "think" ? "flex h-full" : "hidden"}>
@@ -146,20 +146,16 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             <DocsPanel store={store} activeSessionId={sessionId} onFileAction={onFileAction} />
           </aside>
         </div>
-        {panel !== "think" && (
-          <div className="flex h-full flex-col">
-            <header className="flex h-10 items-center border-b border-border px-4"><h1 className="text-title-sm font-medium text-strong">{panelTitles[panel]}</h1></header>
-            <div className="min-h-0 flex-1 overflow-auto">{renderPanel(panel, false)}</div>
-          </div>
-        )}
+        {(["inbox", "workspaces"] as const).map((target) => (
+          <Modal key={target} contained presentation={overlay === target ? "modal" : panel === target ? "page" : "hidden"}
+            title={panelTitles[target]} titleContent={target === "workspaces" ? <WorkspacesSwitcher store={store} /> : undefined}
+            width={target === "workspaces" ? 900 : undefined} onClose={closeOverlay} onExpand={() => setPanel(target)}>
+            {renderPanel(target, overlay === target || panel !== target)}
+          </Modal>
+        ))}
       </div>
       </div>
       <TaskStatusBar store={store} />
-      {overlay && (
-        <Modal title={panelTitles[overlay]} titleContent={overlay === "workspaces" ? <WorkspacesSwitcher store={store} /> : undefined} width={overlay === "workspaces" ? 900 : undefined} onClose={closeOverlay} onExpand={() => setPanel(overlay)}>
-          {renderPanel(overlay, true)}
-        </Modal>
-      )}
       <TextEditor store={store} />
       <RoleEditor store={store} transport={transport} />
     </div>

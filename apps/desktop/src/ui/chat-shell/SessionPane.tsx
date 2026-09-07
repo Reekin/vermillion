@@ -95,6 +95,8 @@ export type SessionPaneProps = {
   createSession: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
+  /** Compact readers reserve all available width for messages. */
+  allowChatTree?: boolean;
 };
 
 type TranscriptPaneProps = {
@@ -569,7 +571,8 @@ export const SessionPane = ({
   sessionId,
   reloadSignal,
   createSession,
-  composerExtras
+  composerExtras,
+  allowChatTree = true
 }: SessionPaneProps): ReactElement => {
   const state = useRendererStoreState(store);
   const [availableEngines, setAvailableEngines] = useState<EngineDefinitionRpc[]>([]);
@@ -1001,7 +1004,7 @@ export const SessionPane = ({
               {sessionId ? truncateSessionHeading(displayedSession?.title) : "新会话"}
             </h2>
           </div>
-          <div className="awb-main__header-actions">
+          {allowChatTree && <div className="awb-main__header-actions">
             <button
               type="button"
               className={"awb-header-toggle" + (showChatTree ? " is-on" : "")}
@@ -1012,7 +1015,7 @@ export const SessionPane = ({
             >
               <GitBranch size={15} />
             </button>
-          </div>
+          </div>}
         </header>
 
         <div className="awb-main__body">
@@ -1040,7 +1043,7 @@ export const SessionPane = ({
             onRespondInteraction={onRespondInteraction}
           />
           </div>
-          {showChatTree && (
+          {allowChatTree && showChatTree && (
             <aside className="awb-chat-tree-column" aria-label="对话树">
               <section className="awb-detail__graph">
                 <ChatTreePanel
