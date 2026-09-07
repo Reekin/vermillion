@@ -58,7 +58,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
         </>
       }
     >
-      <p className="text-title-sm font-medium text-strong">{card.question}</p>
+      <p className="text-label font-medium text-strong">{card.question}</p>
       {card.context && <p className="mt-1.5 whitespace-pre-wrap text-body text-muted-foreground">{card.context}</p>}
       {adjustments.length > 0 && (
         <div className="mt-3 rounded-md border border-border bg-input px-3 py-2">
@@ -173,7 +173,7 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
         )
       }
     >
-      <p className="break-words text-title-sm font-medium text-strong">{workItem.title}</p>
+      <p className="break-words text-label font-medium text-strong">{workItem.title}</p>
       {workItem.evidence && (
         <p className="mt-2 whitespace-pre-wrap break-words text-body text-foreground">{workItem.evidence.summary}</p>
       )}

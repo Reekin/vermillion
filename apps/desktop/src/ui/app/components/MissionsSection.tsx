@@ -107,7 +107,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
       <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2 text-caption text-muted-foreground">
         <Toggle label="调度" checked={scheduler.enabled} disabled={busy} onChange={(enabled) => setScheduler({ enabled })} />
         <Stepper label="并发" value={scheduler.maxWorkers} min={1} max={8} disabled={busy} onChange={(maxWorkers) => setScheduler({ maxWorkers })} />
-        <span className="border-l border-border-strong pl-3 font-mono text-faint-foreground">
+        <span className="border-l border-border-strong pl-3 text-caption text-muted-foreground">
           {workItems.filter((w) => w.status === "running").length} 进行中 · {workItems.filter((w) => !isOpenWorkItem(w)).length} 已结束
         </span>
         {hidden > 0 && <Button size="sm" variant="ghost" className="ml-auto underline underline-offset-4" onClick={onExpand}>另有 {hidden} 项已结束</Button>}
@@ -121,7 +121,7 @@ export const MissionsSection = ({ client, workspaceId, scheduler, missions, work
             return <div key={mission.missionId} data-task-id={mission.missionId}>
               <Card compact header={<>
                 <Badge tone={mission.status === "active" ? "accent" : "neutral"}>{missionStatusLabel[mission.status]}</Badge>
-                <span className="min-w-0 flex-1 truncate text-body font-medium text-strong" title={mission.title}>{mission.title}</span>
+                <span className="min-w-0 flex-1 truncate text-label font-medium text-strong" title={mission.title}>{mission.title}</span>
                 <span className="shrink-0 font-mono text-caption text-muted-foreground" title={new Date(mission.updatedAt).toLocaleString("zh-CN")}>
                   {!compact && <span>{mission.revisions.length} 个 revision · {latestRevision(mission).commit.slice(0, 8)} · </span>}{relativeTime(mission.updatedAt)}
                 </span>
