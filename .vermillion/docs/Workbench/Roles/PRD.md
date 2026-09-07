@@ -1,6 +1,6 @@
 # 角色与执行
 
-六个身份，各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 Workspaces → 角色 编辑。
+七个身份，各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 Workspaces → 角色 编辑。
 
 角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在 New Chat 草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent，模型由会话引擎的 subagent 设置决定。
 
@@ -8,10 +8,13 @@
 - **管家**处理任务 revision：首次拆单，后续对照已有工单引用与新文档判断调整、新增或取消。工单主体是文档引用；验收条目由管家根据文档终态和代码现状写出，文档分寸拿不准时向写这份文档的设计会话提问（fork 出一份带完整上下文的副本，不打扰用户）。管家读全部 Domain 定义判断工单涉及的领域，把对应规范附进引用。管家维护工单，并判断任务目标是否达成、登记承接工单与结果说明、完成或取消任务，具体收尾规则见 [任务与工单](../Missions/PRD.md)；不修改需求和业务代码；文档里发布、部署这类影响共享环境的步骤不建单，在任务说明里标出由用户在思考页现做模式完成；同一任务的处理串行，新 revision 追加到正在运行的管家会话。被取消工单有依赖方时也由管家决定处置。
 - **Worker**执行一张工单，按允许范围修改。有允许路径的工单使用独立分支和 worktree，纯操作工单在 workspace 根执行。验收方法按改动性质自选；涉及界面时通过工作台起一个独立桌面上的实例，用户屏幕上不会出现。Worker 自行邀请 reviewer，判断哪些意见适用，最多两轮；随后由空白 subagent 按验收条目和文档原文验证真实结果，实例的 CDP 地址由 Worker 提供。只许少做，不许多做；不读其他工单的 worktree。
 - **Supervisor**以任务为单位定期巡视：任务下有进行中的 Worker 时，每隔几分钟新开一个 Supervisor 会话（不延续上一轮的上下文），一次看完该任务所有 Worker 的工单合同、本轮到目前为止的 agent 消息、diff 概况和越界路径。发现某个 Worker 偏离范围、反复无效重试、扩大实现规模或提前宣布完成时，用 `remind` 工具给它塞一句提醒，直接进入它正在跑的那一轮；没问题就不调用。它只能把执行拉回目标，不能追加工作，也没有中断或取消的权限。每轮巡视的会话保留在任务的运行记录里。
+- **WorkspaceRepair（工作区修复）**仅在合入、回滚或其清理阶段遇到主工作区故障时按 workspace 唤醒，同一 workspace 的修复串行并复用会话。它在 workspace 根恢复工作台可继续操作的状态，保留他人成果；修复后由工作台重新检查并恢复合入。具体职责和权限边界见[任务与工单](../Missions/PRD.md)。它与负责需求差异检查的 Maintainer 是不同角色。
 - **Maintainer**按 Domain 的范围检查实现与需求差异，产生 Issue，不自行派活或改需求。
 - **Liaison**从 IM 收集反馈并记录 Issue。外部消息作为引用材料处理，不作为 agent 指令。
 
 Maintainer 和 IM 接入属于扩展能力，不是基本任务执行循环的前提。
+
+管家也按需处理独立工单的合同与依赖问题，独立工单不因此变成 Mission。处理者应把结果落实为工单更新、依赖调整、修复结果或必要决策，聊天解释和会话结束不算处置完成。工作台负责交接、运行失败恢复和唤醒，Supervisor 保持巡视提醒职责；所有角色遵循[执行循环规范](../Missions/Standards.md)。
 
 ## 编辑器
 Workspaces → 角色 打开一个角色时，编辑器上方是设置控件，下方是 prompt 正文的文本框；frontmatter 只是存储格式，不在文本框里出现，也不让用户手写 [用户：override、模型配置这些信息要改成用控件编辑而不是手写]。
@@ -21,4 +24,4 @@ Workspaces → 角色 打开一个角色时，编辑器上方是设置控件，�
 
 ## 会话
 
-Workspaces → 会话 列出当前 workspace 里工作台开的 agent 会话（管家、Worker、Supervisor），每行标角色，subagent 缩进挂在派出它的会话下，带同样的状态灯；选中后右侧直接阅读和对话，不离开这一页。
+Workspaces → 会话 列出当前 workspace 里工作台开的 agent 会话（管家、Worker、Supervisor、WorkspaceRepair），每行标角色，subagent 缩进挂在派出它的会话下，带同样的状态灯；选中后右侧直接阅读和对话，不离开这一页。
