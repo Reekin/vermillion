@@ -24,6 +24,8 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
 export { ConfigurationSelect, ConfigurationButton } from "../../chat-shell/composer/ConfigurationControl.js";
+export { SourceEditor } from "./SourceEditor.js";
+export { MarkdownPreview } from "./MarkdownPreview.js";
 
 // ---- Buttons ----
 
