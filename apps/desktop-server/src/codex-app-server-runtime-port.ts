@@ -1614,6 +1614,15 @@ export class CodexAppServerRuntimePort
     const startTurn = async (targetThreadId: string): Promise<TurnStartResponse> => {
       this.pendingTurnSessionIdByThreadId.set(targetThreadId, sessionId);
       try {
+        if (payload.params.thinkMode === "dispatch" || payload.params.thinkMode === "execute") {
+          await this.rpc("thread/inject_items", {
+            threadId: targetThreadId,
+            items: [{
+              type: "message", role: "developer",
+              content: [{ type: "input_text", text: `本轮工作台模式：${payload.params.thinkMode === "dispatch" ? "发单" : "现做"}。按设计伙伴角色中的对应模式规则处理本轮需求。此前轮次的模式不适用于本轮。` }]
+            }]
+          }, options);
+        }
         const params: Record<string, unknown> = {
           threadId: targetThreadId,
           input,

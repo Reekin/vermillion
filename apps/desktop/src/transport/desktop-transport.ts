@@ -90,6 +90,7 @@ export type WorkspaceRemoveInput = {
 };
 
 export type ChatSendInput = {
+  thinkMode?: import("@vermillion/shared").ThinkMode;
   sessionId: string;
   content: string;
   messageId?: string;
@@ -319,6 +320,7 @@ export type DesktopTransport = {
     }) => Promise<SkillDescriptorRpc[]>;
   };
   chatTree: {
+    setMode: (input: { sessionId: string; mode: import("@vermillion/shared").ThinkMode }) => Promise<{ mode: import("@vermillion/shared").ThinkMode }>;
     get: (sessionId: string) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
       sessionId: string;
@@ -816,6 +818,7 @@ export const createDesktopTransport = (
           content: input.content,
           messageId: input.messageId ?? createId(),
           attachments: input.attachments ?? [],
+          thinkMode: input.thinkMode,
           execution: input.execution
         }),
       steer: (input: ChatSteerInput) =>
@@ -864,6 +867,7 @@ export const createDesktopTransport = (
       }
     },
     chatTree: {
+      setMode: (input) => rpc.request("chatTree.setMode", input),
       get: async (sessionId: string) => {
         const result = await rpc.request("chatTree.get", {
           sessionId

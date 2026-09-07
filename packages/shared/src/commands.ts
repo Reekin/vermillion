@@ -11,6 +11,9 @@ import {
 } from "./common.js";
 import { zSessionExecutionProfileInputSchema } from "./session-profile.js";
 
+export const zThinkMode = z.enum(["dispatch", "execute"]);
+export type ThinkMode = z.infer<typeof zThinkMode>;
+
 export const commandTypes = [
   "initialize",
   "createSession",
@@ -86,6 +89,7 @@ const zSendUserMessageCommand = z.object({
   sessionId: zSessionId,
   messageId: zMessageId,
   content: z.string(),
+  thinkMode: zThinkMode.optional(),
   attachments: z.array(zAttachmentSchema).default([]),
   execution: zTurnExecutionOptionsSchema.optional(),
   cwd: z.string().min(1).optional(),
