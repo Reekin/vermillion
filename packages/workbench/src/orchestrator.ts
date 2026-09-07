@@ -152,14 +152,14 @@ export class Orchestrator {
         await this.service.putRun(workspaceId, { ...run, status: "done", note: "等待续做", endedAt: this.now() });
         continue;
       }
-      const stillOwns = run.role === "steward" || (item?.status === "running" && item.run.sessionId === run.sessionId);
+      const stillOwns = run.role === "steward" || (item?.run.sessionId === run.sessionId && (item.status === "running" || (item.status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt)));
       const resumed = stillOwns && (await this.runner.resume(run.sessionId).catch(() => false));
       if (resumed) {
         const resumedRun = await this.service.putRun(workspaceId, { ...run, note: "进程重启后恢复会话" });
         this.runsBySession.set(run.sessionId, { workspaceId, run: resumedRun, idleTurns: 0 });
-        if (run.role === "worker") this.ensurePatrol(workspaceId, run.missionId ?? run.workItemId!);
+        if (run.role === "worker" && item?.status === "running") this.ensurePatrol(workspaceId, run.missionId ?? run.workItemId!);
         await this.runner.send(run.sessionId, run.role === "worker"
-          ? "工作台重启过，你的会话已恢复。先看 worktree 当前状态（git status / diff）和你上一条回复停在哪，再继续处理工单；完成后仍然 workItem.submit。"
+          ? item?.status === "queued" ? "工作台重启过，你的会话已恢复。先读取原工单和用户答复，仅理解答复并通过 workItem.escalate 向管家上报；合同更新前暂停开发与提交。" : "工作台重启过，你的会话已恢复。先看 worktree 当前状态（git status / diff）和你上一条回复停在哪，再继续处理工单；完成后仍然 workItem.submit。"
           : run.workItemId ? "工作台重启过，你的会话已恢复。先用 workItem.get 读取独立工单 " + run.workItemId + "、阻塞原因和用户决定，继续处理原单合同。保持无 Mission，不重新拆单或补建 Mission；用 workItem.update、workItem.cancel 或 decision.create 处置。"
           : "工作台重启过，你的会话已恢复。检查 workItem.list 里已建的工单，把没做完的处理完，最后回复一行摘要。");
         continue;
@@ -289,6 +289,10 @@ export class Orchestrator {
     const items = await this.service.listWorkItems(workspaceId);
     for (const item of items) {
       const issue = item.contractIssue;
+      if (item.status === "queued" && issue?.answerPending && !issue.resolvedAt) {
+        if (!item.run.sessionId || !this.runsBySession.has(item.run.sessionId)) await this.openWorker(workspaceId, item);
+        continue;
+      }
       if (item.status !== "queued" || !issue || issue.resolvedAt || issue.notifiedAt) continue;
       const mission = (await this.service.listMissions(workspaceId)).find((m) => m.missionId === item.missionId);
       await this.stewardTurn(workspaceId, mission ?? item, undefined, [
@@ -440,7 +444,7 @@ export class Orchestrator {
       startedAt: this.now()
     });
     this.runsBySession.set(sessionId, { workspaceId, run, idleTurns: 0 });
-    this.ensurePatrol(workspaceId, item.missionId ?? item.workItemId);
+    if (!item.contractIssue || item.contractIssue.resolvedAt) this.ensurePatrol(workspaceId, item.missionId ?? item.workItemId);
     if (resumed) {
       await this.runner.send(sessionId, [
         item.run.resumeMessage,
