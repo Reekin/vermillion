@@ -1,3 +1,4 @@
+import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import {
   memo,
   useCallback,
@@ -92,7 +93,8 @@ export type SessionPaneProps = {
   /** Incrementing this re-hydrates the displayed session from the provider (after resume). */
   reloadSignal?: number;
   /** Creates the session for the first message in draft state. Returns the new sessionId. */
-  createSession: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
+  createSession: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
+  initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
   getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
@@ -572,6 +574,7 @@ export const SessionPane = ({
   sessionId,
   reloadSignal,
   createSession,
+  initializeDraftExecution,
   composerExtras,
   getSendOptions,
   allowChatTree = true
@@ -1060,6 +1063,7 @@ export const SessionPane = ({
         </div>
 
         <ComposerContainer
+          initializeDraftExecution={initializeDraftExecution}
           extraExecutionControls={composerExtras}
           getSendOptions={getSendOptions}
           transport={transport}

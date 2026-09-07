@@ -1,3 +1,4 @@
+import type { SessionExecutionProfile, SessionExecutionProfileInput } from "@vermillion/shared";
 import {
   useEffect,
   useMemo,
@@ -17,7 +18,6 @@ import type {
   EngineModelCatalogRpc,
   EngineModelRpc,
   EngineSurfaceRpc,
-  SessionExecutionProfile,
   SkillDescriptorRpc,
   ThreadGoal,
   Turn
@@ -303,7 +303,7 @@ export const resolveComposerExecutionSelection = (input: {
     ? undefined
     : persistedModel
       ? input.persistedProfile
-      : input.lastExecution;
+      : { ...input.lastExecution, ...(!input.persistedProfile?.modelId ? input.persistedProfile : undefined) };
   const preferredReasoningOptionId =
     modelPreference && Object.hasOwn(modelPreference, "reasoningOptionId")
       ? modelPreference.reasoningOptionId ?? undefined
@@ -364,7 +364,8 @@ type UseComposerControllerInput = {
   statusNotice?: ComposerStatusNotice;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   /** Draft state only: creates the session for the first message and returns its id. */
-  createSession?: (input: { content: string; attachments: Attachment[] }) => Promise<string>;
+  createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
+  initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   prepareSend?: () => Promise<string>;
   getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   autoSendQueuedMessages?: boolean;
@@ -429,6 +430,8 @@ export const useComposerController = (
   const [modelIdBySessionId, setModelIdBySessionId] = useState<
     Record<string, string | undefined>
   >({});
+  const [draftProfile, setDraftProfile] = useState<SessionExecutionProfileInput>();
+  const [draftProfileReady, setDraftProfileReady] = useState(!input.initializeDraftExecution);
   const [detachedModelId, setDetachedModelId] = useState<string>();
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc>();
   const [isExecutionLoading, setIsExecutionLoading] = useState(false);
@@ -452,6 +455,27 @@ export const useComposerController = (
   const previousSessionIdRef = useRef<string | undefined>(undefined);
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (input.activeSessionId) return;
+    let cancelled = false;
+    setDetachedModelId(undefined);
+    setDraftProfile(undefined);
+    setDraftProfileReady(!input.initializeDraftExecution);
+    if (input.initializeDraftExecution) {
+      void input.initializeDraftExecution().then((profile) => {
+        if (cancelled) return;
+        setDraftProfile(profile);
+        setDraftProfileReady(true);
+      }).catch((error: unknown) => {
+        if (!cancelled) input.onStatusNotice({
+          message: `Failed to load draft configuration: ${String(error)}`,
+          source: "send"
+        });
+      });
+    }
+    return () => { cancelled = true; };
+  }, [input.activeSessionId, input.initializeDraftExecution]);
 
   const activeTurnId = useMemo(() => {
     const latestTurn = [...input.turns]
@@ -511,13 +535,18 @@ export const useComposerController = (
       resolveComposerExecutionSelection({
         models,
         currentModelId,
-        persistedProfile: readSessionExecutionProfile(input.activeSession?.metadata),
+        persistedProfile: input.activeSessionId
+          ? readSessionExecutionProfile(input.activeSession?.metadata)
+          : { engineId: input.selectedEngineId, ...draftProfile },
         lastExecution: input.lastExecution,
         modelExecutionPreferences: currentModelId ? input.modelExecutionPreferences : undefined
       }),
     [
       currentModelId,
       input.activeSession?.metadata,
+      input.activeSessionId,
+      input.selectedEngineId,
+      draftProfile,
       input.lastExecution,
       input.modelExecutionPreferences,
       models
@@ -553,6 +582,7 @@ export const useComposerController = (
     hasComposedInput &&
     Boolean(input.activeSessionId || input.createSession) &&
     !input.isOpeningSelectedSession &&
+    (Boolean(input.activeSessionId) || draftProfileReady) &&
     !isDispatching;
   const canQueue =
     Boolean(input.activeSessionId) &&
@@ -940,7 +970,7 @@ export const useComposerController = (
         ? payload.mode === "send" && input.prepareSend
           ? await input.prepareSend()
           : input.activeSessionId
-        : await input.createSession!({ content, attachments });
+        : await input.createSession!({ content, attachments, execution: payload.execution });
       if (payload.mode === "steer" && payload.turnId) {
         const receipt = await input.transport.chat.steer({
           ...sendOptions,
@@ -958,8 +988,7 @@ export const useComposerController = (
           sessionId,
           content,
           attachments,
-          // New sessions already store the role's merged profile; the runtime uses it for this first turn.
-          execution: input.activeSessionId ? payload.execution : undefined
+          execution: payload.execution
         });
         if (!receipt.accepted) {
           throw new Error("The current runtime rejected the send request.");
@@ -1538,7 +1567,7 @@ export const useComposerController = (
     execution,
     reasoningOptions,
     serviceTiers,
-    isExecutionLoading,
+    isExecutionLoading: isExecutionLoading || (!input.activeSessionId && !draftProfileReady),
     isExecutionDisabled: intent === "steer" || isDispatching,
     suggestions,
     isDispatching,
