@@ -59,7 +59,7 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
             value={content}
             onChange={(event) => { setContent(event.target.value); setDirty(true); }}
             spellCheck={false}
-            className="min-h-0 flex-1 resize-none bg-input p-4 text-label leading-relaxed text-foreground outline-none"
+            className="min-h-0 flex-1 resize-none bg-input p-4 text-body text-foreground outline-none"
             style={{ fontFamily: "var(--awb-font-sans)" }}
           />
         )}

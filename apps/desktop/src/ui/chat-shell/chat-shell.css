@@ -369,9 +369,9 @@ button:disabled {
 .awb-transcript__empty p {
   margin: 6px 0 0;
   max-width: 40ch;
-  font-weight: 500;
-  font-size: var(--awb-text-label);
-  line-height: 1.5;
+  font-weight: 400;
+  font-size: var(--awb-text-caption);
+  line-height: 1.45;
   color: var(--awb-ink-muted);
 }
 
@@ -467,8 +467,9 @@ button:disabled {
 .awb-turn__empty {
   margin: 0;
   color: var(--awb-ink-muted);
-  font-weight: 500;
-  font-size: var(--awb-text-label);
+  font-weight: 400;
+  font-size: var(--awb-text-caption);
+  line-height: 1.45;
 }
 
 .awb-message {
