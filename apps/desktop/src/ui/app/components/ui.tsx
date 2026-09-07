@@ -8,7 +8,7 @@
  * Text          Badge, SectionLabel, InlineNotice, StatusDot
  * Fields        Field (input / textarea / select / number), Toggle, Stepper
  * Structure     PanelHeader, Tabs, ListRow, Card, EmptyState, StatusBar
- * Overlays      Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
+ * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
   ButtonHTMLAttributes,
@@ -20,6 +20,7 @@ import type {
 } from "react";
 import { Minus, Plus, type LucideIcon } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
+import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
 
@@ -148,6 +149,9 @@ const omit = <T extends FieldBase & { kind?: string }>(props: T): Omit<T, keyof 
 
 // ---- Structure ----
 
+/** Floating list surface shared by the status bar panel and hover cards. */
+const floatingPanelClass = "flex max-h-[60vh] w-96 max-w-[94vw] flex-col overflow-auto rounded-md border border-border-strong bg-surface-raised py-1 floating-shadow";
+
 /** Window-wide status feedback with an anchored, keyboard-accessible summary panel. */
 export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenChange }: {
   icon: LucideIcon;
@@ -164,7 +168,7 @@ export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenCha
           <Popover.Trigger render={<Button variant="ghost" size="sm" />}><Icon size={13} aria-hidden="true" />{label}</Popover.Trigger>
           <Popover.Portal>
             <Popover.Positioner side="top" align="start" sideOffset={6} className="z-50">
-              <Popover.Popup aria-label="当前任务" className="flex max-h-[60vh] w-96 max-w-[94vw] flex-col overflow-auto rounded-md border border-border-strong bg-surface-raised py-1 floating-shadow">
+              <Popover.Popup aria-label="当前任务" className={floatingPanelClass}>
                 {children}
               </Popover.Popup>
             </Popover.Positioner>
@@ -198,6 +202,23 @@ export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ i
     </button>)}
     {children}
   </nav>
+);
+
+/**
+ * Read-only detail that floats beside `children` while the pointer rests on them (or they hold focus).
+ * The trigger is a plain block wrapper, so the decorated layout never changes.
+ */
+export const HoverCard = ({ children, content }: { children: ReactNode; content: ReactNode }) => (
+  <Tooltip.Root>
+    <Tooltip.Trigger render={<div />} delay={200}>{children}</Tooltip.Trigger>
+    <Tooltip.Portal>
+      <Tooltip.Positioner side="right" align="start" sideOffset={4} className="z-50">
+        <Tooltip.Popup className={floatingPanelClass}>
+          {content}
+        </Tooltip.Popup>
+      </Tooltip.Positioner>
+    </Tooltip.Portal>
+  </Tooltip.Root>
 );
 
 /** Panel top line: section label on the left, optional actions on the right. */
