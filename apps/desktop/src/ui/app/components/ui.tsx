@@ -260,8 +260,11 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
   if (columns) return (
     <div className={cn("vm-list-columns", className)}>
       {leading}
-      {onClick ? <button type="button" onClick={onClick} className={cn("truncate text-left text-label font-medium text-foreground hover:underline", titleClassName)}>{title}</button>
-        : <span className={cn("truncate text-label font-medium text-foreground", titleClassName)}>{title}</span>}
+      <div className="min-w-0 py-1">
+        {onClick ? <button type="button" onClick={onClick} className={cn("block w-full truncate text-left text-label font-medium text-foreground hover:underline", titleClassName)}>{title}</button>
+          : <span className={cn("block truncate text-label font-medium text-foreground", titleClassName)}>{title}</span>}
+        {meta && <div className="text-caption text-muted-foreground">{meta}</div>}
+      </div>
       <span className="vm-list-info">{columns.info}</span>
       <span className="vm-list-status">{columns.status}</span>
       <span className="vm-list-cancel">{columns.hoverAction}</span>
