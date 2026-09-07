@@ -32,7 +32,7 @@ const until = async (check: () => Promise<boolean>) => {
 const createFakeRunner = () => {
   const sessions: Array<{ sessionId: string; title: string; cwd: string; metadata: Record<string, unknown>; developerInstructions: string; messages: string[]; reply?: string; turnOpen?: boolean }> = [];
   const tools = new Map<string, { role: string; handle: (args: Record<string, unknown>, callerSessionId: string) => Promise<string> }>();
-  const listeners = new Set<(e: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void>();
+  const listeners = new Set<Parameters<AgentRunner["onTurnCompleted"]>[0]>();
   const runner: AgentRunner = {
     open: async (input) => {
       const sessionId = "s" + (sessions.length + 1);
@@ -48,11 +48,11 @@ const createFakeRunner = () => {
     registerTool: (tool) => { tools.set(tool.name, tool); },
     onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
   };
-  const complete = (sessionId: string, reply: string) => {
+  const complete = (sessionId: string, reply: string, finishReason: "completed" | "interrupted" | "failed" = "completed", failure?: string) => {
     const s = sessions.find((s) => s.sessionId === sessionId)!;
     s.reply = reply;
     s.turnOpen = false;
-    for (const l of [...listeners]) l({ sessionId, turnId: "t", finishReason: "completed" });
+    for (const l of [...listeners]) l({ sessionId, turnId: "t", finishReason, failure });
   };
   return { runner, sessions, complete, tools };
 };
@@ -364,7 +364,7 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.sessionId).toBe(active.sessionId);
   });
 
-  it("opens a fresh session when retrying the scheduler's three-failure decision", async () => {
+  it("resumes the last idle worker when retrying the scheduler's three-failure decision", async () => {
     const { service, ws, sessions, runner, complete } = await setup();
     const item = await service.createWorkItem(ws.workspaceId, { title: "Retry", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -380,9 +380,47 @@ describe("Orchestrator", { timeout: 60000 }, () => {
     const resumed: string[] = [];
     runner.resume = async (id) => { resumed.push(id); return true; };
     await service.answerDecision(ws.workspaceId, card!.decisionId, { key: "retry", note: "try once more" });
-    await until(async () => sessions.length === 4 && sessions[3]!.messages.length > 0);
-    expect(resumed).toEqual([]);
-    expect(sessions[3]!.messages[0]).toContain("try once more");
+    await until(async () => sessions[2]!.messages.length === 3);
+    expect(sessions).toHaveLength(3);
+    expect(resumed).toEqual([sessions[2]!.sessionId]);
+    expect(sessions[2]!.messages.at(-1)).toContain("再试一次 (try once more)");
+    expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts).toBe(0);
+  });
+
+  it.each(["failed", "interrupted"] as const)("preserves the conversation and worktree after %s, including retry after three failures", async (reason) => {
+    const { service, ws, sessions, complete } = await setup();
+    await service.writeDoc(ws.workspaceId, ".vermillion/docs/spec.md", "# base\n");
+    await service.commitDocs(ws.workspaceId, { message: "base" });
+    const item = await service.createWorkItem(ws.workspaceId, { title: "Failure", objective: "o", risk: "R2", scope: { inScope: [], outOfScope: [], allowedPaths: ["src/"] }, acceptance: [] });
+    await until(async () => sessions.length === 1 && sessions[0]!.messages.length === 1);
+    const worker = sessions[0]!;
+    await writeFile(join(worker.cwd, "progress.txt"), "unfinished work");
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await service.setScheduler(ws.workspaceId, { enabled: false, maxWorkers: 1 });
+      complete(worker.sessionId, "working", reason, "failure " + attempt);
+      await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts === attempt);
+      const failed = await service.getWorkItem(ws.workspaceId, item.workItemId);
+      expect(failed.run.sessionId).toBe(worker.sessionId);
+      expect(failed.run.worktreePath).toBe(worker.cwd);
+      if (attempt < 3) {
+        expect(failed.status).toBe("queued");
+        await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+        await until(async () => worker.messages.length === attempt + 1);
+        expect(worker.messages.at(-1)).toContain("turn " + reason + ": failure " + attempt);
+      }
+    }
+    await until(async () => (await service.getWorkItem(ws.workspaceId, item.workItemId)).status === "decision");
+    const [card] = await service.listDecisions(ws.workspaceId);
+    expect(card!.sessionId).toBe(worker.sessionId);
+    expect(card!.context).toContain("failure 3");
+    await service.setScheduler(ws.workspaceId, { enabled: true, maxWorkers: 1 });
+    await tick();
+    expect(worker.messages).toHaveLength(3);
+    await service.answerDecision(ws.workspaceId, card!.decisionId, { key: "retry", note: "quota restored" });
+    await until(async () => worker.messages.length === 4);
+    expect(worker.messages.at(-1)).toContain("再试一次 (quota restored)");
+    expect(sessions).toHaveLength(1);
+    expect(await readFile(join(worker.cwd, "progress.txt"), "utf8")).toBe("unfinished work");
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).run.attempts).toBe(0);
   });
 

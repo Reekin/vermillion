@@ -124,11 +124,21 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
       }
     });
   },
-  onTurnCompleted: (listener) =>
-    shell.subscribe(
+  onTurnCompleted: (listener) => {
+    const failures = new Map<string, string>();
+    return shell.subscribe(
       (envelope) => {
-        if (envelope.event.type === "turn.completed") listener({ sessionId: envelope.event.sessionId, turnId: envelope.event.turnId, finishReason: envelope.event.finishReason });
+        const event = envelope.event;
+        if (event.type === "runtime.error" && event.turnId && !event.recoverable) {
+          failures.set(event.turnId, event.message);
+        }
+        if (event.type === "turn.completed") {
+          const failure = failures.get(event.turnId);
+          failures.delete(event.turnId);
+          listener({ sessionId: event.sessionId, turnId: event.turnId, finishReason: event.finishReason, failure });
+        }
       },
-      { eventTypes: ["turn.completed"] }
-    )
+      { eventTypes: ["runtime.error", "turn.completed"] }
+    );
+  }
 });

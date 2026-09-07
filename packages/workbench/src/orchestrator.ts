@@ -26,7 +26,7 @@ export type AgentRunner = {
   turnMessages: (sessionId: string) => string[];
   /** Offers a tool to sessions whose metadata.role matches; handler receives the calling session id. */
   registerTool: (tool: { role: string; name: string; description: string; inputSchema: unknown; handle: (args: Record<string, unknown>, callerSessionId: string) => Promise<string> }) => void;
-  onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed" }) => void) => () => void;
+  onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed"; failure?: string }) => void) => () => void;
 };
 
 export type OrchestratorOptions = {
@@ -93,7 +93,7 @@ export class Orchestrator {
       }),
       this.runner.onTurnCompleted((event) => {
         const bound = this.runsBySession.get(event.sessionId);
-        if (bound) this.enqueue(bound.workspaceId, () => this.onTurn(bound.workspaceId, bound.run, event.finishReason));
+        if (bound) this.enqueue(bound.workspaceId, () => this.onTurn(bound.workspaceId, bound.run, event.finishReason, event.failure));
       })
     );
     void this.service.listWorkspaces().then((workspaces) => {
@@ -426,12 +426,12 @@ export class Orchestrator {
 
   // ---- turn handling ----
 
-  private async onTurn(workspaceId: string, run: AgentRun, finishReason: "completed" | "interrupted" | "failed"): Promise<void> {
+  private async onTurn(workspaceId: string, run: AgentRun, finishReason: "completed" | "interrupted" | "failed", failure?: string): Promise<void> {
     const bound = this.runsBySession.get(run.sessionId);
     if (!bound) return;
     bound.run = { ...bound.run, turns: bound.run.turns + 1 };
     if (run.role === "steward") return this.finishSteward(workspaceId, bound.run, finishReason);
-    if (run.role === "worker") return this.onWorkerTurn(workspaceId, bound, finishReason);
+    if (run.role === "worker") return this.onWorkerTurn(workspaceId, bound, finishReason, failure);
   }
 
   private async finishSteward(workspaceId: string, run: AgentRun, finishReason: string): Promise<void> {
@@ -446,7 +446,7 @@ export class Orchestrator {
     await this.schedule(workspaceId);
   }
 
-  private async onWorkerTurn(workspaceId: string, bound: WorkerBinding, finishReason: string): Promise<void> {
+  private async onWorkerTurn(workspaceId: string, bound: WorkerBinding, finishReason: string, failure?: string): Promise<void> {
     const run = bound.run;
     let item = await this.service.getWorkItem(workspaceId, run.workItemId!);
     if (item.status === "running" && item.run.sessionId === run.sessionId && item.run.staleTurnId) {
@@ -464,22 +464,22 @@ export class Orchestrator {
       return;
     }
     if (finishReason !== "completed") {
-      await this.failWorker(workspaceId, run, "turn " + finishReason);
+      await this.failWorker(workspaceId, run, "turn " + finishReason + (failure ? ": " + failure : ""));
       return;
     }
     await this.service.heartbeatWorkItem(workspaceId, item.workItemId);
     bound.idleTurns += 1;
     if (bound.idleTurns > this.maxIdleTurns) {
-      await this.failWorker(workspaceId, run, "多轮未提交");
+      await this.failWorker(workspaceId, run, "多轮未提交", true);
       return;
     }
     await this.runner.send(run.sessionId, "工单仍是进行中。继续；完成后调用 workItem.submit，需要用户决定则调用 decision.create，依赖另一张未合入的工单则调用 workItem.defer。");
   }
 
-  private async failWorker(workspaceId: string, run: AgentRun, note: string): Promise<void> {
+  private async failWorker(workspaceId: string, run: AgentRun, note: string, newSession = false): Promise<void> {
     this.runsBySession.delete(run.sessionId);
     await this.service.putRun(workspaceId, { ...run, status: "failed", note, endedAt: this.now() });
-    await this.service.requeueWorkItem(workspaceId, run.workItemId!, note);
+    await this.service.requeueWorkItem(workspaceId, run.workItemId!, note, newSession);
   }
 
   // ---- supervisor ----
