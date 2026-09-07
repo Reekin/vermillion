@@ -27,6 +27,7 @@ export const ChatTreePanel = ({
   onJump
 }: ChatTreePanelProps): ReactElement => {
   const graph = useMemo(() => buildChatTreeGraphLayout(chatTree), [chatTree]);
+  const canvasWidth = Math.max(graph.width, 180);
   const graphNodeById = useMemo(
     () => new Map(graph.nodes.map((entry) => [entry.node.nodeId, entry] as const)),
     [graph.nodes]
@@ -59,7 +60,7 @@ export const ChatTreePanel = ({
         <div
           className="awb-chat-tree__graph-canvas"
           style={{
-            minWidth: `${Math.max(graph.width, 180)}px`,
+            minWidth: `${canvasWidth}px`,
             minHeight: `${graph.height}px`
           }}
         >
@@ -120,7 +121,7 @@ export const ChatTreePanel = ({
               aria-current={entry.isCurrent ? "step" : undefined}
             >
               <span className="awb-chat-tree__graph-node-dot" />
-              {status && entry.isCurrent && <span className="absolute left-0 top-full"><Badge>{status}</Badge></span>}
+              {status && entry.isCurrent && <span className={`absolute top-full ${entry.x > canvasWidth / 2 ? "right-0" : "left-0"}`}><Badge>{status}</Badge></span>}
             </button>
           ); })}
         </div>
