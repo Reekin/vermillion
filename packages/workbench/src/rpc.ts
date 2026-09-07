@@ -93,6 +93,7 @@ export const workbenchRpc = {
   "workItem.reject": { params: zWi.extend({ reason: z.string().min(1) }), result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
   "workItem.defer": { params: zWi.extend({ dependsOn: z.string().min(1), note: z.string().min(1) }), result: zWorkItem },
+  "workItem.escalate": { params: zWi.extend({ message: z.string().trim().min(1) }), result: zWorkItem },
   "workItem.update": {
     params: zWi.extend({
       note: z.string().min(1),

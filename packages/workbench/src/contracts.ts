@@ -127,6 +127,8 @@ export const zWorkItem = z.object({
   verify: zVerifyResult.optional(),
   rejections: z.array(zRejection),
   decisions: z.array(z.string()),
+  /** Latest contract problem; unresolved problems hold the queued item for its steward. */
+  contractIssue: z.object({ message: z.string(), at: z.string(), notifiedAt: z.string().optional(), resolvedAt: z.string().optional() }).optional(),
   run: zRun,
   createdAt: z.string(),
   updatedAt: z.string()

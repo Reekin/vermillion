@@ -403,7 +403,7 @@ export class WorkbenchService {
     if (item.run.worktreePath && item.run.branch) await docs.dropWorktree(item.run.worktreePath, item.run.branch);
     const cancelled = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, status: "cancelled", run: { ...current.run, worktreePath: undefined, branch: undefined } }));
     const dependants = (await this.listWorkItems(workspaceId)).filter((w) => w.status === "queued" && w.dependsOn.includes(workItemId)).map((w) => w.workItemId);
-    this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.status === "running" ? item.run.sessionId : undefined, dependants });
+    this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants });
     return cancelled;
   }
 
@@ -422,7 +422,13 @@ export class WorkbenchService {
       const status = item.status === "review" ? "queued" : item.status;
       // While parked the note lives on the decision card and reaches the worker inside the answer line.
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
-      return { ...item, ...changes, status, decisions };
+      return {
+        ...item, ...changes, status, decisions,
+        contractIssue: item.contractIssue ? { ...item.contractIssue, resolvedAt: this.now() } : undefined,
+        run: status === "queued" && item.contractIssue && !item.contractIssue.resolvedAt
+          ? { ...item.run, resumeMessage: "工单已调整：" + note + "。重新读取合同，先 rebase 到主分支当前 HEAD，再继续执行。" }
+          : item.run
+      };
     });
     if (updated.status === "running" && updated.run.sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId, sessionId: updated.run.sessionId, note });
     // Parked on a decision: the user reads the change on the card before answering; the answer carries it to the worker.
@@ -457,6 +463,28 @@ export class WorkbenchService {
         run: { ...item.run, resumeMessage: "对工单「" + prerequisite.title + "」（" + dependsOn + "）的等待已结束。退回原因：" + note + "。先用 workItem.get 确认它的最终状态（关闭合入或被管家改掉依赖），把本分支 rebase 到主分支当前 HEAD，再接着做。" }
       };
     });
+  }
+
+  async escalateWorkItem(workspaceId: string, workItemId: string, message: string): Promise<WorkItem> {
+    if (!message.trim()) throw new Error("Contract problem needs a message");
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
+      if (!item.missionId) throw new Error("Standalone work item has no steward: " + workItemId);
+      if (item.status !== "running") throw new Error("Work item is not running: " + workItemId);
+      return {
+        ...item, status: "queued",
+        contractIssue: { message, at: this.now() },
+        decisions: [...item.decisions, "合同问题：" + message],
+        run: { ...item.run, resumeMessage: "合同问题已交管家处置：" + message }
+      };
+    });
+  }
+
+  /** Delivery receipt persists across scheduler restarts; it does not release the worker. */
+  async acknowledgeContractIssue(workspaceId: string, workItemId: string, at: string): Promise<WorkItem> {
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({
+      ...item,
+      contractIssue: item.contractIssue?.at === at ? { ...item.contractIssue, notifiedAt: this.now() } : item.contractIssue
+    }));
   }
 
   /** Orchestrator: marks/clears the turn during which a contract change landed mid-flight. */
@@ -569,11 +597,12 @@ export class WorkbenchService {
         await this.mutateWorkItem(workspaceId, card.workItemId, (item) => ({
           ...item,
           status: item.status === "decision" ? "queued" : item.status,
+          contractIssue: item.status === "decision" && item.contractIssue ? { ...item.contractIssue, resolvedAt: this.now() } : item.contractIssue,
           decisions: [...item.decisions, line],
           run: item.status === "decision"
             ? {
                 ...item.run,
-                sessionId: card.sessionId ?? item.run.sessionId,
+                sessionId: item.run.sessionId ?? card.sessionId,
                 resumeMessage: "用户决策答复：" + line,
                 ...(resetAttempts ? { attempts: 0, lastFailure: undefined, retryAt: undefined } : {})
               }
