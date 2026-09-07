@@ -7,3 +7,5 @@ dist-web
 node_modules
 release/
 shots/
+.qa/
+.qa-*/
