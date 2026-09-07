@@ -17,7 +17,7 @@ type WorkItemDialogProps = {
 const lines = (values: string[]) => values.length ? values.map((value) => "• " + value).join("\n") : "无";
 const time = (value: string) => new Date(value).toLocaleString("zh-CN");
 const runStatus = { running: "进行中", done: "已结束", failed: "失败" };
-const roleLabel = { steward: "管家", worker: "Worker", supervisor: "Supervisor" };
+const roleLabel = { steward: "管家", worker: "Worker", supervisor: "Supervisor", "workspace-repair": "工作区修复" };
 
 export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, runs, onClose, onOpenSession }: WorkItemDialogProps) => {
   const item = workItems.find((entry) => entry.workItemId === workItemId);

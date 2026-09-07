@@ -58,6 +58,7 @@ export class WorkbenchService {
   private readonly contexts = new Map<string, WorkspaceContext>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
   private readonly integrations = new Map<string, Promise<unknown>>();
+  private readonly actionWrites = new Map<string, Promise<WorkflowAction>>();
   private recoveryHandler?: (workspaceId: string) => Promise<void>;
 
   constructor(options: WorkbenchServiceOptions) {
@@ -356,13 +357,20 @@ export class WorkbenchService {
   }
 
   async putAction(workspaceId: string, action: WorkflowAction): Promise<WorkflowAction> {
-    const { store } = await this.context(workspaceId);
-    const current = await store.actions.get(action.actionId);
-    // A handler can finish or request a decision while a send is in flight.
-    if (current && current.updatedAt !== action.updatedAt && (!actionIsOpen(current) || current.status === "decision")) return current;
-    const saved = await store.actions.put({ ...action, updatedAt: this.now() });
-    this.emit({ type: "actions.changed", workspaceId });
-    return saved;
+    const key = workspaceId + ":" + action.actionId;
+    const next = (this.actionWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      const { store } = await this.context(workspaceId);
+      const current = await store.actions.get(action.actionId);
+      // Checking the version and writing it form one operation, including send/decision races.
+      if (current && current.updatedAt !== action.updatedAt && (!actionIsOpen(current) || current.status === "decision")) return current;
+      const updatedAt = new Date(Math.max(Date.parse(this.now()), current ? Date.parse(current.updatedAt) + 1 : 0)).toISOString();
+      const saved = await store.actions.put({ ...action, updatedAt });
+      this.emit({ type: "actions.changed", workspaceId });
+      return saved;
+    });
+    this.actionWrites.set(key, next);
+    try { return await next; }
+    finally { if (this.actionWrites.get(key) === next) this.actionWrites.delete(key); }
   }
 
   private async getAction(workspaceId: string, actionId: string): Promise<WorkflowAction> {

@@ -44,6 +44,8 @@ export type OrchestratorOptions = {
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+// A replacement orchestrator takes ownership only after the previous generation's in-flight task drains.
+const workspaceQueues = new Map<string, Promise<void>>();
 
 /** One durable dispatch/recovery path for all responsibility owners. */
 export class Orchestrator {
@@ -55,7 +57,6 @@ export class Orchestrator {
   private readonly patrolIntervalMs: number;
   private readonly disposers: Array<() => void> = [];
   private readonly patrols = new Map<string, { workspaceId: string; timer: NodeJS.Timeout; busy: boolean }>();
-  private readonly queues = new Map<string, Promise<void>>();
   private readonly runsBySession = new Map<string, WorkerBinding>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private disposed = false;
@@ -105,13 +106,17 @@ export class Orchestrator {
   }
 
   private enqueue(workspaceId: string, task: () => Promise<void>): Promise<void> {
-    const next = (this.queues.get(workspaceId) ?? Promise.resolve()).then(() => this.disposed ? undefined : task());
-    this.queues.set(workspaceId, next.catch((error) => console.error("[orchestrator]", workspaceId, error)));
+    const next = (workspaceQueues.get(workspaceId) ?? Promise.resolve()).then(() => this.disposed ? undefined : task());
+    const drained = next.catch((error) => console.error("[orchestrator]", workspaceId, error)).finally(() => {
+      if (workspaceQueues.get(workspaceId) === drained) workspaceQueues.delete(workspaceId);
+    });
+    workspaceQueues.set(workspaceId, drained);
     // The recovery RPC receives the actual failure; event callers have the logged queue catch.
     return next;
   }
 
   private async reconcile(workspaceId: string): Promise<void> {
+    if (this.disposed) return;
     await this.service.refreshActions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
     this.clearRetryTimer(workspaceId);
@@ -129,6 +134,7 @@ export class Orchestrator {
     actions = await this.service.listActions(workspaceId);
     const claimed = new Set<string>();
     for (const action of actions) {
+      if (this.disposed) break;
       if (action.role === "workbench" || !actionIsOpen(action) || action.status === "decision" || action.status === "waiting") continue;
       if (claimed.has(action.ownerKey)) continue;
       const occupying = [...this.runsBySession.values()].find((b) => b.workspaceId === workspaceId &&
@@ -148,7 +154,7 @@ export class Orchestrator {
     actions = await this.service.listActions(workspaceId);
     const retryAt = actions.filter((a) => actionIsOpen(a) && a.status === "retry" && a.retryAt)
       .map((a) => Date.parse(a.retryAt!)).filter((at) => at > Date.parse(this.now()));
-    if (retryAt.length) this.retryTimers.set(workspaceId, setTimeout(() => {
+    if (!this.disposed && retryAt.length) this.retryTimers.set(workspaceId, setTimeout(() => {
       this.retryTimers.delete(workspaceId);
       void this.enqueue(workspaceId, () => this.reconcile(workspaceId));
     }, Math.min(2_147_483_647, Math.max(1, Math.min(...retryAt) - Date.parse(this.now())))));
@@ -451,7 +457,7 @@ export class Orchestrator {
   // ---- supervisor ----
 
   private ensurePatrol(workspaceId: string, groupId: string): void {
-    if (this.patrols.has(groupId)) return;
+    if (this.disposed || this.patrols.has(groupId)) return;
     // Not enqueued: a patrol waits on a model turn and must not block scheduling for that workspace.
     const timer = setInterval(() => { void this.patrol(workspaceId, groupId).catch((error) => console.error("[orchestrator] patrol", groupId, error instanceof Error ? error.message : error)); }, this.patrolIntervalMs);
     this.patrols.set(groupId, { workspaceId, timer, busy: false });
