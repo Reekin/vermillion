@@ -49,6 +49,55 @@ const fixture = async () => {
 };
 
 describe("wrapper session trees", () => {
+  it("follows multiple automatic turns on the viewed branch without prepareSend", async () => {
+    const f = await fixture();
+    expect((await f.service.get("root")).currentNodeId).toBe("b");
+    for (const [i, turnId] of ["d", "e"].entries()) {
+      f.snapshot.turns.push({ turnId, sessionId: "root", status: "streaming", startedAt: `2026-09-07T00:01:0${i}Z` });
+      f.started("root", turnId);
+      const tree = await f.service.get("root");
+      expect(tree.currentNodeId).toBe(turnId);
+      expect(tree.visibleTurnIds).toEqual(["a", "b", ...["d", "e"].slice(0, i + 1)]);
+      f.snapshot.turns.at(-1)!.status = "completed";
+    }
+    f.snapshot.turns.push({ turnId: "f", sessionId: "branch", status: "streaming", startedAt: "2026-09-07T00:02:00Z" });
+    f.started("branch", "f");
+    expect((await f.service.get("root")).currentNodeId).toBe("e");
+    expect(f.fork).not.toHaveBeenCalled();
+    await f.index.setTreeView("root", f.index.getTreeView("root")!);
+    f.service.dispose();
+  });
+
+  it("recovers legacy automatic cursors and catches up with turns loaded without a live event", async () => {
+    const f = await fixture();
+    await f.index.setTreeView("root", { sessionId: "root", nodeId: "a" });
+    expect((await f.service.get("root")).currentNodeId).toBe("b");
+    f.snapshot.turns.push({ turnId: "d", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:01:00Z" });
+    expect((await f.service.get("root")).visibleTurnIds).toEqual(["a", "b", "d"]);
+    f.service.dispose();
+  });
+
+  it("keeps explicit jumps pinned through automatic turns, including a jump after prepareSend", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    await f.service.prepareSend("root");
+    await f.service.jump("root", "a");
+    for (const [i, sessionId] of ["root", "branch"].entries()) {
+      const turnId = `auto-${i}`;
+      f.snapshot.turns.push({ turnId, sessionId, status: "streaming", startedAt: `2026-09-07T00:01:0${i}Z` });
+      f.started(sessionId, turnId);
+      const tree = await f.service.get("root");
+      expect(tree.currentNodeId).toBe("a");
+      expect(tree.visibleTurnIds).toEqual(["a"]);
+      expect(tree.nodes.find((node) => node.nodeId === turnId)?.status).toBe("pending");
+    }
+    const reloaded = new SessionIndexStore({ baseDir: f.baseDir });
+    await reloaded.ready();
+    expect(reloaded.getTreeView("root")).toEqual({ sessionId: "root", nodeId: "a", followTip: false });
+    expect(f.fork).not.toHaveBeenCalled();
+    f.service.dispose();
+  });
+
   it("projects shared-prefix branches once and jumps entirely within the loaded wrapper", async () => {
     const f = await fixture();
     const tree = await f.service.get("branch");
