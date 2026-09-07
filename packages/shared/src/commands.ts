@@ -98,6 +98,7 @@ const zSendUserMessageCommand = z.object({
 
 const zSteerTurnCommand = z.object({
   type: z.literal("steerTurn"),
+  thinkMode: zThinkMode.optional(),
   sessionId: zSessionId,
   turnId: zTurnId,
   messageId: zMessageId,

@@ -935,7 +935,7 @@ export const useComposerController = (
     });
     try {
       // Draft state: the first message creates the session, then becomes its first turn.
-      const sendOptions = payload.mode === "send" ? input.getSendOptions?.() : undefined;
+      const sendOptions = input.getSendOptions?.();
       const sessionId = input.activeSessionId
         ? payload.mode === "send" && input.prepareSend
           ? await input.prepareSend()
@@ -943,6 +943,7 @@ export const useComposerController = (
         : await input.createSession!({ content, attachments });
       if (payload.mode === "steer" && payload.turnId) {
         const receipt = await input.transport.chat.steer({
+          ...sendOptions,
           sessionId,
           turnId: payload.turnId,
           content,

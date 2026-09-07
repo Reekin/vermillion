@@ -109,6 +109,7 @@ export type ChatInterruptInput = {
 };
 
 export type ChatSteerInput = {
+  thinkMode?: import("@vermillion/shared").ThinkMode;
   sessionId: string;
   turnId: string;
   content: string;
@@ -824,6 +825,7 @@ export const createDesktopTransport = (
       steer: (input: ChatSteerInput) =>
         sendCommand({
           type: "steerTurn",
+          thinkMode: input.thinkMode,
           sessionId: input.sessionId,
           turnId: input.turnId,
           content: input.content,
