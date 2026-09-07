@@ -1,0 +1,66 @@
+import { z } from "zod";
+import { actionIsOpen, zWorkflowAction, zScheduler, zWorkItem, zDecisionCard, type WorkflowAction } from "./contracts.js";
+import type { WorkbenchService } from "./workbench-service.js";
+
+export const zDiagnosis = z.object({
+  workItemId: z.string(), phase: zWorkItem.shape.status,
+  actions: z.array(zWorkflowAction),
+  blockers: z.array(z.object({ reason: z.string(), role: z.string(), sessionId: z.string().optional(), actionId: z.string().optional(), next: z.string() })),
+  dependencies: z.array(z.object({ workItemId: z.string(), status: z.string() })),
+  decisions: z.array(zDecisionCard),
+  scheduler: zScheduler.extend({ online: z.boolean(), running: z.number() }),
+  resources: z.array(z.object({ name: z.string(), workItemId: z.string(), sessionId: z.string().optional() })),
+  lastFailure: zWorkflowAction.optional(), nextRetryAt: z.string().optional(),
+  waiting: z.array(z.string()), availableActions: z.array(z.object({ method: z.string(), condition: z.string() }))
+});
+
+const nextFor = (action: WorkflowAction): string => {
+  if (action.status === "decision") return "等待用户答复；发起者可撤回已澄清的决策。";
+  if (action.kind === "contract") return "管家落实合同或依赖调整，并登记 resolution。";
+  if (action.kind === "dependency") return action.role === "steward" ? "管家调整已取消的前置依赖。" : "等待前置工单关闭。";
+  if (action.kind === "repair") return "原修复会话检查主工作区后调用 workspace.repair.submit。";
+  if (action.status === "retry") return "等待重试时间，故障已排除可调用 workItem.recover。";
+  return "工作台续接当前未完成阶段。";
+};
+
+/** Read-only projection of the same persisted actions used by the scheduler. */
+export async function diagnose(service: WorkbenchService, workspaceId: string, workItemId: string, online: boolean): Promise<z.infer<typeof zDiagnosis>> {
+  const item = await service.getWorkItem(workspaceId, workItemId);
+  const [items, allActions, cards, scheduler] = await Promise.all([
+    service.listWorkItems(workspaceId), service.listActions(workspaceId),
+    service.listDecisions(workspaceId), service.getScheduler(workspaceId)
+  ]);
+  const related = allActions.filter((a) => a.workItemIds.includes(workItemId));
+  const actions = related.filter(actionIsOpen);
+  const decisions = cards.filter((c) => !c.answer && !c.withdrawn && (c.workItemId === workItemId || actions.some((a) => a.actionId === c.actionId)));
+  const dependencies = item.dependsOn.map((id) => ({ workItemId: id, status: items.find((i) => i.workItemId === id)?.status ?? "missing" }));
+  const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => a.kind !== "execute" || ["waiting", "retry", "decision"].includes(a.status))
+    .map((a) => ({ reason: a.failure ?? a.message, role: a.role, sessionId: a.sessionId, actionId: a.actionId, next: nextFor(a) }));
+  if (item.contractIssue && !item.contractIssue.resolvedAt && !actions.some((a) => a.kind === "contract"))
+    blockers.push({ reason: item.contractIssue.message, role: "steward", next: "管家落实合同调整。" });
+  for (const dependency of dependencies.filter((d) => d.status !== "closed"))
+    blockers.push({ reason: `前置 ${dependency.workItemId}: ${dependency.status}`, role: dependency.status === "cancelled" ? "steward" : "workbench", next: dependency.status === "cancelled" ? "管家调整依赖。" : "等待前置关闭。" });
+  for (const card of decisions) blockers.push({ reason: card.question, role: "user", sessionId: card.sessionId, actionId: card.actionId, next: "用户答复 decision.answer，或发起者说明原因后 decision.withdraw。" });
+  const running = items.filter((i) => i.workItemId !== workItemId && i.status === "running");
+  const resources = running.flatMap((i) => i.needs.filter((n) => item.needs.includes(n)).map((name) => ({ name, workItemId: i.workItemId, sessionId: i.run.sessionId })));
+  const waiting = blockers.map((b) => b.reason);
+  const unfinished = !["closed", "cancelled"].includes(item.status) || actions.length > 0;
+  if (unfinished) {
+    if (!online) waiting.push("桌面调度器不在线，等待启动；保存的记录尚未派发。");
+    else if (!scheduler.enabled) waiting.push("调度开关关闭，等待启用。");
+    if (item.status === "queued") {
+      if (running.length >= scheduler.maxWorkers) waiting.push(`等待 Worker 并发空位（${running.length}/${scheduler.maxWorkers}）。`);
+      if (resources.length) waiting.push("等待共享资源释放：" + resources.map((r) => r.name).join("、"));
+      if (!waiting.length) waiting.push("等待调度器接手排队动作。");
+    }
+  }
+  const availableActions = [{ method: "workItem.diagnose", condition: "随时查询当前状态。" }];
+  if (unfinished) availableActions.push({ method: "workItem.recover", condition: "核对并续接未完成动作；保留合同、依赖和决策等待。" });
+  if (!["closed", "cancelled"].includes(item.status)) availableActions.push({ method: "workItem.escalate", condition: "由管家处理超出 Worker 范围的问题；合入环境故障使用 kind=workspace。" });
+  if (actions.some((a) => a.kind === "repair" && a.sessionId && a.status !== "decision")) availableActions.push({ method: "workspace.repair.submit", condition: "当前修复会话提交真实检查证据。" });
+  if (decisions.length) availableActions.push({ method: "decision.withdraw", condition: "仅发起者撤回尚未答复的卡，必须说明原因。" }, { method: "decision.answer", condition: "仅在获得用户实际答复后提交。" });
+  return { workItemId, phase: item.status, actions, blockers, dependencies, decisions,
+    scheduler: { ...scheduler, online, running: running.length }, resources, waiting, availableActions,
+    lastFailure: related.filter((a) => a.failure).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0],
+    nextRetryAt: actions.flatMap((a) => a.retryAt ? [a.retryAt] : []).sort()[0] };
+}

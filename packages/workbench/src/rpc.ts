@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zDiagnosis } from "./diagnosis.js";
 import { zRoleDocument } from "./role-document.js";
 import {
   zAcceptanceItem,
@@ -32,6 +33,7 @@ import {
 const zWs = z.object({ workspaceId: z.string().min(1) });
 const zWi = zWs.extend({ workItemId: z.string().min(1) });
 const zEmpty = z.object({});
+const zFeedback = z.object({ dispatch: z.enum(["completed", "pending", "offline"]), message: z.string(), diagnoses: z.array(zDiagnosis) });
 
 /** Single method registry: name -> params/result schemas. Handler and client are both derived from it. */
 export const workbenchRpc = {
@@ -106,10 +108,12 @@ export const workbenchRpc = {
   "inbox.acknowledge": { params: zWi, result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
   "workItem.defer": { params: zWi.extend({ dependsOn: z.string().min(1), note: z.string().min(1) }), result: zWorkItem },
-  "workItem.escalate": { params: zWi.extend({ message: z.string().trim().min(1), kind: z.enum(["contract", "workspace"]).optional(), evidence: z.array(z.string()).optional(), requiredChanges: zWorkflowAction.shape.requiredChanges }), result: zWorkItem },
-  "workItem.recover": { params: zWi, result: z.object({ workItem: zWorkItem, actions: z.array(zWorkflowAction), dispatched: z.boolean(), message: z.string() }) },
+  "workItem.diagnose": { params: zWi, result: zDiagnosis },
+  "runtime.info": { params: zEmpty, result: z.object({ buildId: z.string(), pid: z.number(), startedAt: z.string(), schedulerOnline: z.boolean() }) },
+  "workItem.escalate": { params: zWi.extend({ message: z.string().trim().min(1), kind: z.enum(["contract", "workspace"]).optional(), evidence: z.array(z.string()).optional(), requiredChanges: zWorkflowAction.shape.requiredChanges }), result: zWorkItem.extend({ feedback: zFeedback }) },
+  "workItem.recover": { params: zWi, result: z.object({ workItem: zWorkItem, actions: z.array(zWorkflowAction), dispatched: z.boolean(), message: z.string(), diagnosis: zDiagnosis, changes: z.array(z.object({ actionId: z.string(), before: z.string(), after: z.string(), history: zWorkflowAction.shape.history })) }) },
   "action.list": { params: zWs, result: z.array(zWorkflowAction) },
-  "workspace.repair.submit": { params: zWs.extend({ actionId: z.string().min(1), sessionId: z.string().min(1), summary: z.string().trim().min(1), evidence: z.array(z.string().min(1)).min(1) }), result: z.object({ pass: z.boolean(), message: z.string(), action: zWorkflowAction }) },
+  "workspace.repair.submit": { params: zWs.extend({ actionId: z.string().min(1), sessionId: z.string().min(1), summary: z.string().trim().min(1), evidence: z.array(z.string().min(1)).min(1) }), result: z.object({ pass: z.boolean(), message: z.string(), action: zWorkflowAction, feedback: zFeedback }) },
   "workItem.update": {
     params: zWi.extend({
       note: z.string().min(1),
@@ -149,7 +153,7 @@ export const workbenchRpc = {
   },
   /** Pick an option (key), write a free answer (note only), or both. */
   "decision.answer": { params: zWs.extend({ decisionId: z.string().min(1), key: z.string().min(1).optional(), note: z.string().optional() }), result: zDecisionCard },
-  "decision.withdraw": { params: zWs.extend({ decisionId: z.string().min(1), sessionId: z.string().min(1), reason: z.string().trim().min(1) }), result: zDecisionCard },
+  "decision.withdraw": { params: zWs.extend({ decisionId: z.string().min(1), sessionId: z.string().min(1), reason: z.string().trim().min(1) }), result: zDecisionCard.extend({ feedback: zFeedback }) },
 
   "inbox.list": { params: zEmpty, result: z.array(zInboxItem) },
 

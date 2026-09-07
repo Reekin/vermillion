@@ -41,6 +41,8 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
 
     "workItem.list": (p) => service.listWorkItems(p.workspaceId, p.missionId),
     "workItem.get": (p) => service.getWorkItem(p.workspaceId, p.workItemId),
+    "workItem.diagnose": (p) => service.diagnoseWorkItem(p.workspaceId, p.workItemId),
+    "runtime.info": () => service.getRuntimeInfo(),
     "workItem.create": (p) => service.createWorkItem(p.workspaceId, p),
     "workItem.start": (p) => service.startWorkItem(p.workspaceId, p.workItemId, p.run),
     "workItem.heartbeat": (p) => service.heartbeatWorkItem(p.workspaceId, p.workItemId, p.lastTurnId),
@@ -49,10 +51,13 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workItem.rollback": (p) => service.rollbackWorkItem(p.workspaceId, p.workItemId, p.reason),
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
     "workItem.defer": (p) => service.deferWorkItem(p.workspaceId, p.workItemId, p.dependsOn, p.note),
-    "workItem.escalate": (p) => service.escalateWorkItem(p.workspaceId, p.workItemId, p.message, p),
+    "workItem.escalate": async (p) => ({ ...await service.escalateWorkItem(p.workspaceId, p.workItemId, p.message, p), feedback: await service.dispositionFeedback(p.workspaceId, [p.workItemId]) }),
     "workItem.recover": (p) => service.recoverWorkItem(p.workspaceId, p.workItemId),
     "action.list": (p) => service.listActions(p.workspaceId),
-    "workspace.repair.submit": (p) => service.submitWorkspaceRepair(p.workspaceId, p.actionId, p),
+    "workspace.repair.submit": async (p) => {
+      const result = await service.submitWorkspaceRepair(p.workspaceId, p.actionId, p);
+      return { ...result, feedback: await service.dispositionFeedback(p.workspaceId, result.action.workItemIds, result.pass) };
+    },
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
     "scheduler.get": (p) => service.getScheduler(p.workspaceId),
@@ -62,7 +67,11 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "decision.list": (p) => service.listDecisions(p.workspaceId),
     "decision.create": (p) => service.createDecision(p.workspaceId, p),
     "decision.answer": (p) => service.answerDecision(p.workspaceId, p.decisionId, { key: p.key, note: p.note }),
-    "decision.withdraw": (p) => service.withdrawDecision(p.workspaceId, p.decisionId, p.sessionId, p.reason),
+    "decision.withdraw": async (p) => {
+      const card = await service.withdrawDecision(p.workspaceId, p.decisionId, p.sessionId, p.reason);
+      const action = (await service.listActions(p.workspaceId)).find((a) => a.actionId === card.actionId);
+      return { ...card, feedback: await service.dispositionFeedback(p.workspaceId, action?.workItemIds ?? (card.workItemId ? [card.workItemId] : [])) };
+    },
 
     "inbox.list": () => service.listInbox(),
 
@@ -80,7 +89,10 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
       const handler = handlers[raw.method as WorkbenchRpcMethod] as (p: unknown) => Promise<unknown>;
       return { ok: true, result: spec.result.parse(await handler(params)) };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      const reason = error instanceof Error ? error.message : String(error);
+      const params = raw.params as Record<string, unknown> | undefined;
+      const next = params?.workItemId ? "先调用 workItem.diagnose 查询等待原因与可用动作。" : params?.actionId ? "先调用 action.list 核对处理者、会话与当前动作。" : params?.decisionId ? "先调用 decision.list 核对是否已答复或撤回以及发起会话。" : "核对参数和对象的当前状态。";
+      return { ok: false, error: `${reason}\n下一步：${next} 参数与适用状态：vermillion ${raw.method} --help` };
     }
   };
 };
