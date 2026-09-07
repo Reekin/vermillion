@@ -57,3 +57,8 @@
 - 所有控件复用 chat-shell 的 CSS 变量与 `Button`：3-5px 圆角、hairline、单色、等宽大写区块标题。token 在 `ui/app/app.css`。
 - 思考是主页；Inbox / Workspaces 先以 `Modal` 打开，"展开为页面"后占据主区域。切换面板不卸载思考页。
 - 不用红色或高饱和色。
+
+## 经验积累
+
+- 值夜守工单时，approve 前先在主仓 `git merge-tree --write-tree master <branch>` 探一次冲突（worktree 有未提交内容就先用临时 index 做一个 commit-tree 再探）；有冲突直接 reject 让原 Worker rebase，比事后合并失败再收拾干净得多。Worker 提交的 evidence 也要对照分支实际内容核一遍，曾出现改动留在 stash 而分支上没有的情况。
+- Worker 因模型额度耗尽连续三次 turn failed 后会挂到 attempts 决策卡，不会自动重试；额度恢复后回答 retry 即可让它从原 worktree 续做。
