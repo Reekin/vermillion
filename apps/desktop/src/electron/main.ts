@@ -776,7 +776,9 @@ const boot = async (): Promise<void> => {
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     workbenchRpc(payload as { method: string; params: unknown })
   );
-  const inboxKey = (item: InboxItem): string => (item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId);
+  const inboxKey = (item: InboxItem): string => item.kind === "decision"
+    ? `${item.workspaceId}:${item.card.decisionId}`
+    : `${item.workspaceId}:${item.workItem.workItemId}:${item.workItem.merge?.mergedAt}`;
   let knownInbox = new Set((await workbenchService.listInbox()).map(inboxKey));
   const unsubscribeWorkbench = workbenchService.subscribe((event) => {
     if (!window.isDestroyed()) {
@@ -788,7 +790,7 @@ const boot = async (): Promise<void> => {
         knownInbox = new Set(items.map(inboxKey));
         const item = fresh[0];
         if (item && isInBackground()) {
-          showDesktopNotification(item.kind === "decision" ? `需要你决定：${item.card.question}` : `待验收：${item.workItem.title}`);
+          showDesktopNotification(item.kind === "decision" ? `需要你决定：${item.card.question}` : `已合入：${item.workItem.title}`);
         }
       });
     }

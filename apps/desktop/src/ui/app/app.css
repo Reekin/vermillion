@@ -71,9 +71,8 @@
 .vm-field-compact { height: 28px; padding-inline: 8px; font-size: var(--text-label); }
 .vm-status { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 6px; width: 76px; height: 22px; border: 1px solid transparent; border-radius: var(--radius-sm); font-size: var(--text-caption); white-space: nowrap; color: var(--color-faint-foreground); }
 .vm-status-marker { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; }
-.vm-status[data-status="review"] { background: var(--color-accent-soft); color: var(--color-strong); }
 .vm-status[data-status="decision"] { border-color: var(--color-accent-strong); color: var(--color-strong); }
-.vm-status[data-status="review"] .vm-status-marker, .vm-status[data-status="decision"] .vm-status-marker { background: currentColor; }
+.vm-status[data-status="decision"] .vm-status-marker { background: currentColor; }
 .vm-status[data-status="running"] { color: var(--color-foreground); }
 .vm-status[data-status="running"] .vm-status-marker { border: 2px solid currentColor; }
 .vm-status[data-status="queued"] .vm-status-marker { border: 1px solid currentColor; }

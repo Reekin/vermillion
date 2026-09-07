@@ -97,7 +97,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
             workItems: workItems.filter((w) => w.missionId === mission.missionId).map(({ workItemId, title, status }) => ({ workItemId, title, status }))
           }));
           for (const item of workItems) {
-            if (!item.missionId && ["queued", "running", "review", "decision"].includes(item.status)) {
+            if (!item.missionId && ["queued", "running", "decision"].includes(item.status)) {
               tasks.push({ workspaceId, kind: "workItem", id: item.workItemId, title: item.title, status: item.status });
             }
           }

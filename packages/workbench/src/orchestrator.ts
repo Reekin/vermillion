@@ -498,7 +498,7 @@ export class Orchestrator {
     // The item left this session: submitted, parked on a decision, voided (and possibly already re-assigned).
     if (item.status !== "running" || item.run.sessionId !== run.sessionId) {
       this.runsBySession.delete(run.sessionId);
-      const note = item.run.sessionId !== run.sessionId && item.status !== "review" && item.status !== "closed" && item.status !== "cancelled" ? "提交作废：合同已变更"
+      const note = item.run.sessionId !== run.sessionId && item.status !== "closed" && item.status !== "cancelled" ? "提交作废：合同已变更"
         : item.status === "decision" ? "等待决策"
         : item.status === "queued" ? "退回队列"
         : "已提交 (" + item.status + ")";

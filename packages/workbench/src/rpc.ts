@@ -78,8 +78,7 @@ export const workbenchRpc = {
       scope: zScope,
       acceptance: z.array(zAcceptanceItem),
       needs: z.array(z.string()).optional(),
-      dependsOn: z.array(z.string()).optional(),
-      autoClose: z.boolean().optional()
+      dependsOn: z.array(z.string()).optional()
     }),
     result: zWorkItem
   },
@@ -89,8 +88,8 @@ export const workbenchRpc = {
     params: zWi.extend({ evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifyResult.omit({ verifiedAt: true }) }),
     result: zWorkItem
   },
-  "workItem.approve": { params: zWi, result: zWorkItem },
-  "workItem.reject": { params: zWi.extend({ reason: z.string().min(1) }), result: zWorkItem },
+  "workItem.rollback": { params: zWi.extend({ reason: z.string().trim().min(1) }), result: zWorkItem },
+  "inbox.acknowledge": { params: zWi, result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
   "workItem.defer": { params: zWi.extend({ dependsOn: z.string().min(1), note: z.string().min(1) }), result: zWorkItem },
   "workItem.escalate": { params: zWi.extend({ message: z.string().trim().min(1) }), result: zWorkItem },

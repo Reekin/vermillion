@@ -1,8 +1,7 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import type { InboxItem } from "@vermillion/workbench/client";
+import type { InboxItem, WorkItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
-import { Badge, Button, Card, EmptyState, Field, InlineNotice } from "./ui.js";
+import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotice } from "./ui.js";
 
 type InboxPanelProps = { store: WorkbenchStore };
 
@@ -13,13 +12,13 @@ export const InboxPanel = ({ store }: InboxPanelProps) => {
     return <EmptyState title="Inbox 加载失败" hint={inboxError} />;
   }
   if (inbox.length === 0) {
-    return <EmptyState title="没有待处理事项" hint="决策卡和待验收的工单会出现在这里。" />;
+    return <EmptyState title="没有待处理事项" hint="决策卡和已合入通知会出现在这里。" />;
   }
   return (
-    <ul className="space-y-3 p-4">
+    <ul className="mx-auto w-full max-w-4xl space-y-3 p-4">
       {inbox.map((item) => (
         <li key={item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId}>
-          {item.kind === "decision" ? <DecisionCard store={store} item={item} /> : <ReviewCard store={store} item={item} />}
+          {item.kind === "decision" ? <DecisionCard store={store} item={item} /> : <MergedCard store={store} item={item} />}
         </li>
       ))}
     </ul>
@@ -99,25 +98,39 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       </form>
       {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
       {card.details && (
-        <div className="mt-3">
-          <button type="button" className="flex items-center gap-1 text-caption text-muted-foreground hover:text-strong" onClick={() => toggleDetails(item.workspaceId, card.decisionId)}>
-            {showDetails ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            技术详情
-          </button>
-          {showDetails && <pre className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-input px-3 py-2 font-mono text-caption leading-relaxed text-muted-foreground">{card.details}</pre>}
-        </div>
+        <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, card.decisionId)}>{card.details}</CollapsibleDetails>
       )}
     </Card>
   );
 };
 
-const ReviewCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "review" }> }) => {
+const technicalDetails = (item: WorkItem): string => {
+  const { merge, evidence, verify } = item;
+  return [
+    merge && ["合入", "commit: " + (merge.commit ?? "无代码改动"), "时间: " + merge.mergedAt, "Diff 概况", merge.diffStat || "无文件变更"].join("\n"),
+    evidence && ["命令输出", ...evidence.commands.map((entry) => "$ " + entry.command + "\n" + entry.output)].join("\n\n"),
+    ["Review 处置", ...item.review.map((entry) => (entry.decision === "accepted" ? "采纳：" : "拒绝：") + entry.comment + "\n理由：" + entry.reason)].join("\n\n"),
+    verify && ["验收过程 · " + verify.verifiedAt, ...verify.items.map((entry) => [
+      (entry.index + 1) + ". " + (item.acceptance[entry.index]?.text ?? "验收项"),
+      (entry.pass ? "通过：" : "未通过：") + entry.evidence
+    ].join("\n"))].join("\n\n"),
+    evidence?.assumptions.length && "假设\n" + evidence.assumptions.join("\n"),
+    evidence?.untested.length && "未测\n" + evidence.untested.join("\n"),
+    evidence?.outOfScopeFindings.length && "范围外发现\n" + evidence.outOfScopeFindings.join("\n"),
+    evidence?.attachments.length && "附件\n" + evidence.attachments.join("\n")
+  ].filter(Boolean).join("\n\n");
+};
+
+const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "merged" }> }) => {
   const client = store((s) => s.client);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rejecting, setRejecting] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
   const [reason, setReason] = useState("");
   const { workItem } = item;
+  const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + workItem.workItemId] ?? false);
+  const toggleDetails = store((s) => s.toggleInboxDetails);
+  const showAgentSession = store((s) => s.showAgentSession);
   const run = async (task: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
@@ -129,62 +142,52 @@ const ReviewCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
       setBusy(false);
     }
   };
-  const rejected = workItem.review.filter((r) => r.decision === "rejected");
   return (
     <Card
       header={
         <>
-          <Badge tone="accent">验收</Badge>
-          <Badge>{workItem.risk}</Badge>
-          {workItem.rejections.length > 0 && <Badge>第 {workItem.rejections.length + 1} 轮</Badge>}
+          <Badge>已合入</Badge>
           <span className="ml-auto truncate text-caption text-muted-foreground">{item.mission ? "任务：" + item.mission.title : "独立工单"}</span>
         </>
       }
       footer={
-        rejecting ? (
+        rollingBack ? (
           <form
-            className="flex flex-1 gap-2"
+            className="flex min-w-0 flex-1 flex-wrap items-end gap-2"
             onSubmit={(event) => {
               event.preventDefault();
               if (!reason.trim()) return;
-              void run(() => client.request("workItem.reject", { workspaceId: item.workspaceId, workItemId: workItem.workItemId, reason: reason.trim() }));
+              void run(() => client.request("workItem.rollback", { workspaceId: item.workspaceId, workItemId: workItem.workItemId, reason: reason.trim() }));
             }}
           >
-            <Field autoFocus value={reason} onChange={(event) => setReason(event.target.value)} placeholder="打回原因（会写进工单）" className="min-w-0 flex-1" />
-            <Button variant="primary" type="submit" disabled={busy || !reason.trim()}>确认打回</Button>
-            <Button variant="ghost" onClick={() => setRejecting(false)}>取消</Button>
+            <Field kind="textarea" rows={2} label="回滚理由" autoFocus disabled={busy} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明需要修改的地方，Worker 会据此继续处理" className="w-full" />
+            <Button variant="primary" type="submit" disabled={busy || !reason.trim()}>确认回滚并续做</Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => setRollingBack(false)}>取消</Button>
           </form>
         ) : (
           <>
-            <Button variant="primary" disabled={busy} onClick={() => void run(() => client.request("workItem.approve", { workspaceId: item.workspaceId, workItemId: workItem.workItemId }))}>通过</Button>
-            <Button disabled={busy} onClick={() => setRejecting(true)}>打回</Button>
-            <Button variant="ghost" disabled={busy} onClick={() => void run(() => client.request("workItem.cancel", { workspaceId: item.workspaceId, workItemId: workItem.workItemId }))}>不做</Button>
+            <Button variant="primary" disabled={busy} onClick={() => void run(() => client.request("inbox.acknowledge", { workspaceId: item.workspaceId, workItemId: workItem.workItemId }))}>知道了</Button>
+            <Button disabled={busy} onClick={() => setRollingBack(true)}>附理由回滚</Button>
+            {workItem.run.sessionId && <Button variant="ghost" size="sm" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, workItem.run.sessionId!)}>会话</Button>}
           </>
         )
       }
     >
-      <p className="text-title-sm font-medium text-strong">{workItem.title}</p>
+      <p className="break-words text-title-sm font-medium text-strong">{workItem.title}</p>
       {workItem.evidence && (
-        <div className="mt-3 rounded-md border border-border bg-input px-3 py-2">
-          <div className="eyebrow mb-1">证据</div>
-          <p className="whitespace-pre-wrap text-label text-foreground">{workItem.evidence.summary}</p>
-          {workItem.evidence.assumptions.length > 0 && <p className="mt-1 text-caption text-muted-foreground">假设：{workItem.evidence.assumptions.join("；")}</p>}
-          {workItem.evidence.untested.length > 0 && <p className="mt-1 text-caption text-muted-foreground">未测：{workItem.evidence.untested.join("；")}</p>}
-        </div>
+        <p className="mt-2 whitespace-pre-wrap break-words text-body text-foreground">{workItem.evidence.summary}</p>
       )}
       {workItem.verify && (
         <ul className="mt-3 space-y-1">
           {workItem.verify.items.map((v) => (
             <li key={v.index} className="flex gap-2 text-label">
-              <span className="w-9 shrink-0 font-mono text-caption text-accent-strong">{v.pass ? "PASS" : "FAIL"}</span>
-              <span className="text-muted-foreground">{workItem.acceptance[v.index]?.text ?? "#" + v.index}</span>
+              <Badge>{v.pass ? "通过" : "未通过"}</Badge>
+              <span className="min-w-0 whitespace-pre-wrap break-words text-muted-foreground">{v.evidence}</span>
             </li>
           ))}
         </ul>
       )}
-      {rejected.length > 0 && (
-        <p className="mt-2 text-caption text-faint-foreground">已拒绝的 review 意见：{rejected.map((r) => r.comment + "（" + r.reason + "）").join("；")}</p>
-      )}
+      <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, workItem.workItemId)}>{technicalDetails(workItem)}</CollapsibleDetails>
       {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
     </Card>
   );

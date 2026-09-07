@@ -38,12 +38,12 @@ export type Mission = z.infer<typeof zMission>;
 
 export const latestRevision = (mission: Mission): MissionRevision => mission.revisions[mission.revisions.length - 1]!;
 
-/** queued -> running -> review -> closed; decision parks a work item until the user answers; cancelled is the other terminal state. */
-export const workItemStatuses = ["queued", "running", "review", "decision", "closed", "cancelled"] as const;
+/** queued -> running -> closed; decision parks a work item until the user answers. */
+export const workItemStatuses = ["queued", "running", "decision", "closed", "cancelled"] as const;
 export const zWorkItemStatus = z.enum(workItemStatuses);
 export type WorkItemStatus = z.infer<typeof zWorkItemStatus>;
 
-export const zRisk = z.enum(["R0", "R1", "R2", "R3"]);
+export const zRisk = z.enum(["R0", "R1", "R2"]);
 export type Risk = z.infer<typeof zRisk>;
 
 export const zDocRef = z.object({
@@ -114,7 +114,6 @@ export const zWorkItem = z.object({
   objective: z.string(),
   status: zWorkItemStatus,
   risk: zRisk,
-  autoClose: z.boolean(),
   /** Execution resources this item occupies (e.g. "browser"); the scheduler waits for a free slot. */
   needs: z.array(z.string()),
   /** Work items that must be closed before this one is scheduled. Same mission when the steward sets them; a worker may add one from any mission via workItem.defer. */
@@ -125,6 +124,13 @@ export const zWorkItem = z.object({
   evidence: zEvidence.optional(),
   review: z.array(zReviewDisposition),
   verify: zVerifyResult.optional(),
+  merge: z.object({
+    commit: z.string().optional(),
+    diffStat: z.string(),
+    mergedAt: z.string(),
+    acknowledgedAt: z.string().optional(),
+    rollbackCommit: z.string().optional()
+  }).optional(),
   rejections: z.array(zRejection),
   decisions: z.array(z.string()),
   /** Latest contract problem; unresolved problems hold the queued item for its steward. */
@@ -210,7 +216,7 @@ export type DocCommit = z.infer<typeof zDocCommit>;
 
 export const zInboxItem = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("decision"), workspaceId: z.string(), card: zDecisionCard }),
-  z.object({ kind: z.literal("review"), workspaceId: z.string(), workItem: zWorkItem, mission: zMission.optional() })
+  z.object({ kind: z.literal("merged"), workspaceId: z.string(), workItem: zWorkItem, mission: zMission.optional() })
 ]);
 export type InboxItem = z.infer<typeof zInboxItem>;
 
