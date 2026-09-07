@@ -574,14 +574,26 @@ button:disabled {
 
 .awb-message__content :is(h1, h2, h3, h4, h5, h6) {
   margin-block: 1em 0.72rem;
-  font-size: var(--awb-text-title-sm);
+  font-size: var(--awb-text-body);
   font-weight: 600;
   line-height: 1.3;
   color: var(--awb-ink-strong);
 }
 
-.awb-message__content :is(h1, h2) {
+.awb-message__content h1 {
   font-size: var(--awb-text-title);
+}
+
+.awb-message__content h2 {
+  font-size: var(--awb-text-title-sm);
+}
+
+.awb-message__content :is(h5, h6) {
+  font-size: var(--awb-text-label);
+}
+
+.awb-message__content :is(h4, h6) {
+  font-weight: 500;
 }
 
 .awb-message__streaming-tail,
