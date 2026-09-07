@@ -1,203 +1,42 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>Workspaces mock</title>
-<link rel="stylesheet" href="workspaces.css">
-</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vermillion · 任务</title><link rel="stylesheet" href="workspaces.css"></head>
 <body>
-<p class="mock-label">Modal · 快速查看</p>
-<div class="frame modal">
-  <div class="titlebar">
-    <h1>Workspaces</h1>
-    <button class="ws-switch">vermillion <span class="path">I:\gpt-projects\vermillion</span><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
-    <div class="icons">
-      <button class="iconbtn" title="展开为页面"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
-      <button class="iconbtn" title="关闭"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-    </div>
-  </div>
-  <nav class="tabs">
-    <button class="tab is-active">任务<span class="count">3</span></button>
-    <button class="tab">会话<span class="count">2</span></button>
-    <button class="tab">Docs</button>
-    <button class="tab">Issues</button>
-    <button class="tab more">更多<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
-  </nav>
-  <div class="toolbar">
-    <label class="switch"><span class="track"></span>调度</label>
-    <span class="stepper">并发 <span class="box"><button>−</button><span>2</span><button>+</button></span></span>
-    <span class="divider"></span>
-    <span class="summary">1 进行中 · 4 待验收</span>
-    <button class="link">另有 4 项已结束</button>
-  </div>
-  <div class="content">
-    <div class="group">
-      <div class="card">
-        <div class="card-head">
-          <span class="badge accent">进行中</span>
-          <span class="title">Chattree</span>
-          <span class="meta"><span class="time">3 分钟前</span><button class="ghost">管家会话</button><button class="menu-dot" title="更多"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></span>
-        </div>
-        <div class="card-body">
-          <p class="summary">wrapper 会话树、节点跳转、自动 fork、分支并行及侧栏合并，附 revision 与 UI 规范。</p>
-          <p class="note"><b>管家</b> 已新建 1 张 R2 工单，覆盖会话树与分支并行；依据 revision 6bc928cf。</p>
-        </div>
-        <ul class="items">
-          <li class="item is-hover">
-            <span class="badge risk">R2</span>
-            <span class="title">将 Chattree 接入 wrapper fork 会话树</span>
-            <span class="run">1 turn · 01:46</span>
-            <span class="status review"><span class="dot"></span>待验收</span>
-            <span class="actions"><button class="ghost">会话</button><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-          </li>
-        </ul>
+<main class="workspace">
+  <header><h1>Workspaces</h1><label class="workspace-picker"><span>工作区</span><select aria-label="工作区"><option>vermillion</option></select></label><span class="path">I:\gpt-projects\vermillion</span></header>
+  <nav aria-label="工作区分页"><span class="active">任务 <small>3</small></span><span>会话 <small>1</small></span><span>Docs</span><span>Issues</span><span class="more">更多</span></nav>
+  <div class="toolbar"><label class="scheduler"><input type="checkbox" checked><span class="switch"></span>调度</label><label class="concurrency">并发 <input aria-label="并发上限" type="number" value="5" min="1" max="8"></label><span class="stats">1 执行中 · 1 排队中</span><button id="history-toggle" aria-expanded="false">显示已结束 <span>28</span></button></div>
+  <section class="content" aria-label="任务列表">
+    <details class="mission" id="primary">
+      <summary><span class="name"><i class="chevron"></i>任务页信息层级与阅读体验</span><span class="status running"><i></i>进行中</span><span class="progress">1 / 3</span><time>3 分钟前</time></summary>
+      <div class="detail">
+        <p class="description">任务默认展示标题、状态和工单进度，展开后查看说明与执行详情。</p>
+        <div class="detail-heading"><h2>工单</h2><button class="session" data-session="管家">管家会话 ↗</button></div>
+        <div class="workitem"><span class="work-title">收起任务详情，整理信息层级</span><span class="status closed">已关闭</span><button class="session" data-session="信息层级工单">会话 ↗</button></div>
+        <div class="workitem"><span class="work-title">优化任务列表留白与状态对齐</span><span class="status running"><i></i>进行中</span><button class="session" data-session="列表布局工单">会话 ↗</button></div>
+        <div class="workitem"><span class="work-title">检查弹窗与页面的阅读体验</span><span class="status queued"><i></i>排队中</span><span></span></div>
+        <details class="technical"><summary>运行记录与任务说明</summary><p>管家：列表布局正在调整，完成后检查两种窗口宽度。</p><p>2 个 revision · 22f575b · Worker 运行 2 turn</p></details>
       </div>
-      <div class="card">
-        <div class="card-head">
-          <span class="badge accent">进行中</span>
-          <span class="title">Role</span>
-          <span class="meta"><span class="time">35 分钟前</span><button class="ghost">管家会话</button><button class="menu-dot" title="更多"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></span>
-        </div>
-        <div class="card-body">
-          <p class="summary">角色 prompt 支持 frontmatter 选择 override / append，附 revision 与 UI/UX 规范引用。</p>
-          <p class="note"><b>管家</b> 已新建 R2 工单 wi-mtq2ympe-3ltfis，3 条验收。</p>
-        </div>
-        <ul class="items">
-          <li class="item">
-            <span class="badge risk">R2</span>
-            <span class="title">项目角色 prompt 支持 frontmatter 选择 override / append</span>
-            <span class="run">Worker 运行中 · 2 turn</span>
-            <span class="status running"><span class="dot"></span>进行中</span>
-            <span class="actions"><button class="ghost">会话</button><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-          </li>
-          <li class="item">
-            <span class="badge risk">R1</span>
-            <span class="title">跑一遍 typecheck 与 test</span>
-            <span class="run">等待上一张</span>
-            <span class="status queued"><span class="dot"></span>排队中</span>
-            <span class="actions"><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-          </li>
-        </ul>
-      </div>
-    </div>
-    <div class="group">
-      <p class="eyebrow">独立工单</p>
-      <ul class="items standalone">
-        <li class="item">
-          <span class="badge risk">R2</span>
-          <span class="title">New Chat 草稿态无法粘贴/拖入/选择文件</span>
-          <span class="run">1 turn · 01:55</span>
-          <span class="status review"><span class="dot"></span>待验收</span>
-          <span class="actions"><button class="ghost">会话</button><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-        </li>
-        <li class="item">
-          <span class="badge risk">R2</span>
-          <span class="title">从 Workspaces 会话页切回思考页后 SessionPane 空白</span>
-          <span class="run">1 turn · 02:16</span>
-          <span class="status review"><span class="dot"></span>待验收</span>
-          <span class="actions"><button class="ghost">会话</button><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-        </li>
-        <li class="item">
-          <span class="badge risk">R2</span>
-          <span class="title">后台 agent 会话发消息未携带会话已保存的 workspace</span>
-          <span class="run">3 次失败</span>
-          <span class="status decision"><span class="dot"></span>待决策</span>
-          <span class="actions"><button class="ghost">会话</button><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-        </li>
-      </ul>
-    </div>
-  </div>
-</div>
-<p class="mock-label">Page · 展开为页面（显示全部，含运行记录）</p>
-<div class="frame page">
-  <aside class="rail">
-    <div class="head"><span class="eyebrow">Workspaces</span><button class="iconbtn" title="添加"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
-    <div class="row is-selected"><div class="name">vermillion</div><div class="path">I:\gpt-projects\vermillion</div></div>
-    <div class="row"><div class="name">chat</div><div class="path">I:\gpt-projects\chat</div></div>
-  </aside>
-  <div class="main">
-    <nav class="tabs">
-      <button class="tab is-active">任务<span class="count">3</span></button>
-      <button class="tab">会话<span class="count">2</span></button>
-      <button class="tab">Docs</button>
-      <button class="tab">Domain</button>
-      <button class="tab">角色</button>
-      <button class="tab">Issues</button>
-      <button class="tab">Automation</button>
-    </nav>
-    <div class="toolbar">
-      <label class="switch"><span class="track"></span>调度</label>
-      <span class="stepper">并发 <span class="box"><button>−</button><span>2</span><button>+</button></span></span>
-      <span class="divider"></span>
-      <span class="summary">1 进行中 · 4 待验收 · 4 已结束</span>
-    </div>
-    <div class="content">
-      <div class="group">
-        <div class="card">
-          <div class="card-head">
-            <span class="badge accent">进行中</span>
-            <span class="title">Chattree</span>
-            <span class="meta"><span class="time">1 个 revision · 6bc928cf · 3 分钟前</span><button class="ghost">管家会话</button><button class="menu-dot" title="更多"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></span>
-          </div>
-          <div class="card-body">
-            <p class="summary">wrapper 会话树、节点跳转、自动 fork、分支并行及侧栏合并，附 revision 与 UI 规范。</p>
-            <p class="note"><b>管家</b> 已新建 1 张 R2 工单，覆盖会话树与分支并行；依据 revision 6bc928cf。</p>
-          </div>
-          <ul class="items">
-            <li class="item">
-              <span class="badge risk">R2</span>
-              <span class="title">将 Chattree 接入 wrapper fork 会话树</span>
-              <span class="run">Worker · 已提交 · 1 turn · 01:46:03</span>
-              <span class="status review"><span class="dot"></span>待验收</span>
-              <span class="actions"><button class="ghost">会话</button><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-            </li>
-          </ul>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <span class="badge">已完成</span>
-            <span class="title">Diff 弹窗</span>
-            <span class="meta"><span class="time">2 个 revision · a91c02e4 · 昨天 22:10</span><button class="ghost">管家会话</button><button class="menu-dot" title="更多"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></span>
-          </div>
-          <ul class="items">
-            <li class="item is-closed">
-              <span class="badge risk">R2</span>
-              <span class="title">文件变更行点击打开 Diff 弹窗</span>
-              <span class="run done">Worker · 1 turn · 昨天 21:40</span>
-              <span class="status closed">已关闭</span>
-              <span class="actions"><button class="x" style="visibility:hidden" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button><button class="ghost">会话</button></span>
-            </li>
-            <li class="item is-closed">
-              <span class="badge risk">R1</span>
-              <span class="title">Diff 弹窗窄窗口截图</span>
-              <span class="run done">Worker · 1 turn · 昨天 22:05</span>
-              <span class="status closed">已关闭</span>
-              <span class="actions"><button class="x" style="visibility:hidden" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button><button class="ghost">会话</button></span>
-            </li>
-          </ul>
-        </div>
-      </div>
-      <div class="group">
-        <p class="eyebrow">独立工单</p>
-        <ul class="items standalone">
-          <li class="item">
-            <span class="badge risk">R2</span>
-            <span class="title">New Chat 草稿态无法粘贴/拖入/选择文件</span>
-            <span class="run">Worker · 已提交 · 1 turn · 01:55:11</span>
-            <span class="status review"><span class="dot"></span>待验收</span>
-            <span class="actions"><button class="ghost">会话</button><button class="x" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
-          </li>
-          <li class="item is-closed">
-            <span class="badge risk">R1</span>
-            <span class="title">打包 release</span>
-            <span class="run done">Worker · 1 turn · 昨天 20:12</span>
-            <span class="status closed">已关闭</span>
-            <span class="actions"><button class="x" style="visibility:hidden" title="取消工单"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button><button class="ghost">会话</button></span>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
-</body>
-</html>
+    </details>
+    <details class="mission">
+      <summary><span class="name"><i class="chevron"></i>让决策卡与合入通知更容易阅读</span><span class="status queued"><i></i>等待中</span><span class="progress">1 / 2</span><time>26 分钟前</time><span class="reason">等待任务状态调整完成 · 管家跟进</span></summary>
+      <div class="detail"><p class="description">通知正文呈现行为变化与结果，技术过程放入可展开的详情。</p><div class="workitem"><span class="work-title">整理合入结果与技术详情</span><span class="status closed">已关闭</span><button class="session" data-session="通知工单">会话 ↗</button></div><div class="workitem"><span class="work-title">更新决策卡的等待说明</span><span class="status queued"><i></i>等待中</span><button class="session" data-session="决策工单">会话 ↗</button></div></div>
+    </details>
+    <details class="mission">
+      <summary><span class="name"><i class="chevron"></i>由管家判断任务完成并展示结果</span><span class="status running"><i></i>进行中</span><span class="progress">2 / 2</span><time>1 小时前</time><span class="reason">工单已结束，管家正在确认任务结果</span></summary>
+      <div class="detail"><p class="description">任务完成时展示结果说明；存在承接工单时保留关联，方便继续查看。</p><p class="note">管家正在核对关联工单与任务目标。</p><button class="session" data-session="收尾管家">管家会话 ↗</button></div>
+    </details>
+    <section class="standalone"><h2>独立工单 <span>1</span></h2><details class="mission"><summary><span class="name"><i class="chevron"></i>修复打开会话时的过期请求提示</span><span class="status queued"><i></i>排队中</span><span class="progress">—</span><time>6 分钟前</time></summary><div class="detail"><p class="description">切换会话时，已取消的旧请求不再显示错误提示。</p><p class="note">等待可用执行资源。</p></div></details></section>
+    <section id="history" hidden><h2>最近完成</h2><details class="mission"><summary><span class="name"><i class="chevron"></i>在会话中提供可点击的会话跳转</span><span class="status closed">已完成</span><span class="progress">1 / 1</span><time>昨天</time><span class="reason">会话引用可直接打开对应对话。</span></summary><div class="detail"><p class="description">聊天中的会话引用显示为可点击组件，点击后定位到对应会话。</p><button class="session" data-session="会话跳转工单">会话 ↗</button></div></details></section>
+  </section>
+  <footer><span>vermillion</span><span>当前任务 3</span></footer>
+</main>
+<dialog id="session-dialog"><h2 id="session-title">会话</h2><p>会话内容在实际工作台中打开。</p><button id="close-dialog" class="session">关闭</button></dialog>
+<script>
+const toggle=document.querySelector('#history-toggle'),historySection=document.querySelector('#history');
+toggle.addEventListener('click',()=>{historySection.hidden=!historySection.hidden;toggle.setAttribute('aria-expanded',String(!historySection.hidden));toggle.innerHTML=historySection.hidden?'显示已结束 <span>28</span>':'隐藏已结束';});
+const dialog=document.querySelector('#session-dialog');
+document.querySelectorAll('[data-session]').forEach(button=>button.addEventListener('click',()=>{document.querySelector('#session-title').textContent=button.dataset.session+'会话';dialog.showModal();}));
+document.querySelector('#close-dialog').addEventListener('click',()=>dialog.close());
+</script>
+</body></html>
