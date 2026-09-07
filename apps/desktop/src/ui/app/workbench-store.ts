@@ -40,6 +40,8 @@ export type WorkbenchState = {
   /** Panel view state survives switching between overlay and page. */
   workspaceSection: WorkspaceSection;
   expandedInboxDetails: Record<string, boolean>;
+  expandedMissions: Record<string, boolean>;
+  setMissionExpanded: (workspaceId: string, missionId: string, expanded: boolean) => void;
   workspaces: Workspace[];
   /** Workspace a new chat will be created in. Chosen in the composer; remembered across restarts. */
   draftWorkspaceId: string | undefined;
@@ -165,6 +167,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       overlay: undefined,
       workspaceSection: "missions",
       expandedInboxDetails: {},
+      expandedMissions: {},
+      setMissionExpanded: (workspaceId, missionId, expanded) => set((state) => ({
+        expandedMissions: { ...state.expandedMissions, [workspaceId + "/" + missionId]: expanded }
+      })),
       workspaces: [],
       draftWorkspaceId: undefined,
       browsingWorkspaceId: undefined,

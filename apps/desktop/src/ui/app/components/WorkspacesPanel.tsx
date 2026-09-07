@@ -51,6 +51,8 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
   const client = store((s) => s.client);
   const agentSessionId = store((s) => s.agentSessionId);
   const taskTarget = store((s) => s.taskTarget);
+  const expandedMissions = store((s) => s.expandedMissions);
+  const setMissionExpanded = store((s) => s.setMissionExpanded);
   const showAgentSession = store((s) => s.showAgentSession);
   const selectAgentSession = store((s) => s.selectAgentSession);
   const workspaces = store((s) => s.workspaces);
@@ -121,7 +123,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
             {more && <ContextMenu {...more} onClose={() => setMore(undefined)} items={moreSections.map((item) => ({ key: item.id, label: item.label, onSelect: () => setSection(item.id) }))} />}
             <div className="min-h-0 flex-1 overflow-auto">
               {section === "missions" && viewError ? <EmptyState title="任务加载失败" hint={viewError} /> : section === "missions" && view && (
-                <MissionsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} onExpand={onExpand} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
+                <MissionsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} onExpand={onExpand} expandedMissions={expandedMissions} setMissionExpanded={setMissionExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
               )}
               {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} compact={compact} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
