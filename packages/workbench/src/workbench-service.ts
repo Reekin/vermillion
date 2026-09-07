@@ -413,10 +413,10 @@ export class WorkbenchService {
     return diagnose(this, workspaceId, workItemId, !!this.recoveryHandler);
   }
 
-  async dispositionFeedback(workspaceId: string, workItemIds: string[]) {
+  async dispositionFeedback(workspaceId: string, workItemIds: string[], completed = false) {
     return {
-      dispatch: this.recoveryHandler ? "pending" as const : "offline" as const,
-      message: this.recoveryHandler ? "处置记录已保存；派发与完成状态以当前动作记录为准。" : "处置记录已保存，桌面调度器不在线，尚未派发。",
+      dispatch: completed ? "completed" as const : this.recoveryHandler ? "pending" as const : "offline" as const,
+      message: completed ? "本次处置已完成；其他等待与下一步见 diagnoses。" : this.recoveryHandler ? "处置记录已保存；派发与完成状态以当前动作记录为准。" : "处置记录已保存，桌面调度器不在线，尚未派发。",
       diagnoses: await Promise.all(workItemIds.map((id) => this.diagnoseWorkItem(workspaceId, id)))
     };
   }

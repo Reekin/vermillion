@@ -33,7 +33,7 @@ import {
 const zWs = z.object({ workspaceId: z.string().min(1) });
 const zWi = zWs.extend({ workItemId: z.string().min(1) });
 const zEmpty = z.object({});
-const zFeedback = z.object({ dispatch: z.enum(["pending", "offline"]), message: z.string(), diagnoses: z.array(zDiagnosis) });
+const zFeedback = z.object({ dispatch: z.enum(["completed", "pending", "offline"]), message: z.string(), diagnoses: z.array(zDiagnosis) });
 
 /** Single method registry: name -> params/result schemas. Handler and client are both derived from it. */
 export const workbenchRpc = {

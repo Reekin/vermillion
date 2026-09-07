@@ -56,7 +56,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "action.list": (p) => service.listActions(p.workspaceId),
     "workspace.repair.submit": async (p) => {
       const result = await service.submitWorkspaceRepair(p.workspaceId, p.actionId, p);
-      return { ...result, feedback: await service.dispositionFeedback(p.workspaceId, result.action.workItemIds) };
+      return { ...result, feedback: await service.dispositionFeedback(p.workspaceId, result.action.workItemIds, result.pass) };
     },
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
