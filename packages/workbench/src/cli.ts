@@ -9,6 +9,7 @@ import { createWorkbenchRpcHandler } from "./rpc-handler.js";
 import { RoleService } from "./roles.js";
 import { WorkbenchService } from "./workbench-service.js";
 import { AppLauncher, resolveAppCommand } from "./app-launcher.js";
+import { methodHelp } from "./cli-help.js";
 
 const desktopSessionMethods = ["chatTree.submit", "chatTree.retry", "chatTree.operations"];
 
@@ -26,9 +27,25 @@ const shippedRoleDefaultsDir = (): string | undefined => {
  * VERMILLION_PERSISTENCE_BASE_DIR overrides ~/.vermillion.
  */
 export const runCli = async (argv: string[]): Promise<number> => {
+  try {
+    return await executeCli(argv);
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n下一步：检查 JSON 参数与运行端；使用 vermillion ${argv[0] ?? ""} --help 查询帮助。\n`);
+    return 1;
+  }
+};
+
+const executeCli = async (argv: string[]): Promise<number> => {
   const [method, rawParams] = argv;
+  const helpMethod = method === "help" || method === "--help" || method === "-h" ? rawParams : rawParams === "--help" || rawParams === "-h" ? method : undefined;
+  if (helpMethod) {
+    const help = methodHelp(helpMethod);
+    if (!help) { process.stderr.write(`unknown method: ${helpMethod}\n下一步：vermillion --help 查看方法列表。\n`); return 1; }
+    process.stdout.write(help);
+    return 0;
+  }
   if (!method || method === "--help" || method === "-h") {
-    process.stdout.write("usage: vermillion <method> [json-params]\n\nmethods:\n" + [...Object.keys(workbenchRpc), ...desktopSessionMethods].map((m) => "  " + m).join("\n") + "\n");
+    process.stdout.write("usage: vermillion <method> [json-params]\n单方法帮助: vermillion <method> --help\n\nmethods:\n" + [...Object.keys(workbenchRpc), ...desktopSessionMethods].map((m) => "  " + m).join("\n") + "\n");
     return method ? 0 : 1;
   }
   const desktopSessionMethod = desktopSessionMethods.includes(method);

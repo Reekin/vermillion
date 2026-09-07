@@ -20,6 +20,8 @@ import { DocsService, WorktreeMergeConflict, WorktreeNotReady } from "./docs.js"
 import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
+import { diagnose } from "./diagnosis.js";
+import { runtimeInfo } from "./runtime-info.js";
 
 const RETRY_MINUTES = [1, 5, 30, 300];
 
@@ -403,17 +405,42 @@ export class WorkbenchService {
     return () => { if (this.recoveryHandler === handler) this.recoveryHandler = undefined; };
   }
 
+  async getRuntimeInfo() {
+    return { ...runtimeInfo, schedulerOnline: !!this.recoveryHandler };
+  }
+
+  async diagnoseWorkItem(workspaceId: string, workItemId: string) {
+    return diagnose(this, workspaceId, workItemId, !!this.recoveryHandler);
+  }
+
+  async dispositionFeedback(workspaceId: string, workItemIds: string[]) {
+    return {
+      dispatch: this.recoveryHandler ? "pending" as const : "offline" as const,
+      message: this.recoveryHandler ? "处置记录已保存；派发与完成状态以当前动作记录为准。" : "处置记录已保存，桌面调度器不在线，尚未派发。",
+      diagnoses: await Promise.all(workItemIds.map((id) => this.diagnoseWorkItem(workspaceId, id)))
+    };
+  }
+
   async recoverWorkItem(workspaceId: string, workItemId: string) {
-    await this.getWorkItem(workspaceId, workItemId);
-    for (const action of await this.listActions(workspaceId)) {
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    const before = await this.listActions(workspaceId);
+    if (["closed", "cancelled"].includes(item.status) && !before.some((a) => a.workItemIds.includes(workItemId) && actionIsOpen(a))) throw new Error("工单已结束，没有待恢复动作；请用 workItem.diagnose 查询结果。");
+    for (const action of before) {
       if (action.workItemIds.includes(workItemId) && action.status === "retry") {
         await this.putAction(workspaceId, { ...action, retryAt: this.now() });
       }
     }
     await this.refreshActions(workspaceId);
     await this.recoveryHandler?.(workspaceId);
-    return { workItem: await this.getWorkItem(workspaceId, workItemId), actions: (await this.listActions(workspaceId)).filter((a) => a.workItemIds.includes(workItemId)), dispatched: !!this.recoveryHandler,
-      message: this.recoveryHandler ? "已核对当前动作；未解决的合同、依赖与决策继续等待。" : "记录已保存，调度器不在线，尚未派发。" };
+    const actions = (await this.listActions(workspaceId)).filter((a) => a.workItemIds.includes(workItemId));
+    const changes = actions.flatMap((action) => {
+      const previous = before.find((a) => a.actionId === action.actionId);
+      return previous?.updatedAt === action.updatedAt ? [] : [{ actionId: action.actionId, before: previous ? `${previous.status}/${previous.stage}` : "absent", after: `${action.status}/${action.stage}`, history: action.history.slice(previous?.history.length ?? 0) }];
+    });
+    const diagnosis = await this.diagnoseWorkItem(workspaceId, workItemId);
+    return { workItem: await this.getWorkItem(workspaceId, workItemId), actions, changes, diagnosis,
+      dispatched: actions.some((a) => a.deliveredAt && a.deliveredAt !== before.find((previous) => previous.actionId === a.actionId)?.deliveredAt),
+      message: !this.recoveryHandler ? "记录已保存，调度器不在线，尚未派发。" : changes.length ? "已核对并续接动作，实际变化见 changes；当前等待见 diagnosis。" : "已核对，没有新增派发；当前处理者与等待条件见 diagnosis。" };
   }
 
   async failAction(workspaceId: string, actionId: string, failure: string): Promise<WorkflowAction> {
