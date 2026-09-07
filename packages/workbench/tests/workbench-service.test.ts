@@ -101,22 +101,25 @@ describe("WorkbenchService", () => {
     expect(status).not.toContain("workitems/");
   });
 
-  it("parks an item on a decision card after the third failure; retry resets, cancel closes", async () => {
+  it("parks an item on a decision card after the fifth failure; retry resets, cancel closes", async () => {
     const { service, ws } = await setup();
     const item = await service.createWorkItem(ws.workspaceId, { title: "Flaky", objective: "o", risk: "R1", scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "t" }] });
     await service.requeueWorkItem(ws.workspaceId, item.workItemId, "one");
     await service.requeueWorkItem(ws.workspaceId, item.workItemId, "two");
+    await service.requeueWorkItem(ws.workspaceId, item.workItemId, "three");
+    await service.requeueWorkItem(ws.workspaceId, item.workItemId, "four");
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("queued");
-    const parked = await service.requeueWorkItem(ws.workspaceId, item.workItemId, "three");
+    const parked = await service.requeueWorkItem(ws.workspaceId, item.workItemId, "five");
     expect(parked.status).toBe("decision");
     const card = (await service.listDecisions(ws.workspaceId)).find((c) => c.workItemId === item.workItemId && !c.answer)!;
     expect(card.kind).toBe("attempts");
-    expect(card.context).toContain("three");
+    expect(card.context).toContain("five");
     await service.answerDecision(ws.workspaceId, card.decisionId, { key: "retry" });
     const retried = await service.getWorkItem(ws.workspaceId, item.workItemId);
     expect(retried.status).toBe("queued");
     expect(retried.run.attempts).toBe(0);
-    for (const f of ["a", "b", "c"]) await service.requeueWorkItem(ws.workspaceId, item.workItemId, f);
+    expect(retried.run.retryAt).toBeUndefined();
+    for (const f of ["a", "b", "c", "d", "e"]) await service.requeueWorkItem(ws.workspaceId, item.workItemId, f);
     const card2 = (await service.listDecisions(ws.workspaceId)).find((c) => c.workItemId === item.workItemId && !c.answer)!;
     await service.answerDecision(ws.workspaceId, card2.decisionId, { key: "cancel" });
     expect((await service.getWorkItem(ws.workspaceId, item.workItemId)).status).toBe("cancelled");

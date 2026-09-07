@@ -100,6 +100,8 @@ export const zRun = z.object({
   /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
   attempts: z.number().int().nonnegative().optional(),
+  /** Earliest automatic retry time; persisted so restarting the scheduler preserves backoff. */
+  retryAt: z.string().datetime().optional(),
   /** Set when a contract change was steered into a turn already in progress; a submit from that same turn is void. Cleared when the turn ends. */
   staleTurnId: z.string().optional()
 });

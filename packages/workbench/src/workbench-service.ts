@@ -20,8 +20,8 @@ import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
 
-/** Failures before an item stops being re-queued and asks the user instead. */
-const MAX_ATTEMPTS = 3;
+const RETRY_MINUTES = [1, 5, 30, 300];
+const MAX_ATTEMPTS = RETRY_MINUTES.length + 1;
 
 const createId = (prefix: string): string =>
   prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -343,7 +343,7 @@ export class WorkbenchService {
   /** Worker claimed the item; records the session and worktree it runs in. */
   /** A (re)start begins a new turn: the pending message is claimed and any stale-turn mark from the previous run is over. */
   async startWorkItem(workspaceId: string, workItemId: string, run: WorkItem["run"]): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined, staleTurnId: undefined } }));
+    return this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, status: "running", run: { ...item.run, ...run, resumeMessage: undefined, retryAt: undefined, staleTurnId: undefined } }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
@@ -465,28 +465,40 @@ export class WorkbenchService {
   }
 
   /**
-   * Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted; after the
-   * third failure the item is parked on a decision card instead so the user sees it.
+   * Scheduler: the worker session ended without submit or decision. Back to the queue with the failure noted; after
+   * four delayed retries the item is parked on a decision card instead so the user sees it.
    */
-  async requeueWorkItem(workspaceId: string, workItemId: string, failure: string): Promise<WorkItem> {
-    const item = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({
-      ...current,
-      status: "queued",
-      run: { ...current.run, sessionId: undefined, lastFailure: failure, attempts: (current.run.attempts ?? 0) + 1 }
-    }));
+  async requeueWorkItem(workspaceId: string, workItemId: string, failure: string, newSession = false): Promise<WorkItem> {
+    const item = await this.mutateWorkItem(workspaceId, workItemId, (current) => {
+      const attempts = (current.run.attempts ?? 0) + 1;
+      const delay = RETRY_MINUTES[attempts - 1];
+      return {
+        ...current,
+        status: delay === undefined ? "decision" : "queued",
+        run: {
+          ...current.run,
+          sessionId: newSession && delay !== undefined ? undefined : current.run.sessionId,
+          resumeMessage: "上次运行异常结束：" + failure,
+          lastFailure: failure,
+          attempts,
+          retryAt: delay === undefined ? undefined : new Date(Date.parse(this.now()) + delay * 60_000).toISOString()
+        }
+      };
+    });
     if ((item.run.attempts ?? 0) < MAX_ATTEMPTS) return item;
     await this.createDecision(workspaceId, {
       kind: "attempts",
       workItemId,
       missionId: item.missionId,
+      sessionId: item.run.sessionId,
       question: "工单「" + item.title + "」连续 " + MAX_ATTEMPTS + " 次没有完成，要继续吗？",
-      context: "最近一次失败：" + failure + "。每次都由新的 Worker 会话从上次的 worktree 继续，但都没有走到提交。",
+      context: "最近一次失败：" + failure + "。工单已暂停自动重派，原会话和 worktree 已保留。",
       options: [
-        { key: "retry", label: "再试一次", detail: "重新排队，失败计数清零，换一个 Worker 会话继续" },
+        { key: "retry", label: "再试一次", detail: "失败计数清零，立即回原会话和 worktree 继续" },
         { key: "cancel", label: "取消工单", detail: "关闭工单并清理它的 worktree；需要的话由管家或你重新建单" }
       ],
       recommended: "cancel",
-      recommendation: "三次都没提交通常说明工单本身有问题，先看看会话里卡在哪，比盲目重试有用"
+      recommendation: "先查看最近一次失败原因；问题已排除时可以再试一次"
     });
     return this.getWorkItem(workspaceId, workItemId);
   }
@@ -558,11 +570,14 @@ export class WorkbenchService {
           ...item,
           status: item.status === "decision" ? "queued" : item.status,
           decisions: [...item.decisions, line],
-          run: resetAttempts
-            ? { ...item.run, sessionId: undefined, resumeMessage: undefined, attempts: 0, lastFailure: undefined }
-            : item.status === "decision"
-              ? { ...item.run, sessionId: card.sessionId ?? item.run.sessionId, resumeMessage: "用户决策答复：" + line }
-              : item.run
+          run: item.status === "decision"
+            ? {
+                ...item.run,
+                sessionId: card.sessionId ?? item.run.sessionId,
+                resumeMessage: "用户决策答复：" + line,
+                ...(resetAttempts ? { attempts: 0, lastFailure: undefined, retryAt: undefined } : {})
+              }
+            : item.run
         }));
       }
     }
