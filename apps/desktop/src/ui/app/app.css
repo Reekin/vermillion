@@ -130,6 +130,7 @@
 .vm-disclosure-header:hover { background: var(--color-surface-hover); }
 .vm-disclosure-title { display: flex; justify-content: flex-start; min-width: 0; max-width: 100%; gap: 8px; padding: 0; text-align: left; color: var(--color-strong); font-size: var(--text-label); font-weight: 500; white-space: normal; }
 .vm-disclosure-title > svg { flex-shrink: 0; }
+.vm-disclosure-title:hover:not(:disabled) { background: transparent; }
 .vm-disclosure-title > span { overflow-wrap: anywhere; }
 .vm-disclosure-status { display: flex; }
 .vm-disclosure-progress { border-left: 1px solid var(--color-border-strong); padding-left: 12px; }
