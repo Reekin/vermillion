@@ -1,22 +1,8 @@
 import { ListTodo } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { TaskWorkItem, WorkbenchStore } from "../workbench-store.js";
-import { Badge, EmptyState, HoverCard, InlineNotice, ListRow, PanelHeader, StatusBar } from "./ui.js";
-import { statusLabel, taskStatusLabel } from "./task-labels.js";
-
-/** Work items under a mission, shown while the pointer rests on the mission row. */
-const MissionItems = ({ items }: { items: TaskWorkItem[] }) =>
-  items.length === 0 ? (
-    <InlineNotice className="pt-2">还没有工单</InlineNotice>
-  ) : (
-    <ul>
-      {items.map((item) => (
-        <li key={item.workItemId}>
-          <ListRow title={<span title={item.title}>{item.title}</span>} trailing={<Badge status={item.status}>{statusLabel[item.status]}</Badge>} />
-        </li>
-      ))}
-    </ul>
-  );
+import type { WorkbenchStore } from "../workbench-store.js";
+import { Badge, EmptyState, InlineNotice, ListRow, PanelHeader, StatusBar } from "./ui.js";
+import { statusLabel } from "./task-labels.js";
 
 export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
   const tasks = store((s) => s.tasks);
@@ -34,7 +20,7 @@ export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
     return () => window.clearTimeout(timer);
   }, [result, setResult]);
 
-  const notice = result && (result.kind === "commit" ? "已提交文档 · " + result.message : (result.appended ? "已补充任务 · " : "已创建任务 · ") + result.title);
+  const notice = result && (result.kind === "commit" ? "已提交文档 · " + result.message : "已开工 · " + result.title);
   return (
     <StatusBar icon={ListTodo} label={`当前任务: ${tasks.length}`} notice={notice} open={open} onOpenChange={setOpen}>
       <PanelHeader title="当前任务" />
@@ -45,13 +31,13 @@ export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
             <ListRow
               title={task.title}
               meta={workspaces.find((w) => w.workspaceId === task.workspaceId)?.label}
-              trailing={<>{task.kind === "mission" && <span>工单 {task.workItems.filter((w) => w.status === "closed").length}/{task.workItems.length}</span>}<Badge>{taskStatusLabel[task.status]}</Badge></>}
+              trailing={<Badge status={task.status}>{statusLabel[task.status]}</Badge>}
               onClick={() => { setOpen(false); showTask(task); }}
             />
           );
           return (
             <li key={task.workspaceId + ":" + task.id}>
-              {task.kind === "mission" ? <HoverCard content={<MissionItems items={task.workItems} />}>{row}</HoverCard> : row}
+              {row}
             </li>
           );
         })}

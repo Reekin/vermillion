@@ -1,3 +1,4 @@
+import { isHistoricalChatTreePosition } from "./chat-tree-send-target.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
@@ -175,7 +176,7 @@ export const useChatTreeController = (input: {
       if (!sessionId || !chatTree) return false;
       if (pendingSend) throw new Error("请等待该消息发送完成，或切换到其他节点提问。");
       const nodeId = chatTree.currentNodeId;
-      if (!nodeId || !chatTree.nodes.some((node) => node.parentNodeId === nodeId)) return false;
+      if (!nodeId || !isHistoricalChatTreePosition(chatTree)) return false;
       const navigation = ++navigationRef.current;
       const operation = await transport.chatTree.submit({ ...payload, attachments: payload.attachments ?? [], sessionId, nodeId });
       if (sessionIdRef.current === sessionId) {

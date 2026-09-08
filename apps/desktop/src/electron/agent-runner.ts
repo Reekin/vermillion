@@ -1,6 +1,6 @@
 import type { createSessionRuntimeService } from "@vermillion/desktop-server";
-import type { AgentRunner, SessionAsk } from "@vermillion/workbench";
-import { mergeSessionExecutionProfile, resolveEngineExecutionPreference } from "@vermillion/shared";
+import type { AgentRunner } from "@vermillion/workbench";
+import { mergeSessionExecutionProfile, resolveEngineExecutionPreference, writeSessionExecutionProfile } from "@vermillion/shared";
 
 type SessionShell = ReturnType<typeof createSessionRuntimeService>;
 
@@ -20,38 +20,6 @@ const lastAssistantText = (shell: SessionShell, sessionId: string): string | und
   return text || undefined;
 };
 
-/**
- * One question into a throwaway fork of a session: the fork keeps the original's full context, the original never
- * sees the question. The fork is archived afterwards so it does not linger in the sidebar.
- */
-export const createSessionAsk = (shell: SessionShell): SessionAsk => async ({ sessionId, question }) => {
-  const forked = await shell.runSessionAction({ sessionId, action: "fork" });
-  if (forked.action !== "fork" || forked.status !== "forked") throw new Error("Could not fork session " + sessionId);
-  const child = forked.forkedSessionId;
-  try {
-    await shell.openSession(child); // discovered fork -> loaded, executable session
-    await shell.setSessionTitle(child, "澄清 · " + question.slice(0, 40));
-    const done = new Promise<void>((resolve) => {
-      const off = shell.subscribe(
-        (envelope) => {
-          if (envelope.event.type === "turn.completed" && envelope.event.sessionId === child) { off(); resolve(); }
-        },
-        { eventTypes: ["turn.completed"] }
-      );
-    });
-    const receipt = await shell.executeCommand({
-      commandId: createId(),
-      command: { type: "sendUserMessage", sessionId: child, messageId: createId(), content: question, attachments: [] }
-    });
-    if (!receipt.accepted) throw new Error("ask rejected for " + child);
-    await done;
-    return lastAssistantText(shell, child) ?? "";
-  } finally {
-    // The fork is throwaway either way; a failed ask must not leave it in the sidebar.
-    await shell.runSessionAction({ sessionId: child, action: "archive" }).catch(() => undefined);
-  }
-};
-
 /** Background agent sessions for the orchestrator: same engine and session list as the UI, opened headlessly. */
 export const createAgentRunner = (shell: SessionShell, engineId: string): AgentRunner => ({
   open: async (input) => {
@@ -67,6 +35,32 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     });
     await shell.setSessionTitle(sessionId, input.title);
     return { sessionId };
+  },
+  fork: async (input) => {
+    if (!await shell.ensureSessionLoadedForRead(input.sourceSessionId)) throw new Error("Source session not found");
+    const workspace = (await shell.listWorkspaces()).workspaces.find((entry) => entry.workspaceId === input.workspaceId);
+    if (!workspace) throw new Error("Workspace not found");
+    const tree = await shell.getChatTree(input.sourceSessionId);
+    const source = shell.getSnapshot();
+    const turn = source.turns.find((entry) => entry.sessionId === input.sourceSessionId && entry.turnId === input.sourceTurnId);
+    // A paged projection may omit this turn (including inherited turns). Codex validates lastTurnId canonically.
+    if (turn && turn.status !== "completed") throw new Error("Worker fork requires a completed source turn");
+    const settings = await shell.getSettings();
+    const metadata = writeSessionExecutionProfile({ ...input.metadata, treeId: tree.treeId ?? input.sourceSessionId,
+      role: "worker", sourceSessionId: input.sourceSessionId, sourceTurnId: input.sourceTurnId }, {
+      engineId,
+      ...mergeSessionExecutionProfile(resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]), input.modelConfig)
+    });
+    const result = await shell.runSessionAction({
+      sessionId: input.sourceSessionId, action: "fork", fromTurnId: input.sourceTurnId, activateFork: false,
+      cwd: workspace.absolutePath, developerInstructions: input.developerInstructions,
+      metadata
+    });
+    if (result.action !== "fork" || result.status !== "forked") throw new Error("Worker fork unavailable");
+    const sessionId = result.forkedSessionId;
+    if (!await shell.ensureSessionLoadedForRead(sessionId)) throw new Error("Worker fork could not be loaded");
+    await shell.setSessionTitle(sessionId, input.title);
+    return { sessionId, treeId: tree.treeId ?? input.sourceSessionId };
   },
   send: async (sessionId, content) => {
     const receipt = await shell.executeCommand({
@@ -95,11 +89,18 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     if (!turn) return;
     await shell.executeCommand({ commandId: createId(), command: { type: "interruptTurn", sessionId, turnId: turn.turnId } });
   },
-  resume: async (sessionId) => {
+  resume: async (sessionId, options?: { cwd?: string; metadata?: Record<string, unknown>; title?: string }) => {
     // Background recovery must not participate in the UI's cancellable session-opening sequence.
     if (!await shell.ensureSessionLoadedForRead(sessionId)) return false;
-    const result = await shell.runSessionAction({ sessionId, action: "resume" });
-    return result.action === "resume" && result.resumed;
+    try {
+      const { title, ...resumeOptions } = options ?? {};
+      const result = await shell.runSessionAction({ sessionId, action: "resume", ...resumeOptions });
+      if (result.action !== "resume" || !result.resumed) return false;
+      if (title) await shell.setSessionTitle(sessionId, title);
+      return true;
+    } catch {
+      return false;
+    }
   },
   isActive: (sessionId) => shell.getSnapshot().turns.some((turn) => turn.sessionId === sessionId && turn.status !== "completed"),
   lastReply: (sessionId) => lastAssistantText(shell, sessionId),

@@ -1,55 +1,24 @@
 import { useMemo, useState } from "react";
-import type { DocChange, Mission } from "@vermillion/workbench/client";
+import type { DocChange } from "@vermillion/workbench/client";
 import { cn } from "../lib/cn.js";
 import { Modal } from "./Modal.js";
 import { Button, Field, InlineNotice } from "./ui.js";
 
 type CommitDocsDialogProps = {
-  /** Every doc in the workspace; the mission's revision is "these docs at this commit". */
-  docs: string[];
-  /** Docs with local changes; they get committed as part of the revision. */
   pending: DocChange[];
-  /** Missions the changes may be appended to; a completed one goes back to active when it gets a revision. */
-  missions: Mission[];
-  /** Mission created from the current session, preselected when present. */
-  defaultMissionId?: string;
   onClose: () => void;
-  onCreate: (input: { title: string; summary: string; paths: string[] }) => Promise<void>;
-  onAppend: (input: { missionId: string; message: string; paths: string[] }) => Promise<void>;
   onCommit: (input: { message: string; paths: string[] }) => Promise<void>;
 };
 
 const stripDocsPrefix = (path: string): string => path.replace(/^\.vermillion\/docs\//, "");
 
-/** Default title from what is being committed: the single file's name, or the deepest shared folder. */
-const inferTitle = (paths: string[]): string => {
-  if (paths.length === 0) return "";
-  const names = paths.map(stripDocsPrefix);
-  if (names.length === 1) return names[0]!.replace(/\.md$/, "").split("/").pop() ?? "";
-  const segments = names.map((n) => n.split("/").slice(0, -1));
-  const shared: string[] = [];
-  for (let i = 0; ; i += 1) {
-    const seg = segments[0]?.[i];
-    if (seg === undefined || segments.some((s) => s[i] !== seg)) break;
-    shared.push(seg);
-  }
-  // A top-level bucket like "specs" says nothing about the change; prefer the first file's name then.
-  return shared.length > 1 ? shared.at(-1)! : names[0]!.replace(/\.md$/, "").split("/").pop() ?? "";
-};
-
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
 
-export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, onClose, onCreate, onAppend, onCommit }: CommitDocsDialogProps) => {
-  const appendable = missions.filter((m) => m.status !== "cancelled");
-  const [mode, setMode] = useState<"create" | "append" | "commit">(defaultMissionId && appendable.some((m) => m.missionId === defaultMissionId) ? "append" : "create");
-  const [missionId, setMissionId] = useState(defaultMissionId ?? appendable[0]?.missionId ?? "");
+export const CommitDocsDialog = ({ pending, onClose, onCommit }: CommitDocsDialogProps) => {
   const changeByPath = useMemo(() => new Map(pending.map((c) => [c.path, c])), [pending]);
-  // "仅提交" only makes sense for pending changes; missions may also reference docs that are already committed.
-  const listed = useMemo(() => (mode === "commit" ? pending.map((c) => c.path) : [...new Set([...pending.map((c) => c.path), ...docs])].sort()), [mode, pending, docs]);
+  const listed = useMemo(() => pending.map((c) => c.path).sort(), [pending]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(pending.map((c) => c.path)));
   const selectedPaths = useMemo(() => listed.filter((p) => selected.has(p)), [listed, selected]);
-  const [title, setTitle] = useState(() => inferTitle(pending.map((c) => c.path)));
-  const [summary, setSummary] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -62,14 +31,12 @@ export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, on
       return next;
     });
 
-  const canSubmit = selectedPaths.length > 0 && (mode === "create" ? title.trim().length > 0 : mode === "append" ? missionId.length > 0 : message.trim().length > 0);
+  const canSubmit = selectedPaths.length > 0 && message.trim().length > 0;
   const submit = async () => {
     setBusy(true);
     setError(undefined);
     try {
-      if (mode === "create") await onCreate({ title: title.trim(), summary: summary.trim(), paths: selectedPaths });
-      else if (mode === "append") await onAppend({ missionId, message: message.trim(), paths: selectedPaths });
-      else await onCommit({ message: message.trim(), paths: selectedPaths });
+      await onCommit({ message: message.trim(), paths: selectedPaths });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -78,7 +45,7 @@ export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, on
   };
 
   return (
-    <Modal title={pending.length > 0 ? "提交 Doc 变更" : "创建任务"} onClose={onClose} width={560}>
+    <Modal title="仅提交文档" onClose={onClose} width={560}>
       <form
         className="p-4"
         onSubmit={(event) => {
@@ -86,50 +53,11 @@ export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, on
           if (canSubmit && !busy) void submit();
         }}
       >
-        <div className="flex gap-1 rounded-lg border border-border p-0.5" role="radiogroup" aria-label="提交方式">
-          {[
-            { id: "create" as const, label: "新任务" },
-            { id: "append" as const, label: "补充到现有任务", disabled: appendable.length === 0 },
-            { id: "commit" as const, label: "仅提交", disabled: pending.length === 0 }
-          ].map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              role="radio"
-              aria-checked={mode === option.id}
-              disabled={option.disabled}
-              onClick={() => setMode(option.id)}
-              className={cn(
-                "flex-1 rounded-md py-1.5 text-label text-muted-foreground disabled:opacity-40",
-                mode === option.id && "bg-surface-selected text-strong"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-
-        {mode === "create" ? (
-          <>
-            <Field label="标题" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="这次要做什么" className="mt-4" />
-            <Field kind="textarea" label="摘要" value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} placeholder="预期效果" className="mt-3" />
-          </>
-        ) : (
-          <>
-            {mode === "append" && (
-            <Field kind="select" label="任务" value={missionId} onChange={(event) => setMissionId(event.target.value)} className="mt-4">
-              {appendable.map((m) => (
-                <option key={m.missionId} value={m.missionId}>{m.title}{m.status === "done" ? "（已完成）" : ""}</option>
-              ))}
-            </Field>
-            )}
-            <Field label={mode === "commit" ? "提交说明" : "变更说明"} autoFocus value={message} onChange={(event) => setMessage(event.target.value)} placeholder="这次改了什么" className="mt-3" />
-          </>
-        )}
+        <Field label="提交说明" autoFocus value={message} onChange={(event) => setMessage(event.target.value)} placeholder="这次改了什么" />
 
         <div className="mt-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="eyebrow">{mode === "commit" ? "本次提交的文件" : "任务涉及的文档"} {selectedPaths.length}/{listed.length}</span>
+            <span className="eyebrow">本次提交的文件 {selectedPaths.length}/{listed.length}</span>
             <div className="flex gap-1">
               <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(listed))}>全选</Button>
               <Button size="sm" variant="ghost" onClick={() => setSelected((current) => new Set(listed.filter((path) => !current.has(path))))}>反选</Button>
@@ -155,7 +83,7 @@ export const CommitDocsDialog = ({ docs, pending, missions, defaultMissionId, on
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>取消</Button>
           <Button variant="primary" type="submit" disabled={busy || !canSubmit}>
-            {busy ? "提交中…" : mode === "create" ? "创建任务" : mode === "append" ? "补充任务" : "提交"}
+            {busy ? "提交中…" : "提交"}
           </Button>
         </div>
       </form>

@@ -1310,15 +1310,16 @@ export class CodexAppServerRuntimePort
     } satisfies ThreadTurnsListParams)) as ThreadTurnsListResponse;
   }
 
-  public async resumeThread(threadId: string): Promise<Thread> {
+  public async resumeThread(threadId: string, cwd?: string, developerInstructions?: string): Promise<Thread> {
     await this.start(this.startConfig);
-    return this.resumeThreadInCurrentProcess(threadId);
+    return this.resumeThreadInCurrentProcess(threadId, cwd, {}, developerInstructions);
   }
 
   private async resumeThreadInCurrentProcess(
     threadId: string,
     cwd?: string,
-    options: RuntimeOperationOptions = {}
+    options: RuntimeOperationOptions = {},
+    developerInstructions?: string
   ): Promise<Thread> {
     const selected = this.resolveSelectedConfig();
     const result = (await this.rpc("thread/resume", {
@@ -1328,18 +1329,35 @@ export class CodexAppServerRuntimePort
       modelProvider: selected.modelProvider ?? null,
       serviceTier: selected.serviceTier ?? null,
       approvalPolicy: selected.approvalPolicy ?? null,
-      sandbox: selected.sandbox ?? null
+      sandbox: selected.sandbox ?? null,
+      ...(developerInstructions ? { developerInstructions: await this.appendDeveloperInstructions(developerInstructions, cwd, options) } : {})
     } satisfies ThreadResumeParams, options)) as ThreadResumeResponse;
     return result.thread;
   }
 
-  public async forkThread(threadId: string, lastTurnId?: string): Promise<Thread> {
+  public async forkThread(threadId: string, lastTurnId?: string, options: {
+    cwd?: string; developerInstructions?: string;
+  } = {}): Promise<Thread> {
     await this.start(this.startConfig);
+    const developerInstructions = options.developerInstructions
+      ? await this.appendDeveloperInstructions(options.developerInstructions, options.cwd, {})
+      : undefined;
     const result = (await this.rpc("thread/fork", {
       threadId,
       ...(lastTurnId ? { lastTurnId } : {}),
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...(developerInstructions ? { developerInstructions, deferGoalContinuation: true } : {}),
       threadSource: "user"
-    } satisfies ThreadForkParams & { lastTurnId?: string })) as ThreadForkResponse;
+    } satisfies ThreadForkParams & { lastTurnId?: string; deferGoalContinuation?: boolean })) as ThreadForkResponse;
+    if (options.developerInstructions) {
+      // Fork config governs future compaction; this same-priority tail switches the inherited history now.
+      await this.rpc("thread/inject_items", {
+        threadId: result.thread.id,
+        items: [{ type: "message", role: "developer", content: [{ type: "input_text", text:
+          "当前分支角色已切换为 Worker。此前设计伙伴角色及其发单/现做模式约束不再适用于本分支。以下是本分支的开发者指令：\n\n" + options.developerInstructions
+        }] }]
+      });
+    }
     return result.thread;
   }
 
@@ -1650,7 +1668,8 @@ export class CodexAppServerRuntimePort
       const resumed = await this.resumeThreadInCurrentProcess(
         providerSessionId,
         cwd,
-        options
+        options,
+        developerInstructions
       );
       threadId = resumed.id;
       this.attachThreadToSession(sessionId, threadId);
@@ -2008,7 +2027,8 @@ export class CodexAppServerRuntimePort
       const resumed = await this.resumeThreadInCurrentProcess(
         providerSessionId,
         cwd,
-        options
+        options,
+        developerInstructions
       );
       this.attachThreadToSession(sessionId, resumed.id);
       return resumed.id;

@@ -16,7 +16,8 @@ import type {
   SessionActionDescriptor,
   SessionActionKind,
   SessionActionProviderContext,
-  SessionActionResult
+  SessionActionResult,
+  SessionActionOptions
 } from "./session-actions.js";
 
 const isoFromUnixSeconds = (value: number): string =>
@@ -47,7 +48,7 @@ const buildForkMetadata = (
   providerSessionId: string,
   thread?: { cwd?: string; path?: string | null }
 ): Record<string, unknown> => ({
-  ...(input.session?.metadata ?? {}),
+  ...(input.session?.metadata ?? input.indexEntry?.metadata ?? {}),
   providerKind: codexProviderKind,
   providerSessionId,
   cwd: thread?.cwd ?? input.session?.metadata?.cwd,
@@ -158,7 +159,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
   }
 
   public async runAction(
-    input: SessionActionProviderContext & { action: SessionActionKind; fromTurnId?: string; activateFork?: boolean }
+    input: SessionActionProviderContext & SessionActionOptions & { action: SessionActionKind }
   ): Promise<SessionActionResult | undefined> {
     const threadId = resolveCodexThreadId(input);
 
@@ -183,8 +184,18 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         bestEffort: true
       });
       await this.codexRuntimePort.unsubscribeThread(threadId);
-      const thread = await this.codexRuntimePort.resumeThread(threadId);
+      const cwd = input.cwd ?? input.session?.metadata?.cwd ?? input.indexEntry?.metadata?.cwd;
+      const instructions = input.session?.metadata?.developerInstructions ?? input.indexEntry?.metadata?.developerInstructions;
+      const thread = typeof instructions === "string"
+        ? await this.codexRuntimePort.resumeThread(threadId, typeof cwd === "string" ? cwd : undefined, instructions)
+        : typeof cwd === "string"
+        ? await this.codexRuntimePort.resumeThread(threadId, cwd)
+        : await this.codexRuntimePort.resumeThread(threadId);
       this.codexRuntimePort.attachThreadToSession(input.sessionId, thread.id);
+      if (input.cwd || input.metadata) {
+        await input.runtimeService.updateSessionMetadata(input.sessionId,
+          { ...input.metadata, ...(input.cwd ? { cwd: input.cwd } : {}) });
+      }
       return {
         action: "resume",
         resumed: true
@@ -199,7 +210,11 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
       if (!workspaceId) {
         throw new Error("Fork is unavailable without a workspace context.");
       }
-      const thread = await this.codexRuntimePort.forkThread(threadId, input.fromTurnId);
+      const thread = input.cwd || input.developerInstructions
+        ? await this.codexRuntimePort.forkThread(threadId, input.fromTurnId, {
+          cwd: input.cwd, developerInstructions: input.developerInstructions
+        })
+        : await this.codexRuntimePort.forkThread(threadId, input.fromTurnId);
       const childSessionId = discoveredCodexSessionId(thread.id);
       const createdAt = isoFromUnixSeconds(thread.createdAt);
       const updatedAt = isoFromUnixSeconds(thread.updatedAt);
@@ -212,7 +227,10 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         summaryText: thread.preview?.trim() || undefined,
         createdAt,
         updatedAt,
-        metadata: buildForkMetadata(input, thread.id, thread)
+        metadata: {
+          ...buildForkMetadata(input, thread.id, thread), ...input.metadata,
+          ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {})
+        }
       };
       // A fork stays in its parent's conversation. Sessions created in-app carry their conversation id; only
       // discovered ones need it derived from the fork chain.

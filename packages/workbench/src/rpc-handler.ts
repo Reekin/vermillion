@@ -33,13 +33,11 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "role.write": async (p) => { await service.writeRoleOverride(p.workspaceId, p.roleId, p.content); return {}; },
     "role.reset": async (p) => { await service.resetRoleOverride(p.workspaceId, p.roleId); return {}; },
 
-    "mission.list": (p) => service.listMissions(p.workspaceId),
-    "mission.create": (p) => service.createMission(p.workspaceId, p),
-    "mission.addRevision": (p) => service.addMissionRevision(p.workspaceId, p),
-    "mission.setStatus": (p) => service.setMissionStatus(p.workspaceId, p.missionId, p.status),
-    "mission.setResult": (p) => service.setMissionResult(p.workspaceId, p.missionId, p),
 
-    "workItem.list": (p) => service.listWorkItems(p.workspaceId, p.missionId),
+    "work.start": (p) => service.startWork(p.workspaceId, p),
+    "work.list": (p) => service.listWorkRequests(p.workspaceId),
+    "work.retry": (p) => service.retryWork(p.workspaceId, p.requestId),
+    "workItem.list": (p) => service.listWorkItems(p.workspaceId),
     "workItem.get": (p) => service.getWorkItem(p.workspaceId, p.workItemId),
     "workItem.diagnose": (p) => service.diagnoseWorkItem(p.workspaceId, p.workItemId),
     "runtime.info": () => service.getRuntimeInfo(),
@@ -50,14 +48,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "inbox.acknowledge": (p) => service.acknowledgeWorkItem(p.workspaceId, p.workItemId),
     "workItem.rollback": (p) => service.rollbackWorkItem(p.workspaceId, p.workItemId, p.reason),
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
-    "workItem.defer": (p) => service.deferWorkItem(p.workspaceId, p.workItemId, p.dependsOn, p.note),
-    "workItem.escalate": async (p) => ({ ...await service.escalateWorkItem(p.workspaceId, p.workItemId, p.message, p), feedback: await service.dispositionFeedback(p.workspaceId, [p.workItemId]) }),
-    "workItem.recover": (p) => service.recoverWorkItem(p.workspaceId, p.workItemId),
     "action.list": (p) => service.listActions(p.workspaceId),
-    "workspace.repair.submit": async (p) => {
-      const result = await service.submitWorkspaceRepair(p.workspaceId, p.actionId, p);
-      return { ...result, feedback: await service.dispositionFeedback(p.workspaceId, result.action.workItemIds, result.pass) };
-    },
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
     "scheduler.get": (p) => service.getScheduler(p.workspaceId),
@@ -67,18 +58,11 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "decision.list": (p) => service.listDecisions(p.workspaceId),
     "decision.create": (p) => service.createDecision(p.workspaceId, p),
     "decision.answer": (p) => service.answerDecision(p.workspaceId, p.decisionId, { key: p.key, note: p.note }),
-    "decision.withdraw": async (p) => {
-      const card = await service.withdrawDecision(p.workspaceId, p.decisionId, p.sessionId, p.reason);
-      const action = (await service.listActions(p.workspaceId)).find((a) => a.actionId === card.actionId);
-      return { ...card, feedback: await service.dispositionFeedback(p.workspaceId, action?.workItemIds ?? (card.workItemId ? [card.workItemId] : [])) };
-    },
-
     "inbox.list": () => service.listInbox(),
 
     "app.start": (p) => service.startApp(p),
     "app.stop": async (p) => { await service.stopApp(p.pid); return {}; },
 
-    "session.ask": async (p) => ({ answer: await service.askMissionAuthor(p.workspaceId, p.missionId, p.question) })
   };
 
   return async (raw: WorkbenchRpcRequest): Promise<WorkbenchRpcResponse> => {

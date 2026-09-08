@@ -8,6 +8,20 @@ const codexProviderHandle = (providerSessionId = "thread-1") => ({
 });
 
 describe("CodexSessionActionsProvider", () => {
+  it("resumes a Worker in its allocated worktree and persists the cwd and work binding", async () => {
+    const resumeThread = vi.fn().mockResolvedValue({ id: "thread-worker" });
+    const updateSessionMetadata = vi.fn();
+    const provider = new CodexSessionActionsProvider({ codexRuntimePort: {
+      resumeThread, interruptThread: vi.fn(), unsubscribeThread: vi.fn(), attachThreadToSession: vi.fn()
+    } as unknown as CodexAppServerRuntimePort });
+    await provider.runAction({ sessionId: "worker", action: "resume", cwd: "I:/worktree",
+      metadata: { workItemId: "item" }, providerHandle: codexProviderHandle("thread-worker"),
+      session: { metadata: { cwd: "I:/workspace", developerInstructions: "WORKER_ROLE" } } as never,
+      sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata } as never });
+    expect(resumeThread).toHaveBeenCalledWith("thread-worker", "I:/worktree", "WORKER_ROLE");
+    expect(updateSessionMetadata).toHaveBeenCalledWith("worker", { cwd: "I:/worktree", workItemId: "item" });
+  });
+
   it("registers a background fork without overwriting the user's active selection", async () => {
     const setLastActiveSelection = vi.fn();
     const upsertSession = vi.fn();

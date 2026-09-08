@@ -185,6 +185,14 @@ export type SessionCapabilityContext = ResolvedSessionContext & {
   sessionIdentity: SessionIdentityRegistry;
 };
 
+export type SessionActionOptions = {
+  fromTurnId?: string;
+  activateFork?: boolean;
+  cwd?: string;
+  developerInstructions?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type SessionActionsCapability = {
   resolveDisplayedSessionId?: (input: SessionCapabilityContext) => string | undefined;
   listAdditionalActions?: (
@@ -192,7 +200,7 @@ export type SessionActionsCapability = {
   ) => Promise<SessionActionDescriptor[]>;
   prepareArchive?: (input: SessionCapabilityContext) => Promise<void>;
   runAction?: (
-    input: SessionCapabilityContext & { action: SessionActionKind }
+    input: SessionCapabilityContext & SessionActionOptions & { action: SessionActionKind }
   ) => Promise<SessionActionResult | undefined>;
 };
 
@@ -421,7 +429,8 @@ export class CapabilityRegistry {
 
   public async runSessionAction(
     sessionId: string,
-    action: SessionActionKind
+    action: SessionActionKind,
+    options: SessionActionOptions = {}
   ): Promise<SessionActionResult> {
     const context = this.resolveContext(sessionId);
     const { session, indexEntry } = context;
@@ -473,6 +482,7 @@ export class CapabilityRegistry {
         {
           const result = await provider?.runAction?.({
             ...context,
+            ...options,
             action
           });
           if (result) {
@@ -500,6 +510,7 @@ export class CapabilityRegistry {
       case "fork": {
         const result = await provider?.runAction?.({
           ...context,
+          ...options,
           action
         });
         if (result) {

@@ -6,14 +6,14 @@ import {
   zAgentRun,
   zScheduler,
   zDecisionCard,
-  zMission,
+  zWorkRequest,
   zWorkItem,
   zWorkflowAction,
   type WorkflowAction,
   type AgentRun,
   type Scheduler,
   type DecisionCard,
-  type Mission,
+  type WorkRequest,
   type WorkItem
 } from "./contracts.js";
 
@@ -38,7 +38,8 @@ const readJsonDir = async <T>(dir: string, schema: z.ZodType<T>): Promise<T[]> =
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
     const raw = await readFile(join(dir, name), "utf8");
-    records.push(schema.parse(withDefaults(JSON.parse(raw))));
+    const parsed = schema.safeParse(withDefaults(JSON.parse(raw)));
+    if (parsed.success) records.push(parsed.data);
   }
   return records;
 };
@@ -89,7 +90,7 @@ const createCollection = <T extends Record<string, unknown>>(
 export class WorkspaceStore {
   readonly rootPath: string;
   readonly stateDir: string;
-  readonly missions: Collection<Mission>;
+  readonly workRequests: Collection<WorkRequest>;
   readonly workItems: Collection<WorkItem>;
   readonly decisions: Collection<DecisionCard>;
   readonly runs: Collection<AgentRun>;
@@ -99,7 +100,7 @@ export class WorkspaceStore {
   constructor(rootPath: string) {
     this.rootPath = rootPath;
     this.stateDir = join(rootPath, STATE_DIR);
-    this.missions = createCollection(join(this.stateDir, "missions"), zMission, "missionId");
+    this.workRequests = createCollection(join(this.stateDir, "work-requests"), zWorkRequest, "requestId");
     this.workItems = createCollection(join(this.stateDir, "workitems"), zWorkItem, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
     this.runs = createCollection(join(this.stateDir, "runs"), zAgentRun, "runId");

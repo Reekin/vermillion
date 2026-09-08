@@ -610,6 +610,13 @@ export class RuntimeOrchestrator {
     }
   }
 
+  public async updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<void> {
+    const session = this.domainService.requireSession(sessionId);
+    this.domainService.commitRuntimeEvent({ type: "session.updated", sessionId,
+      conversationId: session.conversationId, status: session.status, metadata: { ...session.metadata, ...metadata } });
+    await this.sessionIndexSyncService.syncSession(sessionId);
+  }
+
   public async setSessionTitle(sessionId: string, title: string): Promise<void> {
     this.domainService.updateSessionTitle({ sessionId, title });
     await this.sessionIndexSyncService.syncSession(sessionId);
@@ -708,6 +715,7 @@ export class RuntimeOrchestrator {
       ...envelope,
       command: {
         ...envelope.command,
+        ...(session.metadata?.role === "worker" ? { thinkMode: undefined } : {}),
         ...(workspaceId ? { workspaceId } : {}),
         ...(cwd ? { cwd } : {}),
         ...(providerSessionId ? { providerSessionId } : {}),

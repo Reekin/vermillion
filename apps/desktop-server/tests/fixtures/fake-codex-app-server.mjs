@@ -2084,6 +2084,7 @@ const handleRequest = (payload) => {
           result: {
             config: {
               model_provider: "fake-provider",
+              developer_instructions: process.env.FAKE_CODEX_DEVELOPER_INSTRUCTIONS,
               model_providers: {
                 "fake-provider": {
                   base_url:

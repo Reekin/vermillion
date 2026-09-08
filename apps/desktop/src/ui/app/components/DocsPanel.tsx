@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
-import type { DocChange, DocFile, Mission } from "@vermillion/workbench/client";
+import type { DocChange, DocFile } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
 import { Button, EmptyState, InlineNotice, PanelHeader } from "./ui.js";
@@ -10,7 +10,6 @@ import { DiffDialog } from "./DiffDialog.js";
 
 type DocsPanelProps = {
   store: WorkbenchStore;
-  activeSessionId?: string;
   onFileAction: (absolutePath: string, action: "open" | "reveal") => Promise<void>;
 };
 
@@ -46,21 +45,19 @@ const buildTree = (paths: string[]): TreeNode[] => {
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
 const EMPTY_DOCS: DocFile[] = [];
 const EMPTY_CHANGES: DocChange[] = [];
-const EMPTY_MISSIONS: Mission[] = [];
 
-export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelProps) => {
+export const DocsPanel = ({ store, onFileAction }: DocsPanelProps) => {
   const client = store((s) => s.client);
   const workspace = store((s) => s.workspaces.find((w) => w.workspaceId === s.browsingWorkspaceId));
   const view = store((s) => s.view);
   const viewError = store((s) => s.viewError);
   const docs = view?.docs ?? EMPTY_DOCS;
   const pending = view?.pendingDocChanges ?? EMPTY_CHANGES;
-  const missions = view?.missions ?? EMPTY_MISSIONS;
   const openDocPath = store((s) => (s.editor?.kind === "doc" ? s.editor.path : undefined));
   const openEditor = store((s) => s.openEditor);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
-  const [missionOpen, setMissionOpen] = useState(false);
+  const [commitOpen, setCommitOpen] = useState(false);
   const setResult = store((s) => s.setDocCommit);
   const [diffTarget, setDiffTarget] = useState<{ workspaceId: string; path: string }>();
   const [diffResult, setDiffResult] = useState<{ diff?: string; error?: string }>();
@@ -148,7 +145,7 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
         {tree.map((node) => renderNode(node, 0))}
       </ul>
       <div className="border-t border-border p-3">
-        <Button variant="primary" className="w-full" disabled={docs.length === 0} onClick={() => setMissionOpen(true)}>{pending.length > 0 ? "提交变更" : "创建任务"}</Button>
+        <Button variant="primary" className="w-full" disabled={pending.length === 0} onClick={() => setCommitOpen(true)}>仅提交</Button>
       </div>
 
       {menu && (
@@ -166,27 +163,14 @@ export const DocsPanel = ({ store, activeSessionId, onFileAction }: DocsPanelPro
         />
       )}
 
-      {missionOpen && (
+      {commitOpen && (
         <CommitDocsDialog
-          docs={docs.map((doc) => doc.path)}
           pending={pending}
-          missions={missions}
-          defaultMissionId={activeSessionId ? missions.find((m) => m.status !== "cancelled" && m.sessionId === activeSessionId)?.missionId : undefined}
-          onClose={() => setMissionOpen(false)}
-          onCreate={async (input) => {
-            const mission = await client.request("mission.create", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
-            setResult({ kind: "mission", missionId: mission.missionId, title: mission.title, appended: false });
-            setMissionOpen(false);
-          }}
-          onAppend={async (input) => {
-            const mission = await client.request("mission.addRevision", { workspaceId: workspace.workspaceId, sessionId: activeSessionId, ...input });
-            setResult({ kind: "mission", missionId: mission.missionId, title: mission.title, appended: true });
-            setMissionOpen(false);
-          }}
+          onClose={() => setCommitOpen(false)}
           onCommit={async (input) => {
             const committed = await client.request("docs.commit", { workspaceId: workspace.workspaceId, ...input });
             setResult({ kind: "commit", ...committed });
-            setMissionOpen(false);
+            setCommitOpen(false);
           }}
         />
       )}

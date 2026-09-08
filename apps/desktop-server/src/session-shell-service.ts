@@ -352,6 +352,10 @@ export class SessionShellService {
     return this.runtimeService.setSessionTitle(sessionId, title);
   }
 
+  public updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<void> {
+    return this.runtimeService.updateSessionMetadata(sessionId, metadata);
+  }
+
   public listSessions(options: {
     conversationId?: string;
     includeArchived?: boolean;
@@ -727,6 +731,11 @@ export class SessionShellService {
   public async runSessionAction(input: {
     sessionId: string;
     action: SessionActionKind;
+    fromTurnId?: string;
+    activateFork?: boolean;
+    cwd?: string;
+    developerInstructions?: string;
+    metadata?: Record<string, unknown>;
   }): Promise<SessionActionResult> {
     if (input.action === "pin" || input.action === "unpin") {
       if (!(await this.sessionCatalog.get(input.sessionId))) {
@@ -741,8 +750,8 @@ export class SessionShellService {
       } as SessionActionResult;
     }
     const result = this.capabilities
-      ? await this.capabilities.runSessionAction(input.sessionId, input.action)
-      : await this.requireSessionActions().runAction(input.sessionId, input.action);
+      ? await this.capabilities.runSessionAction(input.sessionId, input.action, input)
+      : await this.requireSessionActions().runAction(input.sessionId, input.action, input);
     if (input.action === "resume") {
       await this.sessionCatalog.markSessionRead(input.sessionId);
     }

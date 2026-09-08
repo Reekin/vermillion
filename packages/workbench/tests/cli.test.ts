@@ -28,7 +28,7 @@ describe("vermillion cli", () => {
     };
     const { workspaceId } = await call("workspace.add", { rootPath: root });
     const { workItemId } = await call("workItem.create", {
-      workspaceId, title: "Resources", objective: "isolated acceptance", risk: "R1", needs: ["browser"],
+      workspaceId, title: "Resources", objective: "isolated acceptance", risk: "R1", needs: ["browser:qa-profile"],
       scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "done" }]
     });
     const id = { workspaceId, workItemId };

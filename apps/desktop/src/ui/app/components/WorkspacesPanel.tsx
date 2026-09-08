@@ -1,6 +1,6 @@
 import { ChevronDown, CornerDownRight, Pin, Plus, X } from "lucide-react";
-import { useMemo, useState } from "react";
-import { type DecisionCard, type RoleFile, type WorkbenchClient } from "@vermillion/workbench/client";
+import { useEffect, useMemo, useState } from "react";
+import { type DecisionCard, type RoleFile, type WorkbenchClient, type WorkItem } from "@vermillion/workbench/client";
 import type { RendererStore } from "../../../store/store.js";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { SessionPane, formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
@@ -11,21 +11,21 @@ import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, StatusDot, Tabs } from "./ui.js";
 import { roleLabel as agentRoleLabel } from "./workflow-display.js";
 import { ContextMenu } from "./ContextMenu.js";
-import { isOpenWorkItem, MissionsSection } from "./MissionsSection.js";
+import { isOpenWorkItem, WorkItemsSection } from "./WorkItemsSection.js";
 
 type WorkspacesPanelProps = {
   store: WorkbenchStore;
   transport: DesktopTransport;
   sessionStore: RendererStore;
   pickDirectory: () => Promise<string | undefined>;
-  /** Overlay = quick look: the task board lists only active missions and open standalone items. */
+  /** Overlay = quick look: the task board lists only unfinished work items. */
   compact: boolean;
   onExpand: () => void;
 };
 
 /** Secondary navigation inside a workspace. Sections without a backing feature yet render a placeholder. */
 const sections: Array<{ id: WorkspaceSection; label: string }> = [
-  { id: "missions", label: "任务" },
+  { id: "workItems", label: "工单" },
   { id: "sessions", label: "会话" },
   { id: "docs", label: "Docs" },
   { id: "domains", label: "Domain" },
@@ -34,7 +34,7 @@ const sections: Array<{ id: WorkspaceSection; label: string }> = [
   { id: "automation", label: "Automation" }
 ];
 
-/** Domain definitions are plain docs under this folder; the steward reads them all when attaching standards to a work item. */
+/** Domain definitions are plain docs under this folder; the Worker reads them all when attaching standards to a work item. */
 const DOMAINS_DIR = ".vermillion/docs/domains/";
 
 export const WorkspacesSwitcher = ({ store }: { store: WorkbenchStore }) => {
@@ -47,27 +47,64 @@ export const WorkspacesSwitcher = ({ store }: { store: WorkbenchStore }) => {
   </Field>;
 };
 
+export const loadSourceTreeTitles = async (
+  list: DesktopTransport["sessionBrowser"]["list"], workspaceId: string,
+  workItems: Pick<WorkItem, "treeId" | "sourceSessionId">[]
+): Promise<Record<string, string>> => {
+  const pending = new Map(workItems.flatMap((item) => item.treeId ? [[item.treeId, item.sourceSessionId] as const] : []));
+  const titles: Record<string, string> = {};
+  let cursor: string | undefined;
+  let expectedRevision: string | undefined;
+  while (pending.size) {
+    const page = await list({ workspaceId, kind: "user", limit: 100, cursor, expectedRevision });
+    for (const session of page.items) {
+      const ids = new Set([session.sessionId, ...(session.memberSessionIds ?? [])]);
+      for (const [treeId, sourceId] of pending) {
+        if (ids.has(treeId) || (sourceId && ids.has(sourceId))) {
+          titles[treeId] = session.title;
+          pending.delete(treeId);
+        }
+      }
+    }
+    if (!page.hasMore || !page.nextCursor) break;
+    cursor = page.nextCursor;
+    expectedRevision = page.revision;
+  }
+  return titles;
+};
+
 export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory, compact, onExpand }: WorkspacesPanelProps) => {
   const client = store((s) => s.client);
   const agentSessionId = store((s) => s.agentSessionId);
   const taskTarget = store((s) => s.taskTarget);
-  const expandedMissions = store((s) => s.expandedMissions);
-  const setMissionExpanded = store((s) => s.setMissionExpanded);
+  const expandedWorkGroups = store((s) => s.expandedWorkGroups);
+  const setWorkGroupExpanded = store((s) => s.setWorkGroupExpanded);
   const showAgentSession = store((s) => s.showAgentSession);
   const selectAgentSession = store((s) => s.selectAgentSession);
   const workspaces = store((s) => s.workspaces);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
   const view = store((s) => s.view);
   const viewError = store((s) => s.viewError);
+  const [sourceTitles, setSourceTitles] = useState<Record<string, string>>({});
+  const sourceIdsKey = JSON.stringify(view?.workItems.map(({ treeId, sourceSessionId }) => [treeId, sourceSessionId]) ?? []);
+  useEffect(() => {
+    let active = true;
+    setSourceTitles({});
+    if (!activeWorkspaceId) return;
+    void loadSourceTreeTitles(transport.sessionBrowser.list, activeWorkspaceId, view?.workItems ?? [])
+      .then((titles) => { if (active) setSourceTitles(titles); })
+      .catch((caught: Error) => { if (active) setError(caught.message); });
+    return () => { active = false; };
+  }, [transport, activeWorkspaceId, sourceIdsKey]);
   const selectWorkspace = store((s) => s.browseWorkspace);
   const openEditor = store((s) => s.openEditor);
   const section = store((s) => s.workspaceSection);
   const setSection = store((s) => s.setWorkspaceSection);
   const [more, setMore] = useState<{ x: number; y: number }>();
   const [error, setError] = useState<string | undefined>();
-  const taskCount = view ? view.missions.filter((m) => m.status === "active").length + view.workItems.filter((w) => !w.missionId && isOpenWorkItem(w)).length : 0;
+  const taskCount = view?.workItems.filter(isOpenWorkItem).length ?? 0;
   const sessionCount = new Set(view?.runs.filter((r) => r.status === "running").map((r) => r.sessionId)).size;
-  const mainSections = sections.filter((s) => ["missions", "sessions", "docs", "issues"].includes(s.id));
+  const mainSections = sections.filter((s) => ["workItems", "sessions", "docs", "issues"].includes(s.id));
   const moreSections = sections.filter((s) => !mainSections.includes(s));
 
   const add = async () => {
@@ -113,7 +150,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
           <EmptyState title="选择一个 workspace" action={<Button onClick={() => void add()}>添加 workspace</Button>} />
         ) : (
           <>
-            <Tabs items={(compact ? mainSections : sections).map((item) => ({ ...item, count: item.id === "missions" ? taskCount : item.id === "sessions" ? sessionCount : undefined }))} selected={section} onSelect={(id) => setSection(id as WorkspaceSection)}>
+            <Tabs items={(compact ? mainSections : sections).map((item) => ({ ...item, count: item.id === "workItems" ? taskCount : item.id === "sessions" ? sessionCount : undefined }))} selected={section} onSelect={(id) => setSection(id as WorkspaceSection)}>
               {compact && <button type="button" className="ml-auto flex items-center gap-1" aria-haspopup="menu" aria-expanded={!!more} aria-current={moreSections.some((s) => s.id === section) ? "page" : undefined} onClick={(event) => {
                 event.stopPropagation();
                 const rect = event.currentTarget.getBoundingClientRect();
@@ -122,8 +159,8 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
             </Tabs>
             {more && <ContextMenu {...more} onClose={() => setMore(undefined)} items={moreSections.map((item) => ({ key: item.id, label: item.label, onSelect: () => setSection(item.id) }))} />}
             <div className="min-h-0 flex-1 overflow-auto">
-              {section === "missions" && viewError ? <EmptyState title="任务加载失败" hint={viewError} /> : section === "missions" && view && (
-                <MissionsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} missions={view.missions} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} compact={compact} onExpand={onExpand} expandedMissions={expandedMissions} setMissionExpanded={setMissionExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
+              {section === "workItems" && viewError ? <EmptyState title="工单加载失败" hint={viewError} /> : section === "workItems" && view && (
+                <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={compact} onExpand={onExpand} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
               )}
               {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} compact={compact} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
@@ -151,7 +188,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
 
 
 /**
- * Sessions the workbench started in this workspace (steward / worker / supervisor): a list on the left, the selected
+ * Sessions the workbench started in this workspace (Worker): a list on the left, the selected
  * session's transcript and composer on the right. Same reading surface as Think, scoped to agents.
  */
 const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, onSelect, compact }: { transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; selected: string | undefined; onSelect: (sessionId: string | undefined) => void; compact: boolean }) => {
@@ -188,7 +225,7 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
     <div className="flex h-full">
       <aside className="flex w-1/3 min-w-0 max-w-80 shrink-0 flex-col border-r border-border">
         {sessions.length === 0 && !loading ? (
-          <EmptyState title="还没有 agent 会话" hint="管家、Worker、Supervisor 和工作区修复的会话会出现在这里。" />
+          <EmptyState title="还没有 agent 会话" hint="独立 Worker 和验证会话会出现在这里。" />
         ) : (
           <ul className="min-h-0 flex-1 overflow-auto py-1">
             {sessions.map((session) => renderRow(session))}
@@ -238,7 +275,7 @@ const DomainsSection = ({ client, workspaceId, docs, onOpen }: { client: Workben
           <IconButton icon={Plus} label="新建领域" type="submit" disabled={!draft.trim()} />
         </form>
       </PanelHeader>
-      <InlineNotice>每个领域一份 md：正文说明覆盖什么、什么改动该考虑它，头部 standards 列规范路径。管家建单时读全部定义，判断涉及的领域并把规范附进工单。</InlineNotice>
+      <InlineNotice>每个领域一份 md：正文说明覆盖什么、什么改动该考虑它，头部 standards 列规范路径。Worker 建单时读全部定义，判断涉及的领域并把规范附进工单。</InlineNotice>
       {domains.length === 0 ? (
         <InlineNotice>还没有领域定义。</InlineNotice>
       ) : (
@@ -252,7 +289,7 @@ const DomainsSection = ({ client, workspaceId, docs, onOpen }: { client: Workben
   );
 };
 
-const roleLabelForFile = (role: RoleFile) => role.roleId === "workspace-repair" ? agentRoleLabel[role.roleId] : role.title;
+const roleLabelForFile = (role: RoleFile) => role.title;
 
 const roleSourceLabel: Record<RoleFile["source"], string> = { global: "全局", workspace: "本 workspace" };
 

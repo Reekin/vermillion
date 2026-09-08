@@ -32,11 +32,11 @@ async function fixture() {
   await index.upsertSession({ workspaceId: "workspace", session: snapshot.sessions[0]! });
   const load = vi.fn(async (_id: string) => true);
   const changed = vi.fn();
-  const addBranch = async (sessionId: string, sourceTurnId: string) => {
+  const addBranch = async (sessionId: string, sourceTurnId: string, parentSessionId = "root") => {
     const session = { ...snapshot.sessions[0]!, sessionId };
     snapshot.sessions.push(session);
     await index.upsertSession({ workspaceId: "workspace", session });
-    await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "root", childSessionId: sessionId,
+    await index.upsertRelation({ workspaceId: "workspace", parentSessionId, childSessionId: sessionId,
       relationType: "fork", sourceTurnId });
     return sessionId;
   };
@@ -57,6 +57,34 @@ async function fixture() {
 }
 
 describe("asynchronous wrapper branch sends", () => {
+  it.each(["root", "worker"])("honors %s as source of a shared historical turn despite newer Worker activity", async (caller) => {
+    const f = await fixture();
+    await f.addBranch("worker", "b");
+    const worker = f.snapshot.sessions.find((session) => session.sessionId === "worker")!;
+    worker.metadata = { role: "worker" };
+    worker.updatedAt = "2026-09-08T00:00:00Z";
+    await f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith("worker", expect.anything()));
+    f.service.submit({ ...f.input, sessionId: caller, nodeId: "a" }, f.send);
+    await vi.waitFor(() => expect(f.fork).toHaveBeenCalledWith(caller, "a"));
+    await vi.waitFor(() => expect(f.service.listOperations("root")[0]!.status).toBe("sent"));
+  });
+
+  it("prefers a discussion member over its newer Worker when the caller does not contain the node", async () => {
+    const f = await fixture();
+    await f.addBranch("discussion", "b");
+    f.snapshot.turns.push({ ...f.snapshot.turns[0]!, sessionId: "discussion", turnId: "d" });
+    await f.addBranch("worker", "d", "discussion");
+    const worker = f.snapshot.sessions.find((session) => session.sessionId === "worker")!;
+    worker.metadata = { role: "worker" };
+    worker.updatedAt = "2026-09-08T00:00:00Z";
+    await f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith("worker", expect.anything()));
+    f.service.submit({ ...f.input, nodeId: "d" }, f.send);
+    await vi.waitFor(() => expect(f.fork).toHaveBeenCalledWith("discussion", "d"));
+    await vi.waitFor(() => expect(f.service.listOperations("root")[0]!.status).toBe("sent"));
+  });
+
   it("exposes the provider rejection reason and reuses the target on retry", async () => {
     const f = await fixture();
     const send = vi.fn().mockResolvedValueOnce({ accepted: false,

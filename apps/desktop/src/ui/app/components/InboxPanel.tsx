@@ -45,8 +45,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const action = data?.actions.find((entry) => entry.actionId === card.actionId);
   const dispositions = action ? dispositionSummary(action) : [];
   const relatedIds = [...new Set([...(action?.workItemIds ?? []), ...(card.workItemId ? [card.workItemId] : [])])];
-  const missionTitle = data?.missions.find((entry) => entry.missionId === card.missionId)?.title;
-  const sessionId = action?.sessionId ?? card.sessionId;
+  const sessionId = card.sessionId ?? data?.workItems.find((entry) => entry.workItemId === card.workItemId)?.run.sessionId;
   const retainDecision = store((s) => s.retainDecision);
   const dismissDecision = store((s) => s.dismissDecision);
   const answered = !!card.answer;
@@ -71,7 +70,6 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       header={
         <>
           <Badge tone="accent">{answered ? "已答复" : "决策"}</Badge>
-          {missionTitle && <span className="truncate text-caption text-muted-foreground">{missionTitle}</span>}
           {sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>进入会话</Button>}
         </>
       }
@@ -118,7 +116,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       </>}
       {answered && <DetailSection title="答复结果">
         <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
-        <p>{card.deliveryPending ? "答复已保存，等待交接" : "答复已记录"}</p>
+        <p>{card.deliveryPending ? "答复已保存，等待送达 Worker" : "答复已送达 Worker"}</p>
         <Button size="sm" variant="ghost" onClick={() => dismissDecision(item.workspaceId, card.decisionId)}>知道了</Button>
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
@@ -136,7 +134,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
         <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, card.decisionId)}>{[card.details, action?.history.map((entry) => entry.at + " " + entry.message).join("\n")].filter(Boolean).join("\n\n")}</CollapsibleDetails>
       )}
     </Card>
-    {detailId && data && <WorkItemDialog client={client} workspaceId={item.workspaceId} workItemId={detailId} workItems={data.workItems} runs={data.runs} actions={data.actions} onClose={() => setDetailId(undefined)} onOpenSession={(id) => showAgentSession(item.workspaceId, id)} />}
+    {detailId && data && <WorkItemDialog client={client} workspaceId={item.workspaceId} workItemId={detailId} workItems={data.workItems} runs={data.runs} actions={data.actions} onClose={() => setDetailId(undefined)} onOpenSession={(id, turnId) => showAgentSession(item.workspaceId, id, turnId)} />}
     </>
   );
 };
@@ -184,7 +182,7 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
       header={
         <>
           <Badge>已合入</Badge>
-          <span className="ml-auto truncate text-caption text-muted-foreground">{item.mission ? "任务：" + item.mission.title : "独立工单"}</span>
+          <span className="ml-auto truncate text-caption text-muted-foreground">工单</span>
         </>
       }
       footer={

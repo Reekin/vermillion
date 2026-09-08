@@ -35,7 +35,7 @@ const setup = async () => {
   await git(root, "config", "core.autocrlf", "false");
   const write = (path: string, content: string) => cli("docs.write", { workspaceId, path, content });
   const diff = async (path: string) => (await cli("docs.diff", { workspaceId, path })).diff;
-  const commit = () => cli("mission.create", { workspaceId, title: "Baseline", summary: "" });
+  const commit = () => cli("docs.commit", { workspaceId, message: "Baseline" });
   return { root, write, diff, commit };
 };
 

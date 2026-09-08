@@ -166,9 +166,9 @@ export class WrapperChatTreeService {
     if (target && turnsById.get(target)?.status !== "completed") {
       throw new Error("Wait for this turn to finish before branching.");
     }
-    let member = tree.currentSessionId!;
+    let member = nodeId ? this.resolveSendSource(sessionId, nodeId, paths, byActivity) : tree.currentSessionId!;
     if (target && !paths.get(member)?.includes(target)) {
-      member = byActivity.find((id) => paths.get(id)?.includes(target))!;
+      member = this.resolveSendSource(sessionId, target, paths, byActivity);
     }
     if (target && paths.get(member)?.at(-1) !== target) {
       member = await this.options.fork(member, target);
@@ -177,6 +177,15 @@ export class WrapperChatTreeService {
     const view = { sessionId: member, nodeId: target, followTip: true };
     await this.options.sessionIndexStore.setTreeView(sessionId, view);
     return { sessionId: member };
+  }
+
+  private resolveSendSource(sessionId: string, nodeId: string, paths: Map<string, string[]>, byActivity: string[]): string {
+    if (paths.get(sessionId)?.includes(nodeId)) return sessionId;
+    const candidates = byActivity.filter((id) => paths.get(id)?.includes(nodeId));
+    const isWorker = (id: string) => this.options.runtimeService.getSession(id)?.metadata?.role === "worker";
+    const source = (!isWorker(sessionId) ? candidates.find((id) => !isWorker(id)) : undefined) ?? candidates[0];
+    if (!source) throw new Error(`Unknown tree node: ${nodeId}`);
+    return source;
   }
 
   private changed(sessionId: string): void {
@@ -220,8 +229,7 @@ export class WrapperChatTreeService {
         if (turnsById.get(operation.nodeId)?.status !== "completed") {
           throw new Error("Wait for this turn to finish before branching.");
         }
-        const source = byActivity.find((id) => paths.get(id)?.includes(operation.nodeId));
-        if (!source) throw new Error(`Unknown tree node: ${operation.nodeId}`);
+        const source = this.resolveSendSource(operation.sessionId, operation.nodeId, paths, byActivity);
         operation.targetSessionId = await this.options.fork(source, operation.nodeId);
         this.changed(operation.sessionId);
       }

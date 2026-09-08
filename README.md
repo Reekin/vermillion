@@ -1,6 +1,6 @@
 # Vermillion
 
-个人 agent 工作台。你只在两处出现：和设计伙伴聊出 Spec，以及在 Inbox 里朱批决策卡和验收工单。
+个人 agent 工作台。讨论形成文档，从讨论节点开工，在同一棵会话树中查看 Worker 的执行，在 Inbox 处理决定和查看结果。
 
 ## 运行
 
@@ -14,12 +14,12 @@
 1. 思考页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并创建 `.vermillion/docs/`。
 2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 workspace 根（设计伙伴能读整个项目），角色 prompt 作为 developer instructions 注入（追加在 codex config.toml 的 `developer_instructions` 之后），只会改 `.vermillion/docs/` 下的文件。
 3. 右栏 Docs 树按文件夹显示 `.vermillion/docs/`；有改动的文件带 M/U/D 标记，点击可编辑，右键可在文件管理器或默认编辑器中打开。
-4. 点 **提交变更**：选「新任务」或「补充到现有任务」，勾选本次要提交的文件；每次提交是任务的一个 revision，管家据此判断拆单、调整还是重发。
-5. **Inbox** 汇总所有 workspace 的决策卡（选一个选项即回答）和待验收工单（通过 / 打回并写原因 / 不做），并展示证据包与验收结果。
+4. 点 **开工**，或在发单模式中说“把 ABC 开工做掉”：本轮结束后 fork 出 Worker 分支，由它整理和提交相关文档、建单，结束准备轮后等调度续跑。查看位置留在讨论节点；ChatTree 底部列出 Worker，点击查看对应分支。
+5. **Inbox** 汇总所有 workspace 的决策卡和已合入结果。可以选择选项或自由答复，答复送回原 Worker；已合入结果可以确认或附理由回滚。
 6. 左栏 **New Chat** 回到草稿态；会话列表按最近完成的 turn 排序，可切换为按 workspace 分组，可加载更多。
-7. **Workspaces → 任务** 顶部打开调度后，提交的 revision 会自动触发管家拆单、Worker 在 worktree 里实现并自验、Supervisor 每 turn 盯方向；每个任务和工单下面列出跑过它的 agent 运行记录，都能点「会话」看现场。Inbox 里「通过」会把 Worker 的分支合进 workspace。
-8. 在思考里提"打包""跑测试"这类不改设计的操作请求，设计伙伴会直接建一张独立工单进入队列，不写文档、不经管家；任务页底部有「独立工单」分组。
-9. **Workspaces → Domain** 列出 `.vermillion/docs/domains/` 下的领域定义，可新建和编辑；管家建单时据此给工单附上相关规范。**Workspaces → 角色** 列出所有角色 prompt（设计伙伴、管家、Worker、Supervisor、Maintainer、Liaison、Reviewer、Verifier）及其来源。全局版本在 `~/.vermillion/roles/` 直接改文件；点「覆盖」在本 workspace 的 `.vermillion/roles/` 写一份覆盖版本，「恢复全局」删除覆盖。
+7. **Workspaces → 工单** 按来源会话树分组，展示调度开关、并发上限、进度与等待原因。Worker 自行判断是否使用 worktree，完成 review 和独立验证后提交，由工作台合入。
+8. 发单模式下，打包、跑测试和不改设计的 bug 修复也走开工，文档终态不变就不改文档。现做模式下设计伙伴在 workspace 根直接执行并提交成果。
+9. **Workspaces → Domain** 列出 `.vermillion/docs/domains/` 下的领域定义，可新建和编辑；Worker 建单时据此附上相关规范。**Workspaces → 角色** 编辑设计伙伴、Worker、Maintainer、Liaison 及 Reviewer、Verifier 的角色配置。全局版本在 `~/.vermillion/roles/`；workspace 可以覆盖或追加。
 
 ## CLI
 
@@ -35,7 +35,7 @@ CLI 与桌面共用同一个服务和方法表；CLI 的写入会通过文件监
 ## 数据位置
 
 - 全局：`~/.vermillion/`（workspace 注册表、会话索引、`roles/` 角色 prompt）
-- 每个 workspace：`<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 覆盖）、`missions/` `workitems/` `decisions/` `runs/`（一条一 JSON）、`scheduler.json`、`worktrees/`（Worker 分支）。除 docs 外都通过 `.git/info/exclude` 排除在 git 之外。
+- 每个 workspace：`<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 覆盖）、`work-requests/` `workitems/` `decisions/` `runs/` `actions/`（一条一 JSON）、`scheduler.json`。Worker 按需创建独立 worktree 并在工单登记位置。工作台运行记录排除在 git 之外。
 
 ## 结构
 

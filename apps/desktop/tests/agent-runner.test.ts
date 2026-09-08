@@ -2,6 +2,36 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it.each([true, false])("forks a completed source in the background with Worker identity (cached=%s)", async (cached) => {
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      listWorkspaces: async () => ({ workspaces: [{ workspaceId: "workspace", absolutePath: "I:/workspace" }] }),
+      getChatTree: async () => ({ treeId: "tree" }),
+      getSettings: async () => ({ executionPreferencesByEngineId: {} }),
+      getSnapshot: () => ({ turns: cached ? [{ sessionId: "source", turnId: "turn", status: "completed" }] : [] }),
+      runSessionAction: vi.fn().mockResolvedValue({ action: "fork", status: "forked", forkedSessionId: "worker" }),
+      setSessionTitle: vi.fn(), openSession: vi.fn()
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    await expect(runner.fork({ sourceSessionId: "source", sourceTurnId: "turn", workspaceId: "workspace",
+      title: "Work", developerInstructions: "Worker role", metadata: { workItemId: "item", treeSessionId: "tree" } }))
+      .resolves.toEqual({ sessionId: "worker", treeId: "tree" });
+    expect(shell.runSessionAction).toHaveBeenCalledWith(expect.objectContaining({ action: "fork", fromTurnId: "turn",
+      activateFork: false, metadata: expect.objectContaining({ role: "worker", workItemId: "item", sourceSessionId: "source", treeSessionId: "tree" }) }));
+    expect(shell.openSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a running fork point before creating a provider thread", async () => {
+    const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      listWorkspaces: async () => ({ workspaces: [{ workspaceId: "workspace", absolutePath: "I:/workspace" }] }),
+      getChatTree: async () => ({ treeId: "tree" }),
+      getSnapshot: () => ({ turns: [{ sessionId: "source", turnId: "turn", status: "running" }] }), runSessionAction: vi.fn() };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    await expect(runner.fork({ sourceSessionId: "source", sourceTurnId: "turn", workspaceId: "workspace",
+      title: "Work", developerInstructions: "Worker role", metadata: {} })).rejects.toThrow("completed source turn");
+    expect(shell.runSessionAction).not.toHaveBeenCalled();
+  });
+
   it("forwards the failed turn's runtime reason without leaking it into later turns", () => {
     let emit: (envelope: { event: Record<string, unknown> }) => void = () => {};
     const shell = { subscribe: vi.fn((listener) => { emit = listener; return () => {}; }) };
@@ -20,6 +50,7 @@ describe("AgentRunner recovery", () => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       runSessionAction: vi.fn().mockResolvedValue({ action: "resume", resumed: true }),
+      setSessionTitle: vi.fn().mockResolvedValue(undefined),
       openSession: vi.fn().mockRejectedValue(new Error("Open session cancelled."))
     };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
@@ -39,6 +70,16 @@ describe("AgentRunner recovery", () => {
     shell.ensureSessionLoadedForRead.mockResolvedValue(false);
     await expect(runner.resume("missing")).resolves.toBe(false);
     expect(shell.runSessionAction).not.toHaveBeenCalled();
+  });
+
+  it("names the claimed Worker after its work item once resumed", async () => {
+    const { shell, runner } = setup();
+    const options = { cwd: "I:/worktree", title: "Worker · Greeting", metadata: { workItemId: "item" } };
+    await expect(runner.resume("worker", options)).resolves.toBe(true);
+    expect(shell.setSessionTitle).toHaveBeenCalledWith("worker", "Worker · Greeting");
+    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume",
+      cwd: "I:/worktree", metadata: { workItemId: "item" } });
+    expect(shell.openSession).not.toHaveBeenCalled();
   });
 
   it("reports a provider session that cannot resume", async () => {

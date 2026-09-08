@@ -1,3 +1,4 @@
+import { StartWorkButton } from "../app/components/StartWorkButton.js";
 import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import {
   memo,
@@ -100,6 +101,7 @@ export type SessionPaneProps = {
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
+  onStartWork?: (input: { sessionId: string; turnId: string }) => Promise<void>;
   getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
@@ -589,6 +591,7 @@ export const SessionPane = ({
   createSession,
   initializeDraftExecution,
   composerExtras,
+  onStartWork,
   getSendOptions,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
@@ -1073,6 +1076,9 @@ export const SessionPane = ({
                 <ChatTreePanel
                   operations={operations}
                   chatTree={activeChatTree}
+                  onSelectWorker={(id) => {
+                    void transport.sessionBrowser.activate(id, { focusTree: true }).then(() => refreshChatTree());
+                  }}
                   onJump={sessionId ? (nodeId) => {
                     void onJumpChatTree(nodeId).then(() => viewport.scrollToBottom(sessionId));
                   } : undefined}
@@ -1085,7 +1091,7 @@ export const SessionPane = ({
         <ComposerContainer
           draftKey={pendingSend?.operationId ?? operations.find((operation) => operation.targetSessionId === activeSessionId)?.operationId ?? activeSessionId}
           initializeDraftExecution={initializeDraftExecution}
-          extraExecutionControls={composerExtras}
+          extraExecutionControls={<>{composerExtras}{onStartWork && <StartWorkButton sessionId={viewSessionId} turnId={activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId)?.turnId} onStart={onStartWork} />}</>}
           getSendOptions={getSendOptions}
           transport={transport}
           activeSession={activeSession}

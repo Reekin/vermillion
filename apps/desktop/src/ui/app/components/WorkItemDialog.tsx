@@ -3,7 +3,7 @@ import type { AgentRun, DecisionCard, WorkbenchClient, WorkItem, WorkflowAction 
 import { Modal } from "./Modal.js";
 import { Badge, Button, Card, CollapsibleDetails, DetailSection, EmptyState, InlineNotice, ListRow } from "./ui.js";
 import { WorkflowDetails } from "./WorkflowDetails.js";
-import { roleLabel, waitingActions } from "./workflow-display.js";
+import { roleLabel } from "./workflow-display.js";
 import { statusLabel } from "./task-labels.js";
 
 type WorkItemDialogProps = {
@@ -14,7 +14,7 @@ type WorkItemDialogProps = {
   runs: AgentRun[];
   actions?: WorkflowAction[];
   onClose: () => void;
-  onOpenSession: (sessionId: string) => void;
+  onOpenSession: (sessionId: string, turnId?: string) => void;
 };
 
 const lines = (values: string[]) => values.length ? values.map((value) => "• " + value).join("\n") : "无";
@@ -47,13 +47,13 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   }, [client, workspaceId]);
   const itemRuns = runs.filter((run) => run.workItemId === workItemId).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   const itemActions = actions.filter((action) => action.workItemIds.includes(workItemId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const sessionId = (item && waitingActions(actions, item).find((action) => action.sessionId)?.sessionId) ?? item?.run.sessionId ?? itemRuns[0]?.sessionId;
+  const sessionId = item?.run.sessionId ?? itemRuns[0]?.sessionId;
   const itemDecisions = decisions?.filter((card) => card.workItemId === workItemId || itemActions.some((action) => action.actionId === card.actionId) || item?.decisions.includes(card.decisionId));
   return <Modal title="工单详情" onClose={onClose} width={800}>
     {!item ? <EmptyState title="工单不存在" hint={workItemId} /> : <Card
       className="m-4"
       header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{statusLabel[item.status]}</Badge></>}
-      footer={sessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(sessionId); }}>会话</Button>}
+      footer={<>{sessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(sessionId); }}>会话</Button>}{item.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(item.sourceSessionId!, item.sourceTurnId); }}>来源</Button>}</>}
     >
       <DetailSection title="工单">{item.title}</DetailSection>
       <DetailSection title="目标">{item.objective || "未填写"}</DetailSection>

@@ -1,25 +1,18 @@
-import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { promisify } from "node:util";
-import { latestRevision, actionIsOpen, type Mission, type AgentRun, type WorkflowAction, type WorkItem, type RoleExecutionOverrides } from "./contracts.js";
-import { STATE_DIR } from "./docs.js";
+import { effectiveNeeds, actionIsOpen, type AgentRun, type WorkflowAction, type WorkItem, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 
-const execFileAsync = promisify(execFile);
-const git = async (cwd: string, args: string[]): Promise<string> =>
-  (await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout;
-
 /** What the orchestrator needs from the session engine. Implemented in Electron main over SessionShellService. */
 export type AgentRunner = {
+  resolveSourceTurn?: (sessionId: string) => Promise<string>;
+  fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
   open: (input: { workspaceId: string; cwd: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
   send: (sessionId: string, content: string) => Promise<void>;
   /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
-  resume: (sessionId: string) => Promise<boolean>;
+  resume: (sessionId: string, options?: { cwd?: string; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
   /** True while the runtime is executing a turn, including tool/model waits. */
   isActive?: (sessionId: string) => boolean;
   /** Text of the last assistant message in the session, if any. */
@@ -38,8 +31,6 @@ export type OrchestratorOptions = {
   now?: () => string;
   /** Worker turns without status progress before the item is requeued. */
   maxIdleTurns?: number;
-  /** How often a mission with running workers gets a supervisor patrol. */
-  patrolIntervalMs?: number;
 };
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
@@ -54,11 +45,10 @@ export class Orchestrator {
   private readonly runner: AgentRunner;
   private readonly now: () => string;
   private readonly maxIdleTurns: number;
-  private readonly patrolIntervalMs: number;
   private readonly disposers: Array<() => void> = [];
-  private readonly patrols = new Map<string, { workspaceId: string; timer: NodeJS.Timeout; busy: boolean }>();
   private readonly runsBySession = new Map<string, WorkerBinding>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
+  private readonly preparing = new Map<string, string>();
   private disposed = false;
 
   constructor(options: OrchestratorOptions) {
@@ -67,20 +57,19 @@ export class Orchestrator {
     this.runner = options.runner;
     this.now = options.now ?? (() => new Date().toISOString());
     this.maxIdleTurns = options.maxIdleTurns ?? 3;
-    this.patrolIntervalMs = options.patrolIntervalMs ?? 4 * 60_000;
-    this.runner.registerTool({ role: "supervisor", name: "remind", description: "提醒正在执行的 Worker 回到工单范围。",
-      inputSchema: { type: "object", properties: { workItemId: { type: "string" }, message: { type: "string" } }, required: ["workItemId", "message"], additionalProperties: false },
-      handle: (args) => this.remind(String(args.workItemId ?? ""), String(args.message ?? "")) });
+
   }
 
   start(): void {
     this.disposed = false;
-    this.disposers.push(this.service.setRecoveryHandler((workspaceId) => this.enqueue(workspaceId, () => this.reconcile(workspaceId))));
+    this.disposers.push(this.service.setWorkerActiveChecker((sessionId) => this.active(sessionId)));
+    if (this.runner.resolveSourceTurn) this.disposers.push(this.service.setSourceTurnResolver(this.runner.resolveSourceTurn));
+    this.disposers.push(this.service.registerScheduler());
     this.disposers.push(this.service.subscribe((event) => {
       if (!("workspaceId" in event)) return;
       if (event.type === "workItem.updated") {
         void this.enqueue(event.workspaceId, () => this.deliverUpdate(event.workspaceId, event.workItemId, event.sessionId, event.note));
-      } else if (["actions.changed", "workItems.changed", "missions.changed", "decisions.changed", "scheduler.changed"].includes(event.type)) {
+      } else if (["actions.changed", "workItems.changed", "workRequests.changed", "decisions.changed", "scheduler.changed"].includes(event.type)) {
         void this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
       } else if (event.type === "workItem.cancelled" && event.sessionId) {
         const sessionId = event.sessionId;
@@ -90,19 +79,31 @@ export class Orchestrator {
     this.disposers.push(this.runner.onTurnCompleted((event) => {
       const bound = this.runsBySession.get(event.sessionId);
       if (bound) void this.enqueue(bound.workspaceId, () => this.onTurn(bound, event.finishReason, event.failure, event.turnId));
+      const preparingWorkspace = this.preparing.get(event.sessionId);
+      if (preparingWorkspace) void this.enqueue(preparingWorkspace, async () => {
+        this.preparing.delete(event.sessionId);
+        const request = (await this.service.listWorkRequests(preparingWorkspace)).find((entry) => entry.workerSessionId === event.sessionId && entry.status === "preparing");
+        const items = await this.service.listWorkItems(preparingWorkspace);
+        if (request && (event.finishReason !== "completed" || !items.some((item) => item.requestId === request.requestId)))
+          await this.service.failWorkRequest(preparingWorkspace, request.requestId, event.failure ?? "准备轮未完成工单登记，请核对当前准备进度并继续。");
+        else await this.service.finishPreparation(preparingWorkspace, event.sessionId, event.turnId);
+        await this.reconcile(preparingWorkspace);
+      });
+      void this.service.listWorkspaces().then((workspaces) => {
+        for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, () => this.reconcile(workspace.workspaceId));
+      });
     }));
     void this.service.listWorkspaces().then((workspaces) => {
       for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, () => this.reconcile(workspace.workspaceId));
     });
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.disposed = true;
     for (const dispose of this.disposers.splice(0)) dispose();
-    for (const patrol of this.patrols.values()) clearInterval(patrol.timer);
-    this.patrols.clear();
     for (const timer of this.retryTimers.values()) clearTimeout(timer);
     this.retryTimers.clear();
+    await Promise.allSettled([...workspaceQueues.values()]);
   }
 
   private enqueue(workspaceId: string, task: () => Promise<void>): Promise<void> {
@@ -111,16 +112,16 @@ export class Orchestrator {
       if (workspaceQueues.get(workspaceId) === drained) workspaceQueues.delete(workspaceId);
     });
     workspaceQueues.set(workspaceId, drained);
-    // The recovery RPC receives the actual failure; event callers have the logged queue catch.
     return next;
   }
 
   private async reconcile(workspaceId: string): Promise<void> {
     if (this.disposed) return;
+    await this.prepareRequests(workspaceId);
     await this.service.refreshActions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
     this.clearRetryTimer(workspaceId);
-    if (!scheduler.enabled) return;
+    if (!scheduler.enabled) { await this.scheduleRetry(workspaceId); return; }
     await this.service.continueIntegrations(workspaceId);
     let actions = await this.service.listActions(workspaceId);
     // Completed actions can still have a final turn in flight. Keep the owner until it ends.
@@ -130,7 +131,6 @@ export class Orchestrator {
         await this.release(bound, "done", action?.status ?? "done");
       }
     }
-    await this.settleMissions(workspaceId);
     actions = await this.service.listActions(workspaceId);
     const claimed = new Set<string>();
     for (const action of actions) {
@@ -147,12 +147,18 @@ export class Orchestrator {
         const item = items.find((i) => i.workItemId === action.workItemIds[0]);
         if (!item || await this.service.isWorkItemBlocked(workspaceId, item.workItemId)) continue;
         const running = items.filter((i) => i.status === "running" && i.workItemId !== item.workItemId);
-        if (running.length >= scheduler.maxWorkers || running.some((i) => i.needs.some((need) => item.needs.includes(need)))) continue;
+        if (running.length >= scheduler.maxWorkers || running.some((i) => effectiveNeeds(i).some((need) => effectiveNeeds(item).includes(need)))) continue;
       }
       await this.dispatch(workspaceId, action);
     }
-    actions = await this.service.listActions(workspaceId);
-    const retryAt = actions.filter((a) => actionIsOpen(a) && a.status === "retry" && a.retryAt)
+    await this.scheduleRetry(workspaceId);
+  }
+
+  private async scheduleRetry(workspaceId: string): Promise<void> {
+    const actions = await this.service.listActions(workspaceId);
+    const requests = await this.service.listWorkRequests(workspaceId);
+    const retryAt = [...actions.filter((a) => actionIsOpen(a) && a.status === "retry" && a.retryAt),
+      ...requests.filter((request) => request.status !== "failed" && request.status !== "ready" && request.retryAt)]
       .map((a) => Date.parse(a.retryAt!)).filter((at) => at > Date.parse(this.now()));
     if (!this.disposed && retryAt.length) this.retryTimers.set(workspaceId, setTimeout(() => {
       this.retryTimers.delete(workspaceId);
@@ -176,63 +182,43 @@ export class Orchestrator {
       const root = await this.service.workspaceRoot(workspaceId);
       let item = action.role === "worker" ? await this.service.getWorkItem(workspaceId, action.workItemIds[0]!) : undefined;
       let cwd = item?.run.worktreePath ?? root;
-      if (item && action.stage === "worktree") {
-        if (item.scope.allowedPaths.length && !item.run.worktreePath) {
-          // The action already records the worktree stage before any external operation.
-          action = await this.service.putAction(workspaceId, { ...action, status: "running" });
-          const branch = item.run.branch ?? "vermillion/" + item.workItemId;
-          const worktreePath = join(root, STATE_DIR, "worktrees", item.workItemId);
-          await mkdir(join(root, STATE_DIR, "worktrees"), { recursive: true });
-          const entries = (await git(root, ["worktree", "list", "--porcelain", "-z"])).split("\0\0");
-          const existing = entries.map((entry) => entry.split("\0")).find((fields) => fields.some((field) => field.startsWith("worktree ") && resolve(field.slice(9)) === resolve(worktreePath)));
-          if (existing) {
-            if (!existing.includes("branch refs/heads/" + branch)) throw new Error("Worktree target belongs to a different branch: " + worktreePath);
-          } else await git(root, ["worktree", "add", "-b", branch, worktreePath, "HEAD"]);
-          item = await this.service.patchWorkItemRun(workspaceId, item.workItemId, { worktreePath, branch });
-          cwd = worktreePath;
-        }
-        action = await this.service.putAction(workspaceId, { ...action, status: "running", stage: "open" });
-      }
       let sessionId = action.sessionId;
       const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
       if (sessionId && !bound) {
-        // A thrown resume is a stage failure. Only a definitive false permits replacing the session.
-        if (!await this.runner.resume(sessionId)) {
-          sessionId = undefined;
-          action = await this.service.putAction(workspaceId, { ...action, sessionId: undefined, runId: undefined, stage: "open" });
-        }
+        if (!await this.runner.resume(sessionId, { cwd, title: item ? "Worker · " + item.title : undefined, metadata: { role: "worker", workItemId: item?.workItemId, sourceSessionId: item?.sourceSessionId, sourceTurnId: item?.sourceTurnId, treeId: item?.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
+
       }
       if (!sessionId) {
         if (action.stage !== "open") action = await this.service.putAction(workspaceId, { ...action, stage: "open" });
         const previous = [...await this.service.listActions(workspaceId)].reverse().find((a) => a.actionId !== action.actionId && a.ownerKey === action.ownerKey && a.sessionId);
         const candidate = item?.run.sessionId ?? previous?.sessionId;
-        if (candidate && await this.runner.resume(candidate)) sessionId = candidate;
+        if (candidate && await this.runner.resume(candidate, { cwd, title: item ? "Worker · " + item.title : undefined, metadata: { role: "worker", workItemId: item?.workItemId, sourceSessionId: item?.sourceSessionId, sourceTurnId: item?.sourceTurnId, treeId: item?.treeId } })) sessionId = candidate;
         else {
-          const role = await this.roles.resolve(root, action.role === "workbench" ? "worker" : action.role);
-          let developerInstructions = role.content;
-          if (action.role === "worker") {
-            const [reviewer, verifier] = await Promise.all([this.roles.resolve(root, "reviewer"), this.roles.resolve(root, "verifier")]);
-            developerInstructions += "\n\n## reviewer subagent prompt（spawn 时原样传入，并附工单与 diff）\n" + reviewer.content +
-              "\n\n## verifier subagent prompt（spawn 时原样传入，并附 acceptance、refs 与 diff）\n" + verifier.content;
-          }
-          ({ sessionId } = await this.runner.open({ workspaceId, cwd, developerInstructions, modelConfig: role.modelConfig,
-            title: action.role + " · " + (item?.title ?? action.missionId ?? workspaceId),
-            metadata: { role: action.role, actionId: action.actionId, workItemId: item?.workItemId ?? action.workItemIds[0], missionId: action.missionId } }));
+          if (candidate) throw new Error("原执行会话无法恢复：" + candidate);
+          const role = await this.workerRole(root);
+          const developerInstructions = role.content;
+          if (item?.run.forkSessionId && item.run.forkTurnId) {
+            ({ sessionId } = await this.runner.fork({ workspaceId, sourceSessionId: item.run.forkSessionId, sourceTurnId: item.run.forkTurnId,
+              developerInstructions, modelConfig: role.modelConfig, title: "Worker · " + item.title,
+              metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId } }));
+            if (!await this.runner.resume(sessionId, { cwd })) throw new Error("无法恢复工单分支");
+          } else ({ sessionId } = await this.runner.open({ workspaceId, cwd, developerInstructions, modelConfig: role.modelConfig,
+            title: action.role + " · " + (item?.title ?? workspaceId),
+            metadata: { role: action.role, actionId: action.actionId, workItemId: item?.workItemId ?? action.workItemIds[0] } }));
         }
         action = await this.service.putAction(workspaceId, { ...action, sessionId, stage: "deliver", status: "running" });
       }
       let run = (await this.service.listRuns(workspaceId)).find((r) => r.runId === action.runId && r.sessionId === sessionId);
       if (!run || run.status !== "running") {
         run = await this.service.putRun(workspaceId, { runId: createId("run"), role: action.role === "workbench" ? "worker" : action.role,
-          actionId: action.actionId, sessionId, workItemId: item?.workItemId ?? action.workItemIds[0], missionId: action.missionId,
-          revision: action.revision, closureKey: action.closureKey, status: "running", turns: 0, startedAt: this.now() });
+          actionId: action.actionId, sessionId, workItemId: item?.workItemId ?? action.workItemIds[0],
+ status: "running", turns: 0, startedAt: this.now() });
         action = await this.service.putAction(workspaceId, { ...action, runId: run.runId });
       }
       const wasActive = this.runner.isActive?.(sessionId) ?? !!bound;
       this.runsBySession.set(sessionId, { workspaceId, actionId: action.actionId, run });
       if (item && item.status === "queued") item = await this.service.startWorkItem(workspaceId, item.workItemId, { ...item.run, sessionId, heartbeatAt: this.now() });
       else if (item && item.run.sessionId !== sessionId) item = await this.service.patchWorkItemRun(workspaceId, item.workItemId, { sessionId });
-      if (item) this.ensurePatrol(workspaceId, item.missionId ?? item.workItemId);
       if (action.stage === "execute" && wasActive) return;
       if (action.stage === "execute") {
         // An unbound inactive execute stage is a restart recovery, not evidence of failure.
@@ -250,7 +236,7 @@ export class Orchestrator {
       const current = (await this.service.listActions(workspaceId)).find((a) => a.actionId === action.actionId)!;
       if (current.message === action.message && current.stage === "deliver" && actionIsOpen(current) && current.status !== "decision") {
         await this.service.putAction(workspaceId, { ...current, status: "running", stage: "execute", deliveredAt: this.now(), retryAt: undefined });
-        if (item?.run.resumeMessage) await this.service.patchWorkItemRun(workspaceId, item.workItemId, { resumeMessage: undefined });
+        if (item?.run.resumeMessage && !wasActive) await this.service.patchWorkItemRun(workspaceId, item.workItemId, { resumeMessage: undefined });
       }
     } catch (error) {
       await this.fail(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
@@ -282,9 +268,6 @@ export class Orchestrator {
       await this.release(bound, "done", "已交接");
     } else if (finishReason !== "completed") {
       await this.fail(workspaceId, actionId, "turn " + finishReason + (failure ? ": " + failure : ""));
-    } else if (action.kind === "revision") {
-      await this.service.finishAction(workspaceId, actionId, this.runner.lastReply(bound.run.sessionId)?.slice(0, 400) ?? "已处理 revision");
-      await this.release(bound, "done", "已处理 revision");
     } else if (action.stage === "deliver") {
       await this.release(bound, "done", "待送达后续消息");
     } else if (action.idleTurns >= this.maxIdleTurns) {
@@ -298,75 +281,11 @@ export class Orchestrator {
     await this.reconcile(workspaceId);
   }
 
-  /** Persist one closure notification per snapshot; only the steward can finish the mission. */
-  private async settleMissions(workspaceId: string): Promise<void> {
-    if (!(await this.service.getScheduler(workspaceId)).enabled) return;
-    const [missions, items, runs, actions] = await Promise.all([this.service.listMissions(workspaceId), this.service.listWorkItems(workspaceId), this.service.listRuns(workspaceId), this.service.listActions(workspaceId)]);
-    for (const mission of missions.filter((m) => m.status === "active")) {
-      const own = items.filter((i) => i.missionId === mission.missionId);
-      const related = (mission.relatedWorkItemIds ?? []).map((id) => items.find((i) => i.workItemId === id));
-      if (!own.length && !related.length) continue;
-      const stewards = runs.filter((r) => r.role === "steward" && r.missionId === mission.missionId);
-      if (stewards.some((r) => r.status === "running") || !this.stewarded(mission, stewards)) continue;
-      const stewardship = actions.filter((a) => a.ownerKey === "steward:" + mission.missionId);
-      if (stewardship.some(actionIsOpen)) continue;
-      const allEnded = own.every((i) => i.status === "closed" || i.status === "cancelled");
-      if (!allEnded && !related.length) continue;
-      const revision = latestRevision(mission);
-      const closureKey = JSON.stringify([revision, own.map((i) => [i.workItemId, i.status]), related.map((i, index) => [mission.relatedWorkItemIds![index], i?.status])]);
-      const lastClosure = stewardship.filter((a) => a.closureKey).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
-        ?? stewards.filter((r) => r.closureKey).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-      if (lastClosure?.closureKey === closureKey) continue;
-      const describe = (item: WorkItem) => ({ workItemId: item.workItemId, missionId: item.missionId, title: item.title, objective: item.objective, status: item.status, refs: item.refs, evidence: item.evidence, verify: item.verify, decisions: item.decisions });
-      const message = [
-        "任务收尾判断请求：" + mission.title,
-        "workspaceId: " + workspaceId,
-        "missionId: " + mission.missionId,
-        "任务摘要: " + mission.summary,
-        "revision: " + JSON.stringify(revision),
-        "本任务工单全部结束: " + allEnded,
-        "本任务工单与执行结果: " + JSON.stringify(own.map(describe)),
-        "已登记承接工单与执行结果: " + JSON.stringify(related.filter((i): i is WorkItem => Boolean(i)).map(describe)),
-        "已保存的结果说明: " + (mission.resultSummary ?? ""),
-        "其他任务工单索引（供核实承接工作）: " + JSON.stringify(items.filter((i) => i.missionId && i.missionId !== mission.missionId).map((i) => ({ workItemId: i.workItemId, missionId: i.missionId, title: i.title, status: i.status }))),
-        "任务保持进行中，等待管家按角色职责判断。"
-      ].join("\n");
-      await this.service.createAction(workspaceId, { kind: "revision", role: "steward", ownerKey: "steward:" + mission.missionId,
-        missionId: mission.missionId, closureKey, workItemIds: [], status: "pending", stage: "open", message });
-    }
-  }
-
-  /**
-   * Whether a steward run has taken the mission's latest revision. Revisions can share a commit (appending without
-   * doc changes points at HEAD again), so the run must also postdate the revision; a running run holding the commit
-   * counts because new revisions are steered into it.
-   */
-  private stewarded(mission: Mission, stewards: AgentRun[]): boolean {
-    const latest = latestRevision(mission);
-    return stewards.some((r) => r.revision === latest.commit && (r.status === "running" || (r.endedAt ?? r.startedAt) >= latest.at));
-  }
-
-
-  private async relatedSessionContext(workspaceId: string, owner: { missionId?: string; workItemId?: string }): Promise<string> {
-    const [missions, runs] = await Promise.all([
-      owner.missionId ? this.service.listMissions(workspaceId) : Promise.resolve([]),
-      this.service.listRuns(workspaceId)
-    ]);
-    const mission = missions.find((entry) => entry.missionId === owner.missionId);
-    return [
-      ...((mission?.revisions ?? []).flatMap((revision) => revision.sessionId
-        ? [`设计伙伴 sessionId: ${revision.sessionId}（revision: ${revision.commit}）`] : [])),
-      ...[...new Set(runs.filter((run) => run.role === "steward" &&
-        (owner.missionId ? run.missionId === owner.missionId : !!owner.workItemId && run.workItemId === owner.workItemId))
-        .map((run) => run.sessionId))].map((sessionId) => `管家 sessionId: ${sessionId}`)
-    ].join("\n");
-  }
-
   private async workerMessage(workspaceId: string, item: WorkItem, cwd: string): Promise<string> {
     const root = await this.service.workspaceRoot(workspaceId);
-    const isolated = item.scope.allowedPaths.length > 0;
+    const isolated = !!item.run.worktreePath;
     const branch = item.run.branch;
-    const related = await this.relatedSessionContext(workspaceId, item);
+    const related = "sourceSessionId: " + (item.sourceSessionId ?? "") + "\nsourceTurnId: " + (item.sourceTurnId ?? "");
     const prior = [
       ...(item.run.resumeMessage ? [item.run.resumeMessage] : []),
       ...item.rejections.map((r) => "用户打回：" + r.reason),
@@ -388,58 +307,64 @@ export class Orchestrator {
       "先用 CLI 读取完整工单：vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "'",
       ...(prior.length ? ["", "历史记录：", ...prior.map((p) => "- " + p)] : []),
       "",
-      "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create，发现依赖另一张未合入的工单时调用 workItem.defer，合同与现实对不上时调用 workItem.escalate（workspaceId、workItemId、message）；调用后结束会话。"
+      "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create，发现依赖另一张未合入的工单时通过 workItem.update 修改 dependsOn，需要用户取舍时直接创建决策卡；调用后结束会话。"
     ].join("\n");
   }
 
-  private completion(action: WorkflowAction): string {
-    if (action.closureKey) return "按角色职责判断任务收尾；需要变更任务状态时实际调用 mission.setStatus。完成本次判断后回复摘要，任务不会因回复而自动完成。";
-    switch (action.kind) {
-      case "contract": return 'workItem.update 带 resolution:{actionId:"' + action.actionId + '",disposition:"updated"|"clarified",reason:"具体处置依据"}；updated 必须实际修改 requiredChanges 指定的合同字段，改标题、引用或仅写 note 不算解决。也可 workItem.cancel；需要用户取舍时 decision.create 关联 actionId 和自己的 sessionId。';
-      case "dependency": return "workItem.update 调整 dependsOn 或 workItem.cancel；需要用户取舍时 decision.create 关联 actionId 和自己的 sessionId。登记的前置未关闭时保持等待。";
-      case "repair": return 'workspace.repair.submit {workspaceId,actionId,sessionId,summary,evidence:[string]}，由工作台检查恢复条件；需要用户授权时 decision.create 关联 actionId 和自己的 sessionId。';
-      case "execute": return "完成后调用 workItem.submit 提交 evidence、review 处置和 verify；需要用户决定时 decision.create 关联 actionId 和自己的 sessionId，依赖未合入工单时 workItem.defer，合同不符时 workItem.escalate。调用后结束本轮。";
-      default: return "读取任务 revision 和现有工单，完成本次任务安排后回复摘要。";
-    }
+  private completion(_action: WorkflowAction): string {
+    return "完成后调用 workItem.submit 提交证据、review 和逐条验收；需要用户取舍时调用 decision.create。";
+  }
+
+  private async workerRole(root: string) {
+    const [worker, reviewer, verifier] = await Promise.all(["worker", "reviewer", "verifier"].map((role) => this.roles.resolve(root, role)));
+    return { ...worker!, content: worker!.content + "\n\n## reviewer subagent prompt（spawn 时原样传入，并附工单与 diff）\n" + reviewer!.content +
+      "\n\n## verifier subagent prompt（spawn 时原样传入，并附 acceptance、refs 与 diff）\n" + verifier!.content };
   }
 
   private async actionMessage(workspaceId: string, action: WorkflowAction, cwd: string): Promise<string> {
-    const items = (await this.service.listWorkItems(workspaceId)).filter((item) => action.workItemIds.includes(item.workItemId));
-    const context = [
-      "workspaceId: " + workspaceId, "actionId: " + action.actionId, "sessionId: " + action.sessionId,
-      "当前动作: " + action.kind, action.message,
-      ...(action.failure ? ["上次失败: " + action.failure] : []),
-      "读取当前处置与关联决定：vermillion action.list '" + JSON.stringify({ workspaceId }) + "'",
-      "vermillion decision.list '" + JSON.stringify({ workspaceId }) + "'",
-      this.completion(action),
-      "决策卡主文只说明业务问题、当前影响与可选动作；源码路径、命令、SHA 和诊断日志放 details。技术恢复由当前处理者落实，不要求用户在会话间转述。"
-    ];
-    if (action.role === "worker" && items[0]) return [await this.workerMessage(workspaceId, items[0], cwd), ...context].join("\n");
-    context.push(await this.relatedSessionContext(workspaceId, { missionId: action.missionId, workItemId: action.workItemIds[0] }));
-    if (action.role === "workspace-repair") context.push(
-      "工作目录（主工作区）: " + cwd,
-      "只处理主工作区故障，不修改产品功能，不替 Worker 解决分支业务代码冲突，不发布部署。保留他人未提交改动与成果，不覆盖、删除、提交或 stash；归属不明需授权时发决策卡。",
-      "受影响工单及成果: " + JSON.stringify(items)
-    );
-    else {
-      if (!action.missionId) context.push("这是独立工单，保持无 Mission。处理原单合同，不重新拆单或补建 Mission。");
-      context.push("原工单合同、已有决定、成果位置: " + JSON.stringify(items));
-      if (action.requiredChanges) context.push("requiredChanges: " + action.requiredChanges.join(", "));
-      context.push("仅回复文字或保存答复不解除阻塞。通过持久化工单动作处置，不与 Worker 自由对话。合同与依赖调整落实前暂停 Worker 执行与提交。");
-      if (action.kind === "revision" && action.missionId && !action.closureKey) {
-        const mission = (await this.service.listMissions(workspaceId)).find((m) => m.missionId === action.missionId);
-        if (mission) {
-          const index = mission.revisions.map((r) => r.commit).lastIndexOf(action.revision!);
-          const revision = mission.revisions[index] ?? latestRevision(mission);
-          const previous = mission.revisions[index - 1];
-          const range = previous ? [previous.commit, revision.commit] : [revision.commit + "^", revision.commit];
-          context.push("任务: " + JSON.stringify(mission), "现有工单: " + JSON.stringify((await this.service.listWorkItems(workspaceId)).filter((i) => i.missionId === mission.missionId)),
-            "按需读取完整 diff: git diff " + range.join(" ") + " -- " + revision.paths.map((p) => JSON.stringify(p)).join(" "));
-          context.push(await git(cwd, ["diff", "--stat", ...range, "--", ...revision.paths]).catch(() => "无法生成 diff stat，请按 revision 读取文档。"));
+    const item = await this.service.getWorkItem(workspaceId, action.workItemIds[0]!);
+    return [await this.workerMessage(workspaceId, item, cwd), "sessionId: " + action.sessionId,
+      "actionId: " + action.actionId, action.message, action.failure ?? "", this.completion(action)].join("\n");
+  }
+
+  private async prepareRequests(workspaceId: string): Promise<void> {
+    for (let request of await this.service.listWorkRequests(workspaceId)) {
+      if (request.status === "ready" || request.status === "failed") continue;
+      if (request.retryAt && request.retryAt > this.now()) continue;
+      if (!request.workerSessionId && this.runner.isActive?.(request.sourceSessionId)) continue;
+      try {
+        const root = await this.service.workspaceRoot(workspaceId);
+        if (!request.workerSessionId) {
+          const role = await this.workerRole(root);
+          const fork = await this.runner.fork({ workspaceId, sourceSessionId: request.sourceSessionId,
+            sourceTurnId: request.sourceTurnId, developerInstructions: role.content, modelConfig: role.modelConfig,
+            title: "Worker · 开工准备", metadata: { role: "worker", requestId: request.requestId,
+              sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId } });
+          request = await this.service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: fork.sessionId, treeId: fork.treeId });
         }
+        const sessionId = request.workerSessionId!;
+        if (this.preparing.has(sessionId)) continue;
+        if (this.runner.isActive?.(sessionId)) { this.preparing.set(sessionId, workspaceId); continue; }
+        if (!request.failure && (await this.service.listWorkItems(workspaceId)).some((item) => item.run.sessionId === sessionId)) {
+          if (!this.runner.isActive?.(sessionId)) await this.service.finishPreparation(workspaceId, sessionId);
+          else this.preparing.set(sessionId, workspaceId);
+          continue;
+        }
+        if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备分支");
+        this.preparing.set(sessionId, workspaceId);
+        await this.runner.send(sessionId, ["你现在是 Worker。先完成开工准备，本轮结束后由调度器发送执行合同。",
+          "workspaceId: " + workspaceId, "sessionId: " + sessionId, "requestId: " + request.requestId,
+          "sourceSessionId: " + request.sourceSessionId, "sourceTurnId: " + request.sourceTurnId,
+          "开工范围: " + (request.scope ?? "根据当前讨论确定完整范围。"),
+          request.failure ? "上次准备未完成：" + request.failure + "。先核对已登记工单与已有成果，不要重复创建。" : "",
+          "自行选择相关文档改动，调用 docs.commit 提交这些路径；其他改动留在工作区。自行判断是否需要 worktree；需要时用 git 创建并记录 worktreePath 和 branch。",
+          "调用 workItem.create，传入自己的 sessionId、requestId、合同和选定的 worktreePath/branch，然后结束本轮。程序不会自动创建 worktree。",
+          "若需拆成多单，全部传同一 requestId，只有第一张传自己的 sessionId；其余省略 sessionId。调度器将在本轮结束后从准备分支末端 fork 兄弟 Worker 分支。"].join("\n"));
+      } catch (error) {
+        if (request.workerSessionId) this.preparing.delete(request.workerSessionId);
+        await this.service.failWorkRequest(workspaceId, request.requestId, error instanceof Error ? error.message : String(error));
       }
     }
-    return context.join("\n");
   }
 
   private async deliverUpdate(workspaceId: string, workItemId: string, sessionId: string, note: string): Promise<void> {
@@ -455,99 +380,4 @@ export class Orchestrator {
     await this.reconcile(workspaceId);
   }
 
-  // ---- supervisor ----
-
-  private ensurePatrol(workspaceId: string, groupId: string): void {
-    if (this.disposed || this.patrols.has(groupId)) return;
-    // Not enqueued: a patrol waits on a model turn and must not block scheduling for that workspace.
-    const timer = setInterval(() => { void this.patrol(workspaceId, groupId).catch((error) => console.error("[orchestrator] patrol", groupId, error instanceof Error ? error.message : error)); }, this.patrolIntervalMs);
-    this.patrols.set(groupId, { workspaceId, timer, busy: false });
-  }
-
-  private stopPatrol(groupId: string): void {
-    const patrol = this.patrols.get(groupId);
-    if (!patrol) return;
-    clearInterval(patrol.timer);
-    this.patrols.delete(groupId);
-  }
-
-  private workersInGroup(workspaceId: string, groupId: string): WorkerBinding[] {
-    return [...this.runsBySession.values()].filter((b) => b.workspaceId === workspaceId && b.run.role === "worker" && (b.run.missionId ?? b.run.workItemId) === groupId);
-  }
-
-  /**
-   * One fresh supervisor session looks at every running worker of the group: contract, this turn's agent messages,
-   * diff stat and out-of-scope paths. It nudges a worker through the remind tool; the session is archived afterwards.
-   */
-  private async patrol(workspaceId: string, groupId: string): Promise<void> {
-    const patrolState = this.patrols.get(groupId);
-    const workers = this.workersInGroup(workspaceId, groupId);
-    if (workers.length === 0) {
-      this.stopPatrol(groupId);
-      return;
-    }
-    if (!patrolState || patrolState.busy) return;
-    patrolState.busy = true;
-    try {
-      const root = await this.service.workspaceRoot(workspaceId);
-      const sections: string[] = [];
-      for (const bound of workers) {
-        const item = await this.service.getWorkItem(workspaceId, bound.run.workItemId!).catch(() => undefined);
-        if (!item || item.status !== "running") continue;
-        const cwd = item.run.worktreePath ?? root;
-        const stat = (await git(cwd, ["diff", "--stat", "HEAD"]).catch(() => "")).trim();
-        const changed = await git(cwd, ["diff", "--name-only", "HEAD"]).catch(() => "");
-        const outside = item.scope.allowedPaths.length
-          ? changed.split("\n").filter(Boolean).filter((p) => !item.scope.allowedPaths.some((allowed) => p.startsWith(allowed.replace(/\*+$/, "").replace(/\/$/, ""))))
-          : [];
-        const messages = this.runner.turnMessages(bound.run.sessionId);
-        sections.push([
-          "### 工单「" + item.title + "」 workItemId: " + item.workItemId,
-          "objective: " + item.objective,
-          "allowedPaths: " + (item.scope.allowedPaths.join(", ") || "(无限制)"),
-          "acceptance: " + item.acceptance.map((a, i) => (i + 1) + ") " + a.text).join("; "),
-          "越界路径: " + (outside.length ? outside.join(", ") : "无"),
-          "diff --stat:",
-          stat || "(无改动)",
-          "",
-          "本轮 agent 消息（" + messages.length + " 条）：",
-          ...messages.map((m, i) => (i + 1) + ". " + m.slice(0, 1500)),
-        ].join("\n"));
-      }
-      if (sections.length === 0) return;
-      const mission = (await this.service.listMissions(workspaceId)).find((m) => m.missionId === groupId);
-      const { content, modelConfig } = await this.roles.resolve(root, "supervisor");
-      const { sessionId } = await this.runner.open({
-        workspaceId,
-        cwd: root,
-        developerInstructions: content,
-        modelConfig,
-        title: "Supervisor · " + (mission?.title ?? groupId),
-        metadata: { role: "supervisor", missionId: mission?.missionId }
-      });
-      const run = await this.service.putRun(workspaceId, { runId: createId("run"), role: "supervisor", sessionId, missionId: mission?.missionId, status: "running", turns: 0, startedAt: this.now() });
-      const done = new Promise<void>((resolve) => {
-        const off = this.runner.onTurnCompleted((e) => { if (e.sessionId === sessionId) { off(); resolve(); } });
-      });
-      await this.runner.send(sessionId, [
-        "巡视任务「" + (mission?.title ?? groupId) + "」，当前 " + sections.length + " 个 Worker 在进行中。",
-        "",
-        ...sections,
-        "",
-        "对偏离的 Worker 调用 remind 工具；都正常就回复一行“无事”。"
-      ].join("\n\n"));
-      await done;
-      await this.service.putRun(workspaceId, { ...run, status: "done", turns: 1, note: (this.runner.lastReply(sessionId) ?? "").slice(0, 200), endedAt: this.now() });
-    } finally {
-      patrolState.busy = false;
-    }
-  }
-
-  private async remind(workItemId: string, message: string): Promise<string> {
-    const bound = [...this.runsBySession.values()].find((b) => b.run.role === "worker" && b.run.workItemId === workItemId);
-    if (!bound) throw new Error("没有正在进行的 Worker 持有工单 " + workItemId);
-    if (!message.trim()) throw new Error("message 不能为空");
-    await this.runner.steer(bound.run.sessionId, "Supervisor 提醒：" + message.trim());
-    return "已提醒 " + workItemId;
-  }
 }

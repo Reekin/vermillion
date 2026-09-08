@@ -9,39 +9,8 @@ export const zWorkspace = z.object({
 });
 export type Workspace = z.infer<typeof zWorkspace>;
 
-export const missionStatuses = ["active", "done", "cancelled"] as const;
-export const zMissionStatus = z.enum(missionStatuses);
-export type MissionStatus = z.infer<typeof zMissionStatus>;
-
-/** One doc commit attributed to a mission. A mission is the ordered sequence of these. */
-export const zMissionRevision = z.object({
-  commit: z.string().min(1),
-  message: z.string(),
-  paths: z.array(z.string()),
-  sessionId: z.string().optional(),
-  at: z.string()
-});
-export type MissionRevision = z.infer<typeof zMissionRevision>;
-
-export const zMission = z.object({
-  missionId: z.string().min(1),
-  title: z.string().min(1),
-  status: zMissionStatus,
-  summary: z.string(),
-  resultSummary: z.string().optional(),
-  relatedWorkItemIds: z.array(z.string().min(1)).optional(),
-  /** Session the mission was first created from. */
-  sessionId: z.string().optional(),
-  revisions: z.array(zMissionRevision).min(1),
-  createdAt: z.string(),
-  updatedAt: z.string()
-});
-export type Mission = z.infer<typeof zMission>;
-
-export const latestRevision = (mission: Mission): MissionRevision => mission.revisions[mission.revisions.length - 1]!;
-
 /** queued -> running -> closed; decision parks a work item until the user answers. */
-export const workItemStatuses = ["queued", "running", "merging", "decision", "closed", "cancelled"] as const;
+export const workItemStatuses = ["preparing", "queued", "running", "merging", "decision", "closed", "cancelled"] as const;
 export const zWorkItemStatus = z.enum(workItemStatuses);
 export type WorkItemStatus = z.infer<typeof zWorkItemStatus>;
 
@@ -69,6 +38,7 @@ export const zScope = z.object({
 
 export const zEvidence = z.object({
   summary: z.string(),
+  commit: z.string().optional(),
   commands: z.array(z.object({ command: z.string(), output: z.string() })),
   assumptions: z.array(z.string()),
   untested: z.array(z.string()),
@@ -92,6 +62,9 @@ export const zVerifyResult = z.object({
 export const zRejection = z.object({ reason: z.string().min(1), at: z.string() });
 
 export const zRun = z.object({
+  forkSessionId: z.string().optional(),
+  forkTurnId: z.string().optional(),
+  baseCommit: z.string().optional(),
   sessionId: z.string().optional(),
   lastTurnId: z.string().optional(),
   heartbeatAt: z.string().optional(),
@@ -110,15 +83,19 @@ export const zRun = z.object({
 
 export const zWorkItem = z.object({
   workItemId: z.string().min(1),
-  /** Absent for standalone operations (package, run tests, ...) that change no doc. */
-  missionId: z.string().min(1).optional(),
+  /** Origin of the execution branch; absent for manually created work. */
+  sourceSessionId: z.string().optional(),
+  sourceTurnId: z.string().optional(),
+  treeId: z.string().optional(),
+  requestId: z.string().optional(),
+  verificationFailures: z.number().int().nonnegative().optional(),
   title: z.string().min(1),
   objective: z.string(),
   status: zWorkItemStatus,
   risk: zRisk,
-  /** Execution resources this item occupies (e.g. "browser"); the scheduler waits for a free slot. */
+  /** Concrete shared resource instances occupied during execution. */
   needs: z.array(z.string()),
-  /** Work items that must be closed before this one is scheduled. Same mission when the steward sets them; a worker may add one from any mission via workItem.defer. */
+  /** Work items that must be closed before this one is scheduled. */
   dependsOn: z.array(z.string()),
   refs: z.array(zDocRef),
   scope: zScope,
@@ -128,6 +105,7 @@ export const zWorkItem = z.object({
   verify: zVerifyResult.optional(),
   merge: z.object({
     commit: z.string().optional(),
+    commits: z.array(z.string()).optional(),
     diffStat: z.string(),
     mergedAt: z.string(),
     acknowledgedAt: z.string().optional(),
@@ -135,13 +113,25 @@ export const zWorkItem = z.object({
   }).optional(),
   rejections: z.array(zRejection),
   decisions: z.array(z.string()),
-  /** Latest contract problem; unresolved problems hold the queued item for its steward. */
-  contractIssue: z.object({ message: z.string(), at: z.string(), notifiedAt: z.string().optional(), resolvedAt: z.string().optional(), answerPending: z.boolean().optional() }).optional(),
   run: zRun,
   createdAt: z.string(),
   updatedAt: z.string()
 });
 export type WorkItem = z.infer<typeof zWorkItem>;
+
+/** Root code writers share the concrete workspace directory; isolated and read-only work does not. */
+export const effectiveNeeds = (item: WorkItem): string[] => [...new Set([
+  ...item.needs, ...(!item.run.worktreePath && item.scope.allowedPaths.length ? ["workspace:root"] : [])
+])];
+
+export const zWorkRequest = z.object({
+  requestId: z.string(), sourceSessionId: z.string(), sourceTurnId: z.string(),
+  scope: z.string().optional(), treeId: z.string().optional(), workerSessionId: z.string().optional(),
+  status: z.enum(["pending", "preparing", "ready", "failed"]),
+  attempts: z.number().int().nonnegative().optional(), retryAt: z.string().optional(),
+  failure: z.string().optional(), createdAt: z.string(), updatedAt: z.string()
+});
+export type WorkRequest = z.infer<typeof zWorkRequest>;
 
 export const zDecisionOption = z.object({
   key: z.string().min(1),
@@ -152,8 +142,8 @@ export const zDecisionOption = z.object({
 
 export const zDecisionCard = z.object({
   decisionId: z.string().min(1),
+  requestId: z.string().optional(),
   workItemId: z.string().optional(),
-  missionId: z.string().optional(),
   sessionId: z.string().optional(),
   actionId: z.string().optional(),
   withdrawn: z.object({ reason: z.string().min(1), at: z.string(), sessionId: z.string() }).optional(),
@@ -223,18 +213,18 @@ export type DocCommit = z.infer<typeof zDocCommit>;
 
 export const zInboxItem = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("decision"), workspaceId: z.string(), card: zDecisionCard }),
-  z.object({ kind: z.literal("merged"), workspaceId: z.string(), workItem: zWorkItem, mission: zMission.optional() })
+  z.object({ kind: z.literal("merged"), workspaceId: z.string(), workItem: zWorkItem })
 ]);
 export type InboxItem = z.infer<typeof zInboxItem>;
 
-/** Per-workspace scheduler switch for the steward/worker/supervisor loop; stored at .vermillion/scheduler.json. */
+/** Per-workspace execution scheduler settings. */
 export const zScheduler = z.object({
   enabled: z.boolean(),
   maxWorkers: z.number().int().min(1).max(8)
 });
 export type Scheduler = z.infer<typeof zScheduler>;
 
-export const agentRoles = ["steward", "worker", "supervisor", "workspace-repair"] as const;
+export const agentRoles = ["worker"] as const;
 export const zAgentRole = z.enum(agentRoles);
 export type AgentRole = z.infer<typeof zAgentRole>;
 
@@ -243,13 +233,8 @@ export const zAgentRun = z.object({
   runId: z.string().min(1),
   role: zAgentRole,
   sessionId: z.string().min(1),
-  missionId: z.string().optional(),
   workItemId: z.string().optional(),
   actionId: z.string().optional(),
-  /** Steward: the revision commit this run processed. */
-  revision: z.string().optional(),
-  /** Snapshot of the revision and work item states sent for a closure judgment. */
-  closureKey: z.string().optional(),
   status: z.enum(["running", "done", "failed"]),
   turns: z.number().int().nonnegative(),
   note: z.string().optional(),
@@ -261,14 +246,10 @@ export type AgentRun = z.infer<typeof zAgentRun>;
 /** A durable unit of responsibility. Delivery and turn completion do not satisfy its completion condition. */
 export const zWorkflowAction = z.object({
   actionId: z.string(),
-  kind: z.enum(["execute", "contract", "dependency", "revision", "repair", "integration"]),
-  role: z.enum(["worker", "steward", "workspace-repair", "workbench"]),
+  kind: z.enum(["execute", "integration"]),
+  role: z.enum(["worker", "workbench"]),
   ownerKey: z.string(),
   workItemIds: z.array(z.string()),
-  missionId: z.string().optional(),
-  revision: z.string().optional(),
-  /** Revision/work-state snapshot delivered for a mission closure judgment. */
-  closureKey: z.string().optional(),
   status: z.enum(["pending", "running", "waiting", "retry", "decision", "done", "cancelled"]),
   stage: z.enum(["worktree", "open", "deliver", "execute", "merge", "rollback", "cleanup"]),
   message: z.string(),
@@ -279,12 +260,13 @@ export const zWorkflowAction = z.object({
   idleTurns: z.number().int().nonnegative(),
   retryAt: z.string().optional(),
   failure: z.string().optional(),
-  requiredChanges: z.array(z.enum(["objective", "scope", "acceptance", "dependsOn", "needs"])).optional(),
   integration: z.object({
     operation: z.enum(["merge", "rollback", "cancel"]),
     before: z.string().optional(),
     target: z.string().optional(),
+    targets: z.array(z.string()).optional(),
     commit: z.string().optional(),
+    commits: z.array(z.string()).optional(),
     diffStat: z.string(),
     reason: z.string().optional()
   }).optional(),
@@ -312,7 +294,7 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workspaces.changed") }),
   z.object({ type: z.literal("sessionNavigation.changed"), sessionId: z.string(), workspaceId: z.string() }),
   z.object({ type: z.literal("docs.changed"), workspaceId: z.string() }),
-  z.object({ type: z.literal("missions.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("workRequests.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("roles.changed"), workspaceId: z.string() }),

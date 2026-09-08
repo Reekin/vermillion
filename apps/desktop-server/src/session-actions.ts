@@ -3,6 +3,7 @@ import {
   type SessionActionDescriptor,
   type SessionActionKind,
   type SessionActionResult,
+  type SessionActionOptions,
   type AgentWorkbenchCapabilities,
   type SessionActionsCapability,
   type SessionCapabilityContext as SessionActionProviderContext
@@ -29,7 +30,8 @@ export type {
   SessionActionDescriptor,
   SessionActionKind,
   SessionActionResult,
-  SessionActionProviderContext
+  SessionActionProviderContext,
+  SessionActionOptions
 };
 
 export class SessionActionsProvider {
@@ -64,8 +66,9 @@ export class SessionActionsProvider {
 
   public async runAction(
     sessionId: string,
-    action: SessionActionKind
+    action: SessionActionKind,
+    options: SessionActionOptions = {}
   ): Promise<SessionActionResult> {
-    return this.capabilities.runSessionAction(sessionId, action);
+    return this.capabilities.runSessionAction(sessionId, action, options);
   }
 }

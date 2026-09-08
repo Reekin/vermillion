@@ -26,7 +26,7 @@ import {
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
 import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, resolveAppCommand, startLocalEndpoint, type InboxItem } from "@vermillion/workbench";
-import { createAgentRunner, createSessionAsk } from "./agent-runner.js";
+import { createAgentRunner } from "./agent-runner.js";
 import { createSessionNavigation } from "./session-navigation.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
@@ -748,7 +748,6 @@ const boot = async (): Promise<void> => {
   await roleService.ensureGlobal();
   const workbenchService = new WorkbenchService({
     roles: roleService,
-    ask: createSessionAsk(service),
     sessionNavigation: createSessionNavigation(service, persistenceBaseDir),
     launcher: new AppLauncher({ command: resolveAppCommand(appRoot), packageRoot: launcherPackageRoot }),
     workspaces: {
@@ -774,6 +773,12 @@ const boot = async (): Promise<void> => {
         await service.removeWorkspace(workspaceId);
       }
     }
+  });
+  workbenchService.setSourceTurnResolver(async (sessionId) => {
+    if (!await service.ensureSessionLoadedForRead(sessionId)) throw new Error("Source session not found: " + sessionId);
+    const turn = service.getSnapshot().turns.filter((entry) => entry.sessionId === sessionId).at(-1);
+    if (!turn) throw new Error("Source session has no turn: " + sessionId);
+    return turn.turnId;
   });
   const workbenchRpc = createWorkbenchRpcHandler(workbenchService);
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
@@ -810,8 +815,7 @@ const boot = async (): Promise<void> => {
   const orchestrator = new Orchestrator({
     service: workbenchService,
     roles: roleService,
-    runner: createAgentRunner(service, "codex"),
-    patrolIntervalMs: Number(process.env.VERMILLION_PATROL_INTERVAL_MS) || undefined
+    runner: createAgentRunner(service, "codex")
   });
   orchestrator.start();
   app.on("before-quit", () => {

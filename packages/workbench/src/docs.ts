@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { DocChange, DocFile } from "./contracts.js";
@@ -56,6 +56,7 @@ const assertDocPath = (path: string): void => {
 
 /** Git-backed document store rooted at <workspace>/.vermillion/docs. */
 export class DocsService {
+  private gitDir?: string;
   constructor(private readonly rootPath: string) {}
 
   async ensureRepo(): Promise<void> {
@@ -68,6 +69,7 @@ export class DocsService {
     }
     await mkdir(join(this.rootPath, DOCS_DIR), { recursive: true });
     await this.excludeStateFromGit();
+    this.gitDir = resolve(this.rootPath, (await git(this.rootPath, ["rev-parse", "--git-common-dir"])).trim());
   }
 
   /** Only docs/ is versioned; work files under .vermillion stay out of git via the repo-local exclude file. */
@@ -179,9 +181,9 @@ export class DocsService {
   }
 
   /**
-   * Read-only preflight; the caller serializes integration and workspace repair.
+   * Read-only preflight; the caller serializes integration.
    * Uncommitted changes in the main workspace do not block by themselves: Git refuses to merge or
-   * revert over files they touch, and that refusal surfaces as a workspace repair.
+   * revert over files they touch, and that refusal remains a recorded integration failure.
    */
   async checkIntegrationReady(): Promise<void> {
     const markers = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer", "BISECT_LOG"];
@@ -255,7 +257,7 @@ export class DocsService {
     const log = await git(this.rootPath, ["log", "--first-parent", "--format=%H%x00%B%x00", start + "..HEAD"]);
     const entries = log.split("\0");
     for (let i = 0; i + 1 < entries.length; i += 2) {
-      if (entries[i + 1]!.split("\n").some((line) => line === "This reverts commit " + target + ", reversing")) return entries[i]!.trim();
+      if (entries[i + 1]!.split("\n").some((line) => line === "This reverts commit " + target + ", reversing" || line === "This reverts commit " + target + ".")) return entries[i]!.trim();
     }
     return undefined;
   }
@@ -265,8 +267,9 @@ export class DocsService {
     const completed = await this.getRollbackCommit(target, before ?? target);
     if (completed) return completed;
     await this.checkIntegrationReady();
+    const parents = (await git(this.rootPath, ["rev-list", "--parents", "-n", "1", target])).trim().split(/\s+/).length - 1;
     try {
-      await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "revert", "--no-edit", "-m", "1", target]);
+      await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "revert", "--no-edit", ...(parents > 1 ? ["-m", "1"] : []), target]);
     } catch (error) {
       const files = (await git(this.rootPath, ["diff", "--name-only", "--diff-filter=U", "-z"])).split("\0").filter(Boolean);
       if (files.length) {
@@ -281,7 +284,11 @@ export class DocsService {
   async dropWorktree(worktreePath: string, branch: string, discard = false): Promise<void> {
     const registered = (await git(this.rootPath, ["worktree", "list", "--porcelain", "-z"]))
       .split("\0").some((field) => field.startsWith("worktree ") && samePath(field.slice(9), worktreePath));
-    if (registered || await exists(worktreePath)) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
+    if (registered) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
+    else if (await exists(worktreePath)) {
+      if ((await readdir(worktreePath)).length) throw new Error("已注销的 worktree 目录仍有内容，保留以待检查：" + worktreePath);
+      await rmdir(worktreePath);
+    }
     const ref = "refs/heads/" + branch;
     const branches = await git(this.rootPath, ["for-each-ref", "--format=%(refname)", ref]);
     if (branches.split("\n").includes(ref)) await git(this.rootPath, ["branch", discard ? "-D" : "-d", "--", branch]);
@@ -295,17 +302,63 @@ export class DocsService {
     }
   }
 
+  async rootResult(commit: string | undefined, base: string | undefined, allowedPaths: string[]): Promise<{ commit?: string; commits?: string[]; diffStat: string }> {
+    if (!allowedPaths.length) {
+      if (commit) throw new WorktreeNotReady("根目录代码成果需要在 scope.allowedPaths 登记归属路径。");
+      return { diffStat: "" };
+    }
+    const paths = [...allowedPaths, ":(exclude).vermillion"];
+    const dirty = await git(this.rootPath, ["diff", "--name-only", "HEAD", "--", ...paths]);
+    const untracked = await git(this.rootPath, ["ls-files", "--others", "--exclude-standard", "--", ...paths]);
+    if (dirty.trim() || untracked.trim()) throw new WorktreeNotReady("根目录范围内仍有未提交成果，请先提交再登记 evidence.commit。");
+    if (!base) throw new WorktreeNotReady("根目录执行缺少起始提交，无法确认成果范围。");
+    if (!commit) {
+      if ((await git(this.rootPath, ["diff", "--name-only", base, "HEAD", "--", ...paths])).trim())
+        throw new WorktreeNotReady("根目录代码成果需要在 evidence.commit 登记提交末端。");
+      return { diffStat: "" };
+    }
+    const target = await this.resolveCommit(commit);
+    await git(this.rootPath, ["merge-base", "--is-ancestor", target, "HEAD"]);
+    await git(this.rootPath, ["merge-base", "--is-ancestor", base, target]);
+    const candidates = (await git(this.rootPath, ["rev-list", "--reverse", base + ".." + target])).trim().split("\n").filter(Boolean);
+    const commits: string[] = [];
+    for (const candidate of candidates) {
+      const args = ["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-m", "-z", candidate];
+      const own = (await git(this.rootPath, [...args, "--", ...paths])).split("\0").filter(Boolean);
+      if (!own.length) continue;
+      const all = (await git(this.rootPath, args)).split("\0").filter(Boolean);
+      if (all.some((path) => !own.includes(path))) throw new WorktreeNotReady("提交混合本单与范围外改动，无法安全记录回滚：" + candidate);
+      commits.push(candidate);
+    }
+    if (!commits.length) throw new WorktreeNotReady("提交范围中没有属于本单的代码成果。");
+    const stats = await Promise.all(commits.map((sha) => git(this.rootPath, ["show", "--format=", "--stat", sha])));
+    return { commit: commits.at(-1), commits, diffStat: stats.join("\n") };
+  }
+
+  async committedDiff(path: string, from: string, to: string): Promise<string> {
+    assertDocPath(path);
+    return git(this.rootPath, ["diff", from, to, "--", ":(literal)" + path]);
+  }
+
   /**
-   * Recursive watcher over .vermillion; reports which area changed ("docs", "roles", "missions", "workitems", "decisions")
+   * Recursive watcher over .vermillion; reports which area changed ("docs", "roles", "work-requests", "workitems", "decisions")
    * so out-of-process writers (CLI, agents) surface as the same events as in-process writes. Debounced per area.
    */
-  watch(onChange: (area: string) => void): FSWatcher {
+  watch(onChange: (area: string) => void): Pick<FSWatcher, "close"> {
     const timers = new Map<string, NodeJS.Timeout>();
-    return watch(join(this.rootPath, STATE_DIR), { recursive: true }, (_event, filename) => {
-      const area = String(filename ?? "").split(/[\\/]/)[0] ?? "";
-      if (!area || area.endsWith(".tmp")) return;
+    const notify = (area: string) => {
       clearTimeout(timers.get(area));
       timers.set(area, setTimeout(() => onChange(area), 150));
+    };
+    const stateWatcher = watch(join(this.rootPath, STATE_DIR), { recursive: true }, (_event, filename) => {
+      const area = String(filename ?? "").split(/[\\/]/)[0] ?? "";
+      if (!area || area.endsWith(".tmp")) return;
+      notify(area);
     });
+    const gitWatcher = this.gitDir ? watch(this.gitDir, { recursive: true }, (_event, filename) => {
+      const path = String(filename ?? "").replace(/\\/g, "/");
+      if (path === "HEAD" || path === "packed-refs" || path.startsWith("refs/")) notify("git");
+    }) : undefined;
+    return { close: () => { stateWatcher.close(); gitWatcher?.close(); for (const timer of timers.values()) clearTimeout(timer); } };
   }
 }

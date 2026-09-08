@@ -161,6 +161,10 @@ export class SessionRuntimeService {
     return this.runtimeOrchestrator.setSessionTitle(sessionId, title);
   }
 
+  public updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<void> {
+    return this.runtimeOrchestrator.updateSessionMetadata(sessionId, metadata);
+  }
+
   public listSessions(options: SessionListOptions = {}): ChatSession[] {
     return this.domainService.listSessions(options);
   }

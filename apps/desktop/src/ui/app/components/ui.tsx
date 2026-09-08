@@ -68,9 +68,9 @@ export const IconButton = ({ icon: Icon, label, size = 14, active, className, ..
 
 // ---- Text ----
 
-export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "decision" | "running" | "queued" | "merging" | "closed" | "cancelled"; muted?: boolean }) => (
+export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "preparing" | "decision" | "running" | "queued" | "merging" | "closed" | "cancelled"; muted?: boolean }) => (
   <span
-    data-status={status === "merging" ? "queued" : status}
+    data-status={status === "merging" || status === "preparing" ? "queued" : status}
     className={cn(
       status ? "vm-status" : "inline-flex shrink-0 items-center whitespace-nowrap min-h-5 rounded-sm border px-1.5 py-0.5 font-sans text-micro font-medium",
       !status && tone === "neutral" && "border-border-strong text-foreground",
@@ -320,8 +320,8 @@ export const Card = ({ header, children, footer, className, compact, rows }: { h
 
 /** Controlled card with an overview, adjacent metadata and inline detail. */
 export const DisclosureCard = ({ title, open, onToggle, status, progress, time, actions, summary, children }: {
-  title: string; open: boolean; onToggle: () => void; status: ReactNode; progress: ReactNode;
-  time: ReactNode; actions: ReactNode; summary?: ReactNode; children: ReactNode;
+  title: string; open: boolean; onToggle: () => void; status?: ReactNode; progress?: ReactNode;
+  time?: ReactNode; actions?: ReactNode; summary?: ReactNode; children: ReactNode;
 }) => (
   <article className="vm-disclosure-card">
     <header className="vm-disclosure-header">

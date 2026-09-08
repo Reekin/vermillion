@@ -8,7 +8,7 @@ export const SessionNavigationContext = createContext<{
 } | undefined>(undefined);
 
 const roleLabels: Record<string, string> = {
-  "design-partner": "设计伙伴", steward: "管家", worker: "Worker", supervisor: "Supervisor"
+  "design-partner": "设计伙伴", worker: "Worker", maintainer: "Maintainer", liaison: "Liaison"
 };
 
 /** Workbench links belong to the source turn, independently of its engine extensions. */

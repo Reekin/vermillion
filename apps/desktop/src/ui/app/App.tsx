@@ -50,20 +50,36 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
+  const [navigationError, setNavigationError] = useState<string>();
+  const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
+    const tree = await transport.chatTree.get(targetSessionId);
+    const rootId = tree.treeId ?? targetSessionId;
+    const { page } = await transport.sessionBrowser.open(rootId);
+    const root = page.snapshot.sessions.find((session) => session.sessionId === rootId);
+    await transport.sessionBrowser.activate(targetSessionId, { focusTree: true });
+    if (turnId) await transport.chatTree.jump({ sessionId: targetSessionId, nodeId: turnId });
+    if (!root?.metadata?.role || root.metadata.role === "design-partner") {
+      setNavigationTarget({ sessionId: targetSessionId, workspaceId });
+      setSessionId(targetSessionId);
+      setReloadSignal((value) => value + 1);
+      store.getState().browseWorkspace(workspaceId);
+      store.getState().setPanel("think");
+    } else {
+      store.getState().browseWorkspace(workspaceId);
+      store.setState({ agentSessionId: targetSessionId, workspaceSection: "sessions", panel: "workspaces", overlay: undefined });
+    }
+  }, [store, transport]);
+  useEffect(() => {
+    store.setState({ navigateSession: (workspaceId, id, turnId) => {
+      setNavigationError(undefined);
+      void openSessionTarget(workspaceId, id, turnId).catch((error: Error) => setNavigationError(error.message));
+    } });
+    return () => store.setState({ navigateSession: undefined });
+  }, [store, openSessionTarget]);
   const navigation = useMemo(() => ({
     client: store.getState().client,
-    open: async (target: SessionNavigation) => {
-      await transport.sessionBrowser.activate(target.targetSessionId, { focusTree: true });
-      if (target.role === "design-partner") {
-        setNavigationTarget({ sessionId: target.targetSessionId, workspaceId: target.targetWorkspaceId });
-        setSessionId(target.targetSessionId);
-        store.getState().browseWorkspace(target.targetWorkspaceId);
-        store.getState().setPanel("think");
-      } else {
-        store.getState().showAgentSession(target.targetWorkspaceId, target.targetSessionId);
-      }
-    }
-  }), [store, transport]);
+    open: (target: SessionNavigation) => openSessionTarget(target.targetWorkspaceId, target.targetSessionId)
+  }), [store, openSessionTarget]);
   const thinkMode = useThinkMode(transport, sessionId);
   const workspaceIds = useMemo(() => workspaces.map((w) => w.workspaceId), [workspaces]);
   // Think shows only the user's own design sessions; agent sessions live under Workspaces → 会话.
@@ -171,6 +187,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               createSession={createSession}
               initializeDraftExecution={initializeDraftExecution}
               getSendOptions={thinkMode.getSendOptions}
+              onStartWork={async (input) => {
+                if (!sessionWorkspaceId) throw new Error("请先选择会话。");
+                await store.getState().client.request("work.start", { workspaceId: sessionWorkspaceId, ...input });
+                store.getState().setDocCommit({ kind: "work", title: openSession?.title ?? "当前会话" });
+              }}
               composerExtras={<>
                 <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                 <ConfigurationSelect label="模式" aria-label="模式" value={thinkMode.mode} disabled={!thinkMode.ready}
@@ -183,7 +204,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             />
           </main>
           <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">
-            <DocsPanel store={store} activeSessionId={sessionId} onFileAction={onFileAction} />
+            <DocsPanel store={store} onFileAction={onFileAction} />
           </aside>
         </div>
         {(["inbox", "workspaces"] as const).map((target) => (
@@ -195,6 +216,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         ))}
       </div>
       </div>
+      {navigationError && <InlineNotice tone="error">{navigationError}</InlineNotice>}
       <TaskStatusBar store={store} />
       <TextEditor store={store} />
       <RoleEditor store={store} transport={transport} />

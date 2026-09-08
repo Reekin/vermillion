@@ -2229,3 +2229,12 @@ label.awb-configuration-control > span {
   border-color: var(--awb-accent-strong);
   background: var(--awb-accent);
 }
+
+.awb-chat-tree__graph-node.is-worker .awb-chat-tree__graph-node-dot {
+  border-color: var(--awb-accent-strong);
+  background: var(--awb-accent-soft);
+  border-radius: 3px;
+}
+.awb-chat-tree__graph-node.is-worker.is-current .awb-chat-tree__graph-node-dot {
+  background: var(--awb-accent-strong);
+}

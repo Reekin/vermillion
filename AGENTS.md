@@ -3,15 +3,15 @@
 ## 运行与验证
 - 开发：`pnpm dev`（Vite 4193 + Electron）。验收用 `VERMILLION_REMOTE_DEBUGGING_PORT=9333` 启动后走 CDP；隔离数据用 `VERMILLION_PERSISTENCE_BASE_DIR` + `VERMILLION_USER_DATA_DIR`（后者绕开 single-instance lock，允许与用户正在运行的实例并存）。
 - `start.bat` 会在源码比 `dist-web`/`dist-electron` 新时自动重新 build（`scripts/needs-build.mjs`）。交付前必须用 `start.bat` 而不是 dev 模式做最终验收。
-- 提交前：`pnpm -r --workspace-concurrency=1 typecheck` 与 `pnpm -r --workspace-concurrency=1 test` 全绿，并做一次真实冷启动跑通 New Chat → 发消息 → docs 树变化 → 创建任务。
+- 提交前：`pnpm -r --workspace-concurrency=1 typecheck` 与 `pnpm -r --workspace-concurrency=1 test` 全绿，并做一次真实冷启动跑通 New Chat → 发消息 → docs 树变化 → 开工 → Worker 建单续跑。
 - CLI：`node packages/workbench/bin/vermillion.mjs <method> [json]`（需先 `pnpm --filter @vermillion/workbench build`）。桌面运行时在 `<baseDir>/endpoint.json` 发布 loopback 端口，CLI 优先经它调用桌面内的服务；桌面未运行时 CLI 在进程内跑同一个服务。
 - 打包：`pnpm package` 生成 `release/vermillion-<version>-<stamp>/`（Vermillion.exe + resources/app + vermillion-cli.cmd），不含 node_modules。
 
 ## 分层
 - `packages/shared` / `core` / `adapters` / `apps/desktop-server`：会话引擎（codex app-server 适配、会话/turn 投影、会话浏览查询）。标识符前缀 `Session*`。
-- `packages/workbench`：工作台领域（Workspace / Doc / Mission / WorkItem / DecisionCard / Inbox）。标识符前缀 `Workbench*`。renderer 只能引用 `@vermillion/workbench/client`。
+- `packages/workbench`：工作台领域（Workspace / Doc / 开工 / WorkItem / DecisionCard / Inbox）。标识符前缀 `Workbench*`。renderer 只能引用 `@vermillion/workbench/client`。
 - `apps/desktop/src/ui/chat-shell`：`SessionPane`（transcript + composer + 会话打开/切换/审批），props 只有 `store / transport / sessionId / createSession / composerExtras`。它不拥有侧栏和右栏。
-- `apps/desktop/src/ui/app`：应用壳。侧栏（会话分页查询）、Docs 树、Inbox、Workspaces、workspace 选择都在这里。思考页只列用户自己的会话（`sessionBrowser.list` 的 `kind: "user"`，即会话 metadata 没有 `role`）；管家/Worker/Supervisor 会话在 Workspaces → 会话 分页里用同一个 `SessionPane` 阅读，Inbox 和任务看板的"会话"链接通过 store 的 `showAgentSession` 跳到那里。
+- `apps/desktop/src/ui/app`：应用壳。侧栏、Docs 树、Inbox、Workspaces、workspace 选择都在这里。思考页列用户的会话树；从讨论 fork 出的 Worker 在树底部列表进入，选中后显示对应分支。冷启动的 Worker 在 Workspaces → 会话 阅读。工单和 Inbox 的会话入口按来源导航到相应位置。
 - 界面开发从 `apps/desktop/src/ui/app/components/ui.tsx`（组件入口）和 `app.css` 的 `@theme`（变量）开始，规则见 `.vermillion/docs/Foundation/UIUX/Standards.md`。`pnpm --filter @vermillion/desktop lint:ui` 拦硬编码颜色/任意字号/`awb-*`/裸表单控件；会话区 `ui/chat-shell` 保留 `awb-*`，turn 扩展块用 `app.css` 的 `vm-*`。
 
 ## 状态与事件
@@ -21,8 +21,8 @@
 
 ## 持久化
 - 全局 `~/.vermillion/`：workspace 注册表（引擎的 `workspace-registry.json` 是唯一注册表）、会话索引、`roles/<role>.md`（角色 prompt 的全局版本）。
-- 每个 workspace `<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 的 workspace 覆盖）、`missions/` `workitems/` `decisions/`（一条一 JSON）。
-- 所有 agent 会话 cwd = workspace 根（Worker 在 worktree 时是 worktree 根）；写边界靠角色 prompt、`allowedPaths` 和 Supervisor，不靠 cwd。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
+- 每个 workspace `<root>/.vermillion/` 保存 `docs/`（真相源，走 git）、`roles/`（角色 prompt 的 workspace 覆盖）、开工、工单、决策和运行记录。运行记录通过服务与 CLI/RPC 更新，不直接编辑文件。
+- 所有 agent 会话 cwd = workspace 根（Worker 使用 worktree 时是 worktree 根）；`allowedPaths` 限定修改范围，是否使用 worktree 由 Worker 判断并登记。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
 
 ## 角色 prompt
 - 默认版本是 `packages/workbench/roles/<role>.md`（打包后在 `resources/app/roles/`）。启动时 `RoleService.ensureGlobal` 把缺失的角色补到 `~/.vermillion/roles/`；已存在的不覆盖。开发期间以 `~/.vermillion/roles/` 为准（用户直接改那里），提交前 `cp ~/.vermillion/roles/*.md packages/workbench/roles/` 反向同步。
@@ -30,28 +30,26 @@
 - 注入方式：会话 metadata 带 `developerInstructions`，runtime port 在 `thread/start` 时读 codex `config/read` 的 `developer_instructions` 并追加角色文本，不覆盖用户 config.toml 里的配置。思考会话注入 `design-partner`。
 
 ## 调度（packages/workbench/src/orchestrator.ts）
-- 三个循环都在 `Orchestrator` 里，靠 `WorkbenchEvent` 和 `turn.completed` 驱动，状态只在 `.vermillion/` 文件里（`scheduler.json`、`runs/`、工单的 `run` 段）；进程重启后 `reconcile` 从文件恢复：仍在 running 的 worker/steward run 用 `runner.resume` 重新打开原会话（codex 会话是持久的），发一条“会话已恢复”让它接着做；打不开的才标 failed、工单退回队列。supervisor run 直接结束，下次需要时新开。
-- 管家：`missions.changed` 后找最新 revision 没有 steward run 的任务，开一个 cwd = workspace 根的会话，首条消息带任务摘要、变更说明、`diff --stat`、现有工单和一条范围已填好的 diff 命令，完整 diff 由管家按需自己拉。同一任务已有管家会话在跑时，新消息 steer 进那个会话（run 的 revision 前移），不另开。工单被取消且有排队工单 `dependsOn` 它时，也用同样方式叫醒该任务的管家，附上受影响工单，由它决定去掉依赖、换依赖或一并取消。
-- 调度器：`workItems.changed` / `decisions.changed` / worker turn 结束后取单；上限 `scheduler.maxWorkers`；第三次失败时 `requeueWorkItem` 不再回队列，而是建一张 `kind: "attempts"` 的决策卡把工单挂到 decision；回答 retry 清零计数回队列，cancel 走 `cancelWorkItem`。取单还要求 `dependsOn`（同任务内的工单 id，创建时校验）全部 closed，且 `needs`（执行资源名，如 browser）没有被 running 的工单占用（每种资源一个槽位）。挂在决策卡上的工单是 `decision` 状态，不占并发，也不会被取。有 allowedPaths 的工单在 `.vermillion/worktrees/<id>` + 分支 `vermillion/<id>` 里跑，其余在 workspace 根。approve 时 merge 分支并删 worktree，cancel 直接删。
+- `Orchestrator` 由 `WorkbenchEvent` 和 `turn.completed` 驱动，状态持久化在工作台。开工先登记请求，来源 turn 结束后从那个节点 fork Worker，保留讨论上下文，不主动 compact。
+- Worker 准备轮先提交相关文档、建单、按需自行创建并登记 worktree，结束后才进入执行队列。调度器排到它时恢复原会话并设置执行 cwd，发送工单合同续跑。多单的其他执行者从准备轮末端 fork。
+- 取单遵守 `scheduler.maxWorkers`、全部已关闭的 `dependsOn` 和 `needs` 中的具体共享资源。独立浏览器、桌面不按工具类别互斥。等待用户不占执行并发；前置取消时说明原因交用户决定。
 - `workItem.update` 对进行中的工单发 `workItem.updated`，编排层用 `runner.steer`（有活跃 turn 就 `turn/steer`，否则作为下一条消息）立即通知 worker，idle 计数归零。若送达时正有一轮在跑，那轮的 id 记在 `run.staleTurnId`，该轮结束时清掉；`staleTurnId` 未清时到达的 `workItem.submit` 视为依据旧合同，作废（工单回 queued、丢弃 evidence，保留 worktree）。worker 不维护任何版本号。`workItem.cancel` 对进行中的工单发 `workItem.cancelled`，编排层 interrupt 该会话。
-- `decision.create` 只把 running 的工单转为 decision；`decision.answer` 只把 decision 的转回 queued，其他状态不动。
-- Supervisor：按任务（独立工单按工单）定时巡视，`patrolIntervalMs` 默认 4 分钟（`VERMILLION_PATROL_INTERVAL_MS` 可覆盖）。有 running 的 worker 时每轮新开一个 supervisor 会话，塞进每个 worker 的合同、本轮全部 agent 消息（含 commentary）、`diff --stat`、越界路径；会话只有一个 host tool `remind(workItemId, message)`（`runner.registerTool`，按 `metadata.role === "supervisor"` 可见），调用即 `runner.steer` 进那个 worker 的当前 turn。没有 interrupt 权限。巡视不进 workspace 串行队列（它要等模型回复）。多轮未提交仍由 `maxIdleTurns` 判定 requeue。
-- 调度开关和运行记录在 Workspaces → 任务 页；Automation 页留给用户自定义的定时/触发任务，与这套循环无关。
-- `AgentRunner`（apps/desktop/src/electron/agent-runner.ts）是编排层对会话引擎的唯一依赖：open / send / interrupt / lastReply / onTurnCompleted。agent 会话 metadata 带 `role`、`workItemId`、`missionId`。
+- 决策答复直接送回原 Worker，普通文字答复同样有效。review 或验证两轮不过就等待用户，不无限返工。运行失败保留原会话和成果，按 1、5、30、300 分钟重试四次，再失败发决策卡；`maxIdleTurns` 限制无进展续轮。
+- 调度开关和运行记录在 Workspaces → 工单 页；Automation 页用于用户自定义定时或触发任务。
+- `AgentRunner`（apps/desktop/src/electron/agent-runner.ts）是编排层对会话引擎的边界，提供 fork、打开、恢复、发送、steer、中断与 turn 完成通知。Worker metadata 保存角色、工单与来源信息。
 - 启动时把 `vermillion` CLI 放到 `<baseDir>/bin` 并加进本进程 PATH，codex 子进程继承，agent 直接 `vermillion <method> [json]`。
 
 ## 验收实例
-- `app.start` / `app.stop`（RPC 和 CLI）通过 `AppLauncher` 起一个独立数据目录、独立 userData、指定 CDP 端口的 Vermillion 实例。Windows 上经 `packages/workbench/scripts/start-on-hidden-desktop.ps1` 用 `CreateDesktop` + `CreateProcess(lpDesktop)` 放到桌面 `vermillion-qa`，窗口、弹窗、焦点都不会出现在用户屏幕；CDP 和截图照常。发布包里脚本在 `resources/app/scripts/`，可执行文件取 `Vermillion.exe`，仓库里取 electron + `dist-electron/main.js`。
+- `app.start` / `app.stop`（RPC 和 CLI）通过 `AppLauncher` 起一个独立数据目录、独立 userData、指定 CDP 端口的 Vermillion 实例。Windows 上经 `packages/workbench/scripts/start-on-hidden-desktop.ps1` 用 `CreateDesktop` + `CreateProcess(lpDesktop)` 放到桌面 `vermillion-qa`，窗口、弹窗、焦点都不会出现在用户屏幕；CDP 和截图照常。`port` 要避开 Windows 保留端口区间（`netsh interface ipv4 show excludedportrange protocol=tcp`，9323–9422 等常被占，含 9333），否则 Electron 开不了调试端口、app.start 等 30 秒后报错。发布包里脚本在 `resources/app/scripts/`，可执行文件取 `Vermillion.exe`，仓库里取 electron + `dist-electron/main.js`。
 - Worker / Verifier 做界面验收只能用这条路径，不用 start.bat。
 
 ## Domain
-- 领域定义是普通文档：`.vermillion/docs/domains/<id>.md`，正文自然语言说明覆盖范围和触发条件，frontmatter `standards:` 列规范文档路径。没有程序侧匹配；管家建单时读全部定义，语义判断工单涉及哪些领域，把这些领域的 standards 作为 refs 附上，Worker 开工前读。Workspaces → Domain 页只是列出并编辑这个目录。
+- 领域定义是普通文档：`.vermillion/docs/domains/<id>.md`，正文自然语言说明覆盖范围和触发条件，frontmatter `standards:` 列规范文档路径。Worker 建单时读全部定义，语义判断工单涉及哪些领域，把相应 standards 作为 refs 附上。Workspaces → Domain 页列出并编辑这个目录。
 
 ## 工单
-- 独立工单：无 missionId，用于打包、跑测试这类操作和不改设计的 bug 修复；设计伙伴在聊天里直接 `workItem.create`，不经管家。是否用 worktree 只看 `allowedPaths` 是否非空，与 missionId 无关。
-- Mission 是 Doc revision 的序列；commit 只能通过 `mission.create` / `mission.addRevision` 产生，支持部分路径提交。一个会话可以产出多个任务或给已有任务补 revision。
-- 状态：queued → running → review → closed，decision 为挂起，cancelled 是另一个终态（`cancelWorkItem`）。只有 closed 满足 `dependsOn`；前置 cancelled 的工单留在队列并在任务页标出。写操作有业务含义：create / start / heartbeat / submit(evidence+review+verify) / approve / reject(reason) / cancel，不暴露裸 status 修改。
-- submit 时 verify 通过且 autoClose（R0/R1 默认）直接 closed；rework 回 queued；否则进 review。
+- 发单模式的执行入口是 `work.start`；Worker 通过 `workItem.create` 建单并登记执行会话，文档使用 `docs.commit` 按相关路径提交，refs 保存文档路径、段落和 commit。现做模式直接完成实现，不为同一件事再开工。
+- 工单记录准备、排队、执行、等待合入、等待用户和结束状态；只有已关闭满足依赖。submit 接收 evidence、review 和 verify，验证通过后由工作台串行合入并关闭；Inbox 展示结果并支持附理由回滚。
+- 引用文档出现新提交时通知 Worker 并更新引用；变更送达那一轮的旧提交作废，保留成果后按新合同续跑。
 
 ## UI 规范
 - 所有控件复用 chat-shell 的 CSS 变量与 `Button`：3-5px 圆角、hairline、单色、等宽大写区块标题。token 在 `ui/app/app.css`。
@@ -61,4 +59,4 @@
 ## 经验积累
 
 - 值夜守工单时，approve 前先在主仓 `git merge-tree --write-tree master <branch>` 探一次冲突（worktree 有未提交内容就先用临时 index 做一个 commit-tree 再探）；有冲突直接 reject 让原 Worker rebase，比事后合并失败再收拾干净得多。Worker 提交的 evidence 也要对照分支实际内容核一遍，曾出现改动留在 stash 而分支上没有的情况。
-- Worker 因模型额度耗尽连续三次 turn failed 后会挂到 attempts 决策卡，不会自动重试；额度恢复后回答 retry 即可让它从原 worktree 续做。
+- Worker 的运行失败达到自动重试上限后会挂到 attempts 决策卡；额度恢复后回答 retry，让它从原会话与工作目录续做。

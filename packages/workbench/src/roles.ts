@@ -5,6 +5,8 @@ import { STATE_DIR } from "./docs.js";
 
 export const ROLES_DIR = STATE_DIR + "/roles";
 
+const retiredRoles = new Set(["steward", "supervisor", "workspace-repair"]);
+
 const roleFile = (dir: string, roleId: string): string => join(dir, roleId + ".md");
 
 const assertRoleId = (roleId: string): void => {
@@ -69,6 +71,7 @@ export class RoleService {
     if (!defaultsDir) return;
     await mkdir(globalDir, { recursive: true });
     for (const roleId of await listIds(defaultsDir)) {
+      if (retiredRoles.has(roleId)) continue;
       const target = roleFile(globalDir, roleId);
       if (!(await exists(target))) await writeFile(target, await readFile(roleFile(defaultsDir, roleId), "utf8"), "utf8");
     }
@@ -79,6 +82,7 @@ export class RoleService {
     const ids = new Set([...(await listIds(this.options.globalDir)), ...overrides]);
     const out: RoleFile[] = [];
     for (const roleId of [...ids].sort()) {
+      if (retiredRoles.has(roleId)) continue;
       const { content, source } = await this.read(workspaceRoot, roleId);
       out.push({ roleId, source, title: titleOf(content) || roleId });
     }
