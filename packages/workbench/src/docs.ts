@@ -178,7 +178,11 @@ export class DocsService {
     return (await git(this.rootPath, ["rev-parse", "HEAD"])).trim();
   }
 
-  /** Read-only preflight; the caller serializes integration and workspace repair. */
+  /**
+   * Read-only preflight; the caller serializes integration and workspace repair.
+   * Uncommitted changes in the main workspace do not block by themselves: Git refuses to merge or
+   * revert over files they touch, and that refusal surfaces as a workspace repair.
+   */
   async checkIntegrationReady(): Promise<void> {
     const markers = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer", "BISECT_LOG"];
     for (const marker of markers) {
@@ -195,9 +199,6 @@ export class DocsService {
     };
     for (const flag of ["--git-dir", "--git-common-dir"]) {
       await checkLocks(resolve(this.rootPath, (await git(this.rootPath, ["rev-parse", flag])).trim()));
-    }
-    if (await git(this.rootPath, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"])) {
-      throw new WorkspaceNotReady("Main workspace has uncommitted changes.");
     }
   }
 

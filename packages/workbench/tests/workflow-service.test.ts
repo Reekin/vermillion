@@ -171,7 +171,7 @@ describe("workflow service persisted transitions", { timeout: 30000 }, () => {
     expect(await service.isWorkItemBlocked(ws, item.workItemId)).toBe(true);
   });
 
-  it("retains two verified results during one dirty-workspace repair, checks reality, merges and cleans up", async () => {
+  it("retains two verified results during one locked-workspace repair, checks reality, merges and cleans up", async () => {
     const { root, service, ws } = await setup();
     await writeFile(join(root, "owned-dirty.txt"), "base\n");
     await git(root, "add", "-A");
@@ -189,7 +189,10 @@ describe("workflow service persisted transitions", { timeout: 30000 }, () => {
       await service.startWorkItem(ws, item.workItemId, { branch, worktreePath, sessionId: filename });
       items.push({ ...item, branch, worktreePath, filename, head: (await git(worktreePath, "rev-parse", "HEAD")).trim() });
     }
+    // A personal uncommitted edit is not an integration blocker; a stale Git lock is.
     await writeFile(join(root, "owned-dirty.txt"), "test-owned uncommitted edit\n");
+    const lock = join(root, ".git", "index.lock");
+    await writeFile(lock, "");
     for (const item of items) {
       expect(await service.submitWorkItem(ws, item.workItemId, submission)).toMatchObject({ status: "merging", ...submission });
     }
@@ -208,8 +211,7 @@ describe("workflow service persisted transitions", { timeout: 30000 }, () => {
       expect(await service.getWorkItem(ws, item.workItemId)).toMatchObject({ status: "merging", ...submission, rejections: [], run: { branch: item.branch, worktreePath: item.worktreePath } });
       expect((await git(item.worktreePath, "rev-parse", "HEAD")).trim()).toBe(item.head);
     }
-    // This file and its uncommitted edit were created solely by this test.
-    await writeFile(join(root, "owned-dirty.txt"), "base\n");
+    await rm(lock);
     expect((await service.submitWorkspaceRepair(ws, repair.actionId, report)).pass).toBe(true);
     for (const item of items) {
       const closed = await service.getWorkItem(ws, item.workItemId);
@@ -223,7 +225,7 @@ describe("workflow service persisted transitions", { timeout: 30000 }, () => {
     }
     expect((await service.listActions(ws)).filter((a) => ["repair", "integration"].includes(a.kind) && actionIsOpen(a))).toEqual([]);
     expect((await git(root, "worktree", "list", "--porcelain")).match(/^worktree /gm)).toHaveLength(1);
-    expect(await git(root, "status", "--porcelain")).toBe("");
+    expect(await readFile(join(root, "owned-dirty.txt"), "utf8")).toBe("test-owned uncommitted edit\n");
     expect(await service.listDecisions(ws)).toEqual([]);
   });
 });

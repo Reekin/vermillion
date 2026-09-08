@@ -54,12 +54,18 @@ test("freezes target, keeps worktree, and resumes completed merge and cleanup", 
   expect(await docs.mergeWorktree(worker, "worker", "retry after cleanup", snapshot.target)).toEqual({ diffStat: "" });
 }, 20_000);
 
-test("main workspace changes, Git operations and locks block integration without changing files", async () => {
+test("unrelated main workspace changes survive integration; Git operations and locks block it without changing files", async () => {
   const { main, worker, docs } = await fixture();
   const head = await docs.head();
   await writeFile(join(main, "personal.txt"), "keep");
-  await expect(docs.mergeWorktree(worker, "worker", "output")).rejects.toBeInstanceOf(WorkspaceNotReady);
+  await writeFile(join(main, "file.txt"), "personal edit\n");
+  await expect(docs.mergeWorktree(worker, "worker", "output")).rejects.toThrow();
+  expect(await docs.head()).toBe(head);
+  expect(await readFile(join(main, "file.txt"), "utf8")).toBe("personal edit\n");
+  await writeFile(join(main, "file.txt"), "base\n");
+  expect((await docs.mergeWorktree(worker, "worker", "output")).commit).toBeTruthy();
   expect(await readFile(join(main, "personal.txt"), "utf8")).toBe("keep");
+  expect(await readFile(join(main, "file.txt"), "utf8")).toBe("worker\n");
   await rm(join(main, "personal.txt"));
   for (const marker of ["index.lock", "MERGE_HEAD"]) {
     const path = join(main, ".git", marker);
@@ -67,7 +73,7 @@ test("main workspace changes, Git operations and locks block integration without
     await expect(docs.checkIntegrationReady()).rejects.toBeInstanceOf(WorkspaceNotReady);
     await rm(path);
   }
-  expect(await docs.head()).toBe(head);
+  expect(await docs.head()).toBe(await git(main, "rev-parse", "HEAD"));
 });
 
 test("dirty worker is not committed or cleaned", async () => {
