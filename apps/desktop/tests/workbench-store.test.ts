@@ -51,6 +51,6 @@ describe("global task summary", () => {
     await vi.waitFor(() => expect(store.getState().workspaces).toHaveLength(2));
     store.getState().setDocCommit({ kind: "commit", commit: "abc", message: "说明" });
     store.getState().showTask({ workspaceId: "b", kind: "workItem", id: "target" });
-    expect(store.getState()).toMatchObject({ overlay: "workspaces", browsingWorkspaceId: "b", taskTarget: { id: "target" }, docCommit: { message: "说明" } });
+    expect(store.getState()).toMatchObject({ panel: "workbench", workspaceSection: "workItems", overlay: undefined, browsingWorkspaceId: "b", taskTarget: { id: "target" }, docCommit: { message: "说明" } });
   });
 });

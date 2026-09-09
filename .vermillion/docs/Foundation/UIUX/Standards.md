@@ -4,7 +4,7 @@
 
 ## 从哪里开始
 
-- 应用壳组件入口：`apps/desktop/src/ui/app/components/ui.tsx`。文件头列出全部可用组件；先在这里找，再看相近页面（`InboxPanel`、`WorkspacesPanel`、`DocsPanel`、`SessionSidebar`）的真实用法。
+- 应用壳组件入口：`apps/desktop/src/ui/app/components/ui.tsx`。文件头列出全部可用组件；先在这里找，再看相近页面（`InboxPanel`、`WorkspacePages`、`DocsPanel`、`SessionSidebar`）的真实用法。
 - 主题变量：`apps/desktop/src/ui/app/app.css` 的 `@theme` 块。字号档位 `text-micro / caption / label / body / title-sm / title`，颜色 `text-strong / foreground / muted-foreground / faint-foreground`，表面 `bg-surface / surface-raised / surface-hover / surface-selected / input`，边框 `border-border / border-strong / control-border`，圆角 `rounded-sm / md / lg`，字距 `tracking-eyebrow`。
 - 会话区（`ui/chat-shell`）保留自己的 `awb-*` 样式；应用壳和 `features/` 只用上面两处，不引用 `awb-*` class。会话区里嵌入的业务块（turn 扩展）用 `app.css` 里的 `vm-*` 块。
 
@@ -25,6 +25,14 @@
 页面可以安排这些组件的外部布局；不跨层覆盖组件内部样式。出现新用途时扩展 `ui.tsx` 的接口并检查已有使用处，不在页面里复制一份。
 
 通用会话组件只接收展示数据、渲染插槽和操作回调。工单查询、事件订阅、Worker 分支业务投影及状态文案由应用壳提供，会话区不反向依赖应用壳的 Context、工作台客户端或业务类型。
+
+## 导航与状态保留
+
+- 主导航上方是工作台和 Inbox，设置位于底部且与两者同级。设置直接打开完整空白页面，当前没有配置项。
+- 工作台左侧会话列表常驻，New Chat 旁放 All / workspace 筛选下拉；筛选只影响列表，不切换当前会话。具体 workspace 筛选作为新草稿的默认项目。
+- 右侧顶部分页固定为会话、工单、Docs、Domain、角色、Issues、Automation。会话默认打开，SessionPane 与右侧 Docs Explorer 在切页时保持挂载并保留草稿。
+- 其他分页在标题栏显示 workspace 选择器，明确编辑范围；All 仅是会话列表筛选值。页面内容不再嵌套导航侧栏或分页。Domain 草稿在切页时保留。
+- 工单链接进入工作台 → 工单并定位目标；会话链接进入工作台 → 会话并选中目标会话或树内节点。Inbox 保持弹窗与展开页面行为。
 
 ## 视觉规则
 
@@ -58,5 +66,5 @@
 ## 检查
 
 - `pnpm --filter @vermillion/desktop lint:ui`：拦截 `ui/app` 和 `features/` 里的硬编码颜色、任意字号/圆角/字距、`awb-*` class、裸 `<input>/<textarea>/<select>`。确需例外的元素加 `data-ui-raw="原因"`。
-- 改公共组件或 `app.css` 后，起实例打开 Think（会话列表 + Docs）、Inbox、Workspaces → 工单 三个页面，看普通状态、空态、长中文标题、错误和窄窗口。截图交给空白 subagent 对照本文判断，不自己看图下结论。
+- 改公共组件或 `app.css` 后，起实例打开 工作台 → 会话（会话列表 + Docs）、Inbox、工作台 → 工单 三个页面，看普通状态、空态、长中文标题、错误和窄窗口。截图交给空白 subagent 对照本文判断，不自己看图下结论。
 - 涉及界面的工单，verifier 除了逐条 acceptance，还要对照本文看一遍截图：是否用了对应组件、是否出现规则之外的颜色和字号、重要操作是否被弱化到看不见。

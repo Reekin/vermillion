@@ -1,23 +1,23 @@
-import { Inbox, MessageSquare, FolderKanban } from "lucide-react";
+import { Inbox, PanelsTopLeft, Settings } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import type { Panel } from "../workbench-store.js";
 
 type RailProps = {
   panel: Panel;
-  overlay: Panel | undefined;
+  overlay: "inbox" | undefined;
   inboxCount: number;
   onSelect: (panel: Panel) => void;
   onOpenPage: (panel: Panel) => void;
 };
 
 const items: Array<{ id: Panel; label: string; icon: typeof Inbox }> = [
-  { id: "think", label: "思考", icon: MessageSquare },
+  { id: "workbench", label: "工作台", icon: PanelsTopLeft },
   { id: "inbox", label: "Inbox", icon: Inbox },
-  { id: "workspaces", label: "Workspaces", icon: FolderKanban }
+  { id: "settings", label: "设置", icon: Settings }
 ];
 
 export const Rail = ({ panel, overlay, inboxCount, onSelect, onOpenPage }: RailProps) => (
-  <nav className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-border-strong bg-app-shell pt-3" aria-label="主导航">
+  <nav className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-border-strong bg-app-shell py-3" aria-label="主导航">
     {items.map(({ id, label, icon: Icon }) => {
       const active = overlay ? overlay === id : panel === id;
       return (
@@ -28,10 +28,11 @@ export const Rail = ({ panel, overlay, inboxCount, onSelect, onOpenPage }: RailP
           aria-label={label}
           aria-current={active ? "page" : undefined}
           onClick={() => onSelect(id)}
-          onDoubleClick={() => onOpenPage(id)}
+          onDoubleClick={id === "inbox" ? () => onOpenPage(id) : undefined}
           className={cn(
             "relative flex h-9 w-9 items-center justify-center rounded-lg text-faint-foreground transition-colors",
             "hover:bg-surface-hover hover:text-foreground",
+            id === "settings" && "mt-auto",
             active && "bg-surface-selected text-strong"
           )}
         >

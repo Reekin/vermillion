@@ -16,11 +16,11 @@ import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
-import { InlineNotice } from "./components/ui.js";
-import { WorkspacesPanel, WorkspacesSwitcher } from "./components/WorkspacesPanel.js";
+import { EmptyState, InlineNotice, PanelHeader, Tabs } from "./components/ui.js";
+import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
-import { createWorkbenchStore, type Panel } from "./workbench-store.js";
+import { createWorkbenchStore, type Panel, type WorkspaceSection } from "./workbench-store.js";
 import { createRendererWorkbenchClient } from "./workbench-client.js";
 import "./app.css";
 import { SessionNavigationContext, renderSessionNavigation } from "./session-navigation.js";
@@ -31,13 +31,22 @@ type AppProps = {
   transport: DesktopTransport;
 };
 
-const panelTitles: Record<Panel, string> = { think: "思考", inbox: "Inbox", workspaces: "Workspaces" };
+const tabs: Array<{ id: WorkspaceSection; label: string }> = [
+  { id: "sessions", label: "会话" },
+  { id: "workItems", label: "工单" },
+  { id: "docs", label: "Docs" },
+  { id: "domains", label: "Domain" },
+  { id: "roles", label: "角色" },
+  { id: "issues", label: "Issues" },
+  { id: "automation", label: "Automation" }
+];
 
 
 export const App = ({ sessionStore, transport }: AppProps) => {
   const store = useMemo(() => createWorkbenchStore(createRendererWorkbenchClient()), []);
   const panel = store((s) => s.panel);
   const overlay = store((s) => s.overlay);
+  const section = store((s) => s.workspaceSection);
   const inboxCount = store((s) => s.inbox.length);
   const workspaces = store((s) => s.workspaces);
   const draftWorkspaceId = store((s) => s.draftWorkspaceId);
@@ -51,6 +60,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
+  const [workspaceFilterId, setWorkspaceFilterId] = useState<string | undefined>();
   const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
   const [composerActions, setComposerActions] = useState<ComposerActions>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
@@ -58,21 +68,16 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
     const tree = await transport.chatTree.get(targetSessionId);
     const rootId = tree.treeId ?? targetSessionId;
-    const { page } = await transport.sessionBrowser.open(rootId);
-    const root = page.snapshot.sessions.find((session) => session.sessionId === rootId);
+    await transport.sessionBrowser.open(rootId);
     await transport.sessionBrowser.activate(targetSessionId, { focusTree: true });
     if (turnId) await transport.chatTree.jump({ sessionId: targetSessionId, nodeId: turnId });
-    if (!root?.metadata?.role || root.metadata.role === "design-partner") {
-      setNavigationTarget({ sessionId: targetSessionId, workspaceId });
-      setSessionId(targetSessionId);
-      setReloadSignal((value) => value + 1);
-      store.getState().browseWorkspace(workspaceId);
-      store.getState().setPanel("think");
-    } else {
-      store.getState().browseWorkspace(workspaceId);
-      store.setState({ agentSessionId: targetSessionId, workspaceSection: "sessions", panel: "workspaces", overlay: undefined });
-    }
-  }, [store, transport]);
+    setNavigationTarget({ sessionId: targetSessionId, workspaceId });
+    setSessionId(targetSessionId);
+    if (workspaceFilterId && workspaceFilterId !== workspaceId) setWorkspaceFilterId(workspaceId);
+    setReloadSignal((value) => value + 1);
+    store.getState().browseWorkspace(workspaceId);
+    store.setState({ workspaceSection: "sessions", panel: "workbench", overlay: undefined });
+  }, [store, transport, workspaceFilterId]);
   useEffect(() => {
     store.setState({ navigateSession: (workspaceId, id, turnId) => {
       setNavigationError(undefined);
@@ -84,9 +89,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     client: store.getState().client,
     open: (target: SessionNavigation) => openSessionTarget(target.targetWorkspaceId, target.targetSessionId)
   }), [store, openSessionTarget]);
-  const workspaceIds = useMemo(() => workspaces.map((w) => w.workspaceId), [workspaces]);
-  // Think shows only the user's own design sessions; agent sessions live under Workspaces → 会话.
-  const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "user" });
+  const workspaceIds = useMemo(() => workspaces.filter((w) => !workspaceFilterId || w.workspaceId === workspaceFilterId).map((w) => w.workspaceId), [workspaces, workspaceFilterId]);
+  const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds });
   const workspaceLabelById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w.label])), [workspaces]);
   const workspaceById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w])), [workspaces]);
   const [reloadSignal, setReloadSignal] = useState(0);
@@ -101,8 +105,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const openSession = sessionId ? sidebar.findSession(sessionId) : undefined;
   const sessionWorkspaceId = openSession?.workspaceId ?? (navigationTarget?.sessionId === sessionId ? navigationTarget?.workspaceId : undefined);
   useEffect(() => {
-    if (panel === "think") browseWorkspace(sessionId ? sessionWorkspaceId : draftWorkspaceId);
-  }, [panel, sessionId, sessionWorkspaceId, draftWorkspaceId, browseWorkspace]);
+    if (panel === "workbench" && section === "sessions") browseWorkspace(sessionId ? sessionWorkspaceId : draftWorkspaceId);
+  }, [panel, section, sessionId, sessionWorkspaceId, draftWorkspaceId, browseWorkspace]);
+  useEffect(() => {
+    if (workspaceFilterId && !workspaces.some((workspace) => workspace.workspaceId === workspaceFilterId)) setWorkspaceFilterId(undefined);
+  }, [workspaces, workspaceFilterId]);
 
   const [draftRevision, setDraftRevision] = useState(0);
   const initializeDraftExecution = useCallback(async () => {
@@ -129,14 +136,16 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         metadata: { cwd: workspace.rootPath, developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
       });
       setSessionId(created.sessionId);
+      setNavigationTarget({ sessionId: created.sessionId, workspaceId: workspace.workspaceId });
+      if (workspaceFilterId && workspaceFilterId !== workspace.workspaceId) setWorkspaceFilterId(workspace.workspaceId);
       return created.sessionId;
     },
-    [draftWorkspaceId, workspaceById, transport, store]
+    [draftWorkspaceId, workspaceById, transport, store, workspaceFilterId]
   );
 
   const onSelect = useCallback(
     (next: Panel) => {
-      if (next === "think") setPanel("think");
+      if (next !== "inbox") setPanel(next);
       else if (overlay === next) closeOverlay();
       else openOverlay(next);
     },
@@ -155,66 +164,88 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     [transport]
   );
 
-  const renderPanel = (target: Panel, compact: boolean) =>
-    target === "inbox" ? <InboxPanel store={store} /> : <WorkspacesPanel store={store} transport={transport} sessionStore={sessionStore} pickDirectory={pickDirectory} compact={compact} onExpand={() => store.getState().showTaskBoard()} />;
-
   return (
     <SessionNavigationContext.Provider value={navigation}>
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-page-canvas text-foreground">
       <div className="flex min-h-0 flex-1">
       <Rail panel={panel} overlay={overlay} inboxCount={inboxCount} onSelect={onSelect} onOpenPage={setPanel} />
       <div className="relative min-w-0 flex-1">
-        {/* The think page stays mounted so switching panels never loses chat state. */}
-        <div className={panel === "think" ? "flex h-full" : "hidden"}>
+        {/* Keep the workbench mounted while navigating so conversation drafts survive. */}
+        <div className={panel === "workbench" ? "flex h-full" : "hidden"}>
           <SessionSidebar
             {...sidebar}
             selectedSessionId={sessionId}
             isDraft={sessionId === undefined}
             workspaceLabelById={workspaceLabelById}
-            onOpen={setSessionId}
-            onNewChat={() => { setSessionId(undefined); setDraftRevision((n) => n + 1); }}
+            workspaceFilterId={workspaceFilterId}
+            onWorkspaceFilter={(id) => {
+              setWorkspaceFilterId(id);
+              if (!sessionId && id && section === "sessions") store.getState().setDraftWorkspace(id);
+            }}
+            onOpen={(id) => {
+              const selected = sidebar.findSession(id);
+              if (selected) setNavigationTarget({ sessionId: id, workspaceId: selected.workspaceId });
+              setSessionId(id);
+              store.getState().setWorkspaceSection("sessions");
+            }}
+            onNewChat={() => {
+              if (workspaceFilterId) store.getState().setDraftWorkspace(workspaceFilterId);
+              setSessionId(undefined);
+              store.getState().setWorkspaceSection("sessions");
+              setDraftRevision((n) => n + 1);
+            }}
             menu={sessionActions.menu}
             onOpenMenu={(event, id) => void sessionActions.openMenu(event, id)}
             onCloseMenu={sessionActions.closeMenu}
             onRunAction={(id, action) => void sessionActions.run(id, action)}
-            notice={sessionActions.notice}
-            onClearNotice={sessionActions.clearNotice}
+            notice={sessionActions.notice ?? (sidebar.error ? { text: sidebar.error, error: true } : undefined)}
+            onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
-          <main className="relative min-w-0 flex-1">
-            <SessionPane
-              store={sessionStore}
-              transport={transport}
-              sessionId={sessionId}
-              reloadSignal={reloadSignal}
-              createSession={createSession}
-              initializeDraftExecution={initializeDraftExecution}
-              onViewChange={setWorkTarget}
-              composerDraftKey="think"
-              onComposerChange={setComposerActions}
-              renderTurnNavigation={renderSessionNavigation}
-              renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} />}
-              composerExtras={
-                <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
-              }
-            />
-          </main>
-          <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">
-            <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
-              <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
-                if (!sessionWorkspaceId) throw new Error("请先选择会话。");
-                await store.getState().client.request("work.start", { workspaceId: sessionWorkspaceId, ...input });
-                store.getState().setDocCommit({ kind: "work", title: openSession?.title ?? "当前会话" });
-              }} />
-            } />
-          </aside>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <Tabs items={tabs} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} />
+            <div className={section === "sessions" ? "flex min-h-0 flex-1" : "hidden"}>
+              <main className="relative min-w-0 flex-1">
+                <SessionPane
+                  store={sessionStore}
+                  transport={transport}
+                  sessionId={sessionId}
+                  reloadSignal={reloadSignal}
+                  createSession={createSession}
+                  initializeDraftExecution={initializeDraftExecution}
+                  onViewChange={setWorkTarget}
+                  composerDraftKey="think"
+                  onComposerChange={setComposerActions}
+                  renderTurnNavigation={renderSessionNavigation}
+                  renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} />}
+                  composerExtras={
+                    <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
+                  }
+                />
+              </main>
+              <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">
+                <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
+                  <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
+                    if (!sessionWorkspaceId) throw new Error("请先选择会话。");
+                    await store.getState().client.request("work.start", { workspaceId: sessionWorkspaceId, ...input });
+                    store.getState().setDocCommit({ kind: "work", title: openSession?.title ?? "当前会话" });
+                  }} />
+                } />
+              </aside>
+            </div>
+            <div className={section !== "sessions" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+              <div className="flex shrink-0 items-center border-b border-border px-4 py-2"><WorkspaceSwitcher store={store} /></div>
+              <WorkspacePages store={store} transport={transport} pickDirectory={pickDirectory} />
+            </div>
+          </div>
         </div>
-        {(["inbox", "workspaces"] as const).map((target) => (
-          <Modal key={target} contained presentation={overlay === target ? "modal" : panel === target ? "page" : "hidden"}
-            title={panelTitles[target]} titleContent={target === "workspaces" ? <WorkspacesSwitcher store={store} /> : undefined}
-            width={target === "workspaces" ? 900 : undefined} onClose={closeOverlay} onExpand={() => setPanel(target)}>
-            {renderPanel(target, overlay === target || panel !== target)}
-          </Modal>
-        ))}
+        <Modal contained presentation={overlay === "inbox" ? "modal" : panel === "inbox" ? "page" : "hidden"}
+          title="Inbox" onClose={closeOverlay} onExpand={() => setPanel("inbox")}>
+          <InboxPanel store={store} />
+        </Modal>
+        {panel === "settings" && <section className="h-full" aria-label="设置">
+          <PanelHeader title="设置" />
+          <EmptyState title="暂无设置项" />
+        </section>}
       </div>
       </div>
       {navigationError && <InlineNotice tone="error">{navigationError}</InlineNotice>}

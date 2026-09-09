@@ -199,7 +199,7 @@ export const Stepper = ({ label, value, min, max, disabled, onChange }: { label:
 );
 
 export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ id: string; label: string; count?: number }>; selected: string; onSelect: (id: string) => void; children?: ReactNode }) => (
-  <nav className="vm-tabs" aria-label="workspace 导航">
+  <nav className="vm-tabs" aria-label="工作台分页">
     {items.map((item) => <button key={item.id} type="button" aria-current={selected === item.id ? "page" : undefined} onClick={() => onSelect(item.id)}>
       {item.label}{item.count !== undefined && <span className="vm-tab-count">{item.count}</span>}
     </button>)}

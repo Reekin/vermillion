@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
 
-export type Panel = "think" | "inbox" | "workspaces";
+export type Panel = "workbench" | "inbox" | "settings";
 export type WorkspaceSection = "workItems" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
 
 export type CommitOutcome =
@@ -30,8 +30,8 @@ export type EditorTarget = { kind: "doc"; path: string } | { kind: "role"; roleI
 export type WorkbenchState = {
   client: WorkbenchClient;
   panel: Panel;
-  overlay: Panel | undefined;
-  /** Panel view state survives switching between overlay and page. */
+  overlay: "inbox" | undefined;
+  /** Workbench tab selection survives navigation to other panels. */
   workspaceSection: WorkspaceSection;
   expandedInboxDetails: Record<string, boolean>;
   expandedWorkGroups: Record<string, boolean>;
@@ -54,24 +54,21 @@ export type WorkbenchState = {
   taskTarget: TaskTarget | undefined;
   showTask: (target: TaskTarget) => void;
   editor: EditorTarget | undefined;
-  /** Agent session shown in Workspaces → 会话; set by "会话" links in Inbox and the task board. */
-  agentSessionId: string | undefined;
-  /** "另有 N 项已结束" in the overlay: open the full task board as a page. */
+  /** Open the workbench work-items tab. */
   showTaskBoard: () => void;
   /** Outcome of the last commit dialog action, briefly shown in the global status bar. */
   docCommit: CommitOutcome | undefined;
   setDocCommit: (result: CommitOutcome | undefined) => void;
 
   setPanel: (panel: Panel) => void;
-  openOverlay: (panel: Panel) => void;
+  openOverlay: (panel: "inbox") => void;
   closeOverlay: () => void;
   setWorkspaceSection: (section: WorkspaceSection) => void;
   toggleInboxDetails: (workspaceId: string, decisionId: string) => void;
   setDraftWorkspace: (workspaceId: string | undefined) => void;
   browseWorkspace: (workspaceId: string | undefined) => void;
   openEditor: (target: EditorTarget | undefined) => void;
-  selectAgentSession: (sessionId: string | undefined) => void;
-  /** Switches to the Workspaces page, 会话 tab, showing this agent session in its workspace. */
+  /** Opens any session in the workbench conversation tab. */
   showAgentSession: (workspaceId: string, sessionId: string, turnId?: string) => void;
   navigateSession?: (workspaceId: string, sessionId: string, turnId?: string) => void;
   /** Subscribes to workbench events and loads initial state. Returns an unsubscribe. */
@@ -148,9 +145,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
 
     return {
       client,
-      panel: "think",
+      panel: "workbench",
       overlay: undefined,
-      workspaceSection: "workItems",
+      workspaceSection: "sessions",
       expandedInboxDetails: {},
       expandedWorkGroups: {},
       setWorkGroupExpanded: (workspaceId, groupId, expanded) => set((state) => ({
@@ -171,11 +168,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       taskTarget: undefined,
       showTask: (target) => {
         get().browseWorkspace(target.workspaceId);
-        set({ taskTarget: { ...target }, agentSessionId: undefined, workspaceSection: "workItems", overlay: "workspaces" });
+        set({ taskTarget: { ...target }, workspaceSection: "workItems", panel: "workbench", overlay: undefined });
       },
       editor: undefined,
-      agentSessionId: undefined,
-      showTaskBoard: () => set({ workspaceSection: "workItems", panel: "workspaces", overlay: undefined }),
+      showTaskBoard: () => set({ workspaceSection: "workItems", panel: "workbench", overlay: undefined }),
       docCommit: undefined,
       setDocCommit: (result) => set({ docCommit: result }),
 
@@ -198,11 +194,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),
-      selectAgentSession: (agentSessionId) => set({ agentSessionId }),
       showAgentSession: (workspaceId, sessionId, turnId) => {
         if (get().navigateSession) { get().navigateSession!(workspaceId, sessionId, turnId); return; }
         get().browseWorkspace(workspaceId);
-        set({ agentSessionId: sessionId, workspaceSection: "sessions", panel: "workspaces", overlay: undefined });
+        set({ workspaceSection: "sessions", panel: "workbench", overlay: undefined });
       },
 
       connect: () => {

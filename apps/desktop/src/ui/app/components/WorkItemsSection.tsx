@@ -125,7 +125,7 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
         {hidden > 0 && <Button size="sm" variant="ghost" className="ml-auto underline underline-offset-4" onClick={onExpand}>另有 {hidden} 项已结束</Button>}
       </div>
       {error && <InlineNotice tone="error" className="pt-2">{error}</InlineNotice>}
-      {visible.length === 0 ? <EmptyState title={hidden ? "没有进行中的工单" : "还没有工单"} hint="在思考中点击开工，或创建一张工单。" /> : (
+      {visible.length === 0 ? <EmptyState title={hidden ? "没有进行中的工单" : "还没有工单"} hint="在会话中点击开工，或创建一张工单。" /> : (
         <div className="max-w-6xl space-y-3 p-4">
           {[...groups].map(([groupId, items]) => <DisclosureCard key={groupId}
             title={groupId === "standalone" ? "独立工单" : sourceTitles[groupId] ?? "来源会话"}

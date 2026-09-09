@@ -11,14 +11,16 @@
 
 ## 使用
 
-1. 思考页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并创建 `.vermillion/docs/`。
+主导航提供工作台、Inbox 和底部同级的设置。工作台左侧会话列表常驻，统一显示用户与 agent 根会话；Worker 分支留在所属会话树中。右侧分页为会话（默认）、工单、Docs、Domain、角色、Issues、Automation。会话与右侧 Docs 切页时保留挂载和草稿；其他分页的浏览与编辑范围由标题栏 workspace 选择器指定，列表筛选 All 不代表全局编辑范围。设置打开完整空白页面，当前没有配置项。Inbox 支持弹窗查看和展开为页面。
+
+1. 工作台会话页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并创建 `.vermillion/docs/`。
 2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 workspace 根（设计伙伴能读整个项目），角色 prompt 作为 developer instructions 注入（追加在 codex config.toml 的 `developer_instructions` 之后），只会改 `.vermillion/docs/` 下的文件。
 3. 右栏 Docs 树按文件夹显示 `.vermillion/docs/`；有改动的文件带 M/U/D 标记，点击可编辑，右键可在文件管理器或默认编辑器中打开。
 4. 点右侧 Docs 底部的 **开工**，或说“把 ABC 开工做掉”：本轮结束后 fork 出 Worker 分支，由它整理和提交相关文档、建单，结束准备轮后等调度续跑。查看位置留在讨论节点；ChatTree 底部列出 Worker，点击查看对应分支。单独提交文档使用 Docs 右键菜单的 **Commit**。
 5. **Inbox** 汇总所有 workspace 的决策卡和已合入结果。可以选择选项或自由答复，答复送回原 Worker；已合入结果可以确认或附理由回滚。
-6. 左栏 **New Chat** 回到草稿态；会话列表按最近完成的 turn 排序，可切换为按 workspace 分组，可加载更多。
-7. **Workspaces → 工单** 按来源会话树分组，展示调度开关、并发上限、进度与等待原因。Worker 自行判断是否使用 worktree，完成 review 和独立验证后提交，由工作台合入并关闭工单。后台每 5 分钟回收不再使用的 worktree，目录占用不影响工单完成。
-9. **Workspaces → Domain** 列出 `.vermillion/docs/domains/` 下的领域定义，可新建和编辑；Worker 建单时据此附上相关规范。**Workspaces → 角色** 编辑设计伙伴、Worker、Maintainer、Liaison 及 Reviewer、Verifier 的角色配置。全局版本在 `~/.vermillion/roles/`；workspace 可以覆盖或追加。
+6. 左栏 **New Chat** 回到草稿态；会话列表按最近完成的 turn 排序，New Chat 旁的 All / workspace 下拉只筛选列表，不切换当前会话；选中具体 workspace 后新建草稿使用该项目，可加载更多。
+7. **工作台 → 工单** 按来源会话树分组，展示调度开关、并发上限、进度与等待原因。Worker 自行判断是否使用 worktree，完成 review 和独立验证后提交，由工作台合入并关闭工单。后台每 5 分钟回收不再使用的 worktree，目录占用不影响工单完成。
+8. **工作台 → Domain** 列出 `.vermillion/docs/domains/` 下的领域定义，可新建和编辑；Worker 建单时据此附上相关规范。**工作台 → 角色** 编辑设计伙伴、Worker、Maintainer、Liaison 及 Reviewer、Verifier 的角色配置。全局版本在 `~/.vermillion/roles/`；workspace 可以覆盖或追加。
 
 ## CLI
 
@@ -46,7 +48,7 @@ packages/core          会话领域存储与投影
 packages/adapters      运行时适配（codex app-server）
 packages/workbench     工作台领域 + typed RPC + CLI
 apps/desktop-server    会话引擎宿主（Electron main 进程内）
-apps/desktop           Electron 壳：SessionPane（会话）+ 应用壳（侧栏 / Docs / Inbox / Workspaces）
+apps/desktop           Electron 壳：SessionPane（会话）+ 应用壳（工作台 / Docs / Inbox / 设置）
 ```
 
 ## 打包

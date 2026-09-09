@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SessionBrowserPageRpc } from "@vermillion/shared";
 vi.mock("xterm", () => ({ Terminal: class {} }));
-import { loadSourceTreeTitles } from "../src/ui/app/components/WorkspacesPanel.js";
+import { loadSourceTreeTitles } from "../src/ui/app/components/WorkspacePages.js";
 
 describe("source tree titles", () => {
   it("uses the indexed tree title through member aliases and stops once resolved", async () => {

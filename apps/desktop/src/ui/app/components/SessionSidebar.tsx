@@ -1,11 +1,12 @@
-import { CornerDownRight, ListTree, Pin, Plus } from "lucide-react";
-import { useMemo, useState, type MouseEvent } from "react";
+import { CornerDownRight, Pin, Plus } from "lucide-react";
+import type { MouseEvent } from "react";
 import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
-import { Button, IconButton, ListRow, SectionLabel, StatusDot } from "./ui.js";
+import { Badge, Button, Field, ListRow, StatusDot } from "./ui.js";
+import { roleLabel } from "./workflow-display.js";
 
 type SessionSidebarProps = {
   sessions: SidebarSession[];
@@ -15,6 +16,8 @@ type SessionSidebarProps = {
   selectedSessionId: string | undefined;
   isDraft: boolean;
   workspaceLabelById: Map<string, string>;
+  workspaceFilterId: string | undefined;
+  onWorkspaceFilter: (id: string | undefined) => void;
   onOpen: (sessionId: string) => void;
   onNewChat: () => void;
   menu: SessionMenu | undefined;
@@ -25,20 +28,7 @@ type SessionSidebarProps = {
   onClearNotice: () => void;
 };
 
-export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, onOpen, onNewChat, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
-  const [grouped, setGrouped] = useState(false);
-
-  const groups = useMemo(() => {
-    if (!grouped) return undefined;
-    const byWorkspace = new Map<string, SidebarSession[]>();
-    for (const session of sessions) {
-      const list = byWorkspace.get(session.workspaceId) ?? [];
-      list.push(session);
-      byWorkspace.set(session.workspaceId, list);
-    }
-    return [...byWorkspace.entries()];
-  }, [grouped, sessions]);
-
+export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
   /** A session row; subagents it spawned render nested beneath it, indented one level per depth. */
   const renderRow = (session: SidebarSession, depth = 0) => (
     <li key={session.sessionId}>
@@ -51,6 +41,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           <>
             {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
             <StatusDot status={session.statusDot} />
+            {session.role && session.role !== "design-partner" && <Badge>{roleLabel[session.role] ?? session.role}</Badge>}
           </>
         }
         title={
@@ -69,26 +60,22 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
 
   return (
     <aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-border-strong bg-app-shell">
-      <header className="px-4 pt-3"><span className="eyebrow">思考</span></header>
+      <header className="px-4 pt-3"><span className="eyebrow">工作台</span></header>
       <div className="flex items-center gap-1 px-3 pb-2 pt-3">
-        <Button variant={isDraft ? "secondary" : "accent"} size="sm" className="flex-1" onClick={onNewChat} disabled={isDraft}>
+        <Button variant={isDraft ? "secondary" : "accent"} size="sm" className="shrink-0" onClick={onNewChat}>
           <Plus size={13} /> New Chat
         </Button>
-        <IconButton icon={ListTree} label={grouped ? "平铺显示" : "按 workspace 分组"} active={grouped} onClick={() => setGrouped((v) => !v)} />
+        <Field kind="select" compact aria-label="筛选 workspace" className="min-w-0 flex-1" value={workspaceFilterId ?? ""} onChange={(event) => onWorkspaceFilter(event.target.value || undefined)}>
+          <option value="">All</option>
+          {[...workspaceLabelById].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </Field>
       </div>
       <ul className="min-h-0 flex-1 overflow-auto">
         {isDraft && (
           <li><ListRow selected title="新对话" meta="发送第一条消息后创建" /></li>
         )}
         {sessions.length === 0 && !isDraft && !loading && <li className="px-4 py-2 text-caption text-muted-foreground">还没有会话。点 New Chat 开始。</li>}
-        {groups
-          ? groups.map(([workspaceId, list]) => (
-              <li key={workspaceId}>
-                <SectionLabel>{workspaceLabelById.get(workspaceId) ?? workspaceId}</SectionLabel>
-                <ul>{list.map((session) => renderRow(session))}</ul>
-              </li>
-            ))
-          : sessions.map((session) => renderRow(session))}
+        {sessions.map((session) => renderRow(session))}
         {hasMore && (
           <li className="px-3 py-2">
             <Button size="sm" variant="ghost" className="w-full" disabled={loading} onClick={() => void loadMore()}>{loading ? "加载中…" : "加载更多"}</Button>
