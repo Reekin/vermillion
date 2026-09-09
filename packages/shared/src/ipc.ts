@@ -50,6 +50,7 @@ export const sessionRpcMethods = [
   "skills.list",
   "chatTree.get",
   "chatTree.jump",
+  "chatTree.markRead",
   "chatTree.prepareSend",
   "chatTree.submit",
   "chatTree.retry",
@@ -277,6 +278,7 @@ const zChatTreeNodeSchema = z.object({
   turnId: zTurnId.optional(),
   order: z.number().int(),
   isCurrent: z.boolean(),
+  unread: z.boolean().optional(),
   status: z.enum(["pending", "completed", "interrupted", "replaced", "reviewEnded"]).optional()
 });
 
@@ -712,6 +714,12 @@ const zChatTreeJumpRequestSchema = z.object({
   })
 });
 
+const zChatTreeMarkReadRequestSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.markRead"),
+  params: z.object({ sessionId: zSessionId, nodeId: z.string().min(1) })
+});
+
 const zChatTreePrepareSendRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("chatTree.prepareSend"),
@@ -906,6 +914,7 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zSkillsListRequestSchema,
   zChatTreeGetRequestSchema,
   zChatTreeJumpRequestSchema,
+  zChatTreeMarkReadRequestSchema,
   zChatTreePrepareSendRequestSchema,
   zChatTreeSubmitRequestSchema,
   zChatTreeRetryRequestSchema,
@@ -1153,6 +1162,13 @@ const zChatTreeJumpResponseSchema = z.object({
   })
 });
 
+const zChatTreeMarkReadResponseSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.markRead"),
+  ok: z.literal(true),
+  result: z.object({ readNodeIds: z.array(z.string().min(1)) })
+});
+
 const zChatTreePrepareSendResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("chatTree.prepareSend"),
@@ -1368,6 +1384,7 @@ export const zSessionRpcResponseSchema = z.union([
   zSkillsListResponseSchema,
   zChatTreeGetResponseSchema,
   zChatTreeJumpResponseSchema,
+  zChatTreeMarkReadResponseSchema,
   zChatTreePrepareSendResponseSchema,
   zChatTreeSubmitResponseSchema,
   zChatTreeRetryResponseSchema,

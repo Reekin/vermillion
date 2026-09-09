@@ -61,6 +61,7 @@ export type ConversationGraphNodeSnapshot = {
   turnId?: string;
   order: number;
   isCurrent: boolean;
+  unread?: boolean;
   status?: "pending" | "completed" | "interrupted" | "replaced" | "reviewEnded";
 };
 

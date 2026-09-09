@@ -20,6 +20,10 @@ export class WrapperChatTreeService {
     fork: (sessionId: string, turnId: string) => Promise<string>;
   }) {
     this.unsubscribe = options.runtimeService.subscribe(({ event }) => {
+      if (event.type === "turn.completed") {
+        this.changed(event.sessionId);
+        return;
+      }
       if (event.type !== "turn.started") return;
       const index = options.sessionIndexStore;
       const treeId = index.getTreeId(event.sessionId);
@@ -70,6 +74,7 @@ export class WrapperChatTreeService {
       const turns = snapshot.turns.filter((turn) => turn.sessionId === memberId)
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
       let parentNodeId = prefix.at(-1);
+      const readTurnIds = new Set(index.getEntry(memberId)?.readTurnIds);
       for (const turn of turns) {
         const question = snapshot.messageBlocks.find((block) =>
           block.turnId === turn.turnId && block.role === "user" && block.text)?.text;
@@ -77,6 +82,7 @@ export class WrapperChatTreeService {
           nodeId: turn.turnId, turnId: turn.turnId, parentNodeId,
           label: question?.slice(0, 80) || turn.turnId,
           order: nodes.length, isCurrent: false,
+          unread: turn.status === "completed" && !readTurnIds.has(turn.turnId),
           status: turn.status === "completed" ? "completed" : "pending"
         });
         turnsById.set(turn.turnId, turn);
@@ -174,6 +180,18 @@ export class WrapperChatTreeService {
     const view = { sessionId: member, nodeId: target, followTip: true };
     await this.options.sessionIndexStore.setTreeView(sessionId, view);
     return { sessionId: member };
+  }
+
+  public async markRead(sessionId: string, nodeId: string): Promise<{ readNodeIds: string[] }> {
+    await this.get(sessionId);
+    const { paths, turnsById } = this.project(sessionId);
+    const path = [...paths.values()].find((ids) => ids.includes(nodeId));
+    if (!path) throw new Error(`Unknown tree node: ${nodeId}`);
+    const turns = path.slice(0, path.indexOf(nodeId) + 1)
+      .map((id) => turnsById.get(id)!)
+      .filter((turn) => turn.status === "completed");
+    if (await this.options.sessionIndexStore.markTurnsRead(turns)) this.changed(sessionId);
+    return { readNodeIds: turns.map((turn) => turn.turnId) };
   }
 
   private resolveSendSource(sessionId: string, nodeId: string, paths: Map<string, string[]>, byActivity: string[]): string {

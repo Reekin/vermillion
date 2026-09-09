@@ -319,6 +319,7 @@ export type DesktopTransport = {
     }) => Promise<SkillDescriptorRpc[]>;
   };
   chatTree: {
+    markRead: (input: { sessionId: string; nodeId: string }) => Promise<{ readNodeIds: string[] }>;
     submit: (input: import("@vermillion/shared").ChatTreeSendInput) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
     retry: (input: { operationId: string }) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
     operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
@@ -868,6 +869,7 @@ export const createDesktopTransport = (
       }
     },
     chatTree: {
+      markRead: (input) => rpc.request("chatTree.markRead", input),
       submit: (input) => rpc.request("chatTree.submit", input),
       retry: (input) => rpc.request("chatTree.retry", input),
       operations: (input) => rpc.request("chatTree.operations", input),

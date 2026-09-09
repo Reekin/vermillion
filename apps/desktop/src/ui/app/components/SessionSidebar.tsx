@@ -5,7 +5,7 @@ import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
-import { Badge, Button, Field, ListRow, StatusDot } from "./ui.js";
+import { Badge, Button, Field, ListRow } from "./ui.js";
 import { roleLabel } from "./workflow-display.js";
 
 type SessionSidebarProps = {
@@ -40,7 +40,6 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         leading={
           <>
             {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
-            <StatusDot status={session.statusDot} />
             {session.role && session.role !== "design-partner" && <Badge>{roleLabel[session.role] ?? session.role}</Badge>}
           </>
         }

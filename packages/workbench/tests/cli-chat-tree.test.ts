@@ -17,7 +17,7 @@ describe("chat tree CLI operations", () => {
     await rm(baseDir, { recursive: true, force: true });
   });
 
-  it.each(["chatTree.submit", "chatTree.retry", "chatTree.operations"])("requires a running desktop for %s", async (method) => {
+  it.each(["chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"])("requires a running desktop for %s", async (method) => {
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     expect(await runCli([method, "{}"])).toBe(1);
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining("需要运行 Vermillion 桌面应用"));
@@ -27,6 +27,7 @@ describe("chat tree CLI operations", () => {
   it("forwards operation parameters and results through the desktop endpoint", async () => {
     const operation = { operationId: "op-1", status: "queued" };
     const calls = [
+      { method: "chatTree.markRead", params: { sessionId: "s-1", nodeId: "n-1" }, result: { readNodeIds: ["n-1"] } },
       { method: "chatTree.submit", params: { sessionId: "s-1", nodeId: "n-1", content: "continue", attachments: [], execution: { engineId: "codex" } }, result: operation },
       { method: "chatTree.retry", params: { operationId: "op-1" }, result: operation },
       { method: "chatTree.operations", params: { sessionId: "s-1" }, result: { operations: [operation] } }
@@ -63,8 +64,10 @@ describe("chat tree CLI operations", () => {
   it("lists the operation methods in help", async () => {
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     expect(await runCli(["--help"])).toBe(0);
-    for (const method of ["chatTree.submit", "chatTree.retry", "chatTree.operations"]) {
+    for (const method of ["chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"]) {
       expect(stdout).toHaveBeenCalledWith(expect.stringContaining(method));
     }
+    expect(await runCli(["chatTree.markRead", "--help"])).toBe(0);
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining("readNodeIds"));
   });
 });

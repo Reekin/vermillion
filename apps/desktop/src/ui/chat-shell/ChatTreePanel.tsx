@@ -11,7 +11,8 @@ export type ChatTreePanelProps = {
   loading?: boolean;
   error?: string;
   onJump?: (nodeId: string) => void;
-  highlightedNodeIds?: readonly string[];
+  nodeMarkers?: Readonly<Record<string, string>>;
+  header?: ReactNode;
   footer?: ReactNode;
   renderNodeStatus?: (status: string) => ReactNode;
 };
@@ -27,7 +28,8 @@ export const ChatTreePanel = ({
   error,
   operations = [],
   onJump,
-  highlightedNodeIds = [],
+  nodeMarkers = {},
+  header,
   footer,
   renderNodeStatus = (status) => status
 }: ChatTreePanelProps): ReactElement => {
@@ -50,7 +52,7 @@ export const ChatTreePanel = ({
     return <p className="awb-detail__empty">Select a session to inspect its chat tree.</p>;
   }
 
-  if (!chatTree.supportsJump || chatTree.nodes.length === 0) {
+  if (!chatTree.supportsJump) {
     return (
       <div className="awb-detail-card">
         <strong>Chat tree unavailable</strong>
@@ -61,6 +63,7 @@ export const ChatTreePanel = ({
 
   return (
     <div className="awb-chat-tree">
+      {header}
       <div className="awb-chat-tree__graph-shell">
         <div
           className="awb-chat-tree__graph-canvas"
@@ -113,7 +116,7 @@ export const ChatTreePanel = ({
               key={operation?.operationId ?? entry.node.nodeId}
               data-virtual={virtual ? "true" : undefined}
               type="button"
-              className={`awb-chat-tree__graph-node${entry.isCurrent ? " is-current" : ""}${entry.node.status === "pending" ? " is-running" : ""}${highlightedNodeIds.includes(entry.node.nodeId) ? " is-highlighted" : ""}`}
+              className={`awb-chat-tree__graph-node${entry.isCurrent ? " is-current" : ""}${entry.node.status === "pending" ? " is-running" : entry.node.unread ? " is-unread" : ""}${nodeMarkers[entry.node.nodeId] ? " has-marker" : ""}`}
               style={{
                 left: `${entry.x}px`,
                 top: `${entry.y}px`
@@ -122,10 +125,10 @@ export const ChatTreePanel = ({
               title={`${shortLabel(entry.node)}${status ? `\n${status}` : ""}${
                 entry.isCurrent ? "\nCurrent position." : "\nDouble-click to switch."
               }${entry.node.status === "pending" ? "\nRunning." : ""}`}
-              aria-label={`${shortLabel(entry.node)}${status ? `, ${status}` : ""}${entry.isCurrent ? ", current position" : ""}${entry.node.status === "pending" ? ", running" : ""}`}
+              aria-label={`${nodeMarkers[entry.node.nodeId] ? nodeMarkers[entry.node.nodeId] + ": " : ""}${shortLabel(entry.node)}${status ? `, ${status}` : ""}${entry.isCurrent ? ", current position" : ""}${entry.node.status === "pending" ? ", running" : entry.node.unread ? ", unread" : ""}`}
               aria-current={entry.isCurrent ? "step" : undefined}
             >
-              <span className="awb-chat-tree__graph-node-dot" />
+              <span className="awb-chat-tree__graph-node-dot">{nodeMarkers[entry.node.nodeId]}</span>
               {status && entry.isCurrent && <span className={`absolute top-full ${entry.x > canvasWidth / 2 ? "right-0" : "left-0"}`}>{renderNodeStatus(status)}</span>}
             </button>
           ); })}

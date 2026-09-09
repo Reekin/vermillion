@@ -19,6 +19,8 @@
   --awb-accent: #8c8f8d;
   --awb-accent-strong: #b6b9b7;
   --awb-accent-soft: rgba(140, 143, 141, 0.14);
+  --awb-tree-running: #cfb76a;
+  --awb-tree-unread: #8fbc98;
   --awb-success: #919491;
   --awb-warning: #94928f;
   --awb-danger: #918d8e;
@@ -1546,72 +1548,6 @@ label.awb-configuration-control > span {
   color: var(--awb-ink-muted);
 }
 
-.awb-chat-tree {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.awb-chat-tree__graph-shell {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 0 0 0;
-  scrollbar-gutter: stable both-edges;
-}
-
-.awb-chat-tree__graph-canvas {
-  position: relative;
-}
-
-.awb-chat-tree__graph-svg {
-  display: block;
-}
-
-.awb-chat-tree__graph-connector {
-  fill: none;
-  stroke: rgba(121, 123, 122, 0.28);
-  stroke-width: 1.2;
-  stroke-linecap: round;
-}
-
-.awb-chat-tree__graph-node {
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  margin-left: -10px;
-  margin-top: -10px;
-  display: grid;
-  place-items: center;
-  border: none;
-  background: transparent;
-}
-
-.awb-chat-tree__graph-node-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  border: 2px solid rgba(182, 185, 183, 0.7);
-  background: #222324;
-  box-shadow: 0 0 0 5px rgba(26, 26, 26, 0.78);
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    transform 160ms ease;
-}
-
-.awb-chat-tree__graph-node:hover .awb-chat-tree__graph-node-dot {
-  transform: scale(1.08);
-  border-color: rgba(182, 185, 183, 0.9);
-}
-
-.awb-chat-tree__graph-node.is-current .awb-chat-tree__graph-node-dot {
-  border-color: var(--awb-accent-strong);
-  background: var(--awb-accent);
-}
 
 .awb-chat-tree__graph-node[data-virtual="true"] .awb-chat-tree__graph-node-dot {
   border-style: dashed;
@@ -2077,9 +2013,9 @@ label.awb-configuration-control > span {
 .awb-chat-tree__graph-node.is-running::after {
   content: "";
   position: absolute;
-  width: 18px;
-  height: 18px;
-  border: 1px solid var(--awb-accent-strong);
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--awb-tree-running);
   border-top-color: transparent;
   border-radius: 50%;
   animation: awb-spin 1s linear infinite;
@@ -2196,6 +2132,8 @@ label.awb-configuration-control > span {
 }
 
 .awb-chat-tree__graph-node {
+  --node-color: var(--awb-ink-muted);
+  --node-fill: var(--awb-panel-alt);
   position: absolute;
   width: 20px;
   height: 20px;
@@ -2211,8 +2149,9 @@ label.awb-configuration-control > span {
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  border: 2px solid rgba(182, 185, 183, 0.7);
-  background: #222324;
+  border: 2px solid var(--node-color);
+  background: var(--node-fill);
+  color: var(--node-color);
   box-shadow: 0 0 0 5px rgba(26, 26, 26, 0.78);
   transition:
     border-color 160ms ease,
@@ -2222,12 +2161,6 @@ label.awb-configuration-control > span {
 
 .awb-chat-tree__graph-node:hover .awb-chat-tree__graph-node-dot {
   transform: scale(1.08);
-  border-color: rgba(182, 185, 183, 0.9);
-}
-
-.awb-chat-tree__graph-node.is-current .awb-chat-tree__graph-node-dot {
-  border-color: var(--awb-accent-strong);
-  background: var(--awb-accent);
 }
 
 .awb-pending-message-error {
@@ -2237,11 +2170,26 @@ label.awb-configuration-control > span {
   overflow-wrap: anywhere;
 }
 
-.awb-chat-tree__graph-node.is-highlighted .awb-chat-tree__graph-node-dot {
-  border-color: var(--awb-accent-strong);
-  background: var(--awb-accent-soft);
-  border-radius: 3px;
+.awb-chat-tree__graph-node.is-unread {
+  --node-color: var(--awb-tree-unread);
+  --node-fill: var(--awb-tree-unread);
 }
-.awb-chat-tree__graph-node.is-highlighted.is-current .awb-chat-tree__graph-node-dot {
-  background: var(--awb-accent-strong);
+.awb-chat-tree__graph-node.is-running {
+  --node-color: var(--awb-tree-running);
+  --node-fill: var(--awb-tree-running);
+}
+.awb-chat-tree__graph-node.is-current .awb-chat-tree__graph-node-dot {
+  outline: 1px solid var(--awb-ink-strong);
+  outline-offset: 3px;
+}
+.awb-chat-tree__graph-node.has-marker .awb-chat-tree__graph-node-dot {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--awb-panel-alt);
+  font-size: var(--awb-text-micro);
+  font-weight: 600;
+  line-height: 1;
 }

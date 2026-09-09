@@ -32,6 +32,7 @@ const fixture = async () => {
     relationType: "fork", sourceTurnId: "a" });
   let listener: (event: EventEnvelope) => void = () => {};
   const load = vi.fn().mockResolvedValue(true);
+  const changed = vi.fn();
   const fork = vi.fn(async (_sessionId: string, _turnId: string) => "branch");
   const service = new WrapperChatTreeService({
     sessionIndexStore: index,
@@ -40,15 +41,24 @@ const fixture = async () => {
       getSnapshot: () => snapshot,
       getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
       getRevision: () => "initial",
+      notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
     fork
   });
-  return { service, index, snapshot, load, fork, baseDir,
+  return { service, index, snapshot, load, fork, baseDir, changed,
+    completed: (sessionId: string, turnId: string) => listener({ event: { type: "turn.completed", sessionId, turnId, finishReason: "completed" } } as EventEnvelope),
     started: (sessionId: string, turnId: string) => listener({ event: { type: "turn.started", sessionId, turnId } } as EventEnvelope) };
 };
 
 describe("wrapper session trees", () => {
+  it("invalidates the existing graph subscription when any branch completes", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    f.completed("branch", "c");
+    expect(f.changed).toHaveBeenCalledWith("branch", ["b"]);
+    f.service.dispose();
+  });
   it("follows multiple automatic turns on the viewed branch without prepareSend", async () => {
     const f = await fixture();
     expect((await f.service.get("root")).currentNodeId).toBe("b");

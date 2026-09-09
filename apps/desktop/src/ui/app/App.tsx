@@ -206,6 +206,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             <div className={section === "sessions" ? "flex min-h-0 flex-1" : "hidden"}>
               <main className="relative min-w-0 flex-1">
                 <SessionPane
+                  isVisible={panel === "workbench" && section === "sessions" && !overlay}
                   store={sessionStore}
                   transport={transport}
                   sessionId={sessionId}

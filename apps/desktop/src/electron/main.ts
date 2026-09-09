@@ -804,7 +804,7 @@ const boot = async (): Promise<void> => {
     }
   });
   const localEndpoint = await startLocalEndpoint(persistenceBaseDir, async (request) => {
-    if (["chatTree.submit", "chatTree.retry", "chatTree.operations"].includes(request.method)) {
+    if (["chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
       const response = await router.handleRequest({ ...request, id: randomUUID() });
       return response.ok
         ? { ok: true, result: response.result }

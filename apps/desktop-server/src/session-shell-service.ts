@@ -805,6 +805,11 @@ export class SessionShellService {
     return this.wrapperChatTree.prepareSend(input.sessionId, input.nodeId);
   }
 
+  public async markChatTreeRead(input: { sessionId: string; nodeId: string }): Promise<{ readNodeIds: string[] }> {
+    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
+    return this.wrapperChatTree.markRead(input.sessionId, input.nodeId);
+  }
+
   public submitChatTreeSend(input: import("@vermillion/shared").ChatTreeSendInput) {
     if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
     return this.wrapperChatTree.submit(input, (command) => this.executeCommand(command));

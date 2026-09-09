@@ -94,6 +94,7 @@ export type SessionPaneProps = {
   transport: DesktopTransport;
   /** Tree entry to display; undefined renders the draft state (no session yet). */
   sessionId: string | undefined;
+  isVisible?: boolean;
   /** Incrementing this re-hydrates the displayed session from the provider (after resume). */
   reloadSignal?: number;
   /** Creates the session for the first message in draft state. Returns the new sessionId. */
@@ -591,6 +592,7 @@ export const SessionPane = ({
   store,
   transport,
   sessionId,
+  isVisible = true,
   reloadSignal,
   createSession,
   initializeDraftExecution,
@@ -719,6 +721,31 @@ export const SessionPane = ({
   const displayedSessionRevision = useRendererSessionsRevision(store, memberSessionIds);
   const domain = store.getDomainReadModel();
   const viewTurnId = activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId)?.turnId;
+  const [windowVisible, setWindowVisible] = useState(() => typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus());
+  useEffect(() => {
+    const update = () => setWindowVisible(document.visibilityState === "visible" && document.hasFocus());
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    document.addEventListener("visibilitychange", update);
+    document.addEventListener("focusin", update);
+    update();
+    return () => {
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+      document.removeEventListener("visibilitychange", update);
+      document.removeEventListener("focusin", update);
+    };
+  }, []);
+  const visibleNodeIds = new Set(activeChatTree?.visibleNodeIds ?? []);
+  const readableNodes = activeChatTree?.nodes.filter((node) => node.turnId && visibleNodeIds.has(node.nodeId)) ?? [];
+  const readNodeId = readableNodes.at(-1)?.nodeId;
+  const unreadVisibleKey = readableNodes.filter((node) => node.unread).map((node) => node.nodeId).join("\n");
+  useEffect(() => {
+    if (!isVisible || !windowVisible || !sessionId || !readNodeId || !unreadVisibleKey) return;
+    void transport.chatTree.markRead({ sessionId, nodeId: readNodeId }).catch((error: Error) => {
+      setStatusNotice({ source: "chat-tree", message: "更新已读状态失败：" + error.message });
+    });
+  }, [readNodeId, unreadVisibleKey, isVisible, windowVisible, sessionId, transport, setStatusNotice]);
   useEffect(() => {
     onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId });
   }, [onViewChange, viewSessionId, viewTurnId]);

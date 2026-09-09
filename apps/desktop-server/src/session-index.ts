@@ -26,6 +26,7 @@ const sessionIndexEntrySchema = z.object({
   archivedAt: z.string().min(1).optional(),
   lastTurnId: z.string().min(1).optional(),
   unreadState: unreadStateSchema.default("read"),
+  readTurnIds: z.array(z.string().min(1)).optional(),
   source: z.enum(["registry", "discovery", "reconciled"]).default("registry"),
   metadata: z.record(z.string(), z.unknown()).optional()
 });
@@ -129,6 +130,7 @@ const isSameSessionEntry = (
   left.archivedAt === right.archivedAt &&
   left.lastTurnId === right.lastTurnId &&
   left.unreadState === right.unreadState &&
+  isDeepStrictEqual(left.readTurnIds, right.readTurnIds) &&
   left.source === right.source &&
   isDeepStrictEqual(left.metadata, right.metadata);
 
@@ -389,6 +391,7 @@ export class SessionIndexStore {
       archivedAt: input.session.archivedAt ?? existing?.archivedAt,
       lastTurnId: input.session.lastTurnId,
       unreadState: input.unreadState ?? existing?.unreadState ?? "read",
+      readTurnIds: existing?.readTurnIds,
       source: input.source ?? existing?.source ?? "registry",
       metadata: input.session.metadata
     });
@@ -564,6 +567,21 @@ export class SessionIndexStore {
     };
     await this.persist();
     return updated;
+  }
+
+  public async markTurnsRead(turns: readonly { sessionId: string; turnId: string }[]): Promise<boolean> {
+    await this.ready();
+    let changed = false;
+    const entries = this.document.entries.map((entry) => {
+      const readTurnIds = new Set(entry.readTurnIds);
+      for (const turn of turns) if (turn.sessionId === entry.sessionId) readTurnIds.add(turn.turnId);
+      if (readTurnIds.size === (entry.readTurnIds?.length ?? 0)) return entry;
+      changed = true;
+      return { ...entry, readTurnIds: [...readTurnIds] };
+    });
+    if (changed) this.document = { ...this.document, entries };
+    await this.persistMutation(changed);
+    return changed;
   }
 
   public async markSessionUnreadCompleted(
