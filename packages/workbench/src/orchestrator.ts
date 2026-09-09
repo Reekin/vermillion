@@ -243,8 +243,12 @@ export class Orchestrator {
         if (item && turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, turnId);
       } else await this.runner.send(sessionId, message);
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
-      await this.service.updateAction(workspaceId, action, (latest) => latest.message === action.message && latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
-        ? { ...latest, status: "running", stage: "execute", message: "", deliveredAt: this.now(), retryAt: undefined } : latest);
+      await this.service.updateAction(workspaceId, action, (latest) => ({
+        ...latest,
+        ...(latest.message === action.message && latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
+          ? { status: "running" as const, stage: "execute" as const, message: "", failure: undefined, retryAt: undefined } : {}),
+        deliveredAt: this.now()
+      }));
     } catch (error) {
       await this.fail(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
     }
@@ -293,11 +297,6 @@ export class Orchestrator {
     const isolated = !!item.run.worktreePath;
     const branch = item.run.branch;
     const related = "sourceSessionId: " + (item.sourceSessionId ?? "") + "\nsourceTurnId: " + (item.sourceTurnId ?? "");
-    const prior = [
-      ...item.rejections.map((r) => "用户打回：" + r.reason),
-      ...item.decisions.map((d) => "已决策：" + d),
-      ...(item.run.lastFailure ? ["上次运行失败：" + item.run.lastFailure] : [])
-    ];
     return [
       "你负责工单「" + item.title + "」。",
       "workspaceId: " + workspaceId,
@@ -313,7 +312,6 @@ export class Orchestrator {
       ] : []),
       "",
       "先用 CLI 读取完整工单：vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "'",
-      ...(prior.length ? ["", "历史记录：", ...prior.map((p) => "- " + p)] : []),
       "",
       "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create，发现依赖另一张未合入的工单时通过 workItem.update 修改 dependsOn，需要用户取舍时直接创建决策卡；调用后结束会话。"
     ].join("\n");
@@ -330,9 +328,11 @@ export class Orchestrator {
   }
 
   private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {
+    const update = [action.message.trim(), action.failure].filter(Boolean).join("\n");
+    if (action.deliveredAt) return update;
     const item = await this.service.getWorkItem(workspaceId, action.workItemId);
     return [await this.workerMessage(workspaceId, item, cwd), "sessionId: " + action.sessionId,
-      "actionId: " + action.actionId, action.message, action.failure ?? "", this.completion()].join("\n");
+      "actionId: " + action.actionId, update].filter(Boolean).join("\n");
   }
 
   private async prepareRequests(workspaceId: string): Promise<void> {
