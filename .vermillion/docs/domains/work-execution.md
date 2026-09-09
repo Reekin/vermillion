@@ -1,6 +1,7 @@
 ---
 standards:
   - .vermillion/docs/Workbench/Missions/Standards.md
+  - .vermillion/docs/domains/acceptance/Standards.md
 ---
 # 工单执行与恢复
 
