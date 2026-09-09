@@ -126,8 +126,22 @@ export const effectiveNeeds = (item: WorkItem): string[] => [...new Set([
   ...item.needs, ...(!item.run.worktreePath && item.scope.allowedPaths.length ? ["workspace:root"] : [])
 ])];
 
+export const zWorkMessage = z.object({
+  content: z.string(),
+  attachments: z.array(z.object({
+    attachmentId: z.string().min(1), mimeType: z.string().min(1), uri: z.string().min(1),
+    displayUri: z.string().min(1).optional(), name: z.string().min(1).optional()
+  })).optional(),
+  execution: z.object({
+    modelId: z.string().min(1).optional(), reasoningOptionId: z.string().min(1).optional(),
+    serviceTierId: z.string().min(1).nullable().optional()
+  }).optional()
+});
+export type WorkMessage = z.infer<typeof zWorkMessage>;
+
 export const zWorkRequest = z.object({
-  requestId: z.string(), sourceSessionId: z.string(), sourceTurnId: z.string(),
+  requestId: z.string(), sourceSessionId: z.string(), sourceTurnId: z.string().optional(),
+  message: zWorkMessage.optional(),
   scope: z.string().optional(), treeId: z.string().optional(), workerSessionId: z.string().optional(),
   status: z.enum(["pending", "preparing", "ready", "failed"]),
   attempts: z.number().int().nonnegative().optional(), retryAt: z.string().optional(),

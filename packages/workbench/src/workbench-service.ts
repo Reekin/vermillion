@@ -59,7 +59,7 @@ export class WorkbenchService {
   private readonly integrations = new Map<string, Promise<unknown>>();
   private readonly decisionDeliveries = new Map<string, Promise<void>>();
   private schedulerOwner?: object;
-  private sourceTurnResolver?: (sessionId: string) => Promise<string>;
+  private sourceTurnResolver?: (sessionId: string) => Promise<string | undefined>;
   private workerActive?: (sessionId: string) => boolean;
   private releaseWorkerEnvironment?: (sessionId: string) => Promise<void>;
 
@@ -73,7 +73,7 @@ export class WorkbenchService {
     return () => { if (this.workerActive === checker) this.workerActive = undefined; };
   }
 
-  setSourceTurnResolver(resolver: (sessionId: string) => Promise<string>): () => void {
+  setSourceTurnResolver(resolver: (sessionId: string) => Promise<string | undefined>): () => void {
     this.sourceTurnResolver = resolver;
     return () => { if (this.sourceTurnResolver === resolver) this.sourceTurnResolver = undefined; };
   }
@@ -310,11 +310,12 @@ export class WorkbenchService {
     return list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  async startWork(workspaceId: string, input: { sessionId: string; turnId?: string; scope?: string }): Promise<WorkRequest> {
+  async startWork(workspaceId: string, input: { sessionId: string; turnId?: string; scope?: string; message?: WorkRequest["message"] }): Promise<WorkRequest> {
+    if (!input.turnId && !this.sourceTurnResolver) throw new Error("需要有效 turnId；省略时必须连接桌面解析当前会话节点。");
     const turnId = input.turnId ?? await this.sourceTurnResolver?.(input.sessionId);
-    if (!turnId) throw new Error("需要有效 turnId；省略时必须连接桌面解析当前会话节点。");
+    if (!turnId && !input.message?.content.trim() && !input.message?.attachments?.length) throw new Error("空会话需要提供开工内容。");
     return this.putWorkRequest(workspaceId, { requestId: createId("work"), sourceSessionId: input.sessionId,
-      sourceTurnId: turnId, scope: input.scope, status: "pending", createdAt: this.now(), updatedAt: this.now() });
+      sourceTurnId: turnId, message: input.message, scope: input.scope, status: "pending", createdAt: this.now(), updatedAt: this.now() });
   }
 
   async listWorkRequests(workspaceId: string): Promise<WorkRequest[]> {

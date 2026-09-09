@@ -118,6 +118,56 @@ async function fixture() {
   return { ...f, runner, active, orchestrator, complete };
 }
 
+it("sends composed input and configured preparation together after the selected source finishes", async () => {
+  const f = await fixture();
+  f.active.add("design");
+  f.orchestrator.start();
+  const message = { content: "[$review](/skills/review)\n\nImplement ABC", attachments: [
+    { attachmentId: "image", mimeType: "image/png", uri: "file:///example.png" }
+  ], execution: { modelId: "chosen-model", reasoningOptionId: "high", serviceTierId: null } };
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "viewed-turn", message });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.send).not.toHaveBeenCalled();
+  expect(f.runner.fork).not.toHaveBeenCalled();
+  expect((await f.service.listWorkRequests(f.workspaceId))[0]?.message).toEqual(message);
+  f.complete("design");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  expect(f.runner.fork).toHaveBeenCalledWith(expect.objectContaining({ sourceSessionId: "design", sourceTurnId: "viewed-turn" }));
+  const [target, content, options] = vi.mocked(f.runner.send).mock.calls[0]!;
+  expect(target).toBe("fork-1");
+  expect(content.startsWith(message.content + "\n\n" + (await f.roles.resolve(f.root, "work-preparation")).content)).toBe(true);
+  expect(content).toContain(request.requestId);
+  expect(options).toEqual({ attachments: message.attachments, execution: message.execution });
+});
+
+it("prepares a verified empty New Chat in place and preserves its message for retry", async () => {
+  const f = await fixture();
+  vi.mocked(f.runner.resolveSourceTurn!).mockResolvedValue(undefined);
+  vi.mocked(f.runner.send).mockRejectedValueOnce(new Error("provider unavailable"));
+  f.orchestrator.start();
+  const message = { content: "New task", attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png" }] };
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "new", message });
+  await vi.waitFor(async () => expect((await f.service.listWorkRequests(f.workspaceId))[0]?.failure).toBe("provider unavailable"));
+  expect(f.runner.fork).not.toHaveBeenCalled();
+  expect(f.runner.open).not.toHaveBeenCalled();
+  expect(f.runner.resume).not.toHaveBeenCalled();
+  const saved = (await f.service.listWorkRequests(f.workspaceId))[0]!;
+  expect(saved.sourceTurnId).toBeUndefined();
+  expect(saved.workerSessionId).toBe("new");
+  await f.service.putWorkRequest(f.workspaceId, { ...saved, retryAt: undefined });
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(f.runner.send).toHaveBeenLastCalledWith("new", expect.stringContaining("New task"), { attachments: message.attachments, execution: undefined });
+  expect(f.runner.fork).not.toHaveBeenCalled();
+});
+
+it("requires a source resolver to verify empty sessions and rejects contentless empty work", async () => {
+  const f = await fixture();
+  await expect(f.service.startWork(f.workspaceId, { sessionId: "unknown", message: { content: "task" } })).rejects.toThrow("turnId");
+  f.orchestrator.start();
+  vi.mocked(f.runner.resolveSourceTurn!).mockResolvedValue(undefined);
+  await expect(f.service.startWork(f.workspaceId, { sessionId: "empty" })).rejects.toThrow("空会话");
+});
+
 it("waits for the source turn, prepares while execution is disabled, then resumes and forks queued siblings", async () => {
   const f = await fixture();
   await f.service.setScheduler(f.workspaceId, { enabled: false, maxWorkers: 2 });

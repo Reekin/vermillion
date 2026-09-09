@@ -39,6 +39,7 @@ import {
 import { resolveSlashSuggestionItems } from "./composer/composer-suggestions.js";
 import type {
   ComposerSkillReference,
+  ComposerSubmitHandler,
   ComposerExecutionSelection,
   ComposerModelExecutionPreferences,
   ComposerIntent,
@@ -389,7 +390,7 @@ export type UseComposerControllerResult = ComposerViewModel & {
   ) => void;
   onTextareaSelect: (selectionStart: number) => void;
   onPrimaryAction: () => Promise<void>;
-  onSubmitWithInstruction: (instruction: string) => Promise<void>;
+  onSubmitUsing: (handler: ComposerSubmitHandler) => Promise<void>;
   onQueueCurrent: () => void;
   onStop: () => Promise<void>;
   onSuggestionHover: (index: number) => void;
@@ -1162,11 +1163,27 @@ export const useComposerController = (
     });
   };
 
-  const onSubmitWithInstruction = async (instruction: string): Promise<void> => {
-    if (!canSubmit) {
-      return;
+  const onSubmitUsing = async (handler: ComposerSubmitHandler): Promise<void> => {
+    if (!canSubmit) return;
+    const submittedRevision = contentRevisionRef.current;
+    const payload = {
+      content: serializeComposerContent(draft, selectedSkillsRef.current),
+      attachments: getAttachmentsForSession().map((item) => item.attachment),
+      execution: snapshotComposerExecution(execution)
+    };
+    setIsDispatching(true);
+    try {
+      const sessionId = input.activeSessionId ?? await input.createSession!(payload);
+      await handler({ sessionId, ...payload });
+      input.onStatusNotice(undefined);
+      if (submittedRevision === contentRevisionRef.current) {
+        onDraftChange("");
+        replaceSelectedSkills([]);
+        replaceAttachmentsForSession(contentDraftKey, [], { releaseCurrent: true });
+      }
+    } finally {
+      setIsDispatching(false);
     }
-    await submitCurrentInput([draft.trim(), instruction.trim()].filter(Boolean).join("\n\n"));
   };
 
   const onQueueCurrent = (): void => {
@@ -1583,7 +1600,7 @@ export const useComposerController = (
     onDraftChange,
     onTextareaSelect: setCursorPosition,
     onPrimaryAction,
-    onSubmitWithInstruction,
+    onSubmitUsing,
     onQueueCurrent,
     onStop,
     onSuggestionHover: setHighlightedSuggestionIndex,

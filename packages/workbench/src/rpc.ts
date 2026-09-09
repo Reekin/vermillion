@@ -15,6 +15,7 @@ import {
   zEvidence,
   zInboxItem,
   zWorkRequest,
+  zWorkMessage,
   zReviewDisposition,
   zRisk,
   zRoleFile,
@@ -69,7 +70,7 @@ export const workbenchRpc = {
   "role.write": { params: zWs.extend({ roleId: z.string().min(1), content: z.string() }), result: zEmpty },
   "role.reset": { params: zWs.extend({ roleId: z.string().min(1) }), result: zEmpty },
 
-  "work.start": { params: zWs.extend({ sessionId: z.string().min(1), turnId: z.string().min(1).optional(), scope: z.string().optional() }), result: zWorkRequest },
+  "work.start": { params: zWs.extend({ sessionId: z.string().min(1), turnId: z.string().min(1).optional(), scope: z.string().optional(), message: zWorkMessage.optional() }), result: zWorkRequest },
   "work.list": { params: zWs, result: z.array(zWorkRequest) },
   "work.retry": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
   "workItem.list": { params: zWs, result: z.array(zWorkItem) },

@@ -48,10 +48,20 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     await shell.setSessionTitle(sessionId, input.title);
     return { sessionId, treeId: tree.treeId ?? input.sourceSessionId };
   },
-  send: async (sessionId, content) => {
+  resolveSourceTurn: async (sessionId) => {
+    if (!await shell.ensureSessionLoadedForRead(sessionId)) throw new Error("Source session not found: " + sessionId);
+    await shell.getChatTree(sessionId);
+    const snapshot = shell.getSnapshot();
+    const session = snapshot.sessions.find((entry) => entry.sessionId === sessionId);
+    if (!session) throw new Error("Source session not found: " + sessionId);
+    return session.lastTurnId ?? snapshot.turns.filter((entry) => entry.sessionId === sessionId).at(-1)?.turnId
+      ?? (typeof session.metadata?.sourceTurnId === "string" ? session.metadata.sourceTurnId : undefined);
+  },
+  send: async (sessionId, content, options) => {
     const receipt = await shell.executeCommand({
       commandId: createId(),
-      command: { type: "sendUserMessage", sessionId, messageId: createId(), content, attachments: [] }
+      command: { type: "sendUserMessage", sessionId, messageId: createId(), content,
+        attachments: options?.attachments ?? [], execution: options?.execution }
     });
     if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
   },

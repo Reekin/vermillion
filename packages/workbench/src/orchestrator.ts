@@ -1,13 +1,14 @@
-import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type WorkItem, type RoleExecutionOverrides } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 
 /** What the orchestrator needs from the session engine. Implemented in Electron main over SessionShellService. */
 export type AgentRunner = {
-  resolveSourceTurn?: (sessionId: string) => Promise<string>;
+  /** Resolves the session's latest turn; undefined means a verified empty session. */
+  resolveSourceTurn?: (sessionId: string) => Promise<string | undefined>;
   fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; developerInstructions?: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
   open: (input: { workspaceId: string; cwd: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
-  send: (sessionId: string, content: string) => Promise<void>;
+  send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content">) => Promise<void>;
   /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
@@ -343,10 +344,11 @@ export class Orchestrator {
         const root = await this.service.workspaceRoot(workspaceId);
         const preparation = await this.roles.resolve(root, "work-preparation");
         if (!request.workerSessionId) {
-          const fork = await this.runner.fork({ workspaceId, sourceSessionId: request.sourceSessionId,
+          const fork = request.sourceTurnId ? await this.runner.fork({ workspaceId, sourceSessionId: request.sourceSessionId,
             sourceTurnId: request.sourceTurnId, modelConfig: preparation.modelConfig,
             title: "开工准备", metadata: { role: "work-preparation", requestId: request.requestId,
-              sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId } });
+              sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId } })
+            : { sessionId: request.sourceSessionId, treeId: request.sourceSessionId };
           request = await this.service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: fork.sessionId, treeId: fork.treeId });
         }
         const sessionId = request.workerSessionId!;
@@ -357,13 +359,14 @@ export class Orchestrator {
           else this.preparing.set(sessionId, workspaceId);
           continue;
         }
-        if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备分支");
+        if (request.sourceTurnId && !await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备分支");
         this.preparing.set(sessionId, workspaceId);
-        await this.runner.send(sessionId, [preparation.content,
+        await this.runner.send(sessionId, [request.message?.content, preparation.content,
           "workspaceId: " + workspaceId, "sessionId: " + sessionId, "requestId: " + request.requestId,
-          "sourceSessionId: " + request.sourceSessionId, "sourceTurnId: " + request.sourceTurnId,
+          "sourceSessionId: " + request.sourceSessionId, request.sourceTurnId ? "sourceTurnId: " + request.sourceTurnId : "",
           "开工范围: " + (request.scope ?? "根据当前讨论确定完整范围。"),
-          request.failure ? "上次准备未完成：" + request.failure : ""].join("\n"));
+          request.failure ? "上次准备未完成：" + request.failure : ""].filter(Boolean).join("\n\n"),
+          request.message ? { attachments: request.message.attachments, execution: request.message.execution } : undefined);
       } catch (error) {
         if (request.workerSessionId) this.preparing.delete(request.workerSessionId);
         await this.service.failWorkRequest(workspaceId, request.requestId, error instanceof Error ? error.message : String(error));

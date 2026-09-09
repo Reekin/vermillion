@@ -98,6 +98,63 @@ beforeEach(() => {
 });
 
 describe("composer content lifetime", () => {
+  it.each(["idle", "running"] as const)("submits composed payload directly through a handler from a %s source", async (status) => {
+    const prepareSend = vi.fn();
+    const submitBranch = vi.fn();
+    const handler = vi.fn(async () => {});
+    const h = setup({ activeSession: session("a", status), prepareSend, submitBranch });
+    let c = await h.flush();
+    c.onModelChange("two");
+    c.onDraftChange("$review");
+    c = h.render();
+    await c.onSuggestionSelect(c.suggestions!.items[0]!);
+    c = h.render();
+    c.onDraftChange("/goal actual requirement");
+    c.onComposerDrop({ preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] } } as Parameters<typeof c.onComposerDrop>[0]);
+    c = await h.flush();
+    handler.mockRejectedValueOnce(new Error("registration failed"));
+    await expect(c.onSubmitUsing(handler)).rejects.toThrow("registration failed");
+    c = h.render();
+    expect(c.draft).toBe("/goal actual requirement");
+    expect(c.attachments).toHaveLength(1);
+    expect(c.selectedSkills).toHaveLength(1);
+    await c.onSubmitUsing(handler);
+    expect(handler).toHaveBeenLastCalledWith({ sessionId: "a", content: "[$review](/review)\n\n/goal actual requirement",
+      attachments: [attachment.attachment], execution: expect.objectContaining({ modelId: "two" }) });
+    expect(h.render().draft).toBe("");
+    expect(h.render().attachments).toEqual([]);
+    expect(h.render().selectedSkills).toEqual([]);
+    expect(h.render().queue).toEqual([]);
+    for (const send of [h.send, h.steer, prepareSend, submitBranch]) expect(send).not.toHaveBeenCalled();
+  });
+
+  it("creates New Chat without sending a turn before calling the submit handler", async () => {
+    const createSession = vi.fn(async () => "new-session");
+    const handler = vi.fn(async () => {});
+    const h = setup({ activeSessionId: undefined, activeSession: undefined, createSession });
+    let c = await h.flush();
+    c.onDraftChange("new requirement");
+    c = h.render();
+    await c.onSubmitUsing(handler);
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "new-session", content: "new requirement" }));
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.render().draft).toBe("");
+  });
+
+  it("keeps edits made while a custom submission is pending", async () => {
+    const h = setup();
+    let c = await h.flush();
+    c.onDraftChange("submitted");
+    c = h.render();
+    let finish!: () => void;
+    const pending = c.onSubmitUsing(() => new Promise<void>((resolve) => { finish = resolve; }));
+    c = h.render({ activeSessionId: "b", activeSession: session("b") });
+    c.onDraftChange("next draft");
+    finish();
+    await pending;
+    expect(h.render().draft).toBe("next draft");
+  });
   it("keeps text, skills and attachments through nodes, trees and the opening gap", async () => {
     const h = setup({ draftKey: "a:node-1" });
     let c = await h.flush();
@@ -121,14 +178,14 @@ describe("composer content lifetime", () => {
       expect(c.attachments).toHaveLength(1);
     }
     h.send.mockResolvedValueOnce({ accepted: false });
-    await c.onSubmitWithInstruction("Start the work.");
+    await c.onPrimaryAction();
     c = h.render();
     expect(c.draft).toBe("unfinished");
     expect(c.selectedSkills).toHaveLength(1);
     expect(c.attachments).toHaveLength(1);
-    await c.onSubmitWithInstruction("Start the work.");
+    await c.onPrimaryAction();
     expect(h.send).toHaveBeenLastCalledWith(expect.objectContaining({
-      sessionId: "b", content: "[$review](/review)\n\nunfinished\n\nStart the work.",
+      sessionId: "b", content: "[$review](/review)\n\nunfinished",
       attachments: [attachment.attachment]
     }));
     c = h.render();
@@ -143,9 +200,9 @@ describe("composer content lifetime", () => {
     c.onModelChange("two");
     c.onDraftChange("queued");
     c = h.render();
-    await c.onSubmitWithInstruction("Start the work.");
+    await c.onPrimaryAction();
     c = h.render();
-    expect(c.queue[0]?.text).toBe("queued\n\nStart the work.");
+    expect(c.queue[0]?.text).toBe("queued");
     expect(c.draft).toBe("");
     c = h.render({ activeSessionId: "b", activeSession: session("b") });
     expect(c.queue).toEqual([]);
@@ -173,20 +230,6 @@ describe("composer content lifetime", () => {
     expect(h.render({ activeSessionId: undefined, activeSession: undefined }).draft).toBe("");
   });
 
-  it("appends explicit instructions without interpreting slash commands, preserving content on rejection", async () => {
-    const h = setup();
-    let c = await h.flush();
-    c.onDraftChange("/goal discuss this");
-    c = h.render();
-    h.send.mockResolvedValueOnce({ accepted: false });
-    await c.onSubmitWithInstruction("Start the work.");
-    c = h.render();
-    expect(c.draft).toBe("/goal discuss this");
-    await c.onSubmitWithInstruction("Start the work.");
-    expect(h.send).toHaveBeenLastCalledWith(expect.objectContaining({ content: "/goal discuss this\n\nStart the work." }));
-    expect(h.render().draft).toBe("");
-  });
-
   it.each(["text", "skill", "attachment"])("preserves the edited buffer when a delayed send accepts after navigation (%s)", async (edit) => {
     const h = setup();
     let c = await h.flush();
@@ -199,7 +242,7 @@ describe("composer content lifetime", () => {
     c = await h.flush();
     let accept!: (receipt: { accepted: boolean }) => void;
     h.send.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
-    const pending = c.onSubmitWithInstruction("Start the work.");
+    const pending = c.onPrimaryAction();
     c = h.render({ activeSessionId: "b", activeSession: session("b"), draftKey: "b:node" });
     if (edit === "text") c.onDraftChange("new unsent input");
     if (edit === "skill") c.onRemoveSkill(c.selectedSkills[0]!.id);
@@ -212,7 +255,7 @@ describe("composer content lifetime", () => {
     expect({ draft: c.draft, skills: c.selectedSkills, attachments: c.attachments }).toEqual(expected);
     expect(c.draft).toBe(edit === "text" ? "new unsent input" : "submitted");
     expect(h.send).toHaveBeenCalledWith(expect.objectContaining({
-      sessionId: "a", content: "[$review](/review)\n\nsubmitted\n\nStart the work."
+      sessionId: "a", content: "[$review](/review)\n\nsubmitted"
     }));
   });
 
@@ -225,7 +268,7 @@ describe("composer content lifetime", () => {
     expect(h.render({ activeSessionId: "a", activeSession: session("a") }).draft).toBe("only a");
   });
 
-  it("uses steer for explicit instructions during a steer-capable turn", async () => {
+  it("uses steer for normal messages during a steer-capable turn", async () => {
     const h = setup({ activeSession: { ...session("a", "running"), lastTurnId: "turn" }, allowSessionLastTurnFallback: true });
     let c = await h.flush();
     c = h.render({ transport: {
@@ -236,9 +279,9 @@ describe("composer content lifetime", () => {
     c.onDraftChange("adjust scope");
     c = h.render();
     expect(c.intent).toBe("steer");
-    await c.onSubmitWithInstruction("Start the work.");
+    await c.onPrimaryAction();
     expect(h.steer).toHaveBeenCalledWith(expect.objectContaining({
-      sessionId: "a", turnId: "turn", content: "adjust scope\n\nStart the work."
+      sessionId: "a", turnId: "turn", content: "adjust scope"
     }));
     expect(h.render().draft).toBe("");
   });

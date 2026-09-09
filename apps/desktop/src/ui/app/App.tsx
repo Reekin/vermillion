@@ -226,8 +226,9 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">
                 <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
                   <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
-                    if (!sessionWorkspaceId) throw new Error("请先选择会话。");
-                    await store.getState().client.request("work.start", { workspaceId: sessionWorkspaceId, ...input });
+                    const workspaceId = sessionId ? sessionWorkspaceId : draftWorkspaceId;
+                    if (!workspaceId) throw new Error("请先选择 workspace。");
+                    await store.getState().client.request("work.start", { workspaceId, ...input });
                     store.getState().setDocCommit({ kind: "work", title: openSession?.title ?? "当前会话" });
                   }} />
                 } />
