@@ -120,6 +120,7 @@ async function fixture() {
 
 it("waits for the source turn, prepares while execution is disabled, then resumes and forks queued siblings", async () => {
   const f = await fixture();
+  await f.service.setScheduler(f.workspaceId, { enabled: false, maxWorkers: 2 });
   f.active.add("design"); f.orchestrator.start();
   const request = await f.service.startWork(f.workspaceId, { sessionId: "design", scope: "ABC" });
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -128,7 +129,7 @@ it("waits for the source turn, prepares while execution is disabled, then resume
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(1));
   expect(f.runner.fork).toHaveBeenCalledWith(expect.objectContaining({ sourceSessionId: "design", sourceTurnId: "source-turn", metadata: expect.objectContaining({ role: "work-preparation" }) }));
   expect(vi.mocked(f.runner.fork).mock.calls[0]![0].developerInstructions).toBeUndefined();
-  expect(vi.mocked(f.runner.send).mock.calls[0]![1]).toContain("# 开工准备");
+  expect(vi.mocked(f.runner.send).mock.calls[0]![1]).toContain((await f.roles.resolve(f.root, "work-preparation")).content);
   expect(f.runner.resume).not.toHaveBeenCalledWith("fork-1", expect.objectContaining({ developerInstructions: expect.any(String) }));
   const first = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "fork-1" });
   const sibling = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId });

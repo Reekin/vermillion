@@ -140,7 +140,7 @@ export class WorkspaceStore {
     try {
       return zScheduler.parse(JSON.parse(await readFile(this.schedulerPath, "utf8")));
     } catch {
-      return { enabled: false, maxWorkers: 2 };
+      return { enabled: true, maxWorkers: 2 };
     }
   }
 
