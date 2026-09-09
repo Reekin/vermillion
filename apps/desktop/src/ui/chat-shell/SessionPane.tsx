@@ -1,4 +1,3 @@
-import { StartWorkButton } from "../app/components/StartWorkButton.js";
 import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import {
   memo,
@@ -101,7 +100,7 @@ export type SessionPaneProps = {
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
-  onStartWork?: (input: { sessionId: string; turnId: string }) => Promise<void>;
+  onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
   getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
@@ -591,7 +590,7 @@ export const SessionPane = ({
   createSession,
   initializeDraftExecution,
   composerExtras,
-  onStartWork,
+  onViewChange,
   getSendOptions,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
@@ -711,6 +710,11 @@ export const SessionPane = ({
   );
   const displayedSessionRevision = useRendererSessionsRevision(store, memberSessionIds);
   const domain = store.getDomainReadModel();
+  const viewTurnId = activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId)?.turnId;
+  useEffect(() => {
+    onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId });
+  }, [onViewChange, viewSessionId, viewTurnId]);
+
   const displayedSession = viewSessionId ? domain.getSession(viewSessionId) : undefined;
   const activeSessionId = displayedSession && !isOpeningSelectedSession ? viewSessionId : undefined;
   const activeSessionWindow = activeChatTree?.windows?.find((window) => window.sessionId === viewSessionId);
@@ -1091,7 +1095,7 @@ export const SessionPane = ({
         <ComposerContainer
           draftKey={pendingSend?.operationId ?? operations.find((operation) => operation.targetSessionId === activeSessionId)?.operationId ?? activeSessionId}
           initializeDraftExecution={initializeDraftExecution}
-          extraExecutionControls={<>{composerExtras}{onStartWork && <StartWorkButton sessionId={viewSessionId} turnId={activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId)?.turnId} onStart={onStartWork} />}</>}
+          extraExecutionControls={composerExtras}
           getSendOptions={getSendOptions}
           transport={transport}
           activeSession={activeSession}

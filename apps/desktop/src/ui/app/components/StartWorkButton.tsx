@@ -15,6 +15,6 @@ export const StartWorkButton = ({ sessionId, turnId, onStart }: {
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   };
-  return <><Button variant="primary" disabled={!sessionId || !turnId || busy} onClick={() => void start()}>{busy ? "开工中…" : "开工"}</Button>
+  return <><Button variant="primary" className="w-full" disabled={!sessionId || !turnId || busy} onClick={() => void start()}>{busy ? "开工中…" : "开工"}</Button>
     {error && <InlineNotice tone="error">{error}</InlineNotice>}</>;
 };

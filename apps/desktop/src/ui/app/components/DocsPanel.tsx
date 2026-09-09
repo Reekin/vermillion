@@ -1,15 +1,16 @@
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
-import { useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import type { DocChange, DocFile } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { cn } from "../lib/cn.js";
-import { Button, EmptyState, InlineNotice, PanelHeader } from "./ui.js";
+import { EmptyState, InlineNotice, PanelHeader } from "./ui.js";
 import { CommitDocsDialog } from "./CommitDocsDialog.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { DiffDialog } from "./DiffDialog.js";
 
 type DocsPanelProps = {
   store: WorkbenchStore;
+  primaryAction: ReactNode;
   onFileAction: (absolutePath: string, action: "open" | "reveal") => Promise<void>;
 };
 
@@ -46,7 +47,7 @@ const statusMark: Record<DocChange["status"], string> = { added: "U", modified: 
 const EMPTY_DOCS: DocFile[] = [];
 const EMPTY_CHANGES: DocChange[] = [];
 
-export const DocsPanel = ({ store, onFileAction }: DocsPanelProps) => {
+export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps) => {
   const client = store((s) => s.client);
   const workspace = store((s) => s.workspaces.find((w) => w.workspaceId === s.browsingWorkspaceId));
   const view = store((s) => s.view);
@@ -98,6 +99,7 @@ export const DocsPanel = ({ store, onFileAction }: DocsPanelProps) => {
 
   const onContextMenu = (event: MouseEvent, path: string) => {
     event.preventDefault();
+    event.stopPropagation();
     setMenu({ x: event.clientX, y: event.clientY, path });
   };
 
@@ -135,7 +137,7 @@ export const DocsPanel = ({ store, onFileAction }: DocsPanelProps) => {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" onContextMenu={(event) => onContextMenu(event, ".vermillion/docs")}>
       <PanelHeader title="Docs">
         {pending.length > 0 && <span className="font-mono text-micro text-accent-strong">{pending.length} 处变更</span>}
       </PanelHeader>
@@ -145,7 +147,7 @@ export const DocsPanel = ({ store, onFileAction }: DocsPanelProps) => {
         {tree.map((node) => renderNode(node, 0))}
       </ul>
       <div className="border-t border-border p-3">
-        <Button variant="primary" className="w-full" disabled={pending.length === 0} onClick={() => setCommitOpen(true)}>仅提交</Button>
+        {primaryAction}
       </div>
 
       {menu && (
@@ -154,6 +156,7 @@ export const DocsPanel = ({ store, onFileAction }: DocsPanelProps) => {
           y={menu.y}
           onClose={() => setMenu(undefined)}
           items={[
+            { key: "commit", label: "Commit", disabled: pending.length === 0, onSelect: () => setCommitOpen(true) },
             ...(docs.some((doc) => doc.path === menu.path)
               ? [{ key: "diff", label: "Diff", onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
               : []),
