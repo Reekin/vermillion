@@ -7,23 +7,21 @@ import { actionStatusLabel, dispositionSummary, actionRoleLabel } from "./workfl
 import { statusLabel } from "./task-labels.js";
 import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotice, DetailSection, ListRow } from "./ui.js";
 
-type InboxPanelProps = { store: WorkbenchStore };
+type InboxPanelProps = { store: WorkbenchStore; includeProcessed?: boolean };
 
-export const InboxPanel = ({ store }: InboxPanelProps) => {
-  const pending = store((s) => s.inbox);
-  const receipts = store((s) => s.inboxReceipts);
-  const inbox = [...pending, ...receipts.filter((receipt) => !pending.some((entry) => entry.kind === "decision" && entry.workspaceId === receipt.workspaceId && entry.card.decisionId === receipt.card.decisionId))];
+export const InboxPanel = ({ store, includeProcessed = false }: InboxPanelProps) => {
+  const inbox = store((s) => includeProcessed ? s.inboxHistory : s.inbox);
   const inboxError = store((s) => s.inboxError);
   if (inboxError) {
     return <EmptyState title="Inbox 加载失败" hint={inboxError} />;
   }
   if (inbox.length === 0) {
-    return <EmptyState title="没有待处理事项" hint="决策卡和已合入通知会出现在这里。" />;
+    return <EmptyState title={includeProcessed ? "暂无消息" : "没有待处理事项"} hint="决策卡和已合入通知会出现在这里。" />;
   }
   return (
     <ul className="mx-auto w-full max-w-4xl space-y-3 p-4">
       {inbox.map((item) => (
-        <li key={item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId}>
+        <li key={item.workspaceId + "/" + (item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId)}>
           {item.kind === "decision" ? <DecisionCard store={store} item={item} /> : <MergedCard store={store} item={item} />}
         </li>
       ))}
@@ -46,15 +44,11 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const dispositions = action ? dispositionSummary(action) : [];
   const relatedIds = [...new Set([...(action ? [action.workItemId] : []), ...(card.workItemId ? [card.workItemId] : [])])];
   const sessionId = card.sessionId ?? data?.workItems.find((entry) => entry.workItemId === card.workItemId)?.run.sessionId;
-  const retainDecision = store((s) => s.retainDecision);
-  const dismissDecision = store((s) => s.dismissDecision);
   const answered = !!card.answer;
   const adjustments = card.adjustments ?? [];
-  // Keep the card mounted while the pending-list event arrives, then show the persisted answer.
   const answer = async (key?: string) => {
     setBusy(true);
     setError(null);
-    retainDecision(item);
     try {
       await client.request("decision.answer", { workspaceId: item.workspaceId, decisionId: item.card.decisionId, key, note: note.trim() || undefined });
     } catch (caught) {
@@ -63,7 +57,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       setBusy(false);
     }
   };
-  if (card.withdrawn) return null;
+  if (card.withdrawn && !answered) return null;
   return (
     <>
     <Card
@@ -117,7 +111,6 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       {answered && <DetailSection title="答复结果">
         <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
         <p>{card.kind === "attempts" ? (card.deliveryPending ? "操作已保存，等待处理" : "操作已处理") : (card.deliveryPending ? "答复已保存，等待送达 Worker" : "答复已送达 Worker")}</p>
-        <Button size="sm" variant="ghost" onClick={() => dismissDecision(item.workspaceId, card.decisionId)}>知道了</Button>
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
         <p>{actionRoleLabel(action)} · {actionStatusLabel[action.status]}</p>
@@ -181,12 +174,14 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
     <Card
       header={
         <>
-          <Badge>已合入</Badge>
+          <Badge>{workItem.merge?.acknowledgedAt ? "已处理" : "已合入"}</Badge>
           <span className="ml-auto truncate text-caption text-muted-foreground">工单</span>
         </>
       }
       footer={
-        rollingBack ? (
+        workItem.merge?.acknowledgedAt ? (
+          workItem.run.sessionId && <Button variant="ghost" size="sm" outlined onClick={() => showAgentSession(item.workspaceId, workItem.run.sessionId!)}>会话</Button>
+        ) : rollingBack ? (
           <form
             className="flex min-w-0 flex-1 flex-wrap items-end gap-2"
             onSubmit={(event) => {

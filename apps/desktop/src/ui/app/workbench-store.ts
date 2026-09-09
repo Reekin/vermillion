@@ -45,9 +45,7 @@ export type WorkbenchState = {
   /** Why the last view load failed (a bad record, a missing workspace); cleared on the next successful load. */
   viewError: string | undefined;
   inbox: InboxItem[];
-  inboxReceipts: Extract<InboxItem, { kind: "decision" }>[];
-  retainDecision: (item: Extract<InboxItem, { kind: "decision" }>) => void;
-  dismissDecision: (workspaceId: string, decisionId: string) => void;
+  inboxHistory: InboxItem[];
   inboxError: string | undefined;
   tasks: TaskSummary[];
   tasksError: string | undefined;
@@ -137,7 +135,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
 
     const loadInbox = async () => {
       try {
-        set({ inbox: await client.request("inbox.list", {}), inboxError: undefined });
+        const inboxHistory = await client.request("inbox.list", { includeProcessed: true });
+        const inbox = inboxHistory.filter((item) => item.kind === "decision" ? !item.card.answer && !item.card.withdrawn : !item.workItem.merge?.acknowledgedAt);
+        set({ inbox, inboxHistory, inboxError: undefined });
       } catch (error) {
         set({ inboxError: (error as Error).message });
       }
@@ -159,9 +159,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       view: undefined,
       viewError: undefined,
       inbox: [],
-      inboxReceipts: [],
-      retainDecision: (item) => set((state) => ({ inboxReceipts: [...state.inboxReceipts.filter((entry) => entry.card.decisionId !== item.card.decisionId || entry.workspaceId !== item.workspaceId), item] })),
-      dismissDecision: (workspaceId, decisionId) => set((state) => ({ inboxReceipts: state.inboxReceipts.filter((entry) => entry.workspaceId !== workspaceId || entry.card.decisionId !== decisionId) })),
+      inboxHistory: [],
       inboxError: undefined,
       tasks: [],
       tasksError: undefined,

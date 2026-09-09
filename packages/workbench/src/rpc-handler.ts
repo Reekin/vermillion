@@ -62,7 +62,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "decision.list": (p) => service.listDecisions(p.workspaceId),
     "decision.create": (p) => service.createDecision(p.workspaceId, p),
     "decision.answer": (p) => service.answerDecision(p.workspaceId, p.decisionId, { key: p.key, note: p.note }),
-    "inbox.list": () => service.listInbox(),
+    "inbox.list": (p) => service.listInbox(p.includeProcessed),
 
     "app.start": (p) => service.startApp(p),
     "app.stop": async (p) => { await service.stopApp(p.pid); return {}; },
