@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "../src/codex-app-server-generated/v2/Thread.js";
+import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
 import {
   CodexSessionDiscoveryProvider,
   SessionReconciliationService
@@ -125,6 +126,102 @@ afterEach(async () => {
   }
 });
 
+describe("cold history hydration", () => {
+  const setupHistory = async (mode: "full" | "page", loaded = false) => {
+    const root = await createTempDir();
+    const thread = createThread({ id: "thread-history", cwd: join(root, "removed-worktree") });
+    thread.turns = [{
+      id: "turn-history", status: "completed", error: null, itemsView: "full",
+      startedAt: null, completedAt: null, durationMs: null,
+      items: [{ type: "agentMessage", id: "answer", text: "Saved worker answer", phase: "final_answer", memoryCitation: null }]
+    }];
+    const entry = {
+      workspaceId: "workspace-history", sessionId: "worker-history", conversationId: "conversation-history",
+      engineId: "codex", providerKind: "codex-thread", providerSessionId: thread.id,
+      createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z"
+    };
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [] });
+    vi.spyOn(port, "start").mockResolvedValue();
+    let finishResume!: () => void;
+    const resumeGate = new Promise<void>((resolve) => { finishResume = resolve; });
+    const internals = port as unknown as {
+      rpc: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+    };
+    const rpc = vi.spyOn(internals, "rpc").mockImplementation(async (method, params) => {
+      switch (method) {
+        case "thread/read":
+          return { thread: params.includeTurns ? thread : { ...thread, status: { type: loaded ? "idle" : "notLoaded" }, turns: [] } };
+        case "thread/resume":
+          await resumeGate;
+          return { thread: { ...thread, cwd: root } };
+        case "thread/turns/list":
+          return { data: thread.turns, nextCursor: "older", backwardsCursor: null };
+        case "thread/goal/get": return { goal: null };
+        case "thread/unsubscribe": return { status: "unsubscribed" };
+        default: throw new Error(`Unexpected history RPC: ${method}`);
+      }
+    });
+    const resolveHistoryCwd = vi.fn().mockReturnValue(root);
+    const provider = new CodexSessionDiscoveryProvider({ codexRuntimePort: port, resolveHistoryCwd });
+    const hydrate = (isCancelled?: () => boolean) => mode === "full"
+      ? provider.hydrateSession(entry, { isCancelled })
+      : provider.hydrateSessionWindow(entry, { limit: 1, cursor: "page-cursor", isCancelled });
+    return { root, port, rpc, hydrate, finishResume, resolveHistoryCwd };
+  };
+
+  it.each(["full", "page"] as const)("loads cold %s history at the workspace root before reading and unsubscribes without starting a turn", async (mode) => {
+    const { root, port, rpc, hydrate, finishResume, resolveHistoryCwd } = await setupHistory(mode);
+    const pending = hydrate();
+    await vi.waitFor(() => expect(rpc.mock.calls.map(([method]) => method)).toEqual(["thread/read", "thread/resume"]));
+    expect(rpc.mock.calls[0]?.[1]).toEqual({ threadId: "thread-history", includeTurns: false });
+    expect(rpc.mock.calls[1]?.[1]).toMatchObject({ threadId: "thread-history", cwd: root });
+    expect(resolveHistoryCwd).toHaveBeenCalledExactlyOnceWith("workspace-history");
+    finishResume();
+
+    const result = await pending;
+    expect(result?.messageBlocks).toContainEqual(expect.objectContaining({ role: "assistant", text: "Saved worker answer" }));
+    expect(result?.turns[0]?.turnId).toBe("turn-history");
+    expect(rpc.mock.calls.map(([method]) => method)).toEqual([
+      "thread/read", "thread/resume", ...(mode === "page" ? ["thread/turns/list"] : []), "thread/goal/get", "thread/unsubscribe"
+    ]);
+    if (mode === "page") {
+      expect(rpc).toHaveBeenCalledWith("thread/turns/list", {
+        threadId: "thread-history", cursor: "page-cursor", limit: 1, sortDirection: "desc", itemsView: "full"
+      });
+    }
+    expect(port.isThreadExecutionReleased("thread-history")).toBe(true);
+  });
+
+  it.each(["full", "page"] as const)("leaves already loaded %s history subscribed", async (mode) => {
+    const { rpc, hydrate, resolveHistoryCwd } = await setupHistory(mode, true);
+    expect((await hydrate())?.messageBlocks).toContainEqual(expect.objectContaining({ text: "Saved worker answer" }));
+    expect(rpc.mock.calls.map(([method]) => method)).toEqual([
+      "thread/read", mode === "full" ? "thread/read" : "thread/turns/list", "thread/goal/get"
+    ]);
+    expect(resolveHistoryCwd).not.toHaveBeenCalled();
+  });
+
+  it.each(["full", "page"] as const)("unsubscribes cold %s history when cancelled during loading", async (mode) => {
+    const { port, rpc, hydrate, finishResume } = await setupHistory(mode);
+    let cancelled = false;
+    const pending = hydrate(() => cancelled);
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith("thread/resume", expect.anything(), {}));
+    cancelled = true;
+    finishResume();
+    await expect(pending).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenLastCalledWith("thread/unsubscribe", { threadId: "thread-history" });
+    expect(port.getThreadIdForSession("worker-history")).toBeUndefined();
+  });
+
+  it.each(["full", "page"] as const)("unsubscribes cold %s history when transcript hydration fails", async (mode) => {
+    const { rpc, hydrate, finishResume } = await setupHistory(mode);
+    vi.mocked(readCodexRolloutTimestampGroups).mockRejectedValueOnce(new Error("Unreadable rollout"));
+    finishResume();
+    await expect(hydrate()).rejects.toThrow("Unreadable rollout");
+    expect(rpc).toHaveBeenLastCalledWith("thread/unsubscribe", { threadId: "thread-history" });
+  });
+});
+
 describe("Session discovery and reconciliation", () => {
   it("keeps an already-bound main session executable without resuming its running thread", async () => {
     const resumeThread = vi.fn();
@@ -147,13 +244,15 @@ describe("Session discovery and reconciliation", () => {
     expect(attachThreadToSession).not.toHaveBeenCalled();
   });
 
-  it("resumes an unbound main session into the current app-server process", async () => {
-    const resumeThread = vi.fn().mockResolvedValue(createThread({ id: "thread-main" }));
+  it.each(["unbound", "released"])("resumes a %s session at its workspace root", async (state) => {
+    const resumeThread = vi.fn().mockResolvedValue(createThread({ id: "thread-main", cwd: "I:/workspace-alpha/removed-worktree" }));
     const attachThreadToSession = vi.fn();
+    const resolveHistoryCwd = vi.fn().mockReturnValue("I:/workspace-alpha");
     const provider = new CodexSessionDiscoveryProvider({
+      resolveHistoryCwd,
       codexRuntimePort: {
-        isThreadExecutionReleased: () => false,
-        getThreadIdForSession: vi.fn().mockReturnValue(undefined),
+        isThreadExecutionReleased: () => state === "released",
+        getThreadIdForSession: vi.fn().mockReturnValue(state === "released" ? "thread-main" : undefined),
         resumeThread,
         attachThreadToSession
       } as never
@@ -161,10 +260,12 @@ describe("Session discovery and reconciliation", () => {
 
     await expect(provider.ensureSessionExecutable({
       sessionId: "codex-thread:thread-main",
+      workspaceId: "workspace-1",
       providerSessionId: "thread-main"
     } as never)).resolves.toBe(true);
 
-    expect(resumeThread).toHaveBeenCalledWith("thread-main");
+    expect(resolveHistoryCwd).toHaveBeenCalledExactlyOnceWith("workspace-1");
+    expect(resumeThread).toHaveBeenCalledExactlyOnceWith("thread-main", "I:/workspace-alpha");
     expect(attachThreadToSession).toHaveBeenCalledWith(
       "codex-thread:thread-main",
       "thread-main"
@@ -427,7 +528,7 @@ describe("Session discovery and reconciliation", () => {
     expect(discovered.get("workspace-1")?.sessions).toHaveLength(10_000);
   });
 
-  it("hydrates cold session windows from paged codex turns without resuming", async () => {
+  it("hydrates loaded session windows from paged codex turns without resuming", async () => {
     const readThread = vi.fn().mockResolvedValue(createThread({ id: "thread-page" }));
     const listThreadTurns = vi.fn().mockResolvedValue({
       data: [
@@ -1532,7 +1633,7 @@ describe("Session discovery and reconciliation", () => {
       createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z"
     });
     expect(hydrated?.session.sessionId).toBe("worker");
-    expect(readThread).toHaveBeenCalledWith("thread-released", true);
+    expect(readThread.mock.calls).toEqual([["thread-released", false], ["thread-released", true]]);
     expect(resumeThread).not.toHaveBeenCalled();
   });
 

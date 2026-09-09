@@ -22,7 +22,7 @@
 ## 持久化
 - 全局 `~/.vermillion/`：workspace 注册表（引擎的 `workspace-registry.json` 是唯一注册表）、会话索引、`roles/<role>.md`（角色 prompt 的全局版本）。
 - 每个 workspace `<root>/.vermillion/` 保存 `docs/`（真相源，走 git）、`roles/`（角色 prompt 的 workspace 覆盖）、开工、工单、决策和运行记录。运行记录通过服务与 CLI/RPC 更新，不直接编辑文件。
-- 所有 agent 会话 cwd = workspace 根（Worker 使用 worktree 时是 worktree 根）；`allowedPaths` 限定修改范围，是否使用 worktree 由 Worker 判断并登记。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
+- 所有 agent 会话 cwd = workspace 根；Worker 使用 worktree 时在工具调用中显式指定 workdir、git -C 或文件绝对路径。`allowedPaths` 限定修改范围，是否使用 worktree 由 Worker 判断并登记。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
 - 单张工单的合同、执行过程与合入检查点保存在统一记录中，执行过程是当前运行状态的唯一来源。工单查询里的 `run` 由执行过程投影，不单独持久化；历史运行记录只用于追溯。
 
 ## 角色 prompt
@@ -32,7 +32,7 @@
 
 ## 调度（packages/workbench/src/orchestrator.ts）
 - `Orchestrator` 由 `WorkbenchEvent` 和 `turn.completed` 驱动，状态持久化在工作台。开工先登记请求，来源 turn 结束后从那个节点 fork Worker，保留讨论上下文，不主动 compact。
-- Worker 准备轮先提交相关文档、建单、按需自行创建并登记 worktree，结束后才进入执行队列。调度器排到它时恢复原会话并设置执行 cwd，发送工单合同续跑。多单的其他执行者从准备轮末端 fork。
+- Worker 准备轮先提交相关文档、建单、按需自行创建并登记 worktree，结束后才进入执行队列。调度器排到它时在 workspace 根恢复原会话，发送工单合同续跑。多单的其他执行者从准备轮末端 fork。
 - 取单遵守 `scheduler.maxWorkers`、全部已关闭的 `dependsOn` 和 `needs` 中的具体共享资源。独立浏览器、桌面不按工具类别互斥。等待用户不占执行并发；前置取消时说明原因交用户决定。
 - `workItem.update` 对进行中的工单发 `workItem.updated`，编排层用 `runner.steer`（有活跃 turn 就 `turn/steer`，否则作为下一条消息）立即通知 worker，idle 计数归零。若送达时正有一轮在跑，那轮的 id 记在 `run.staleTurnId`，该轮结束时清掉；`staleTurnId` 未清时到达的 `workItem.submit` 视为依据旧合同，作废（工单回 queued、丢弃 evidence，保留 worktree）。worker 不维护任何版本号。`workItem.cancel` 对进行中的工单发 `workItem.cancelled`，编排层 interrupt 该会话。
 - 决策答复直接送回原 Worker，普通文字答复同样有效。review 或验证两轮不过就等待用户，不无限返工。运行失败保留原会话和成果，按 1、5、30、300 分钟重试四次，再失败发决策卡；`maxIdleTurns` 限制无进展续轮。

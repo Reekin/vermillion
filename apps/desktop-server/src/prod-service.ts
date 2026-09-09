@@ -204,7 +204,8 @@ export const createSessionRuntimeService = (
         engineId: codexAgentId,
         sessionDiscovery: new CodexSessionDiscoveryProvider({
           codexRuntimePort,
-          turnChangesStore: codexTurnChangesStore
+          turnChangesStore: codexTurnChangesStore,
+          resolveHistoryCwd: (workspaceId) => workspaceRegistry.getWorkspace(workspaceId)?.absolutePath
         }),
         sessionActions: new CodexSessionActionsProvider({
           codexRuntimePort

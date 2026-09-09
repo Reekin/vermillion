@@ -1,12 +1,26 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
-import { contract, setup, submission } from "./workflow-fixture.js";
+import { contract, git, setup, submission } from "./workflow-fixture.js";
 
 const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
 const orchestrators: Orchestrator[] = [];
 afterEach(async () => {
   for (const orchestrator of orchestrators.splice(0)) await orchestrator.dispose();
   for (const f of fixtures.splice(0)) await f.cleanup();
+});
+
+it("keeps the worker session at workspace root while directing tools to its worktree", async () => {
+  const f = await fixture();
+  const worktreePath = f.root + "/worker-tree";
+  await git(f.root, "worktree", "add", "-b", "worker-test", worktreePath);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original", worktreePath, branch: "worker-test" });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  expect(f.runner.resume).toHaveBeenCalledWith("original", expect.objectContaining({ cwd: f.root }));
+  const message = vi.mocked(f.runner.send).mock.calls[0]![1];
+  expect(message).toContain("工作目录: " + worktreePath);
+  expect(message).toContain("显式指定工具 workdir、git -C 或 worktree 内的绝对路径");
 });
 
 it("detaches a completed worker after its turn ends without waiting for release ACK", async () => {

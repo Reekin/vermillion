@@ -196,7 +196,7 @@ export class Orchestrator {
     try {
       const root = await this.service.workspaceRoot(workspaceId);
       let item = await this.service.getWorkItem(workspaceId, action.workItemId);
-      const cwd = action.worktreePath ?? root;
+      const cwd = root;
       let sessionId = action.sessionId;
       const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
       if (sessionId && !bound) {
@@ -301,8 +301,10 @@ export class Orchestrator {
       "workspaceId: " + workspaceId,
       "workItemId: " + item.workItemId,
       related,
-      "工作目录: " + cwd + (isolated ? "（独立 worktree，分支 " + branch + "）" : "（workspace 根目录，不开分支）"),
+      "会话 cwd: " + cwd,
+      "工作目录: " + (item.run.worktreePath ?? root) + (isolated ? "（独立 worktree，分支 " + branch + "）" : "（workspace 根目录，不开分支）"),
       ...(isolated ? [
+        "会话 cwd 保持 workspace 根目录。操作本工单文件时显式指定工具 workdir、git -C 或 worktree 内的绝对路径。",
         "workspace 根目录（只读主分支）: " + root,
         "提交前先在自己的分支提交 allowedPaths 内的成果，再用 git -C " + JSON.stringify(root) + " rev-parse HEAD 读取主分支当前 SHA，在本 worktree 执行 git rebase <该 SHA>。不要修改或合并主分支。",
         "rebase 冲突在自己的分支解决并继续；基于 rebase 后的结果做 review 和验收。workItem.submit 前再次读取主分支 HEAD，若已前进则重复 rebase 并更新受影响的验证和提交材料。"

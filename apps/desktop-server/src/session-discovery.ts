@@ -896,13 +896,29 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
 
   private readonly codexRuntimePort: CodexAppServerRuntimePort;
   private readonly turnChangesStore: CodexTurnChangesStore | undefined;
+  private readonly resolveHistoryCwd: ((workspaceId: string) => string | undefined) | undefined;
 
   public constructor(options: {
     codexRuntimePort: CodexAppServerRuntimePort;
     turnChangesStore?: CodexTurnChangesStore;
+    resolveHistoryCwd?: (workspaceId: string) => string | undefined;
   }) {
     this.codexRuntimePort = options.codexRuntimePort;
     this.turnChangesStore = options.turnChangesStore;
+    this.resolveHistoryCwd = options.resolveHistoryCwd;
+  }
+
+  private async withHistory<T>(entry: SessionIndexEntry, read: (thread: Thread, restored: boolean) => Promise<T>): Promise<T> {
+    const header = await this.codexRuntimePort.readThread(entry.providerSessionId!, false);
+    const restored = header.status.type === "notLoaded";
+    const thread = restored
+      ? await this.codexRuntimePort.resumeThread(header.id, this.resolveHistoryCwd?.(entry.workspaceId) ?? header.cwd)
+      : header;
+    try {
+      return await read(thread, restored);
+    } finally {
+      if (restored) await this.codexRuntimePort.releaseHistoryRead(thread.id);
+    }
   }
 
   public async discoverWorkspaces(
@@ -980,7 +996,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       && !this.codexRuntimePort.isThreadExecutionReleased(threadId)) {
       return true;
     }
-    const thread = await this.codexRuntimePort.resumeThread(threadId);
+    const thread = await this.codexRuntimePort.resumeThread(threadId, this.resolveHistoryCwd?.(entry.workspaceId));
     this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id);
     return true;
   }
@@ -995,69 +1011,71 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     if (!threadId) {
       return undefined;
     }
-    const thread = await this.codexRuntimePort.readThread(threadId, true);
-    if (input.isCancelled?.()) {
-      return undefined;
-    }
-    this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id, false);
-    await this.refreshThreadGoal(entry.sessionId);
-    const workspaceId = entry.workspaceId;
-    const conversation = parseConversation({
-      conversationId: entry.conversationId,
-      workspaceId,
-      participantEngineIds: [codexAgentId],
-      activeSessionId: entry.sessionId,
-      sessionIds: [entry.sessionId],
-      createdAt: isoFromUnixSeconds(thread.createdAt),
-      updatedAt: isoFromUnixSeconds(thread.updatedAt)
-    });
-    const session = parseChatSession({
-      sessionId: entry.sessionId,
-      conversationId: entry.conversationId,
-      engineId: codexAgentId,
-      status: mapThreadStatus(thread),
-      title: entry.title ?? titleForThread(thread),
-      createdAt: isoFromUnixSeconds(thread.createdAt),
-      updatedAt: isoFromUnixSeconds(thread.updatedAt),
-      archivedAt: entry.archivedAt,
-      lastTurnId: thread.turns.at(-1)?.id,
-      metadata: {
-        ...(entry.metadata ?? {}),
-        providerKind: codexProviderKind,
-        providerSessionId: thread.id,
-        rolloutPath: thread.path ?? undefined,
-        cwd: thread.cwd
+    return this.withHistory(entry, async (header, restored) => {
+      const thread = restored ? header : await this.codexRuntimePort.readThread(threadId, true);
+      if (input.isCancelled?.()) {
+        return undefined;
       }
-    });
+      this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id, false);
+      await this.refreshThreadGoal(entry.sessionId);
+      const workspaceId = entry.workspaceId;
+      const conversation = parseConversation({
+        conversationId: entry.conversationId,
+        workspaceId,
+        participantEngineIds: [codexAgentId],
+        activeSessionId: entry.sessionId,
+        sessionIds: [entry.sessionId],
+        createdAt: isoFromUnixSeconds(thread.createdAt),
+        updatedAt: isoFromUnixSeconds(thread.updatedAt)
+      });
+      const session = parseChatSession({
+        sessionId: entry.sessionId,
+        conversationId: entry.conversationId,
+        engineId: codexAgentId,
+        status: mapThreadStatus(thread),
+        title: entry.title ?? titleForThread(thread),
+        createdAt: isoFromUnixSeconds(thread.createdAt),
+        updatedAt: isoFromUnixSeconds(thread.updatedAt),
+        archivedAt: entry.archivedAt,
+        lastTurnId: thread.turns.at(-1)?.id,
+        metadata: {
+          ...(entry.metadata ?? {}),
+          providerKind: codexProviderKind,
+          providerSessionId: thread.id,
+          rolloutPath: thread.path ?? undefined,
+          cwd: thread.cwd
+        }
+      });
 
-    const hydratedTurns = await hydrateCodexTurnEntities({
-      entry,
-      thread,
-      rolloutPath: rolloutPathForEntry(entry, thread),
-      turnChangesStore: this.turnChangesStore,
-      isCancelled: input.isCancelled
-    });
-    if (!hydratedTurns) {
-      return undefined;
-    }
-    const { turns, messageBlocks, toolCalls, terminalStreams } = hydratedTurns;
-
-    const sessionRelations = this.buildHydratedRelations(thread);
-
-    return {
-      workspaceId,
-      conversation,
-      session,
-      turns,
-      messageBlocks,
-      toolCalls,
-      terminalStreams,
-      sessionRelations,
-      runtimeBinding: {
-        providerKind: codexProviderKind,
-        providerSessionId: thread.id
+      const hydratedTurns = await hydrateCodexTurnEntities({
+        entry,
+        thread,
+        rolloutPath: rolloutPathForEntry(entry, thread),
+        turnChangesStore: this.turnChangesStore,
+        isCancelled: input.isCancelled
+      });
+      if (!hydratedTurns) {
+        return undefined;
       }
-    };
+      const { turns, messageBlocks, toolCalls, terminalStreams } = hydratedTurns;
+
+      const sessionRelations = this.buildHydratedRelations(thread);
+
+      return {
+        workspaceId,
+        conversation,
+        session,
+        turns,
+        messageBlocks,
+        toolCalls,
+        terminalStreams,
+        sessionRelations,
+        runtimeBinding: {
+          providerKind: codexProviderKind,
+          providerSessionId: thread.id
+        }
+      };
+    });
   }
 
   public async hydrateSessionWindow(
@@ -1082,110 +1100,109 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
             includeAnchor: true
           })
         : null);
-    const [thread, turnsPage] = await Promise.all([
-      this.codexRuntimePort.readThread(threadId, false),
-      this.codexRuntimePort.listThreadTurns({
-        threadId,
-        cursor,
-        limit: input.limit,
-        sortDirection: "desc",
-        itemsView: "full"
-      })
-    ]);
-    if (input.isCancelled?.()) {
-      return undefined;
-    }
-    let pageTurns = turnsPage.data;
-    const incompleteTurnIds = new Set(
-      pageTurns
-        .filter(
-          (turn) =>
-            turn.itemsView === "full" &&
-            turn.status === "completed" &&
-            turn.items.some(isUserMessageItem) &&
-            !turn.items.some(isAgentMessageItem)
-        )
-        .map((turn) => turn.id)
-    );
-    if (incompleteTurnIds.size > 0) {
-      const completeThread = await this.codexRuntimePort.readThread(threadId, true);
-      const completeTurnsById = new Map(
-        completeThread.turns
+    return this.withHistory(entry, async (thread) => {
+      const turnsPage = await this.codexRuntimePort.listThreadTurns({
+          threadId,
+          cursor,
+          limit: input.limit,
+          sortDirection: "desc",
+          itemsView: "full"
+        });
+      if (input.isCancelled?.()) {
+        return undefined;
+      }
+      let pageTurns = turnsPage.data;
+      const incompleteTurnIds = new Set(
+        pageTurns
           .filter(
             (turn) =>
-              incompleteTurnIds.has(turn.id) && turn.items.some(isAgentMessageItem)
+              turn.itemsView === "full" &&
+              turn.status === "completed" &&
+              turn.items.some(isUserMessageItem) &&
+              !turn.items.some(isAgentMessageItem)
           )
-          .map((turn) => [turn.id, turn] as const)
+          .map((turn) => turn.id)
       );
-      pageTurns = pageTurns.map((turn) => completeTurnsById.get(turn.id) ?? turn);
-    }
-    if (input.isCancelled?.()) {
-      return undefined;
-    }
-    const pageThread: Thread = {
-      ...thread,
-      turns: pageTurns
-    };
-    this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id, false);
-    await this.refreshThreadGoal(entry.sessionId);
-    const workspaceId = entry.workspaceId;
-    const conversation = parseConversation({
-      conversationId: entry.conversationId,
-      workspaceId,
-      participantEngineIds: [codexAgentId],
-      activeSessionId: entry.sessionId,
-      sessionIds: [entry.sessionId],
-      createdAt: isoFromUnixSeconds(thread.createdAt),
-      updatedAt: isoFromUnixSeconds(thread.updatedAt)
-    });
-    const session = parseChatSession({
-      sessionId: entry.sessionId,
-      conversationId: entry.conversationId,
-      engineId: codexAgentId,
-      status: mapThreadStatus(thread),
-      title: entry.title ?? titleForThread(thread),
-      createdAt: isoFromUnixSeconds(thread.createdAt),
-      updatedAt: isoFromUnixSeconds(thread.updatedAt),
-      archivedAt: entry.archivedAt,
-      lastTurnId: entry.lastTurnId ?? pageTurns[0]?.id,
-      metadata: {
-        ...(entry.metadata ?? {}),
-        providerKind: codexProviderKind,
-        providerSessionId: thread.id,
-        rolloutPath: thread.path ?? undefined,
-        cwd: thread.cwd
+      if (incompleteTurnIds.size > 0) {
+        const completeThread = await this.codexRuntimePort.readThread(threadId, true);
+        const completeTurnsById = new Map(
+          completeThread.turns
+            .filter(
+              (turn) =>
+                incompleteTurnIds.has(turn.id) && turn.items.some(isAgentMessageItem)
+            )
+            .map((turn) => [turn.id, turn] as const)
+        );
+        pageTurns = pageTurns.map((turn) => completeTurnsById.get(turn.id) ?? turn);
       }
-    });
-    const hydratedTurns = await hydrateCodexTurnEntities({
-      entry,
-      thread: pageThread,
-      rolloutPath: rolloutPathForEntry(entry, thread),
-      turnChangesStore: this.turnChangesStore,
-      isCancelled: input.isCancelled
-    });
-    if (!hydratedTurns) {
-      return undefined;
-    }
-    const { turns, messageBlocks, toolCalls, terminalStreams } = hydratedTurns;
+      if (input.isCancelled?.()) {
+        return undefined;
+      }
+      const pageThread: Thread = {
+        ...thread,
+        turns: pageTurns
+      };
+      this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id, false);
+      await this.refreshThreadGoal(entry.sessionId);
+      const workspaceId = entry.workspaceId;
+      const conversation = parseConversation({
+        conversationId: entry.conversationId,
+        workspaceId,
+        participantEngineIds: [codexAgentId],
+        activeSessionId: entry.sessionId,
+        sessionIds: [entry.sessionId],
+        createdAt: isoFromUnixSeconds(thread.createdAt),
+        updatedAt: isoFromUnixSeconds(thread.updatedAt)
+      });
+      const session = parseChatSession({
+        sessionId: entry.sessionId,
+        conversationId: entry.conversationId,
+        engineId: codexAgentId,
+        status: mapThreadStatus(thread),
+        title: entry.title ?? titleForThread(thread),
+        createdAt: isoFromUnixSeconds(thread.createdAt),
+        updatedAt: isoFromUnixSeconds(thread.updatedAt),
+        archivedAt: entry.archivedAt,
+        lastTurnId: entry.lastTurnId ?? pageTurns[0]?.id,
+        metadata: {
+          ...(entry.metadata ?? {}),
+          providerKind: codexProviderKind,
+          providerSessionId: thread.id,
+          rolloutPath: thread.path ?? undefined,
+          cwd: thread.cwd
+        }
+      });
+      const hydratedTurns = await hydrateCodexTurnEntities({
+        entry,
+        thread: pageThread,
+        rolloutPath: rolloutPathForEntry(entry, thread),
+        turnChangesStore: this.turnChangesStore,
+        isCancelled: input.isCancelled
+      });
+      if (!hydratedTurns) {
+        return undefined;
+      }
+      const { turns, messageBlocks, toolCalls, terminalStreams } = hydratedTurns;
 
-    return {
-      workspaceId,
-      conversation,
-      session,
-      turns,
-      messageBlocks,
-      toolCalls,
-      terminalStreams,
-      sessionRelations: this.buildHydratedRelations(thread),
-      hasOlder: Boolean(turnsPage.nextCursor),
-      hasNewer: Boolean(input.cursor),
-      olderCursor: turnsPage.nextCursor ?? undefined,
-      newerCursor: turnsPage.backwardsCursor ?? undefined,
-      runtimeBinding: {
-        providerKind: codexProviderKind,
-        providerSessionId: thread.id
-      }
-    };
+      return {
+        workspaceId,
+        conversation,
+        session,
+        turns,
+        messageBlocks,
+        toolCalls,
+        terminalStreams,
+        sessionRelations: this.buildHydratedRelations(thread),
+        hasOlder: Boolean(turnsPage.nextCursor),
+        hasNewer: Boolean(input.cursor),
+        olderCursor: turnsPage.nextCursor ?? undefined,
+        newerCursor: turnsPage.backwardsCursor ?? undefined,
+        runtimeBinding: {
+          providerKind: codexProviderKind,
+          providerSessionId: thread.id
+        }
+      };
+    });
   }
 
   private async listAllThreads(): Promise<Thread[]> {

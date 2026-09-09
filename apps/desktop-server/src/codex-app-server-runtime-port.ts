@@ -1391,6 +1391,12 @@ export class CodexAppServerRuntimePort
     }
   }
 
+  /** A history load must not unsubscribe execution that started while its read was in flight. */
+  public async releaseHistoryRead(threadId: string): Promise<void> {
+    if (this.activeTurnByThreadId.has(threadId) || this.pendingTurnSessionIdByThreadId.has(threadId)) return;
+    await this.releaseThreadExecution(threadId);
+  }
+
   /** Unsubscribe the idle execution tree without waiting for unloading or archiving its history. */
   public async releaseSessionExecution(sessionId: string): Promise<void> {
     const threadId = this.threadIdBySessionId.get(sessionId);

@@ -9,6 +9,7 @@ const setup = () => {
     rpcClient: { notificationListeners: Set<(event: { method: string; params: unknown }) => void> };
     handleNotification: (method: string, params: Record<string, unknown>) => void;
     activeTurnByThreadId: Map<string, unknown>;
+    pendingTurnSessionIdByThreadId: Map<string, string>;
     childThreadIdsByParentThreadId: Map<string, Set<string>>;
     ensureThreadForSession: (sessionId: string) => Promise<string>;
   };
@@ -23,6 +24,22 @@ const setup = () => {
 };
 
 describe("execution release", () => {
+  it.each(["active", "pending"])("keeps %s execution subscribed when a history read finishes", async (state) => {
+    const { port, internals, rpc } = setup();
+    if (state === "active") internals.activeTurnByThreadId.set("thread-worker", {});
+    else internals.pendingTurnSessionIdByThreadId.set("thread-worker", "worker");
+
+    await port.releaseHistoryRead("thread-worker");
+    expect(rpc).not.toHaveBeenCalled();
+    expect(port.isThreadExecutionReleased("thread-worker")).toBe(false);
+
+    internals.activeTurnByThreadId.clear();
+    internals.pendingTurnSessionIdByThreadId.clear();
+    await port.releaseHistoryRead("thread-worker");
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("thread/unsubscribe", { threadId: "thread-worker" });
+    expect(port.isThreadExecutionReleased("thread-worker")).toBe(true);
+  });
+
   it("returns after unsubscribe without waiting for closure, retains history and resumes on the next send", async () => {
     const { port, internals, rpc } = setup();
     const events: unknown[] = [];
