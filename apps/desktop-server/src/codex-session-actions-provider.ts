@@ -185,16 +185,21 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
       });
       await this.codexRuntimePort.unsubscribeThread(threadId);
       const cwd = input.cwd ?? input.session?.metadata?.cwd ?? input.indexEntry?.metadata?.cwd;
-      const instructions = input.session?.metadata?.developerInstructions ?? input.indexEntry?.metadata?.developerInstructions;
+      const storedInstructions = input.session?.metadata?.developerInstructions ?? input.indexEntry?.metadata?.developerInstructions;
+      const instructions = input.developerInstructions ?? storedInstructions;
       const thread = typeof instructions === "string"
         ? await this.codexRuntimePort.resumeThread(threadId, typeof cwd === "string" ? cwd : undefined, instructions)
         : typeof cwd === "string"
         ? await this.codexRuntimePort.resumeThread(threadId, cwd)
         : await this.codexRuntimePort.resumeThread(threadId);
+      if (input.developerInstructions !== undefined && input.developerInstructions !== storedInstructions) {
+        await this.codexRuntimePort.injectDeveloperInstructions(thread.id, input.developerInstructions);
+      }
       this.codexRuntimePort.attachThreadToSession(input.sessionId, thread.id);
-      if (input.cwd || input.metadata) {
+      if (input.cwd || input.metadata || input.developerInstructions !== undefined) {
         await input.runtimeService.updateSessionMetadata(input.sessionId,
-          { ...input.metadata, ...(input.cwd ? { cwd: input.cwd } : {}) });
+          { ...input.metadata, ...(input.cwd ? { cwd: input.cwd } : {}),
+            ...(input.developerInstructions !== undefined ? { developerInstructions: input.developerInstructions } : {}) });
       }
       return {
         action: "resume",

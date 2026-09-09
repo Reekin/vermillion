@@ -146,6 +146,33 @@ describe("Codex app-server runtime port", () => {
     );
   });
 
+  it("preserves configured instructions and injects a generic role tail only when requested", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath,
+      commandArgs: [fixturePath], resolveConversationIdBySessionId: () => "conversation-1" });
+    vi.spyOn(port, "start").mockResolvedValue();
+    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockImplementation(async (method) => method === "config/read"
+        ? { config: { developer_instructions: "User configuration" } } : { thread: { id: "child" } });
+    await port.forkThread("source", "completed-turn", { cwd: "I:/workspace" });
+    expect(rpc).toHaveBeenCalledWith("thread/fork", { threadId: "source", lastTurnId: "completed-turn",
+      cwd: "I:/workspace", threadSource: "user" });
+    expect(rpc.mock.calls.some(([method]) => method === "thread/inject_items")).toBe(false);
+
+    await port.forkThread("source", "completed-turn", { developerInstructions: "Review role" });
+    expect(rpc).toHaveBeenCalledWith("thread/fork", expect.objectContaining({
+      developerInstructions: "User configuration\n\nReview role", deferGoalContinuation: true }));
+    const injected = rpc.mock.calls.find(([method]) => method === "thread/inject_items")?.[1];
+    expect(injected).toEqual({ threadId: "child", items: [{ type: "message", role: "developer",
+      content: [{ type: "input_text", text: "以下开发者指令定义当前角色，并取代此前角色的指令：\n\nReview role" }] }] });
+    rpc.mockClear();
+    await port.resumeThread("child", "I:/workspace", "Execution role");
+    expect(rpc).toHaveBeenCalledWith("thread/resume", expect.objectContaining({
+      developerInstructions: "User configuration\n\nExecution role" }), {});
+    expect(rpc.mock.calls.some(([method]) => method === "thread/inject_items")).toBe(false);
+    await port.injectDeveloperInstructions("child", "Execution role");
+    expect(rpc).toHaveBeenCalledWith("thread/inject_items", expect.objectContaining({ threadId: "child" }));
+  });
+
   it("sends expected JSON-RPC payloads for resume and refresh helpers", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "awb-codex-rpc-"));
     const requestLogPath = join(tempDir, "requests.jsonl");

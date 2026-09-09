@@ -5,14 +5,14 @@ import type { WorkbenchService } from "./workbench-service.js";
 /** What the orchestrator needs from the session engine. Implemented in Electron main over SessionShellService. */
 export type AgentRunner = {
   resolveSourceTurn?: (sessionId: string) => Promise<string>;
-  fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
+  fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; developerInstructions?: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
   open: (input: { workspaceId: string; cwd: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
   send: (sessionId: string, content: string) => Promise<void>;
   /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
-  resume: (sessionId: string, options?: { cwd?: string; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
+  resume: (sessionId: string, options?: { cwd?: string; developerInstructions?: string; modelConfig?: RoleExecutionOverrides; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
   /** Requests unsubscribe of an idle worker; preserves its history and permits native idle unloading. */
   release: (sessionId: string) => Promise<void>;
   /** True while the runtime is executing a turn, including tool/model waits. */
@@ -200,7 +200,8 @@ export class Orchestrator {
       let sessionId = action.sessionId;
       const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
       if (sessionId && !bound) {
-        if (!await this.runner.resume(sessionId, { cwd, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
+        const role = await this.workerRole(root);
+        if (!await this.runner.resume(sessionId, { cwd, developerInstructions: role.content, modelConfig: role.modelConfig, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
       }
       if (!sessionId) {
         if (action.stage !== "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "open" }));
@@ -340,11 +341,11 @@ export class Orchestrator {
       if (!request.workerSessionId && this.runner.isActive?.(request.sourceSessionId)) continue;
       try {
         const root = await this.service.workspaceRoot(workspaceId);
+        const preparation = await this.roles.resolve(root, "work-preparation");
         if (!request.workerSessionId) {
-          const role = await this.workerRole(root);
           const fork = await this.runner.fork({ workspaceId, sourceSessionId: request.sourceSessionId,
-            sourceTurnId: request.sourceTurnId, developerInstructions: role.content, modelConfig: role.modelConfig,
-            title: "Worker · 开工准备", metadata: { role: "worker", requestId: request.requestId,
+            sourceTurnId: request.sourceTurnId, modelConfig: preparation.modelConfig,
+            title: "开工准备", metadata: { role: "work-preparation", requestId: request.requestId,
               sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId } });
           request = await this.service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: fork.sessionId, treeId: fork.treeId });
         }
@@ -358,14 +359,11 @@ export class Orchestrator {
         }
         if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备分支");
         this.preparing.set(sessionId, workspaceId);
-        await this.runner.send(sessionId, ["你现在是 Worker。先完成开工准备，本轮结束后由调度器发送执行合同。",
+        await this.runner.send(sessionId, [preparation.content,
           "workspaceId: " + workspaceId, "sessionId: " + sessionId, "requestId: " + request.requestId,
           "sourceSessionId: " + request.sourceSessionId, "sourceTurnId: " + request.sourceTurnId,
           "开工范围: " + (request.scope ?? "根据当前讨论确定完整范围。"),
-          request.failure ? "上次准备未完成：" + request.failure + "。先核对已登记工单与已有成果，不要重复创建。" : "",
-          "自行选择相关文档改动，调用 docs.commit 提交这些路径；其他改动留在工作区。自行判断是否需要 worktree；需要时用 git 创建并记录 worktreePath 和 branch。",
-          "调用 workItem.create，传入自己的 sessionId、requestId、合同和选定的 worktreePath/branch，然后结束本轮。程序不会自动创建 worktree。",
-          "若需拆成多单，全部传同一 requestId，只有第一张传自己的 sessionId；其余省略 sessionId。调度器将在本轮结束后从准备分支末端 fork 兄弟 Worker 分支。"].join("\n"));
+          request.failure ? "上次准备未完成：" + request.failure : ""].join("\n"));
       } catch (error) {
         if (request.workerSessionId) this.preparing.delete(request.workerSessionId);
         await this.service.failWorkRequest(workspaceId, request.requestId, error instanceof Error ? error.message : String(error));

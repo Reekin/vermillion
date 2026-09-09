@@ -33,7 +33,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     if (turn && turn.status !== "completed") throw new Error("Worker fork requires a completed source turn");
     const settings = await shell.getSettings();
     const metadata = writeSessionExecutionProfile({ ...input.metadata, treeId: tree.treeId ?? input.sourceSessionId,
-      role: "worker", sourceSessionId: input.sourceSessionId, sourceTurnId: input.sourceTurnId }, {
+      sourceSessionId: input.sourceSessionId, sourceTurnId: input.sourceTurnId }, {
       engineId,
       ...mergeSessionExecutionProfile(resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]), input.modelConfig)
     });
@@ -75,11 +75,18 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     if (!turn) return;
     await shell.executeCommand({ commandId: createId(), command: { type: "interruptTurn", sessionId, turnId: turn.turnId } });
   },
-  resume: async (sessionId, options?: { cwd?: string; metadata?: Record<string, unknown>; title?: string }) => {
+  resume: async (sessionId, options) => {
     // Background recovery must not participate in the UI's cancellable session-opening sequence.
     if (!await shell.ensureSessionLoadedForRead(sessionId)) return false;
     try {
-      const { title, ...resumeOptions } = options ?? {};
+      const { title, modelConfig, ...resumeOptions } = options ?? {};
+      if (modelConfig) {
+        const settings = await shell.getSettings();
+        resumeOptions.metadata = writeSessionExecutionProfile(resumeOptions.metadata, {
+          engineId,
+          ...mergeSessionExecutionProfile(resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]), modelConfig)
+        });
+      }
       const result = await shell.runSessionAction({ sessionId, action: "resume", ...resumeOptions });
       if (result.action !== "resume" || !result.resumed) return false;
       if (title) await shell.setSessionTitle(sessionId, title);

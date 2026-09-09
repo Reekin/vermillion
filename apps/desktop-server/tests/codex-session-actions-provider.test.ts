@@ -8,6 +8,40 @@ const codexProviderHandle = (providerSessionId = "thread-1") => ({
 });
 
 describe("CodexSessionActionsProvider", () => {
+  it("switches explicit role instructions once and retains them on subsequent resumes", async () => {
+    const session = { metadata: { cwd: "I:/workspace", developerInstructions: "PREPARATION_ROLE" } };
+    const resumeThread = vi.fn().mockResolvedValue({ id: "thread-worker" });
+    const injectDeveloperInstructions = vi.fn();
+    const updateSessionMetadata = vi.fn(async (_id, metadata) => { Object.assign(session.metadata, metadata); });
+    const provider = new CodexSessionActionsProvider({ codexRuntimePort: {
+      resumeThread, injectDeveloperInstructions, interruptThread: vi.fn(), unsubscribeThread: vi.fn(), attachThreadToSession: vi.fn()
+    } as unknown as CodexAppServerRuntimePort });
+    const input = { sessionId: "worker", action: "resume" as const,
+      providerHandle: codexProviderHandle("thread-worker"), session: session as never,
+      sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata } as never };
+    await provider.runAction({ ...input, developerInstructions: "WORKER_ROLE", metadata: { role: "worker" } });
+    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace", "WORKER_ROLE");
+    expect(injectDeveloperInstructions).toHaveBeenCalledExactlyOnceWith("thread-worker", "WORKER_ROLE");
+    expect(updateSessionMetadata).toHaveBeenLastCalledWith("worker", { role: "worker", developerInstructions: "WORKER_ROLE" });
+    await provider.runAction({ ...input, developerInstructions: "WORKER_ROLE" });
+    await provider.runAction(input);
+    expect(injectDeveloperInstructions).toHaveBeenCalledTimes(1);
+    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace", "WORKER_ROLE");
+  });
+
+  it("does not persist role instructions if their injection fails", async () => {
+    const updateSessionMetadata = vi.fn();
+    const provider = new CodexSessionActionsProvider({ codexRuntimePort: {
+      resumeThread: vi.fn().mockResolvedValue({ id: "thread-worker" }),
+      injectDeveloperInstructions: vi.fn().mockRejectedValue(new Error("inject failed")),
+      interruptThread: vi.fn(), unsubscribeThread: vi.fn(), attachThreadToSession: vi.fn()
+    } as unknown as CodexAppServerRuntimePort });
+    await expect(provider.runAction({ sessionId: "worker", action: "resume", developerInstructions: "WORKER_ROLE",
+      providerHandle: codexProviderHandle("thread-worker"), sessionIndexStore: {} as never,
+      runtimeService: { updateSessionMetadata } as never })).rejects.toThrow("inject failed");
+    expect(updateSessionMetadata).not.toHaveBeenCalled();
+  });
+
   it("resumes a Worker in its allocated worktree and persists the cwd and work binding", async () => {
     const resumeThread = vi.fn().mockResolvedValue({ id: "thread-worker" });
     const updateSessionMetadata = vi.fn();

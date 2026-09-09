@@ -1362,14 +1362,19 @@ export class CodexAppServerRuntimePort
     } satisfies ThreadForkParams & { lastTurnId?: string; deferGoalContinuation?: boolean })) as ThreadForkResponse;
     if (options.developerInstructions) {
       // Fork config governs future compaction; this same-priority tail switches the inherited history now.
-      await this.rpc("thread/inject_items", {
-        threadId: result.thread.id,
-        items: [{ type: "message", role: "developer", content: [{ type: "input_text", text:
-          "当前分支角色已切换为 Worker。此前设计伙伴角色的指令不再适用于本分支。以下是本分支的开发者指令：\n\n" + options.developerInstructions
-        }] }]
-      });
+      await this.injectDeveloperInstructions(result.thread.id, options.developerInstructions);
     }
     return result.thread;
+  }
+
+  public async injectDeveloperInstructions(threadId: string, text: string): Promise<void> {
+    await this.start(this.startConfig);
+    await this.rpc("thread/inject_items", {
+      threadId,
+      items: [{ type: "message", role: "developer", content: [{ type: "input_text", text:
+        "以下开发者指令定义当前角色，并取代此前角色的指令：\n\n" + text
+      }] }]
+    });
   }
 
   public async unsubscribeThread(threadId: string): Promise<void> {

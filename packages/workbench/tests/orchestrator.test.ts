@@ -126,9 +126,10 @@ it("waits for the source turn, prepares while execution is disabled, then resume
   expect(f.runner.fork).not.toHaveBeenCalled();
   f.complete("design", "source-turn");
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(1));
-  expect(f.runner.fork).toHaveBeenCalledWith(expect.objectContaining({ sourceSessionId: "design", sourceTurnId: "source-turn", metadata: expect.objectContaining({ role: "worker" }) }));
-  expect(vi.mocked(f.runner.fork).mock.calls[0]![0].developerInstructions).toContain("reviewer subagent prompt");
-  expect(vi.mocked(f.runner.fork).mock.calls[0]![0].developerInstructions).toContain("verifier subagent prompt");
+  expect(f.runner.fork).toHaveBeenCalledWith(expect.objectContaining({ sourceSessionId: "design", sourceTurnId: "source-turn", metadata: expect.objectContaining({ role: "work-preparation" }) }));
+  expect(vi.mocked(f.runner.fork).mock.calls[0]![0].developerInstructions).toBeUndefined();
+  expect(vi.mocked(f.runner.send).mock.calls[0]![1]).toContain("# 开工准备");
+  expect(f.runner.resume).not.toHaveBeenCalledWith("fork-1", expect.objectContaining({ developerInstructions: expect.any(String) }));
   const first = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "fork-1" });
   const sibling = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId });
   await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
@@ -138,7 +139,8 @@ it("waits for the source turn, prepares while execution is disabled, then resume
   f.complete("fork-1", "prep-end");
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, sibling.workItemId)).status).toBe("running"));
   expect(f.runner.fork).toHaveBeenLastCalledWith(expect.objectContaining({ sourceSessionId: "fork-1", sourceTurnId: "prep-end" }));
-  expect(f.runner.resume).toHaveBeenCalledWith("fork-1", expect.objectContaining({ cwd: f.root, metadata: expect.objectContaining({ workItemId: first.workItemId }) }));
+  expect(f.runner.resume).toHaveBeenCalledWith("fork-1", expect.objectContaining({ cwd: f.root, developerInstructions: expect.stringContaining("reviewer subagent prompt"), metadata: expect.objectContaining({ role: "worker", workItemId: first.workItemId }) }));
+  expect(vi.mocked(f.runner.fork).mock.calls.at(-1)![0].developerInstructions).toContain("verifier subagent prompt");
   expect(f.runner.open).not.toHaveBeenCalled();
 });
 

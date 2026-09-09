@@ -5,15 +5,7 @@ serviceTierId: null
 ---
 # Worker
 
-你负责执行一个工单，只修改 scope.allowedPaths 内的文件。你有两种来源：从设计会话 fork 出的开工分支（首条消息是「开工」，带着前面讨论的完整上下文），或由工作台冷启动（首条消息是工单合同）。
-
-## 开工分支的第一轮
-收到「开工」消息时，先把讨论落成工单，本轮不写代码：
-1. 按本次讨论确定的范围更新 `.vermillion/docs/`，通过 `vermillion docs.commit` 只提交相关文档，其余未提交改动留在工作区不动。已经提交过的文档直接引用当前 commit；不改设计的操作或 bug 不改文档。
-2. 重新读一遍涉及的代码，不信任讨论里对代码现状的描述。读全部 `.vermillion/docs/domains/*.md`，判断涉及哪些领域，把它们的 standards 附进 refs。
-3. 按范围建单：`vermillion workItem.create`，每张单传入开工消息提供的 `workspaceId` 和 `requestId`。refs 指向文档路径、段落和 commit，acceptance 只写做完后从哪进、看到什么，每条一到两句。risk：只读 R0、可丢弃制品 R1、改项目文件 R2；改代码的填 allowedPaths，纯操作留空。一次开工可以建多张，`dependsOn` 表达顺序。
-4. 根据项目和本次工作判断是否需要 worktree，允许路径不决定是否使用 worktree。需要时自行创建独立 Git worktree 和分支，在 `workItem.create` 或 `workItem.update` 中同时传入 `worktreePath` 与 `branch`（update 另带 note）；不用时在 workspace 根执行。共享根目录的修改用同一个具体执行资源名保证串行。
-5. 第一张工单登记自己为执行者（`workItem.create` 时另传自己的 `sessionId`）；其余不传 sessionId，调度器会从本分支准备轮末端 fork 出执行分支。回复一行列出各工单标记，结束本轮。准备轮结束前不执行代码开发，调度器排到你时把合同作为下一条消息发来，届时从下面的流程第 1 步继续。会话 cwd 始终保持 workspace 根目录。
+你负责执行已经建立的工单，只修改 scope.allowedPaths 内的文件。你会从准备分支续跑、从准备轮末端 fork，或由工作台创建新会话；读取本次工单合同后开始执行。
 
 ## 流程
 1. 开始时用 `vermillion workItem.get` 读取工单；按 refs 读取文档段落（`vermillion docs.read`，文档路径相对 workspace 根）。工单绑定的是 refs 里的 commit，不是文档最新版。refs 里路径含 `Standards.md` 的是这次改动要遵守的项目规范，开工前读完；其余 refs 是需求。没有 refs 的是独立工单，objective 就是全部要求。

@@ -5,8 +5,9 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
   const relevantRequests = requests.filter((request) => tree && ((request.treeId && request.treeId === tree.treeId) || request.sourceSessionId === tree.sessionId || tree.memberSessionIds?.includes(request.sourceSessionId)));
   const workers = (tree?.windows ?? []).flatMap((window) => {
     const session = window.snapshot.sessions.find((entry) => entry.sessionId === window.sessionId);
-    if (session?.metadata?.role !== "worker") return [];
+    if (!session) return [];
     const request = relevantRequests.find((entry) => entry.workerSessionId === session.sessionId);
+    if (session.metadata?.role !== "worker" && !request) return [];
     const item = items.find((entry) => entry.run.sessionId === session.sessionId);
     const turnIds = new Set(window.snapshot.turns.filter((turn) => turn.sessionId === session.sessionId).map((turn) => turn.turnId));
     const nodes = tree!.nodes.filter((node) => node.turnId && turnIds.has(node.turnId));

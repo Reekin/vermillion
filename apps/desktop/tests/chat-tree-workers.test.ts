@@ -20,6 +20,14 @@ const tree = (currentSessionId = "design"): ChatTreeSnapshotRpc => ({
 } as ChatTreeSnapshotRpc);
 
 describe("Worker branch presentation", () => {
+  it("lists the preparation branch without assigning it a Worker role", () => {
+    const source = tree();
+    source.windows![1]!.snapshot.sessions[0]!.metadata = { role: "work-preparation" };
+    const request = { requestId: "prep", sourceSessionId: "design", workerSessionId: "worker", status: "preparing" } as WorkRequest;
+    const result = projectChatTreeWorkers(source, [], [request]);
+    expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ nodeId: "worker-tip", status: "preparing" });
+    expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
+  });
   it("keeps kickoff source selected and hides worker nodes while listing every worker", () => {
     const source = tree();
     const result = projectChatTreeWorkers(source, []);

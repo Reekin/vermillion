@@ -10,7 +10,7 @@ describe("AgentRunner recovery", () => {
     shell.releaseSessionExecution.mockRejectedValue(new Error("turn is active"));
     await expect(runner.release("worker")).rejects.toThrow("turn is active");
   });
-  it.each([true, false])("forks a completed source in the background with Worker identity (cached=%s)", async (cached) => {
+  it.each([true, false])("forks a preparation session without replacing its inherited role instructions (cached=%s)", async (cached) => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       listWorkspaces: async () => ({ workspaces: [{ workspaceId: "workspace", absolutePath: "I:/workspace" }] }),
@@ -22,10 +22,11 @@ describe("AgentRunner recovery", () => {
     };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
     await expect(runner.fork({ sourceSessionId: "source", sourceTurnId: "turn", workspaceId: "workspace",
-      title: "Work", developerInstructions: "Worker role", metadata: { workItemId: "item", treeSessionId: "tree" } }))
+      title: "Work", metadata: { role: "work-preparation", workItemId: "item", treeSessionId: "tree" } }))
       .resolves.toEqual({ sessionId: "worker", treeId: "tree" });
     expect(shell.runSessionAction).toHaveBeenCalledWith(expect.objectContaining({ action: "fork", fromTurnId: "turn",
-      activateFork: false, metadata: expect.objectContaining({ role: "worker", workItemId: "item", sourceSessionId: "source", treeSessionId: "tree" }) }));
+      activateFork: false, developerInstructions: undefined,
+      metadata: expect.objectContaining({ role: "work-preparation", workItemId: "item", sourceSessionId: "source", treeSessionId: "tree" }) }));
     expect(shell.openSession).not.toHaveBeenCalled();
   });
 
@@ -59,6 +60,7 @@ describe("AgentRunner recovery", () => {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       runSessionAction: vi.fn().mockResolvedValue({ action: "resume", resumed: true }),
       setSessionTitle: vi.fn().mockResolvedValue(undefined),
+      getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
       openSession: vi.fn().mockRejectedValue(new Error("Open session cancelled."))
     };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
@@ -71,6 +73,16 @@ describe("AgentRunner recovery", () => {
     expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledWith("worker");
     expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume" });
     expect(shell.openSession).not.toHaveBeenCalled();
+    expect(shell.getSettings).not.toHaveBeenCalled();
+  });
+
+  it("applies the execution role and model profile when resuming a prepared session", async () => {
+    const { shell, runner } = setup();
+    await expect(runner.resume("worker", { developerInstructions: "Worker role",
+      modelConfig: { modelId: "execution-model" }, metadata: { role: "worker", workItemId: "item" } })).resolves.toBe(true);
+    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume",
+      developerInstructions: "Worker role", metadata: expect.objectContaining({ role: "worker", workItemId: "item",
+        sessionProfile: expect.objectContaining({ engineId: "codex", modelId: "execution-model" }) }) });
   });
 
   it("reports a missing session without trying to resume it", async () => {
