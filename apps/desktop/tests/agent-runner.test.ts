@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it("forwards attachments and selected execution with the first preparation message", async () => {
+    const shell = { executeCommand: vi.fn().mockResolvedValue({ accepted: true }) };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const options = { attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png" }],
+      execution: { modelId: "selected", reasoningOptionId: "high", serviceTierId: null } };
+    await runner.send("worker", "User input\n\nPreparation prompt", options);
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
+      type: "sendUserMessage", sessionId: "worker", content: "User input\n\nPreparation prompt", ...options
+    }) }));
+  });
+
+  it("distinguishes verified empty sources from paged history and unknown sessions", async () => {
+    const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getChatTree: vi.fn(),
+      getSnapshot: vi.fn().mockReturnValue({ sessions: [{ sessionId: "source" }], turns: [] }) };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    await expect(runner.resolveSourceTurn!("source")).resolves.toBeUndefined();
+    shell.getSnapshot.mockReturnValue({ sessions: [{ sessionId: "source", lastTurnId: "historical" }], turns: [] });
+    await expect(runner.resolveSourceTurn!("source")).resolves.toBe("historical");
+    shell.ensureSessionLoadedForRead.mockResolvedValue(false);
+    await expect(runner.resolveSourceTurn!("missing")).rejects.toThrow("Source session not found");
+  });
   it("releases the execution environment through the session facade", async () => {
     const shell = { releaseSessionExecution: vi.fn().mockResolvedValue(undefined) };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");

@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Button, InlineNotice } from "./ui.js";
 import type { ComposerActions } from "../../chat-shell/composer/composer-types.js";
+import type { WorkRequest } from "@vermillion/workbench/client";
 
 export const StartWorkButton = ({ sessionId, turnId, composer, onStart }: {
   sessionId?: string; turnId?: string;
   composer?: ComposerActions;
-  onStart: (input: { sessionId: string; turnId: string }) => Promise<void>;
+  onStart: (input: { sessionId: string; turnId?: string; message?: WorkRequest["message"] }) => Promise<void>;
 }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -14,7 +15,9 @@ export const StartWorkButton = ({ sessionId, turnId, composer, onStart }: {
     setBusy(true);
     setError(undefined);
     try {
-      if (composer?.hasContent) await composer.submitWithInstruction("以上需求已确认，请发单开工。通过 vermillion work.start 登记本条需求，范围包含本条消息；本轮只登记开工并简短回复，由 Worker 整理文档、建单和执行。");
+      if (composer?.hasContent) await composer.submitUsing(async ({ sessionId: resolvedSessionId, ...message }) => {
+        await onStart({ sessionId: resolvedSessionId, turnId, message });
+      });
       else await onStart({ sessionId: sessionId!, turnId: turnId! });
     }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }

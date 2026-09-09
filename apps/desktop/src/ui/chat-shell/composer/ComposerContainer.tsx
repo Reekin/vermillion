@@ -19,6 +19,7 @@ import { useComposerController } from "../use-composer-controller.js";
 import { ComposerPanel } from "./ComposerPanel.js";
 import type {
   ComposerActions,
+  ComposerSubmitHandler,
   ComposerExecutionSelection,
   ComposerModelExecutionPreferences
 } from "./composer-types.js";
@@ -130,12 +131,12 @@ export const ComposerContainer = memo(({
     onExecutionPreferenceChange
   });
 
-  const submitRef = useRef(composer.onSubmitWithInstruction);
-  submitRef.current = composer.onSubmitWithInstruction;
-  const submitWithInstruction = useCallback((instruction: string) => submitRef.current(instruction), []);
+  const submitRef = useRef(composer.onSubmitUsing);
+  submitRef.current = composer.onSubmitUsing;
+  const submitUsing = useCallback((handler: ComposerSubmitHandler) => submitRef.current(handler), []);
   useEffect(() => {
-    onComposerChange?.({ hasContent: composer.hasComposedInput, canSubmit: composer.canSubmit, submitWithInstruction });
-  }, [onComposerChange, composer.hasComposedInput, composer.canSubmit, submitWithInstruction]);
+    onComposerChange?.({ hasContent: composer.hasComposedInput, canSubmit: composer.canSubmit, submitUsing });
+  }, [onComposerChange, composer.hasComposedInput, composer.canSubmit, submitUsing]);
   useEffect(() => () => onComposerChange?.(undefined), [onComposerChange]);
 
   return (

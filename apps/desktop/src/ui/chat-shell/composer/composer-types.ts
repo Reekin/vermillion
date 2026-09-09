@@ -12,10 +12,12 @@ import type { ComposerStatusModel } from "../composer-status.js";
 
 export type ComposerIntent = "send" | "steer" | "queue";
 
+export type ComposerSubmitHandler = (payload: import("../../../transport/desktop-transport.js").ChatSendInput) => Promise<void>;
+
 export type ComposerActions = {
   hasContent: boolean;
   canSubmit: boolean;
-  submitWithInstruction: (instruction: string) => Promise<void>;
+  submitUsing: (handler: ComposerSubmitHandler) => Promise<void>;
 };
 
 export type ComposerExecutionSelection = {

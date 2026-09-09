@@ -774,12 +774,6 @@ const boot = async (): Promise<void> => {
       }
     }
   });
-  workbenchService.setSourceTurnResolver(async (sessionId) => {
-    if (!await service.ensureSessionLoadedForRead(sessionId)) throw new Error("Source session not found: " + sessionId);
-    const turn = service.getSnapshot().turns.filter((entry) => entry.sessionId === sessionId).at(-1);
-    if (!turn) throw new Error("Source session has no turn: " + sessionId);
-    return turn.turnId;
-  });
   const workbenchRpc = createWorkbenchRpcHandler(workbenchService);
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     workbenchRpc(payload as { method: string; params: unknown })
