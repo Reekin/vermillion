@@ -64,18 +64,26 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
         attachments: options?.attachments ?? [], execution: options?.execution }
     });
     if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
+    return { turnId: shell.getActiveTurnId(sessionId) };
   },
   steer: async (sessionId, content) => {
-    const turn = shell
-      .getSnapshot()
-      .turns.filter((t) => t.sessionId === sessionId && t.status !== "completed")
-      .at(-1);
-    const command = turn
-      ? { type: "steerTurn" as const, sessionId, turnId: turn.turnId, messageId: createId(), content, attachments: [] }
+    const turnId = shell.getActiveTurnId(sessionId);
+    const command = turnId
+      ? { type: "steerTurn" as const, sessionId, turnId, messageId: createId(), content, attachments: [] }
       : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
-    const receipt = await shell.executeCommand({ commandId: createId(), command });
-    if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
-    return { turnId: turn?.turnId };
+    try {
+      const receipt = await shell.executeCommand({ commandId: createId(), command });
+      if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
+      return { turnId };
+    } catch (error) {
+      // This provider rejection guarantees the input was not accepted by the finished turn.
+      if (!turnId || !(error instanceof Error) || !/no active turn to steer/i.test(error.message)) throw error;
+      const receipt = await shell.executeCommand({ commandId: createId(), command: {
+        type: "sendUserMessage", sessionId, messageId: command.messageId, content, attachments: []
+      } });
+      if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
+      return {};
+    }
   },
   interrupt: async (sessionId) => {
     const turn = shell
@@ -97,7 +105,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
           ...mergeSessionExecutionProfile(resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]), modelConfig)
         });
       }
-      const result = await shell.runSessionAction({ sessionId, action: "resume", ...resumeOptions });
+      const result = await shell.runSessionAction({ sessionId, action: "resume", preserveExecution: true, ...resumeOptions });
       if (result.action !== "resume" || !result.resumed) return false;
       if (title) await shell.setSessionTitle(sessionId, title);
       return true;
@@ -105,7 +113,11 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
       return false;
     }
   },
-  isActive: (sessionId) => shell.getSnapshot().turns.some((turn) => turn.sessionId === sessionId && turn.status !== "completed"),
+  isActive: (sessionId) => !!shell.getActiveTurnId(sessionId),
+  getActiveTurnId: (sessionId) => shell.getActiveTurnId(sessionId),
+  onTurnStarted: (listener) => shell.subscribe(({ event }) => {
+    if (event.type === "turn.started") listener({ sessionId: event.sessionId, turnId: event.turnId });
+  }, { eventTypes: ["turn.started"] }),
   release: (sessionId) => shell.releaseSessionExecution(sessionId),
   onTurnCompleted: (listener) => {
     const failures = new Map<string, string>();

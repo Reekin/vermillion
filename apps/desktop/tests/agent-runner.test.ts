@@ -2,8 +2,34 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it("starts a new turn when the engine rejects steering a finished turn", async () => {
+    const shell = { getActiveTurnId: () => "ended", executeCommand: vi.fn()
+      .mockRejectedValueOnce(new Error("no active turn to steer"))
+      .mockResolvedValueOnce({ accepted: true }) };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    await expect(runner.steer("worker", "update")).resolves.toEqual({});
+    expect(shell.executeCommand.mock.calls.map(([input]) => input.command.type)).toEqual(["steerTurn", "sendUserMessage"]);
+    expect(shell.executeCommand.mock.calls[1]![0].command.messageId).toBe(shell.executeCommand.mock.calls[0]![0].command.messageId);
+  });
+
+  it("does not resend an input when delivery is uncertain", async () => {
+    const shell = { getActiveTurnId: () => "running", executeCommand: vi.fn().mockRejectedValue(new Error("connection lost")) };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    await expect(runner.steer("worker", "update")).rejects.toThrow("connection lost");
+    expect(shell.executeCommand).toHaveBeenCalledOnce();
+  });
+
+  it("uses execution state instead of stale transcript state", async () => {
+    const shell = { getActiveTurnId: () => undefined,
+      getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "old", status: "streaming" }] }),
+      executeCommand: vi.fn().mockResolvedValue({ accepted: true }) };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    expect(runner.isActive!("worker")).toBe(false);
+    await runner.steer("worker", "continue");
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({ type: "sendUserMessage" }) }));
+  });
   it("forwards attachments and selected execution with the first preparation message", async () => {
-    const shell = { executeCommand: vi.fn().mockResolvedValue({ accepted: true }) };
+    const shell = { executeCommand: vi.fn().mockResolvedValue({ accepted: true }), getActiveTurnId: () => "started" };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
     const options = { attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png" }],
       execution: { modelId: "selected", reasoningOptionId: "high", serviceTierId: null } };
@@ -92,7 +118,7 @@ describe("AgentRunner recovery", () => {
     const { shell, runner } = setup();
     await expect(runner.resume("worker")).resolves.toBe(true);
     expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledWith("worker");
-    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume" });
+    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume", preserveExecution: true });
     expect(shell.openSession).not.toHaveBeenCalled();
     expect(shell.getSettings).not.toHaveBeenCalled();
   });
@@ -101,7 +127,7 @@ describe("AgentRunner recovery", () => {
     const { shell, runner } = setup();
     await expect(runner.resume("worker", { developerInstructions: "Worker role",
       modelConfig: { modelId: "execution-model" }, metadata: { role: "worker", workItemId: "item" } })).resolves.toBe(true);
-    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume",
+    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume", preserveExecution: true,
       developerInstructions: "Worker role", metadata: expect.objectContaining({ role: "worker", workItemId: "item",
         sessionProfile: expect.objectContaining({ engineId: "codex", modelId: "execution-model" }) }) });
   });
@@ -118,7 +144,7 @@ describe("AgentRunner recovery", () => {
     const options = { cwd: "I:/worktree", title: "Worker · Greeting", metadata: { workItemId: "item" } };
     await expect(runner.resume("worker", options)).resolves.toBe(true);
     expect(shell.setSessionTitle).toHaveBeenCalledWith("worker", "Worker · Greeting");
-    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume",
+    expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume", preserveExecution: true,
       cwd: "I:/worktree", metadata: { workItemId: "item" } });
     expect(shell.openSession).not.toHaveBeenCalled();
   });

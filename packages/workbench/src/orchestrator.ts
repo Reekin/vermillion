@@ -8,7 +8,7 @@ export type AgentRunner = {
   resolveSourceTurn?: (sessionId: string) => Promise<string | undefined>;
   fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; developerInstructions?: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
   open: (input: { workspaceId: string; cwd: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
-  send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content">) => Promise<void>;
+  send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content">) => Promise<void | { turnId?: string }>;
   /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
@@ -18,6 +18,8 @@ export type AgentRunner = {
   release: (sessionId: string) => Promise<void>;
   /** True while the runtime is executing a turn, including tool/model waits. */
   isActive?: (sessionId: string) => boolean;
+  getActiveTurnId?: (sessionId: string) => string | undefined;
+  onTurnStarted?: (listener: (event: { sessionId: string; turnId: string }) => void) => () => void;
   onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed"; failure?: string }) => void) => () => void;
 };
 
@@ -32,6 +34,7 @@ export type OrchestratorOptions = {
 };
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
+type WorkerTurn = { turnId?: string; scheduled: boolean; settled?: boolean };
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 // A replacement orchestrator takes ownership only after the previous generation's in-flight task drains.
 const workspaceQueues = new Map<string, Promise<void>>();
@@ -46,6 +49,8 @@ export class Orchestrator {
   private readonly cleanupIntervalMs: number;
   private readonly disposers: Array<() => void> = [];
   private readonly runsBySession = new Map<string, WorkerBinding>();
+  private readonly turnsBySession = new Map<string, WorkerTurn>();
+  private readonly settling = new Map<string, number>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly preparing = new Map<string, string>();
   private disposed = false;
@@ -87,32 +92,14 @@ export class Orchestrator {
         void this.enqueue(event.workspaceId, async () => { await this.runner.interrupt(sessionId); await this.service.releaseIdleWorkers(event.workspaceId); await this.reconcile(event.workspaceId); });
       }
     }));
+    if (this.runner.onTurnStarted) this.disposers.push(this.runner.onTurnStarted((event) => {
+      if (this.turnsBySession.get(event.sessionId)?.turnId === event.turnId) return;
+      this.turnsBySession.set(event.sessionId, { turnId: event.turnId, scheduled: false });
+    }));
     this.disposers.push(this.runner.onTurnCompleted((event) => {
-      const bound = this.runsBySession.get(event.sessionId);
-      if (bound) void this.enqueue(bound.workspaceId, async () => {
-        await this.service.workerTurnCompleted(bound.workspaceId, event.sessionId);
-        await this.onTurn(bound, event.finishReason, event.failure, event.turnId);
-        await this.service.releaseIdleWorkers(bound.workspaceId);
-      });
-      const preparingWorkspace = this.preparing.get(event.sessionId);
-      if (preparingWorkspace) void this.enqueue(preparingWorkspace, async () => {
-        this.preparing.delete(event.sessionId);
-        const request = (await this.service.listWorkRequests(preparingWorkspace)).find((entry) => entry.workerSessionId === event.sessionId && entry.status === "preparing");
-        const items = await this.service.listWorkItems(preparingWorkspace);
-        if (request && (event.finishReason !== "completed" || !items.some((item) => item.requestId === request.requestId)))
-          await this.service.failWorkRequest(preparingWorkspace, request.requestId, event.failure ?? "准备轮未完成工单登记，请核对当前准备进度并继续。");
-        else await this.service.finishPreparation(preparingWorkspace, event.sessionId, event.turnId);
-        await this.reconcile(preparingWorkspace);
-      });
-      void this.service.listWorkspaces().then((workspaces) => {
-        for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, async () => {
-          if (workspace.workspaceId !== bound?.workspaceId) {
-            await this.service.workerTurnCompleted(workspace.workspaceId, event.sessionId);
-            await this.service.releaseIdleWorkers(workspace.workspaceId);
-          }
-          await this.reconcile(workspace.workspaceId);
-        });
-      });
+      // Install the barrier synchronously: a queued reconcile may run before this event is processed.
+      this.settling.set(event.sessionId, (this.settling.get(event.sessionId) ?? 0) + 1);
+      void this.settleTurn(event).catch((error) => console.error("[orchestrator] turn completion", event.sessionId, event.turnId, error));
     }));
     void this.service.listWorkspaces().then((workspaces) => {
       for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, async () => {
@@ -137,6 +124,43 @@ export class Orchestrator {
     });
     workspaceQueues.set(workspaceId, drained);
     return next;
+  }
+
+  private async settleTurn(event: Parameters<Parameters<AgentRunner["onTurnCompleted"]>[0]>[0]): Promise<void> {
+    const bound = this.runsBySession.get(event.sessionId);
+    const turn = this.turnsBySession.get(event.sessionId);
+    const workspaces = await this.service.listWorkspaces();
+    try {
+      await Promise.all(workspaces.map(({ workspaceId }) => this.enqueue(workspaceId, async () => {
+        await this.service.workerTurnCompleted(workspaceId, event.sessionId);
+        if (bound?.workspaceId === workspaceId && bound.run.workItemId) {
+          const item = await this.service.getWorkItem(workspaceId, bound.run.workItemId);
+          if (item.run.staleTurnId === event.turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, undefined);
+        }
+        if (bound?.workspaceId === workspaceId && turn && !turn.settled &&
+            (!turn.turnId || turn.turnId === event.turnId) && this.turnsBySession.get(event.sessionId) === turn) {
+          await this.onTurn(bound, turn, event.finishReason, event.failure);
+          turn.settled = true;
+        }
+        if (this.preparing.get(event.sessionId) === workspaceId &&
+            (!turn?.turnId || turn.turnId === event.turnId) && this.turnsBySession.get(event.sessionId) === turn) {
+          this.preparing.delete(event.sessionId);
+          const request = (await this.service.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === event.sessionId && entry.status === "preparing");
+          const items = await this.service.listWorkItems(workspaceId);
+          if (request && (event.finishReason !== "completed" || !items.some((item) => item.requestId === request.requestId)))
+            await this.service.failWorkRequest(workspaceId, request.requestId, event.failure ?? "准备轮未完成工单登记，请核对当前准备进度并继续。");
+          else await this.service.finishPreparation(workspaceId, event.sessionId, event.turnId);
+        }
+      })));
+    } finally {
+      const remaining = this.settling.get(event.sessionId)! - 1;
+      if (remaining) this.settling.set(event.sessionId, remaining);
+      else this.settling.delete(event.sessionId);
+      for (const { workspaceId } of workspaces) void this.enqueue(workspaceId, async () => {
+        await this.service.releaseIdleWorkers(workspaceId);
+        await this.reconcile(workspaceId);
+      });
+    }
   }
 
   private async reconcile(workspaceId: string): Promise<void> {
@@ -183,7 +207,7 @@ export class Orchestrator {
   }
 
   private active(sessionId: string): boolean {
-    return this.runner.isActive?.(sessionId) ?? this.runsBySession.has(sessionId);
+    return this.settling.has(sessionId) || (this.runner.isActive?.(sessionId) ?? this.runsBySession.has(sessionId));
   }
 
   private clearRetryTimer(workspaceId: string): void {
@@ -200,6 +224,11 @@ export class Orchestrator {
       const cwd = root;
       let sessionId = action.sessionId;
       const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
+      if (sessionId && this.settling.has(sessionId)) return;
+      const priorTurn = sessionId ? this.turnsBySession.get(sessionId) : undefined;
+      // A returned submission belongs to the old turn until its completion has settled.
+      if (bound && priorTurn?.scheduled && !priorTurn.settled &&
+          (item.status === "queued" || (priorTurn.turnId && !this.runner.isActive?.(sessionId!)))) return;
       if (sessionId && !bound) {
         const role = await this.workerRole(root);
         if (!await this.runner.resume(sessionId, { cwd, developerInstructions: role.content, modelConfig: role.modelConfig, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
@@ -227,9 +256,14 @@ export class Orchestrator {
         action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, runId }));
       }
       const wasActive = this.runner.isActive?.(sessionId) ?? !!bound;
-      this.runsBySession.set(sessionId, { workspaceId, actionId: action.actionId, run });
+      this.runsBySession.set(sessionId, bound?.run.runId === run.runId ? bound : { workspaceId, actionId: action.actionId, run });
+      if (wasActive && !this.turnsBySession.has(sessionId)) this.turnsBySession.set(sessionId, {
+        turnId: this.runner.getActiveTurnId?.(sessionId), scheduled: false
+      });
+      const wasQueued = item.status === "queued";
       if (item.status === "queued") item = await this.service.startWorkItem(workspaceId, item.workItemId, { sessionId, heartbeatAt: this.now() });
-      if (action.stage === "execute" && wasActive) return;
+      if (action.stage === "execute" && !wasQueued && (wasActive || priorTurn?.scheduled === false)) return;
+      if (wasQueued && action.stage === "execute") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending" }));
       if (action.stage === "execute") {
         // An unbound inactive execute stage is a restart recovery, not evidence of failure.
         action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending",
@@ -239,9 +273,19 @@ export class Orchestrator {
       const message = await this.actionMessage(workspaceId, action, cwd);
       // Delivery is durable even when send throws. The same session and message are retried.
       if (wasActive) {
+        const before = this.turnsBySession.get(sessionId);
         const { turnId } = await this.runner.steer(sessionId, message);
         if (item && turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, turnId);
-      } else await this.runner.send(sessionId, message);
+        const turn = this.turnsBySession.get(sessionId);
+        if (!turnId && turn && turn !== before) turn.scheduled = true;
+      } else {
+        const before = this.turnsBySession.get(sessionId);
+        const sent = await this.runner.send(sessionId, message);
+        const turn = this.turnsBySession.get(sessionId);
+        const turnId = sent?.turnId ?? this.runner.getActiveTurnId?.(sessionId);
+        if (!turn || turn === before) this.turnsBySession.set(sessionId, { turnId, scheduled: true });
+        else if (turn.turnId === turnId) turn.scheduled = true;
+      }
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
       await this.service.updateAction(workspaceId, action, (latest) => ({
         ...latest,
@@ -255,7 +299,7 @@ export class Orchestrator {
   }
 
   private async release(bound: WorkerBinding, status: "done" | "failed", note: string): Promise<void> {
-    this.runsBySession.delete(bound.run.sessionId);
+    if (this.runsBySession.get(bound.run.sessionId) === bound) this.runsBySession.delete(bound.run.sessionId);
     await this.service.putRun(bound.workspaceId, { ...bound.run, status, note, endedAt: this.now() });
   }
 
@@ -266,21 +310,25 @@ export class Orchestrator {
     if (action && actionIsOpen(action) && action.status !== "decision") await this.service.failAction(workspaceId, actionId, reason);
   }
 
-  private async onTurn(bound: WorkerBinding, finishReason: string, failure?: string, turnId?: string): Promise<void> {
+  private async onTurn(bound: WorkerBinding, turn: WorkerTurn, finishReason: string, failure?: string): Promise<void> {
     const { workspaceId, actionId } = bound;
-    bound.run = { ...bound.run, turns: bound.run.turns + 1 };
     const action = (await this.service.listActions(workspaceId)).find((a) => a.actionId === actionId);
     const item = bound.run.role === "worker" && bound.run.workItemId ? await this.service.getWorkItem(workspaceId, bound.run.workItemId) : undefined;
-    if (item && item.run.staleTurnId && item.run.staleTurnId === turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, undefined);
+    if (this.turnsBySession.get(bound.run.sessionId) !== turn || this.runsBySession.get(bound.run.sessionId) !== bound) return;
+    bound.run = { ...bound.run, turns: bound.run.turns + 1 };
     if (!action || action.kind !== "execute" || !actionIsOpen(action) || action.status === "decision") {
       await this.release(bound, "done", action?.status ?? "done");
+    } else if (item?.status === "queued" || action.stage === "deliver") {
+      // Existing continuation wins over failure/idle accounting, including stale-contract returns.
+      if (item?.status === "queued") await this.service.updateAction(workspaceId, action, (latest) => ({ ...latest, stage: "deliver", status: "pending" }));
+      await this.release(bound, "done", "待送达后续消息");
     } else if (action.kind === "execute" && item?.status !== "running") {
       await this.service.finishAction(workspaceId, actionId, "工单已进入 " + item?.status);
       await this.release(bound, "done", "已交接");
+    } else if (!turn.scheduled) {
+      await this.service.putRun(workspaceId, bound.run);
     } else if (finishReason !== "completed") {
       await this.fail(workspaceId, actionId, "turn " + finishReason + (failure ? ": " + failure : ""));
-    } else if (action.stage === "deliver") {
-      await this.release(bound, "done", "待送达后续消息");
     } else if (action.idleTurns >= this.maxIdleTurns) {
       await this.fail(workspaceId, actionId, "连续未落实处置：" + this.completion());
     } else {
@@ -289,7 +337,6 @@ export class Orchestrator {
         message: action.message + "\n尚未落实处置。请执行：" + this.completion() }));
       await this.release(bound, "done", "要求落实具体动作");
     }
-    await this.reconcile(workspaceId);
   }
 
   private async workerMessage(workspaceId: string, item: WorkItem, cwd: string): Promise<string> {

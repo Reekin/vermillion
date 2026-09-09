@@ -146,6 +146,7 @@ const resolveComposerSlashSuggestions = (
 export type SessionShellServiceOptions = {
   runtimeService: SessionRuntimeService;
   releaseSessionExecution?: (sessionId: string) => Promise<void>;
+  getActiveTurnId?: (sessionId: string) => string | undefined;
   wrapperChatTree?: WrapperChatTreeService;
   sessionCatalog: SessionCatalogService;
   capabilities?: CapabilityRegistry;
@@ -181,6 +182,7 @@ export class SessionShellService {
   private readonly wrapperChatTree: WrapperChatTreeService | undefined;
   private readonly runtimeService: SessionRuntimeService;
   private readonly releaseSessionExecutionImpl: SessionShellServiceOptions["releaseSessionExecution"];
+  private readonly getActiveTurnIdImpl: SessionShellServiceOptions["getActiveTurnId"];
   private readonly sessionCatalog: SessionCatalogService;
   private readonly capabilities: CapabilityRegistry | undefined;
   private readonly skillsProvider:
@@ -212,6 +214,7 @@ export class SessionShellService {
     this.wrapperChatTree = options.wrapperChatTree;
     this.runtimeService = options.runtimeService;
     this.releaseSessionExecutionImpl = options.releaseSessionExecution;
+    this.getActiveTurnIdImpl = options.getActiveTurnId;
     this.sessionCatalog = options.sessionCatalog;
     this.capabilities = options.capabilities;
     this.skillsProvider = options.skillsProvider;
@@ -376,6 +379,10 @@ export class SessionShellService {
     }
     if (!this.releaseSessionExecutionImpl) throw new Error("Execution release is unavailable for this runtime.");
     await this.releaseSessionExecutionImpl(sessionId);
+  }
+
+  public getActiveTurnId(sessionId: string): string | undefined {
+    return this.getActiveTurnIdImpl?.(sessionId);
   }
 
   public isSessionPartiallyHydrated(sessionId: string): boolean {
@@ -740,6 +747,7 @@ export class SessionShellService {
   }
 
   public async runSessionAction(input: {
+    preserveExecution?: boolean;
     sessionId: string;
     action: SessionActionKind;
     fromTurnId?: string;
@@ -763,7 +771,7 @@ export class SessionShellService {
     const result = this.capabilities
       ? await this.capabilities.runSessionAction(input.sessionId, input.action, input)
       : await this.requireSessionActions().runAction(input.sessionId, input.action, input);
-    if (input.action === "resume") {
+    if (input.action === "resume" && !input.preserveExecution) {
       await this.sessionCatalog.markSessionRead(input.sessionId);
     }
     return result;

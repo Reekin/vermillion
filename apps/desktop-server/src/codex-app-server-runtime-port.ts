@@ -1423,6 +1423,17 @@ export class CodexAppServerRuntimePort
     }
   }
 
+  public getActiveTurnId(sessionId: string): string | undefined {
+    const threadId = this.threadIdBySessionId.get(sessionId);
+    const active = threadId ? this.activeTurnByThreadId.get(threadId) : undefined;
+    return active?.sessionId === sessionId ? active.turnId : undefined;
+  }
+
+  public trackResumedTurn(sessionId: string, thread: Thread): void {
+    const active = thread.turns?.filter((turn) => turn.status === "inProgress").at(-1);
+    if (active) this.setActiveTurnForThread(thread.id, active.id, sessionId);
+  }
+
   public async interruptThread(
     threadId: string,
     options: { bestEffort?: boolean } = {}
