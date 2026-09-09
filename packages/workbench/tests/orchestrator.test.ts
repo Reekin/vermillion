@@ -239,6 +239,7 @@ it("delivers decision answers and parked adjustments once without replaying work
     const card = await f.service.createDecision(f.workspaceId, { workItemId: item.workItemId,
       sessionId: "original", question: "Continue?", context: "Choice", options: [{ key: "yes", label: "Continue" }] });
     f.complete("original");
+    await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId)).some((run) => run.status === "running")).toBe(false));
     await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "Adjustment for " + note });
     const count = vi.mocked(f.runner.send).mock.calls.length;
     await f.service.answerDecision(f.workspaceId, card.decisionId, { key: "yes", note });
@@ -247,6 +248,24 @@ it("delivers decision answers and parked adjustments once without replaying work
       "用户决策答复：Continue? -> Continue (" + note + ")；挂起期间工单调整：Adjustment for " + note]);
   }
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).decisions).toHaveLength(2);
+});
+
+it("records the opening delivery even when the worker creates a decision before send returns", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  vi.mocked(f.runner.send).mockImplementationOnce(async () => {
+    await f.service.createDecision(f.workspaceId, { workItemId: item.workItemId, sessionId: "original",
+      question: "Continue?", context: "Choice", options: [{ key: "yes", label: "Continue" }] });
+  });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({
+    status: "decision", deliveredAt: expect.any(String)
+  }));
+  const [card] = await f.service.listDecisions(f.workspaceId);
+  await f.service.answerDecision(f.workspaceId, card!.decisionId, { key: "yes" });
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)).toEqual(["original", "用户决策答复：Continue? -> Continue"]);
 });
 
 it("steers only the latest committed document diff and resumes without the opening message", async () => {

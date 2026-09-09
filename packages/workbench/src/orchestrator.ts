@@ -243,8 +243,12 @@ export class Orchestrator {
         if (item && turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, turnId);
       } else await this.runner.send(sessionId, message);
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
-      await this.service.updateAction(workspaceId, action, (latest) => latest.message === action.message && latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
-        ? { ...latest, status: "running", stage: "execute", message: "", failure: undefined, deliveredAt: this.now(), retryAt: undefined } : latest);
+      await this.service.updateAction(workspaceId, action, (latest) => ({
+        ...latest,
+        ...(latest.message === action.message && latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
+          ? { status: "running" as const, stage: "execute" as const, message: "", failure: undefined, retryAt: undefined } : {}),
+        deliveredAt: this.now()
+      }));
     } catch (error) {
       await this.fail(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
     }
