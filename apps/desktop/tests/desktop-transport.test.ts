@@ -1364,6 +1364,96 @@ describe("Desktop transport facade", () => {
     expect(steerRequest.params.envelope.command).not.toHaveProperty("execution");
   });
 
+  it.each(["visible", "lifecycle"])("preempts background streams for %s events without reordering", async (trigger) => {
+    vi.useFakeTimers();
+    const preload = createPreloadMock();
+    const transport = createDesktopTransport(preload.api, {
+      scheduleEventDrain: (callback) => {
+        const timer = setTimeout(callback, 0);
+        return () => clearTimeout(timer);
+      }
+    });
+    const received: EventEnvelope[] = [];
+    const subscription = await transport.events.subscribe({
+      isBackgroundStream: (envelope) => !("turnId" in envelope.event) || envelope.event.turnId !== "visible",
+      onEnvelope: (envelope) => received.push(envelope)
+    });
+    const background: EventEnvelope = {
+      eventId: "background", cursor: "cursor-1", occurredAt: "2026-09-10T00:00:00.000Z",
+      event: { type: "terminal.output", sessionId: "session-1", turnId: "background", terminalId: "terminal-1", chunk: "first\n" }
+    };
+    const urgent: EventEnvelope = {
+      eventId: "urgent", cursor: "cursor-2", occurredAt: background.occurredAt,
+      event: trigger === "visible"
+        ? { ...background.event, turnId: "visible" }
+        : { type: "session.disposed", conversationId: "conversation-1", sessionId: "session-1", disposedAt: background.occurredAt }
+    };
+    const emit = (envelope: EventEnvelope) => preload.emitPush({ channel: "session.events", subscriptionId: "sub-1", envelope });
+    try {
+      emit(background);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(received).toEqual([]);
+      emit(urgent);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(received).toEqual([background, urgent]);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(received).toHaveLength(2);
+      const pending = { ...background, eventId: "pending", cursor: "cursor-3" };
+      emit(pending);
+      await subscription.unsubscribe();
+      expect(received).toEqual([background, urgent, pending]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drains bounded background batches through the bridge without postponing backlog", async () => {
+    vi.useFakeTimers();
+    const scheduled: Array<() => void> = [];
+    const preload = createPreloadMock();
+    const transport = createDesktopTransport(preload.api, {
+      eventBatchMaxSize: 2,
+      scheduleEventDrain: (callback) => {
+        scheduled.push(callback);
+        return () => undefined;
+      }
+    });
+    const store = createRendererStore();
+    const subscription = await connectDesktopTransportToStore({
+      transport, store, isBackgroundStream: () => true
+    });
+    store.ingestEvent({
+      type: "session.created", conversationId: "conversation-1", sessionId: "session-1", engineId: "agent-1", status: "idle"
+    });
+    const initialCursor = store.getState().eventStream.lastCursor;
+    try {
+      for (let index = 1; index <= 5; index += 1) {
+        preload.emitPush({
+          channel: "session.events", subscriptionId: "sub-1",
+          envelope: {
+            eventId: `background-${index}`, cursor: `cursor-${index}`, occurredAt: "2026-09-10T00:00:00.000Z",
+            event: { type: "message.delta", sessionId: "session-1", turnId: "turn-1", messageId: "message-1", delta: String(index) }
+          }
+        });
+      }
+      await vi.advanceTimersByTimeAsync(99);
+      expect(store.getState().eventStream.lastCursor).toBe(initialCursor);
+      expect(scheduled).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(store.getState().eventStream.lastCursor).toBe("cursor-2");
+      scheduled.shift()?.();
+      expect(store.getState().eventStream.lastCursor).toBe("cursor-4");
+      scheduled.shift()?.();
+      expect(store.getState().eventStream.lastCursor).toBe("cursor-5");
+      expect(store.getDomainReadModel().getMessageBlock("message-1:md")?.text).toBe("12345");
+      await subscription.unsubscribe();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("bounds renderer drain batches by serialized bytes", async () => {
     const scheduled: Array<() => void> = [];
     const preload = createPreloadMock();

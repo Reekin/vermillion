@@ -40,6 +40,7 @@ export type RendererStore = {
   subscribe: (listener: Listener) => () => void;
   subscribeMeta: (listener: RevisionListener) => () => void;
   subscribeSession: (sessionId: string, listener: RevisionListener) => () => void;
+  subscribeTurn: (turnId: string, listener: RevisionListener) => () => void;
   subscribeConversation: (
     conversationId: string,
     listener: RevisionListener
@@ -106,6 +107,7 @@ export const createRendererStore = (
   const listeners = new Set<Listener>();
   const metaListeners = new Set<RevisionListener>();
   const sessionListeners = new Map<string, Set<RevisionListener>>();
+  const turnListeners = new Map<string, Set<RevisionListener>>();
   const conversationListeners = new Map<string, Set<RevisionListener>>();
 
   const notifyDomain = (changes: DomainChangeSet): void => {
@@ -116,10 +118,16 @@ export const createRendererStore = (
       for (const listenersForScope of conversationListeners.values()) {
         for (const listener of listenersForScope) listener();
       }
+      for (const listenersForScope of turnListeners.values()) {
+        for (const listener of listenersForScope) listener();
+      }
       return;
     }
     for (const sessionId of changes.sessionIds) {
       for (const listener of sessionListeners.get(sessionId) ?? []) listener();
+    }
+    for (const turnId of changes.turnIds) {
+      for (const listener of turnListeners.get(turnId) ?? []) listener();
     }
     for (const conversationId of changes.conversationIds) {
       for (const listener of conversationListeners.get(conversationId) ?? []) listener();
@@ -281,6 +289,8 @@ export const createRendererStore = (
     },
     subscribeSession: (sessionId, listener) =>
       subscribeScoped(sessionListeners, sessionId, listener),
+    subscribeTurn: (turnId, listener) =>
+      subscribeScoped(turnListeners, turnId, listener),
     subscribeConversation: (conversationId, listener) =>
       subscribeScoped(conversationListeners, conversationId, listener),
     hydrateSnapshot: (snapshot: DomainSnapshot, cursor?: string) =>

@@ -12,11 +12,11 @@ import {
   type SetStateAction
 } from "react";
 import type {
-  AgentParticipant,
   ApprovalRequest,
   Attachment,
   EngineDefinitionRpc,
   EngineSurfaceRpc,
+  EventEnvelope,
   RuntimeInteraction,
   SessionSettingsRpc,
   Turn,
@@ -55,8 +55,9 @@ import {
 } from "./chat-tree-transcript.js";
 import { buildTurnTranscriptRows } from "./transcript-view-model.js";
 import {
-  useRendererConversationRevision,
-  useRendererSessionsRevision,
+  useRendererConversationParticipants,
+  useRendererSessionSelection,
+  useRendererVisibleTurnsRevision,
   useRendererStoreState
 } from "./use-renderer-store-state.js";
 import { useTranscriptViewportController } from "./use-transcript-viewport-controller.js";
@@ -156,7 +157,7 @@ type RenderedTurnGroup = {
 };
 
 const emptyTurns: Turn[] = [];
-const emptyParticipants: AgentParticipant[] = [];
+const emptyTurnIds: string[] = [];
 const toComposerExecution = (
   profile: ReturnType<typeof resolveEngineExecutionPreference>
 ): ComposerExecutionSelection | undefined =>
@@ -702,8 +703,8 @@ export const SessionPane = ({
     isOpening: isOpeningSelectedSession,
     refreshChatTree,
     onJumpChatTree,
-    prepareSend,
-    submitBranch,
+    prepareSend: prepareChatTreeSend,
+    submitBranch: submitChatTreeBranch,
     operations,
     pendingSend,
     retrySend
@@ -714,11 +715,23 @@ export const SessionPane = ({
     refreshSignal: state.refreshSignals.chatTree + state.refreshSignals.sessionBrowser,
     onStatusNotice: setStatusNotice
   });
-  const memberSessionIds = useMemo(
-    () => activeChatTree?.memberSessionIds ?? (sessionId ? [sessionId] : []),
-    [activeChatTree?.memberSessionIds, sessionId]
+  const visibleTurnIds = activeChatTree?.visibleTurnIds ?? emptyTurnIds;
+  const streamScopeRef = useRef({ tree: activeChatTree, turnIds: new Set(visibleTurnIds), viewSessionId });
+  streamScopeRef.current = { tree: activeChatTree, turnIds: new Set(visibleTurnIds), viewSessionId };
+  const isBackgroundStream = useCallback(({ event }: EventEnvelope): boolean => {
+    const scope = streamScopeRef.current;
+    return scope.tree
+      ? !("turnId" in event && typeof event.turnId === "string" && scope.turnIds.has(event.turnId))
+      : !("sessionId" in event && event.sessionId === scope.viewSessionId);
+  }, []);
+  const chatTreeActionsRef = useRef({ prepareChatTreeSend, submitChatTreeBranch });
+  chatTreeActionsRef.current = { prepareChatTreeSend, submitChatTreeBranch };
+  const prepareSend = useCallback(() => chatTreeActionsRef.current.prepareChatTreeSend(), []);
+  const submitBranch = useCallback((...args: Parameters<typeof submitChatTreeBranch>) =>
+    chatTreeActionsRef.current.submitChatTreeBranch(...args), []);
+  const displayedTurnRevision = useRendererVisibleTurnsRevision(
+    store, visibleTurnIds, activeChatTree ? undefined : viewSessionId
   );
-  const displayedSessionRevision = useRendererSessionsRevision(store, memberSessionIds);
   const domain = store.getDomainReadModel();
   const viewTurnId = activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId)?.turnId;
   const [windowVisible, setWindowVisible] = useState(() => typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus());
@@ -750,13 +763,22 @@ export const SessionPane = ({
     onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId });
   }, [onViewChange, viewSessionId, viewTurnId]);
 
-  const displayedSession = viewSessionId ? domain.getSession(viewSessionId) : undefined;
+  const { session: displayedSession, goal: activeThreadGoal } = useRendererSessionSelection(
+    store, viewSessionId, () => ({
+      session: viewSessionId ? domain.getSession(viewSessionId) : undefined,
+      goal: viewSessionId ? domain.getThreadGoal(viewSessionId) : undefined
+    }), ({ session, goal }) => {
+      // Stream deltas touch updatedAt; it is not a composer control or heading.
+      const { updatedAt: _updatedAt, ...controls } = session ?? {};
+      return JSON.stringify({
+        session: session ? controls : undefined,
+        goal
+      });
+    }
+  );
   const activeSessionId = displayedSession && !isOpeningSelectedSession ? viewSessionId : undefined;
   const activeSessionWindow = activeChatTree?.windows?.find((window) => window.sessionId === viewSessionId);
   const displayedEngineId = displayedSession?.engineId ?? selectedEngineId;
-  const activeThreadGoal = activeSessionId
-    ? domain.getThreadGoal(activeSessionId)
-    : undefined;
   const skillsCwd =
     typeof displayedSession?.metadata?.cwd === "string"
       ? displayedSession.metadata.cwd
@@ -769,20 +791,20 @@ export const SessionPane = ({
   });
 
   const displayedConversationId = displayedSession?.conversationId;
-  const displayedConversationRevision = useRendererConversationRevision(
+  const participants = useRendererConversationParticipants(
     store,
     displayedConversationId
   );
   // Most session switches resolve within a frame; only surface the loading state when a switch is genuinely slow.
   const showOpeningIndicator = useDelayedFlag(isOpeningSelectedSession, 300);
   const turns = useMemo(
-    () => activeChatTree?.visibleTurnIds
-      ? activeChatTree.visibleTurnIds.map((id) => domain.getTurn(id)).filter((turn): turn is Turn => Boolean(turn))
+    () => activeChatTree
+      ? visibleTurnIds.map((id) => domain.getTurn(id)).filter((turn): turn is Turn => Boolean(turn))
       : viewSessionId ? domain.listTurns({ sessionId: viewSessionId }) : emptyTurns,
-    [domain, viewSessionId, displayedSessionRevision, activeChatTree]
+    [domain, viewSessionId, displayedTurnRevision, visibleTurnIds, activeChatTree]
   );
   const currentTurn = turns.at(-1);
-  const activeSession = displayedSession && activeSessionId
+  const activeSession = useMemo(() => displayedSession && activeSessionId
     ? {
         ...displayedSession,
         status: currentTurn?.status === "completed" || !currentTurn
@@ -790,14 +812,7 @@ export const SessionPane = ({
           : displayedSession.status === "awaiting_approval" ? "awaiting_approval" as const : "running" as const,
         lastTurnId: currentTurn?.turnId
       }
-    : undefined;
-  const participants = useMemo(
-    () =>
-      displayedConversationId
-        ? domain.listParticipants({ conversationId: displayedConversationId })
-        : emptyParticipants,
-    [displayedConversationId, displayedConversationRevision, domain]
-  );
+    : undefined, [displayedSession, activeSessionId, currentTurn?.turnId, currentTurn?.status]);
   const participantDirectory = useMemo(
     () => buildParticipantDirectory(participants),
     [participants]
@@ -819,6 +834,19 @@ export const SessionPane = ({
     renderedTranscriptRowCount: transcriptRows.length,
     transcriptContentVersion
   });
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+  const onRequestTranscriptBottom = useCallback(() => {
+    if (sessionId) viewportRef.current.scrollToBottom(sessionId);
+  }, [sessionId]);
+  const onResumeSession = useCallback(async () => {
+    if (!viewSessionId) return;
+    await transport.sessionBrowser.open(viewSessionId);
+    await refreshChatTree();
+  }, [transport, viewSessionId, refreshChatTree]);
+  const lastExecution = useMemo(() => toComposerExecution(
+    resolveEngineExecutionPreference(executionPreferencesByEngineId[displayedEngineId])
+  ), [executionPreferencesByEngineId, displayedEngineId]);
 
   useEffect(() => {
     setProcessVisibilityByTurnId({});
@@ -860,29 +888,30 @@ export const SessionPane = ({
     [transcriptRows, activeChatTree]
   );
   const composerTurns = useMemo(
-    () => filterComposerTurnsForChatTree(currentTurn ? [currentTurn] : emptyTurns, activeChatTree),
-    [currentTurn, activeChatTree]
+    () => {
+      // Composer consumes turn identity/status only. Keep output revisions out
+      // of its controls while the transcript continues reading every delta.
+      const turn = currentTurn?.turnId ? domain.getTurn(currentTurn.turnId) : undefined;
+      return filterComposerTurnsForChatTree(turn ? [turn] : emptyTurns, activeChatTree);
+    },
+    [domain, currentTurn?.turnId, currentTurn?.status, activeChatTree]
   );
   const renderedTranscriptRows = isOpeningSelectedSession ? [] : visibleTranscriptRows;
-  const activeSessionApprovals = useMemo(
-    () =>
-      activeSessionId
+  const { approvals: activeSessionApprovals, interactions: activeSessionInteractions } = useRendererSessionSelection(
+    store, activeSessionId, () => ({
+      approvals: activeSessionId
         ? domain.listApprovalRequests().filter(
             (approval): approval is ApprovalRequest =>
               approval.sessionId === activeSessionId && approval.turnId === currentTurn?.turnId && approval.status === "pending"
           )
         : [],
-    [activeSessionId, currentTurn?.turnId, displayedSessionRevision, domain]
-  );
-  const activeSessionInteractions = useMemo(
-    () =>
-      activeSessionId
+      interactions: activeSessionId
         ? domain.listRuntimeInteractions({ sessionId: activeSessionId }).filter(
             (interaction): interaction is RuntimeInteraction =>
               interaction.sessionId === activeSessionId && interaction.turnId === currentTurn?.turnId && interaction.status === "pending"
           )
-        : [],
-    [activeSessionId, currentTurn?.turnId, displayedSessionRevision, domain]
+        : []
+    })
   );
 
   useEffect(() => {
@@ -1001,7 +1030,8 @@ export const SessionPane = ({
     void connectDesktopTransportToStore({
       transport,
       store,
-      onBacklogPressure
+      onBacklogPressure,
+      isBackgroundStream
     })
       .then((binding) => {
         if (disposed) {
@@ -1026,7 +1056,7 @@ export const SessionPane = ({
         void unsubscribe();
       }
     };
-  }, [transport, store, onBacklogPressure]);
+  }, [transport, store, onBacklogPressure, isBackgroundStream]);
 
   const onRespondApproval = useCallback(async (input: {
     sessionId: string;
@@ -1149,11 +1179,7 @@ export const SessionPane = ({
           modelExecutionPreferences={
             executionPreferencesByEngineId[displayedEngineId]?.modelPreferences
           }
-          lastExecution={toComposerExecution(
-            resolveEngineExecutionPreference(
-              executionPreferencesByEngineId[displayedEngineId]
-            )
-          )}
+          lastExecution={lastExecution}
           skillsCwd={skillsCwd}
           turns={composerTurns}
           interruptTurns={composerTurns}
@@ -1168,11 +1194,8 @@ export const SessionPane = ({
           prepareSend={sessionId ? prepareSend : undefined}
           submitBranch={sessionId ? submitBranch : undefined}
           autoSendQueuedMessages={currentTurn?.turnId === displayedSession?.lastTurnId}
-          onResumeSession={viewSessionId ? async () => {
-            await transport.sessionBrowser.open(viewSessionId);
-            await refreshChatTree();
-          } : undefined}
-          onRequestTranscriptBottom={() => { if (sessionId) viewport.scrollToBottom(sessionId); }}
+          onResumeSession={viewSessionId ? onResumeSession : undefined}
+          onRequestTranscriptBottom={onRequestTranscriptBottom}
           onExecutionPreferenceChange={onExecutionPreferenceChange}
           onRespondApproval={onRespondApproval}
           onRespondInteraction={onRespondInteraction}

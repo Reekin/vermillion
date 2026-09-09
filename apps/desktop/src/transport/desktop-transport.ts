@@ -153,6 +153,7 @@ export type EventSubscribeInput = {
   onEnvelopes?: (envelopes: SessionEventPush["envelope"][]) => void;
   onPush?: (push: SessionEventPush) => void;
   onBacklogPressure?: (pressure: EventBacklogPressure) => void;
+  isBackgroundStream?: (envelope: EventEnvelope) => boolean;
 };
 
 export type EventReplayInput = {
@@ -984,6 +985,7 @@ export const createDesktopTransport = (
       subscribe: async (input: EventSubscribeInput) => {
         let disposed = false;
         let cancelScheduledDrain: CancelScheduledWork | undefined;
+        let scheduledBackgroundDrain = false;
         const envelopeQueue: Array<{ envelope: EventEnvelope; bytes: number }> = [];
         let envelopeQueueHead = 0;
         const pendingEnvelopeCount = (): number =>
@@ -1061,6 +1063,7 @@ export const createDesktopTransport = (
         };
         const drainQueuedEnvelopes = (): void => {
           cancelScheduledDrain = undefined;
+          scheduledBackgroundDrain = false;
           if (disposed || pendingEnvelopeCount() === 0) {
             return;
           }
@@ -1099,14 +1102,25 @@ export const createDesktopTransport = (
             envelopeQueueHead = 0;
           }
           if (pendingEnvelopeCount() > 0) {
+            // Only the initial background batch waits; drain its backlog promptly.
             scheduleDrain();
           }
         };
-        const scheduleDrain = (): void => {
-          if (disposed || cancelScheduledDrain) {
+        const scheduleDrain = (background = false): void => {
+          if (disposed) {
             return;
           }
-          cancelScheduledDrain = scheduleEventDrain(drainQueuedEnvelopes);
+          if (cancelScheduledDrain) {
+            if (background || !scheduledBackgroundDrain) return;
+            cancelScheduledDrain();
+          }
+          scheduledBackgroundDrain = background;
+          if (background) {
+            const timer = globalThis.setTimeout(drainQueuedEnvelopes, 100);
+            cancelScheduledDrain = () => globalThis.clearTimeout(timer);
+          } else {
+            cancelScheduledDrain = scheduleEventDrain(drainQueuedEnvelopes);
+          }
         };
         const flushQueuedEnvelopes = (): void => {
           if (cancelScheduledDrain) {
@@ -1153,7 +1167,8 @@ export const createDesktopTransport = (
             });
             addEnvelopeToBacklogStats(push.envelope);
             maybeReportBacklogPressure();
-            scheduleDrain();
+            scheduleDrain(isStreamBacklogEnvelope(push.envelope) &&
+              Boolean(input.isBackgroundStream?.(push.envelope)));
           }
         );
         return {

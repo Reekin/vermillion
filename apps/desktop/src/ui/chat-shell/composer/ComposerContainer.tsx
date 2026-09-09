@@ -1,6 +1,6 @@
 import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { ReactElement, ReactNode } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import type {
   ApprovalRequest,
   Attachment,
@@ -63,7 +63,7 @@ export type ComposerContainerProps = {
   onRespondInteraction?: (input: InteractionResponseInput) => Promise<void>;
 };
 
-export const ComposerContainer = ({
+export const ComposerContainer = memo(({
   transport,
   extraExecutionControls,
   activeSession,
@@ -199,4 +199,4 @@ export const ComposerContainer = ({
       onRespondInteraction={onRespondInteraction}
     />
   );
-};
+});

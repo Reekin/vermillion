@@ -2,6 +2,7 @@ import type { SessionEventSubscriptionFilter } from "@vermillion/shared";
 import type { RendererStore } from "../store/store.js";
 import type {
   DesktopTransport,
+  EventSubscribeInput,
   EventBacklogPressure
 } from "./desktop-transport.js";
 
@@ -16,6 +17,7 @@ export type ConnectDesktopTransportToStoreInput = {
   subscriptionId?: string;
   hydrateSnapshot?: boolean;
   onBacklogPressure?: (pressure: EventBacklogPressure) => void;
+  isBackgroundStream?: EventSubscribeInput["isBackgroundStream"];
 };
 
 const hasHydratedDomainState = (store: RendererStore): boolean => {
@@ -62,7 +64,8 @@ export const connectDesktopTransportToStore = async (
     onEnvelope: (envelope) => {
       input.store.ingestEnvelope(envelope);
     },
-    onBacklogPressure: input.onBacklogPressure
+    onBacklogPressure: input.onBacklogPressure,
+    isBackgroundStream: input.isBackgroundStream
   });
 
   return subscription;
