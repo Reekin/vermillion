@@ -910,7 +910,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
 
   private async withHistory<T>(entry: SessionIndexEntry, read: (thread: Thread, restored: boolean) => Promise<T>): Promise<T> {
     const header = await this.codexRuntimePort.readThread(entry.providerSessionId!, false);
-    const restored = header.status.type === "notLoaded";
+    const restored = !entry.archivedAt && header.status.type === "notLoaded";
     const thread = restored
       ? await this.codexRuntimePort.resumeThread(header.id, this.resolveHistoryCwd?.(entry.workspaceId) ?? header.cwd)
       : header;

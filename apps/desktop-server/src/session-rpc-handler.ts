@@ -404,10 +404,13 @@ export const createWorkbenchRpcHandler = (
               }
             });
           case "chatTree.submit":
+          case "chatTree.nodeAction":
             if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");
             return parseSessionRpcResponse({
               id: request.id, method: request.method, ok: true,
-              result: shellService.submitChatTreeSend(request.params)
+              result: request.method === "chatTree.nodeAction"
+                ? await shellService.runChatTreeNodeAction(request.params)
+                : shellService.submitChatTreeSend(request.params)
             });
           case "chatTree.retry":
             if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");

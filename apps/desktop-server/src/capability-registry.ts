@@ -54,6 +54,8 @@ export type SessionActionResult =
 
 export type ConversationGraphNodeSnapshot = {
   nodeId: string;
+  sessionId?: string;
+  canArchive?: boolean;
   providerNodeId?: string;
   parentNodeId?: string;
   label: string;

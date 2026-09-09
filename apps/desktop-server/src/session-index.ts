@@ -282,13 +282,19 @@ export class SessionIndexStore {
     const members = [this.getTreeId(sessionId)];
     for (let index = 0; index < members.length; index += 1) {
       for (const relation of this.document.relations) {
-        if (relation.relationType === "fork" && relation.parentSessionId === members[index] &&
-            !this.getEntry(relation.childSessionId)?.archivedAt) {
+        if (relation.relationType === "fork" && relation.parentSessionId === members[index]) {
           members.push(relation.childSessionId);
         }
       }
     }
-    return members;
+    const retained = new Set(members.filter((id) => !this.getEntry(id)?.archivedAt));
+    for (const id of [...members].reverse()) {
+      if (!retained.has(id)) continue;
+      const parent = this.document.relations.find((relation) =>
+        relation.relationType === "fork" && relation.childSessionId === id)?.parentSessionId;
+      if (parent) retained.add(parent);
+    }
+    return members.filter((id) => retained.has(id));
   }
 
   public getTreeView(sessionId: string): SessionIndexDocument["treeViews"][string] | undefined {

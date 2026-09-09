@@ -217,7 +217,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   composerDraftKey="think"
                   onComposerChange={setComposerActions}
                   renderTurnNavigation={renderSessionNavigation}
-                  renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} />}
+                  renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} transport={transport} />}
                   composerExtras={
                     <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                   }

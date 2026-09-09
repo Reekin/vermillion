@@ -810,6 +810,17 @@ export class SessionShellService {
     return this.wrapperChatTree.markRead(input.sessionId, input.nodeId);
   }
 
+  public async runChatTreeNodeAction(input: import("@vermillion/shared").ChatTreeNodeActionInput): Promise<SessionActionResult> {
+    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
+    if (input.action === "archive") {
+      await this.wrapperChatTree.archiveBranch(input.sessionId, input.nodeId,
+        (sessionId) => this.runSessionAction({ sessionId, action: "archive" }));
+      return { action: "archive", archived: true };
+    }
+    const target = await this.wrapperChatTree.getNodeTarget(input.sessionId, input.nodeId);
+    return this.runSessionAction({ sessionId: target.sessionId, action: input.action });
+  }
+
   public submitChatTreeSend(input: import("@vermillion/shared").ChatTreeSendInput) {
     if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
     return this.wrapperChatTree.submit(input, (command) => this.executeCommand(command));
