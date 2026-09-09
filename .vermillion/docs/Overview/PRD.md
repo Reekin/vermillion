@@ -23,9 +23,11 @@ Vermillion（朱砂）是个人 agent 工作台：通过讨论明确需求，把
 
 列出这个 workspace 里冷启动的 Worker 会话和 Worker 派出的验证 subagent：左侧会话列表，右侧用与思考页相同的阅读区看选中的会话。从讨论 fork 出的 Worker 分支在它所属的会话树里查看，不在这里重复列出。列表行的右键菜单与思考页会话列表相同。弹窗模式下阅读区不显示对话树，也没有对话树开关，宽度全部给消息 [用户：chattree在弹窗状态下可以不用显示]；消息区在任何宽度下都保持左右留白，文字不贴边、不被裁切。
 
+会话行标注角色，subagent 缩进挂在派出它的会话下，沿用思考页的状态灯。选中后直接在本页阅读和对话。
+
 ### 状态条
 
-窗口底部有一条贯穿全宽的状态条，样式参照 VS Code / Rider 的状态栏，是各类后台状态的常驻反馈位置。常态只放一项：一个任务小图标加「当前任务: N」。[用户：只需要展示成一个Task小图标 当前任务: 1 这样就行了] N 为所有 workspace 中未结束的工单数（准备中、排队、执行中、等待合入、等待用户）。已关闭和已取消的不计入。
+窗口底部有一条贯穿全宽的状态条，样式参照 VS Code / Rider 的状态栏，是各类后台状态的常驻反馈位置。常态只放一项：一个列表图标加「当前工单: N」。N 为所有 workspace 中未结束的工单数（准备中、排队、执行中、等待合入、等待用户）。已关闭和已取消的不计入。
 
 点击这一项弹出一个小面板，列出计入 N 的全部工单摘要：标题、所属 workspace、状态。点击任一条打开 Workspaces 弹窗，切到对应 workspace 的工单页并定位到该工单。
 
@@ -43,10 +45,16 @@ Vermillion（朱砂）是个人 agent 工作台：通过讨论明确需求，把
 
 项目文档用 Markdown，工作台对象用 JSON。全局注册信息与角色配置放在 `~/.vermillion/`，项目内状态放在 `<workspace>/.vermillion/`；会话关联通过 session id 与会话引擎连接。
 
-桌面和 agent 共用工作台服务与 CLI。角色说明随包分发，首次启动补充缺失的全局版本，项目可覆盖；注入时保留用户原有 developer instructions。界面根据事件更新，外部文件修改通过监听进入同一更新链路。
+桌面和 agent 共用工作台服务与 CLI，界面根据事件更新。角色文件的分发、覆盖与注入规则见[角色](../Workbench/Roles/PRD.md)。
 
-进程重启后根据持久化工单和运行记录恢复调度：被打断的 Worker 会话原样恢复并继续（对话上下文和 worktree 都在）；会话无法恢复时才重新排队并记录原因，不把失去执行者的工单一直显示为运行中。
+进程重启后从持久化的执行过程恢复原 Worker，保留对话上下文与已有成果；历史运行记录只用于追溯。恢复与失败处置见[工单](../Workbench/Missions/PRD.md#运行失败与恢复)，状态所有权、存储与事件边界见[架构](../Foundation/Architecture.md)。
 
 ## 规范
 
 - [UI/UX 规范](../Foundation/UIUX/Standards.md)
+- [架构](../Foundation/Architecture.md)
+- [执行循环规范](../Workbench/Missions/Standards.md)
+
+## 实现状态
+
+Issues 与 Automation 目前只有占位入口；Issue 的状态与未读提示、议题采集、定时任务和触发器仍待实现。上述设计保留为目标行为。Docs 行为与执行决策要求分别见[文档管理](../Workbench/Documents/PRD.md)和[Inbox](../Workbench/Inbox/PRD.md)。

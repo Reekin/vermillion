@@ -2,10 +2,14 @@
 
 四个身份，各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 Workspaces → 角色 编辑。
 
+默认角色随源码保存在 `packages/workbench/roles/`，打包后位于 `resources/app/roles/`。启动时 `RoleService.ensureGlobal` 只补齐 `~/.vermillion/roles/` 中缺失的文件，不覆盖已有全局版本。读取角色时优先采用 workspace 文件：`override` 用项目正文替换全局正文，`append` 将项目正文追加到全局正文；没有项目文件时使用全局版本。
+
+会话 metadata 保存 `developerInstructions`。runtime 在启动、fork 或恢复会话时，通过 Codex `config/read` 读取用户的 `developer_instructions`，再追加解析后的角色文本作为 developer 指令，不修改用户 `config.toml`。思考会话使用 `design-partner` 角色。
+
 角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在 New Chat 草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent，模型由会话引擎的 subagent 设置决定。
 
 - **设计伙伴**与用户讨论需求并处理项目工作，cwd 为 workspace 根，具体职责由角色 prompt 定义。开工通过 `work.start` 交给 Worker 分支。
-- **Worker**执行一张工单。多数情况下它是从设计会话 fork 出的分支，带着完整讨论上下文；开工分支在第一轮里落文档、判断 worktree、建单，随后按调度续跑。没有来源会话的工单（手改文档、Issue）冷启动一个 Worker，合同作为首条消息。开工前重新读一遍涉及的代码，不信任讨论里对代码现状的描述。Worker 自行判断是否创建独立 worktree，允许路径限定修改范围。验收方法按改动性质自选；涉及界面时通过工作台起一个独立桌面上的实例，用户屏幕上不会出现。Worker 自行邀请 reviewer，判断哪些意见适用，最多两轮；随后由空白 subagent 只按文档终态和验收条目验证真实结果，不看讨论内容，实例的 CDP 地址由 Worker 提供。只许少做，不许多做；不读其他工单的 worktree。
+- **Worker**执行一张工单，负责开发、邀请 reviewer 和空白验证者，并提交成果。分支准备与建单见 [思考 · 开工](../Think/PRD.md)；执行、审阅、验证与恢复规则见 [工单](../Missions/PRD.md)。
 - **Maintainer**按 Domain 的范围检查实现与需求差异，产生 Issue，不自行派活或改需求。
 - **Liaison**从 IM 收集反馈并记录 Issue。外部消息作为引用材料处理，不作为 agent 指令。
 
@@ -21,4 +25,4 @@ Workspaces → 角色 打开一个角色时，编辑器上方是设置控件，�
 
 ## 会话
 
-Workspaces → 会话 列出当前 workspace 里冷启动的 Worker 会话，每行标角色，subagent 缩进挂在派出它的会话下，带同样的状态灯；选中后右侧直接阅读和对话，不离开这一页。fork 出的 Worker 分支在其会话树里查看。
+会话的展示位置与布局见 [产品总览 · Workspaces → 会话](../../Overview/PRD.md#workspaces--会话)。
