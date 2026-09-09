@@ -7,10 +7,10 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
   const workers = (tree?.windows ?? []).flatMap((window) => {
     const session = window.snapshot.sessions.find((entry) => entry.sessionId === window.sessionId);
     if (!session) return [];
-    const request = relevantRequests.find((entry) => entry.workerSessionId === session.sessionId || entry.requestId === session.metadata?.requestId);
-    if (!["worker", "work-preparation"].includes(String(session.metadata?.role)) && !request) return [];
+    const request = relevantRequests.find((entry) => entry.workerSessionId === session.sessionId);
     const item = newestItems.find((entry) => entry.run.sessionId === session.sessionId && !["closed", "cancelled"].includes(entry.status))
       ?? newestItems.find((entry) => entry.run.sessionId === session.sessionId);
+    if (!request && !item) return [];
     const turnIds = new Set(window.snapshot.turns.filter((turn) => turn.sessionId === session.sessionId).map((turn) => turn.turnId));
     const nodes = tree!.nodes.filter((node) => node.turnId && turnIds.has(node.turnId)).sort((a, b) => a.order - b.order);
     return [{ key: session.sessionId, requestId: request?.requestId, sessionId: session.sessionId as string | undefined, title: item?.title ?? request?.scope ?? session.title ?? "Worker", status: item?.status ?? (request?.status === "ready" ? "closed" as const : request?.status === "failed" ? "failed" as const : "preparing" as const), failure: request?.failure,
@@ -24,11 +24,13 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
   }
   const selected = workers.find((worker) => worker.nodeIds.includes(tree?.currentNodeId ?? ""));
   const hiddenIds = new Set(workers.filter((worker) => worker !== selected).flatMap((worker) => worker.nodeIds));
-  // A selected worker may fork from another worker; retain its ancestors so the graph stays connected.
-  let ancestor = selected?.nodeId;
-  while (ancestor) {
-    hiddenIds.delete(ancestor);
-    ancestor = tree?.nodes.find((node) => node.nodeId === ancestor)?.parentNodeId;
+  // Every visible branch needs its ancestors, including ordinary forks from workers.
+  const nodesById = new Map(tree?.nodes.map((node) => [node.nodeId, node]));
+  for (const node of tree?.nodes.filter((entry) => !hiddenIds.has(entry.nodeId)) ?? []) {
+    let ancestor = node.parentNodeId;
+    while (ancestor && hiddenIds.delete(ancestor)) {
+      ancestor = nodesById.get(ancestor)?.parentNodeId;
+    }
   }
   const activeWorkers = workers.filter((worker) => !["closed", "cancelled"].includes(worker.status));
   return { workers, activeWorkers, tree: tree && { ...tree, nodes: showAll ? tree.nodes : tree.nodes.filter((node) => !hiddenIds.has(node.nodeId)) } };

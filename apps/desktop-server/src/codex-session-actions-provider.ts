@@ -47,13 +47,19 @@ const buildForkMetadata = (
   input: SessionActionProviderContext,
   providerSessionId: string,
   thread?: { cwd?: string; path?: string | null }
-): Record<string, unknown> => ({
-  ...(input.session?.metadata ?? input.indexEntry?.metadata ?? {}),
-  providerKind: codexProviderKind,
-  providerSessionId,
-  cwd: thread?.cwd ?? input.session?.metadata?.cwd,
-  rolloutPath: thread?.path ?? input.session?.metadata?.rolloutPath
-});
+): Record<string, unknown> => {
+  const parent = input.session?.metadata ?? input.indexEntry?.metadata ?? {};
+  // Forks inherit conversational context; ownership is supplied explicitly by the caller.
+  const context = Object.fromEntries(Object.entries(parent).filter(([key]) =>
+    ["role", "sessionProfile", "developerInstructions"].includes(key)));
+  return {
+    ...context,
+    providerKind: codexProviderKind,
+    providerSessionId,
+    cwd: thread?.cwd ?? parent.cwd,
+    rolloutPath: thread?.path
+  };
+};
 
 const resolveForkTitle = (
   thread: { id: string; name?: string | null; preview?: string | null },

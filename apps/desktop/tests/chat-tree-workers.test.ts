@@ -4,6 +4,10 @@ import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
 import { isHistoricalChatTreePosition } from "../src/ui/chat-shell/chat-tree-send-target.js";
 import { projectChatTreeWorkers } from "../src/ui/app/chat-tree-workers.js";
 
+const boundItems = ["worker", "other-worker"].map((sessionId) => ({
+  title: sessionId, status: "running", run: { sessionId }
+})) as WorkItem[];
+
 const tree = (currentSessionId = "design"): ChatTreeSnapshotRpc => ({
   sessionId: "design", treeId: "design", currentSessionId, currentNodeId: currentSessionId === "design" ? "source" : "worker-tip",
   memberSessionIds: ["design", "worker", "other-worker"], supportsJump: true, engineId: "codex", fetchedAt: "now",
@@ -24,27 +28,40 @@ describe("Worker branch presentation", () => {
     const source = tree();
     source.windows![1]!.snapshot.sessions[0]!.metadata = { role: "work-preparation" };
     const request = { requestId: "prep", sourceSessionId: "design", workerSessionId: "worker", status: "preparing" } as WorkRequest;
-    const result = projectChatTreeWorkers(source, [], [request]);
+    const result = projectChatTreeWorkers(source, [boundItems[1]!], [request]);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ nodeId: "worker-tip", status: "preparing" });
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
   });
 
-  it("matches preparation metadata before the request persists its session id without duplicating the list entry", () => {
+  it("keeps an unbound preparation visible while a request awaits its explicit session binding", () => {
     const source = tree();
     source.windows![1]!.snapshot.sessions[0]!.metadata = { role: "work-preparation", requestId: "prep" };
     const request = { requestId: "prep", sourceSessionId: "design", status: "preparing", scope: "Prepare this work" } as WorkRequest;
     const result = projectChatTreeWorkers(source, [], [request]);
-    expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
-    expect(result.workers).toHaveLength(2);
+    expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "other-tip"]);
+    expect(result.workers).toHaveLength(1);
     expect(result.workers.filter((worker) => worker.title === "Prepare this work")).toMatchObject([
-      { sessionId: "worker", nodeId: "worker-tip", status: "preparing" }
+      { sessionId: undefined, nodeId: undefined, status: "preparing" }
     ]);
-    expect(result.workers.some((worker) => !worker.sessionId)).toBe(false);
-    expect(result.activeWorkers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "Prepare this work", nodeId: "worker-tip" });
+    expect(result.workers.some((worker) => worker.sessionId === "worker")).toBe(false);
+  });
+
+  it.each(["worker", "work-preparation"])("keeps ordinary branches with stale %s metadata visible after preparation is ready", (role) => {
+    const source = tree();
+    source.windows![2]!.snapshot.sessions[0]!.metadata = { role, requestId: "ready", workItemId: "old-item" };
+    const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
+    const result = projectChatTreeWorkers(source, [], requests);
+    expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "other-tip"]);
+    expect(result.workers).toMatchObject([{ sessionId: "worker", status: "closed" }]);
+    expect(result.workers).toHaveLength(1);
+    expect(result.activeWorkers).toEqual([]);
+    source.currentSessionId = "other-worker";
+    source.currentNodeId = "other-tip";
+    expect(projectChatTreeWorkers(source, [], requests).tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "other-tip"]);
   });
   it("keeps kickoff source selected and hides worker nodes while listing every worker", () => {
     const source = tree();
-    const result = projectChatTreeWorkers(source, []);
+    const result = projectChatTreeWorkers(source, boundItems);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
     expect(result.tree?.currentSessionId).toBe("design");
     expect(result.tree?.currentNodeId).toBe("source");
@@ -54,7 +71,7 @@ describe("Worker branch presentation", () => {
   });
 
   it("reveals the selected worker and its source, keeping sibling workers hidden", () => {
-    const result = projectChatTreeWorkers(tree("worker"), []);
+    const result = projectChatTreeWorkers(tree("worker"), boundItems);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip"]);
     expect(result.workers.find((worker) => worker.sessionId === "worker")?.nodeId).toBe("worker-tip");
     expect(isHistoricalChatTreePosition(tree("worker"))).toBe(false);
@@ -64,7 +81,7 @@ describe("Worker branch presentation", () => {
     const source = tree();
     const visibleIds = (currentNodeId: string) => projectChatTreeWorkers({
       ...source, currentSessionId: "worker", currentNodeId
-    }, []).tree?.nodes.map((node) => node.nodeId);
+    }, boundItems).tree?.nodes.map((node) => node.nodeId);
     expect(visibleIds("source")).toEqual(["source"]);
     expect(visibleIds("worker-tip")).toEqual(["source", "worker-tip"]);
     expect(visibleIds("other-tip")).toEqual(["source", "other-tip"]);
@@ -76,7 +93,7 @@ describe("Worker branch presentation", () => {
     const source = tree("worker");
     source.currentNodeId = "source";
     source.windows![1]!.snapshot.turns.unshift({ sessionId: "design", turnId: "source" } as typeof source.windows[0]["snapshot"]["turns"][number]);
-    const result = projectChatTreeWorkers(source, []);
+    const result = projectChatTreeWorkers(source, boundItems);
     expect(result.workers.find((worker) => worker.sessionId === "worker")?.nodeIds).toEqual(["worker-tip"]);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
   });
@@ -86,9 +103,28 @@ describe("Worker branch presentation", () => {
     source.nodes.find((node) => node.nodeId === "other-tip")!.parentNodeId = "worker-tip";
     source.currentSessionId = "other-worker";
     source.currentNodeId = "other-tip";
-    expect(projectChatTreeWorkers(source, []).tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "other-tip"]);
+    expect(projectChatTreeWorkers(source, boundItems).tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "other-tip"]);
     source.currentNodeId = "source";
-    expect(projectChatTreeWorkers(source, []).tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
+    expect(projectChatTreeWorkers(source, boundItems).tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
+  });
+
+  it("retains worker ancestors of ordinary forks while hiding later execution and sibling workers", () => {
+    const source = tree();
+    source.nodes.push(
+      { nodeId: "ordinary", turnId: "ordinary", parentNodeId: "worker-tip", order: 3, isCurrent: false, label: "Follow-up" },
+      { nodeId: "worker-later", turnId: "worker-later", parentNodeId: "worker-tip", order: 4, isCurrent: false, label: "Execution" }
+    );
+    source.windows![1]!.snapshot.turns.push({ sessionId: "worker", turnId: "worker-later" } as typeof source.windows[0]["snapshot"]["turns"][number]);
+    source.windows.push({ sessionId: "ordinary", snapshot: {
+      sessions: [{ sessionId: "ordinary", metadata: { role: "work-preparation", requestId: "ready" } }],
+      turns: [{ sessionId: "ordinary", turnId: "ordinary" }]
+    } } as typeof source.windows[number]);
+    const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
+    for (const currentNodeId of ["source", "ordinary"]) {
+      const result = projectChatTreeWorkers({ ...source, currentNodeId }, [boundItems[1]!], requests);
+      expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "ordinary"]);
+      expect(result.workers.map((worker) => worker.sessionId)).toEqual(["worker", "other-worker"]);
+    }
   });
 
   it("shows closed and cancelled branches with showAll while keeping the unfinished list separate", () => {
@@ -116,7 +152,7 @@ describe("Worker branch presentation", () => {
     const source = tree();
     source.nodes.unshift({ nodeId: "worker-latest", turnId: "worker-latest", parentNodeId: "worker-tip", order: 5, isCurrent: false, label: "Latest work" });
     source.windows![1]!.snapshot.turns.unshift({ sessionId: "worker", turnId: "worker-latest" } as typeof source.windows[0]["snapshot"]["turns"][number]);
-    const result = projectChatTreeWorkers(source, []);
+    const result = projectChatTreeWorkers(source, boundItems);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ nodeId: "worker-latest", nodeIds: ["worker-tip", "worker-latest"] });
     expect(result.workers.find((worker) => worker.sessionId === "other-worker")?.nodeId).toBe("other-tip");
   });
@@ -148,7 +184,7 @@ describe("Worker branch presentation", () => {
     const requests = [{ requestId: "one", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     const items = [{ requestId: "one", title: "实际工单", status: "decision", run: { sessionId: "worker" } }] as WorkItem[];
     const result = projectChatTreeWorkers(tree(), items, requests);
-    expect(result.workers).toHaveLength(2);
+    expect(result.workers).toHaveLength(1);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "实际工单", status: "decision" });
     const waitingForTree = projectChatTreeWorkers({ ...tree(), windows: [] }, items, requests);
     expect(waitingForTree.workers).toEqual([]);

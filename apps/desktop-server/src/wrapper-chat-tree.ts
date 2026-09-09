@@ -102,14 +102,9 @@ export class WrapperChatTreeService {
         hasOlder: false, hasNewer: false
       });
     });
-    const byActivity = [...members].sort((left, right) => {
-      const sessions = snapshot.sessions;
-      return sessions.find((item) => item.sessionId === right)!.updatedAt
-        .localeCompare(sessions.find((item) => item.sessionId === left)!.updatedAt);
-    });
     const view = index.getTreeView(treeId);
     const stored = view && paths.has(view.sessionId) ? view : undefined;
-    const currentSessionId = stored?.sessionId ?? byActivity[0]!;
+    const currentSessionId = stored?.sessionId ?? (paths.has(sessionId) ? sessionId : treeId);
     // Legacy views did not distinguish automatic cursors from explicit jumps; resume tip following.
     const currentNodeId = stored?.followTip === false ? stored.nodeId : paths.get(currentSessionId)?.at(-1);
     const currentPath = paths.get(currentSessionId) ?? [];
@@ -121,7 +116,7 @@ export class WrapperChatTreeService {
       nodes: nodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
       windows, fetchedAt: new Date().toISOString()
     };
-    return { tree, paths, turnsById, byActivity };
+    return { tree, paths, turnsById };
   }
 
   public async get(sessionId: string): Promise<ChatTreeSnapshot> {
@@ -154,24 +149,22 @@ export class WrapperChatTreeService {
 
   public async jump(sessionId: string, nodeId: string): Promise<{ jumped: boolean }> {
     // The graph is already loaded when a user picks a node; no engine operation belongs here.
-    const { paths, byActivity } = this.project(sessionId);
-    const member = byActivity.find((id) => paths.get(id)?.at(-1) === nodeId) ??
-      byActivity.find((id) => paths.get(id)?.includes(nodeId));
-    if (!member) throw new Error(`Unknown tree node: ${nodeId}`);
+    const { tree, paths, turnsById } = this.project(sessionId);
+    const member = this.resolveSendSource(tree.currentSessionId!, nodeId, paths, turnsById);
     await this.options.sessionIndexStore.setTreeView(sessionId, { sessionId: member, nodeId, followTip: false });
     return { jumped: true };
   }
 
   public async prepareSend(sessionId: string, nodeId?: string): Promise<{ sessionId: string }> {
     await this.get(sessionId);
-    const { tree, paths, turnsById, byActivity } = this.project(sessionId);
+    const { tree, paths, turnsById } = this.project(sessionId);
     const target = nodeId ?? tree.currentNodeId;
     if (target && turnsById.get(target)?.status !== "completed") {
       throw new Error("Wait for this turn to finish before branching.");
     }
-    let member = nodeId ? this.resolveSendSource(sessionId, nodeId, paths, byActivity) : tree.currentSessionId!;
+    let member = nodeId ? this.resolveSendSource(sessionId, nodeId, paths, turnsById) : tree.currentSessionId!;
     if (target && !paths.get(member)?.includes(target)) {
-      member = this.resolveSendSource(sessionId, target, paths, byActivity);
+      member = this.resolveSendSource(sessionId, target, paths, turnsById);
     }
     if (target && paths.get(member)?.at(-1) !== target) {
       member = await this.options.fork(member, target);
@@ -194,11 +187,9 @@ export class WrapperChatTreeService {
     return { readNodeIds: turns.map((turn) => turn.turnId) };
   }
 
-  private resolveSendSource(sessionId: string, nodeId: string, paths: Map<string, string[]>, byActivity: string[]): string {
+  private resolveSendSource(sessionId: string, nodeId: string, paths: Map<string, string[]>, turnsById: Map<string, Turn>): string {
     if (paths.get(sessionId)?.includes(nodeId)) return sessionId;
-    const candidates = byActivity.filter((id) => paths.get(id)?.includes(nodeId));
-    const isWorker = (id: string) => this.options.runtimeService.getSession(id)?.metadata?.role === "worker";
-    const source = (!isWorker(sessionId) ? candidates.find((id) => !isWorker(id)) : undefined) ?? candidates[0];
+    const source = turnsById.get(nodeId)?.sessionId;
     if (!source) throw new Error(`Unknown tree node: ${nodeId}`);
     return source;
   }
@@ -240,11 +231,11 @@ export class WrapperChatTreeService {
     try {
       if (!operation.targetSessionId) {
         await this.get(operation.sessionId);
-        const { paths, turnsById, byActivity } = this.project(operation.sessionId);
+        const { paths, turnsById } = this.project(operation.sessionId);
         if (turnsById.get(operation.nodeId)?.status !== "completed") {
           throw new Error("Wait for this turn to finish before branching.");
         }
-        const source = this.resolveSendSource(operation.sessionId, operation.nodeId, paths, byActivity);
+        const source = this.resolveSendSource(operation.sessionId, operation.nodeId, paths, turnsById);
         operation.targetSessionId = await this.options.fork(source, operation.nodeId);
         this.changed(operation.sessionId);
       }

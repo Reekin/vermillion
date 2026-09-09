@@ -180,7 +180,7 @@ export const useChatTreeController = (input: {
       const nodeId = chatTree.currentNodeId;
       if (!nodeId || !isHistoricalChatTreePosition(chatTree)) return false;
       const navigation = ++navigationRef.current;
-      const operation = await transport.chatTree.submit({ ...payload, attachments: payload.attachments ?? [], sessionId, nodeId });
+      const operation = await transport.chatTree.submit({ ...payload, attachments: payload.attachments ?? [], sessionId: chatTree.currentSessionId ?? sessionId, nodeId });
       if (sessionIdRef.current === sessionId) {
         receiveSend(operation);
         if (navigationRef.current === navigation) selectSend(operation.operationId);
@@ -202,7 +202,7 @@ export const useChatTreeController = (input: {
     prepareSend: async (): Promise<string> => {
       if (!sessionId) throw new Error("Select a session before sending.");
       const result = await transport.chatTree.prepareSend({
-        sessionId,
+        sessionId: chatTree?.currentSessionId ?? sessionId,
         nodeId: chatTree?.currentNodeId
       });
       await refreshChatTree();

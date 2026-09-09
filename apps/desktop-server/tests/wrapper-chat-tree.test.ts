@@ -52,6 +52,32 @@ const fixture = async () => {
 };
 
 describe("wrapper session trees", () => {
+  it("opens the requested discussion branch even when preparation is newer", async () => {
+    const f = await fixture();
+    const preparation = f.snapshot.sessions.find((session) => session.sessionId === "branch")!;
+    preparation.metadata = { role: "work-preparation", requestId: "request" };
+    preparation.updatedAt = "2026-09-08T00:00:00Z";
+    expect(await f.service.get("root")).toMatchObject({ currentSessionId: "root", currentNodeId: "b" });
+    await f.service.jump("root", "a");
+    expect(f.index.getTreeView("root")).toEqual({ sessionId: "root", nodeId: "a", followTip: false });
+    await f.service.prepareSend("root");
+    expect(f.fork).toHaveBeenCalledWith("root", "a");
+    f.service.dispose();
+  });
+
+  it("retains the viewed branch for shared ancestors and selects the owner on a cross-branch jump", async () => {
+    const f = await fixture();
+    expect(await f.service.get("branch")).toMatchObject({ currentSessionId: "branch", currentNodeId: "c" });
+    await f.service.jump("root", "a");
+    expect(f.index.getTreeView("root")?.sessionId).toBe("branch");
+    await f.service.jump("root", "b");
+    expect(f.index.getTreeView("root")?.sessionId).toBe("root");
+    await f.service.jump("root", "c");
+    expect(await f.service.prepareSend("branch", "c")).toEqual({ sessionId: "branch" });
+    expect(f.fork).not.toHaveBeenCalled();
+    f.service.dispose();
+  });
+
   it("invalidates the existing graph subscription when any branch completes", async () => {
     const f = await fixture();
     await f.service.get("root");

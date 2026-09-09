@@ -394,6 +394,42 @@ describe("CodexSessionActionsProvider", () => {
     });
   });
 
+  it.each([false, true])("inherits semantic context and applies only explicit fork ownership (scheduler=%s)", async (scheduler) => {
+    const forkThread = vi.fn().mockResolvedValue({
+      id: "thread-child", createdAt: 1_776_470_402, updatedAt: 1_776_470_403,
+      path: "child.jsonl", turns: []
+    });
+    const upsertSession = vi.fn().mockResolvedValue(undefined);
+    const upsertRelation = vi.fn().mockResolvedValue(undefined);
+    const provider = new CodexSessionActionsProvider({ codexRuntimePort: {
+      forkThread, attachThreadToSession: vi.fn()
+    } as unknown as CodexAppServerRuntimePort });
+    const context = { role: "work-preparation", sessionProfile: { engineId: "codex", modelId: "model" },
+      cwd: "I:/project", developerInstructions: "Discuss the project" };
+    const ownership = { requestId: "old-request", workItemId: "old-item", actionId: "old-action",
+      sourceSessionId: "old-source", sourceTurnId: "old-turn", treeId: "old-tree" };
+    const explicit = { requestId: "new-request", workItemId: "new-item", actionId: "new-action",
+      sourceSessionId: "parent", sourceTurnId: "source-turn", role: "worker" };
+    await provider.runAction({
+      sessionId: "parent", engineId: "codex", action: "fork", fromTurnId: "source-turn", activateFork: false,
+      metadata: scheduler ? explicit : undefined,
+      runtimeService: {} as never,
+      sessionIndexStore: { upsertSession, upsertRelation, listRelations: () => [] } as never,
+      providerHandle: codexProviderHandle("thread-parent"),
+      indexEntry: { sessionId: "parent", workspaceId: "workspace", conversationId: "conversation",
+        metadata: { ...context, ...ownership, rolloutPath: "parent.jsonl", arbitraryOwnership: "not inherited" }
+      } as never
+    });
+    expect(upsertSession.mock.calls[0]![0].session.metadata).toEqual({
+      ...context, providerKind: "codex-thread", providerSessionId: "thread-child", rolloutPath: "child.jsonl",
+      ...(scheduler ? explicit : {})
+    });
+    expect(forkThread).toHaveBeenCalledWith("thread-parent", "source-turn");
+    expect(upsertRelation).toHaveBeenCalledWith(expect.objectContaining({
+      parentSessionId: "parent", childSessionId: "codex-thread:thread-child", sourceTurnId: "source-turn"
+    }));
+  });
+
   it("forks index-only Codex sessions without requiring a loaded runtime parent", async () => {
     const forkThread = vi.fn().mockResolvedValue({
       id: "thread-child",

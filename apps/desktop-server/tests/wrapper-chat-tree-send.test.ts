@@ -70,16 +70,18 @@ describe("asynchronous wrapper branch sends", () => {
     await vi.waitFor(() => expect(f.service.listOperations("root")[0]!.status).toBe("sent"));
   });
 
-  it("prefers a discussion member over its newer Worker when the caller does not contain the node", async () => {
+  it.each(["worker", "work-preparation"])("selects the node owner over its newer %s when the caller does not contain the node", async (role) => {
     const f = await fixture();
     await f.addBranch("discussion", "b");
     f.snapshot.turns.push({ ...f.snapshot.turns[0]!, sessionId: "discussion", turnId: "d" });
     await f.addBranch("worker", "d", "discussion");
     const worker = f.snapshot.sessions.find((session) => session.sessionId === "worker")!;
-    worker.metadata = { role: "worker" };
+    worker.metadata = { role, requestId: "request" };
     worker.updatedAt = "2026-09-08T00:00:00Z";
     await f.service.get("root");
     await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith("worker", expect.anything()));
+    await f.service.jump("root", "d");
+    expect((await f.service.get("root")).currentSessionId).toBe("discussion");
     f.service.submit({ ...f.input, nodeId: "d" }, f.send);
     await vi.waitFor(() => expect(f.fork).toHaveBeenCalledWith("discussion", "d"));
     await vi.waitFor(() => expect(f.service.listOperations("root")[0]!.status).toBe("sent"));
