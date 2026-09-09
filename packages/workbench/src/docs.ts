@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, readdir, rmdir, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { DocChange, DocFile } from "./contracts.js";
@@ -136,18 +136,60 @@ export class DocsService {
 
   /** Read-only: does not touch the index. Untracked files count as added. */
   async pendingChanges(): Promise<DocChange[]> {
-    const status = await git(this.rootPath, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", DOCS_DIR]);
+    const status = await git(this.rootPath, ["--no-optional-locks", "--literal-pathspecs", "status", "--no-renames", "--porcelain=v1", "-z", "--untracked-files=all", "--", DOCS_DIR]);
     const changes: DocChange[] = [];
     const entries = status.split("\0").filter(Boolean);
     for (let i = 0; i < entries.length; i += 1) {
       const entry = entries[i]!;
       const code = entry.slice(0, 2);
       const path = entry.slice(3);
-      if (code[0] === "R" || code[0] === "C") i += 1;
       const kind: DocChange["status"] = code.includes("D") ? "deleted" : code === "??" || code.includes("A") ? "added" : "modified";
       changes.push({ path, status: kind });
     }
     return changes.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /** Expand selected files/folders to the currently changed files, without touching the index. */
+  async discardPreview(paths: string[]): Promise<DocChange[]> {
+    if (!paths.length) throw new Error("Select at least one doc path.");
+    const targets = paths.map((path) => toPosix(path).replace(/\/$/, ""));
+    for (const path of targets) assertDocPathOrRoot(path);
+    return (await this.pendingChanges()).filter((change) => targets.some((path) => change.path === path || change.path.startsWith(path + "/")));
+  }
+
+  /** Restore exactly the confirmed files to HEAD in both index and worktree. Caller serializes Git mutations. */
+  async discard(paths: string[]): Promise<DocChange[]> {
+    if (!paths.length) throw new Error("Select at least one doc path.");
+    const targets = paths.map(toPosix);
+    for (const path of targets) assertDocPath(path);
+    const changes = (await this.pendingChanges()).filter((change) => targets.includes(change.path));
+    if (!changes.length) return [];
+    // Never traverse a symlink parent or recursively remove a directory that replaced a confirmed file.
+    for (const { path } of changes) {
+      const parts = path.split("/");
+      for (let i = 1; i <= parts.length; i += 1) {
+        const full = join(this.rootPath, ...parts.slice(0, i));
+        const info = await lstat(full).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (info && (i < parts.length ? !info.isDirectory() || info.isSymbolicLink() : info.isDirectory())) {
+          throw new Error("Doc discard requires a file with real directory parents: " + path);
+        }
+      }
+    }
+    const head = await this.head();
+    const tracked = new Set(head ? (await git(this.rootPath, ["ls-tree", "-r", "--name-only", "-z", head, "--", DOCS_DIR])).split("\0") : []);
+    const restore = changes.filter(({ path }) => tracked.has(path)).map(({ path }) => path);
+    const remove = changes.filter(({ path }) => !tracked.has(path)).map(({ path }) => path);
+    for (const path of remove) {
+      await unlink(join(this.rootPath, path)).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
+    if (remove.length) await git(this.rootPath, ["update-index", "--force-remove", "--", ...remove]);
+    if (restore.length) await git(this.rootPath, ["--literal-pathspecs", "restore", "--source=" + head, "--staged", "--worktree", "--", ...restore]);
+    return changes;
   }
 
   /** Current file against HEAD, including staged edits and untracked additions; never writes the index. */

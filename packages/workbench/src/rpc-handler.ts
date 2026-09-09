@@ -16,6 +16,8 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "docs.read": async (p) => ({ content: await service.readDoc(p.workspaceId, p.path, p.commit) }),
     "docs.write": async (p) => { await service.writeDoc(p.workspaceId, p.path, p.content); return {}; },
     "docs.pending": (p) => service.pendingDocChanges(p.workspaceId),
+    "docs.discardPreview": (p) => service.previewDocDiscard(p.workspaceId, p.paths),
+    "docs.discard": (p) => service.discardDocs(p.workspaceId, p.paths),
     "docs.diff": async (p) => ({ diff: await service.docDiff(p.workspaceId, p.path) }),
     "docs.commit": (p) => service.commitDocs(p.workspaceId, p),
 

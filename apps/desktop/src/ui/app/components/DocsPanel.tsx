@@ -7,6 +7,7 @@ import { EmptyState, InlineNotice, PanelHeader } from "./ui.js";
 import { CommitDocsDialog } from "./CommitDocsDialog.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { DiffDialog } from "./DiffDialog.js";
+import { DiscardDocsDialog } from "./DiscardDocsDialog.js";
 
 type DocsPanelProps = {
   store: WorkbenchStore;
@@ -59,6 +60,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
   const [commitOpen, setCommitOpen] = useState(false);
+  const [discardTarget, setDiscardTarget] = useState<{ workspaceId: string; path: string }>();
   const setResult = store((s) => s.setDocCommit);
   const [diffTarget, setDiffTarget] = useState<{ workspaceId: string; path: string }>();
   const [diffResult, setDiffResult] = useState<{ diff?: string; error?: string }>();
@@ -74,7 +76,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
     return () => { active = false; };
   }, [client, diffTarget]);
 
-  const tree = useMemo(() => buildTree(docs.map((doc) => doc.path)), [docs]);
+  const tree = useMemo(() => buildTree([...new Set([...docs.map((doc) => doc.path), ...pending.map((change) => change.path)])]), [docs, pending]);
   const changeByPath = useMemo(() => new Map(pending.map((c) => [c.path, c])), [pending]);
   const dirtyDirs = useMemo(() => {
     const set = new Set<string>();
@@ -157,7 +159,8 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
           onClose={() => setMenu(undefined)}
           items={[
             { key: "commit", label: "Commit", disabled: pending.length === 0, onSelect: () => setCommitOpen(true) },
-            ...(docs.some((doc) => doc.path === menu.path)
+            { key: "discard", label: "丢弃变更", disabled: !pending.some((change) => change.path === menu.path || change.path.startsWith(menu.path + "/")), onSelect: () => setDiscardTarget({ workspaceId: workspace.workspaceId, path: menu.path }) },
+            ...(docs.some((doc) => doc.path === menu.path) || changeByPath.has(menu.path)
               ? [{ key: "diff", label: "Diff", onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
               : []),
             { key: "reveal", label: "在文件管理器中显示", onSelect: () => void onFileAction(absolute(menu.path), "reveal") },
@@ -186,6 +189,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
           onClose={() => setDiffTarget(undefined)}
         />
       )}
+      {discardTarget && <DiscardDocsDialog key={discardTarget.workspaceId + ":" + discardTarget.path} client={client} {...discardTarget} onClose={() => setDiscardTarget(undefined)} />}
     </div>
   );
 };

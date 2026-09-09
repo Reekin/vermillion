@@ -2,6 +2,8 @@ import { z } from "zod";
 import { workbenchRpc, type WorkbenchRpcMethod } from "./rpc.js";
 
 const states: Partial<Record<WorkbenchRpcMethod, string>> = {
+  "docs.discardPreview": "只读预览：paths 可选 .vermillion/docs 内的文件或目录，返回当前变更文件。",
+  "docs.discard": "丢弃已确认文件的暂存和未暂存改动，恢复到 HEAD；新增文件删除。paths 必须传 discardPreview 返回的具体文件路径，不展开目录。返回实际处理的变更。",
   "worktree.list": "查询工单已登记的延迟清理候选。",
   "worktree.cleanup": "立即尝试清理无未结束工单占用的候选；忙目录保留至下次调用。只接受 workspaceId，不接受任意路径。",
   "workItem.diagnose": "任何现存工单；只读，不触发调度。",

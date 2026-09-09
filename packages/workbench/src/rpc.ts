@@ -53,6 +53,8 @@ export const workbenchRpc = {
   "docs.read": { params: zWs.extend({ path: z.string().min(1), commit: z.string().min(1).optional() }), result: z.object({ content: z.string() }) },
   "docs.write": { params: zWs.extend({ path: z.string().min(1), content: z.string() }), result: zEmpty },
   "docs.pending": { params: zWs, result: z.array(zDocChange) },
+  "docs.discardPreview": { params: zWs.extend({ paths: z.array(z.string().min(1)).min(1) }), result: z.array(zDocChange) },
+  "docs.discard": { params: zWs.extend({ paths: z.array(z.string().min(1)).min(1) }), result: z.array(zDocChange) },
   "docs.diff": { params: zWs.extend({ path: z.string().min(1) }), result: z.object({ diff: z.string() }) },
   "docs.commit": {
     params: zWs.extend({ message: z.string().trim().min(1), paths: z.array(z.string()).min(1).optional() }),

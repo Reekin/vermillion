@@ -208,6 +208,18 @@ export class WorkbenchService {
     return (await this.context(workspaceId)).docs.diff(path);
   }
 
+  async previewDocDiscard(workspaceId: string, paths: string[]): Promise<DocChange[]> {
+    return (await this.context(workspaceId)).docs.discardPreview(paths);
+  }
+
+  async discardDocs(workspaceId: string, paths: string[]): Promise<DocChange[]> {
+    return this.integrate(workspaceId, async () => {
+      const changes = await (await this.context(workspaceId)).docs.discard(paths);
+      if (changes.length) this.emit({ type: "docs.changed", workspaceId });
+      return changes;
+    });
+  }
+
   async commitDocs(workspaceId: string, input: { message: string; paths?: string[] }): Promise<DocCommit> {
     const message = input.message.trim();
     if (!message) throw new Error("Commit message is required.");
