@@ -13,7 +13,7 @@ export type AgentRunner = {
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
   resume: (sessionId: string, options?: { cwd?: string; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
-  /** Closes the idle execution environment and its child processes; preserves session history for resume. */
+  /** Requests unsubscribe of an idle worker; preserves its history and permits native idle unloading. */
   release: (sessionId: string) => Promise<void>;
   /** True while the runtime is executing a turn, including tool/model waits. */
   isActive?: (sessionId: string) => boolean;
@@ -27,6 +27,7 @@ export type OrchestratorOptions = {
   now?: () => string;
   /** Worker turns without status progress before the item is requeued. */
   maxIdleTurns?: number;
+  cleanupIntervalMs?: number;
 };
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
@@ -41,6 +42,7 @@ export class Orchestrator {
   private readonly runner: AgentRunner;
   private readonly now: () => string;
   private readonly maxIdleTurns: number;
+  private readonly cleanupIntervalMs: number;
   private readonly disposers: Array<() => void> = [];
   private readonly runsBySession = new Map<string, WorkerBinding>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
@@ -53,6 +55,7 @@ export class Orchestrator {
     this.runner = options.runner;
     this.now = options.now ?? (() => new Date().toISOString());
     this.maxIdleTurns = options.maxIdleTurns ?? 3;
+    this.cleanupIntervalMs = options.cleanupIntervalMs ?? 5 * 60_000;
 
   }
 
@@ -62,6 +65,16 @@ export class Orchestrator {
     this.disposers.push(this.service.setWorkerEnvironmentReleaser((sessionId) => this.runner.release(sessionId)));
     if (this.runner.resolveSourceTurn) this.disposers.push(this.service.setSourceTurnResolver(this.runner.resolveSourceTurn));
     this.disposers.push(this.service.registerScheduler());
+    const cleanupTimer = setInterval(() => {
+      void this.service.listWorkspaces().then((workspaces) => {
+        for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, async () => {
+          await this.service.releaseIdleWorkers(workspace.workspaceId);
+          await this.service.cleanupWorktrees(workspace.workspaceId);
+        });
+      });
+    }, this.cleanupIntervalMs);
+    cleanupTimer.unref();
+    this.disposers.push(() => clearInterval(cleanupTimer));
     this.disposers.push(this.service.subscribe((event) => {
       if (!("workspaceId" in event)) return;
       if (event.type === "workItem.updated") {
@@ -70,12 +83,16 @@ export class Orchestrator {
         void this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
       } else if (event.type === "workItem.cancelled" && event.sessionId) {
         const sessionId = event.sessionId;
-        void this.enqueue(event.workspaceId, async () => { await this.runner.interrupt(sessionId); await this.reconcile(event.workspaceId); });
+        void this.enqueue(event.workspaceId, async () => { await this.runner.interrupt(sessionId); await this.service.releaseIdleWorkers(event.workspaceId); await this.reconcile(event.workspaceId); });
       }
     }));
     this.disposers.push(this.runner.onTurnCompleted((event) => {
       const bound = this.runsBySession.get(event.sessionId);
-      if (bound) void this.enqueue(bound.workspaceId, () => this.onTurn(bound, event.finishReason, event.failure, event.turnId));
+      if (bound) void this.enqueue(bound.workspaceId, async () => {
+        await this.service.workerTurnCompleted(bound.workspaceId, event.sessionId);
+        await this.onTurn(bound, event.finishReason, event.failure, event.turnId);
+        await this.service.releaseIdleWorkers(bound.workspaceId);
+      });
       const preparingWorkspace = this.preparing.get(event.sessionId);
       if (preparingWorkspace) void this.enqueue(preparingWorkspace, async () => {
         this.preparing.delete(event.sessionId);
@@ -87,11 +104,20 @@ export class Orchestrator {
         await this.reconcile(preparingWorkspace);
       });
       void this.service.listWorkspaces().then((workspaces) => {
-        for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, () => this.reconcile(workspace.workspaceId));
+        for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, async () => {
+          if (workspace.workspaceId !== bound?.workspaceId) {
+            await this.service.workerTurnCompleted(workspace.workspaceId, event.sessionId);
+            await this.service.releaseIdleWorkers(workspace.workspaceId);
+          }
+          await this.reconcile(workspace.workspaceId);
+        });
       });
     }));
     void this.service.listWorkspaces().then((workspaces) => {
-      for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, () => this.reconcile(workspace.workspaceId));
+      for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, async () => {
+        await this.service.releaseIdleWorkers(workspace.workspaceId);
+        await this.reconcile(workspace.workspaceId);
+      });
     });
   }
 

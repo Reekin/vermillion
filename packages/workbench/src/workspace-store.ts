@@ -27,12 +27,12 @@ type Collection<T> = {
   put: (record: T) => Promise<T>;
 };
 
-const parseStored = <T>(path: string, schema: z.ZodType<T>, raw: string): T => {
+const parseStored = <T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, raw: string): T => {
   try { return schema.parse(JSON.parse(raw)); }
   catch (cause) { throw new Error("Unsupported or invalid workbench record: " + path + ". Convert stored data explicitly before running this version.", { cause }); }
 };
 
-const readJsonDir = async <T>(dir: string, schema: z.ZodType<T>): Promise<T[]> => {
+const readJsonDir = async <T>(dir: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T[]> => {
   let names: string[];
   try {
     names = await readdir(dir);
@@ -74,7 +74,7 @@ const writeJsonAtomic = async (path: string, value: unknown): Promise<void> => {
 
 const createCollection = <T extends Record<string, unknown>>(
   dir: string,
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   idKey: keyof T & string
 ): Collection<T> => ({
   list: () => readJsonDir(dir, schema),
@@ -111,6 +111,16 @@ export class WorkspaceStore {
   };
   private readonly schedulerPath: string;
   private readonly records: Collection<WorkItemRecord>;
+
+  async listRecords(): Promise<WorkItemRecord[]> { return this.records.list(); }
+
+  async mutateRecord(id: string, mutate: (record: WorkItemRecord) => WorkItemRecord): Promise<WorkItem> {
+    return this.updateRecord(id, (current) => {
+      if (!current) throw new Error("Unknown work item: " + id);
+      const record = mutate(current);
+      return { record, result: projectWorkItem(record) };
+    });
+  }
 
   /** Reject incompatible execution storage before any scheduler or preparation side effect. */
   async validateExecutionStorage(): Promise<void> {
@@ -155,7 +165,7 @@ export class WorkspaceStore {
       get: async (id) => { const record = await this.records.get(id); return record && projectWorkItem(record); },
       create: async (item, runtime) => this.updateRecord(item.workItemId, (current) => {
         if (current) throw new Error("Use workItems.update for existing work");
-        const record: WorkItemRecord = { workItemId: item.workItemId, item, integrations: [], execution: {
+        const record: WorkItemRecord = { workItemId: item.workItemId, item, integrations: [], cleanup: [], execution: {
           ...runtime, kind: "execute", actionId: "execution-" + item.workItemId, workItemId: item.workItemId,
           status: "pending", stage: "open", message: "",
           attempts: 0, idleTurns: 0, history: [], createdAt: item.createdAt, updatedAt: item.updatedAt

@@ -183,12 +183,12 @@ it("publishes merging and its sole integration atomically while event-driven ref
     })());
   });
   try {
-    expect((await service.submitWorkItem(workspaceId, item.workItemId, submission)).status).toBe("merging");
+    expect((await service.submitWorkItem(workspaceId, item.workItemId, submission)).status).toBe("closed");
     while (pending.length) await Promise.all(pending.splice(0));
     expect(observed.some((entry) => entry.status === "merging")).toBe(true);
     expect(observed.filter((entry) => entry.status === "merging").every((entry) => entry.integrations === 1)).toBe(true);
     expect((await service.listActions(workspaceId)).filter((action) => action.kind === "integration")).toHaveLength(1);
-  } finally { unsubscribe(); }
+  } finally { unsubscribe(); while (pending.length) await Promise.all(pending.splice(0)); }
 });
 
 it("claims only one active integration under the shared record lock", async () => {

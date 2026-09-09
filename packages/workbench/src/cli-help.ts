@@ -2,6 +2,8 @@ import { z } from "zod";
 import { workbenchRpc, type WorkbenchRpcMethod } from "./rpc.js";
 
 const states: Partial<Record<WorkbenchRpcMethod, string>> = {
+  "worktree.list": "查询工单已登记的延迟清理候选。",
+  "worktree.cleanup": "立即尝试清理无未结束工单占用的候选；忙目录保留至下次调用。只接受 workspaceId，不接受任意路径。",
   "workItem.diagnose": "任何现存工单；只读，不触发调度。",
   "decision.answer": "尚未答复的决策；只有获得用户实际答复后才能提交 key 或 note。",
   "runtime.info": "随时查询；连接桌面时返回该运行端的构建哈希，否则返回 CLI 本地运行端并标明 schedulerOnline=false。",

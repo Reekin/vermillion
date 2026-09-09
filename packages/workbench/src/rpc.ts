@@ -22,6 +22,7 @@ import {
   zScope,
   zVerifyResult,
   zWorkItem,
+  zWorktreeCleanup,
   zWorkbenchEvent,
   zWorkspace,
   zSessionNavigation,
@@ -34,6 +35,8 @@ const zEmpty = z.object({});
 
 /** Single method registry: name -> params/result schemas. Handler and client are both derived from it. */
 export const workbenchRpc = {
+  "worktree.list": { params: zWs, result: z.array(zWorktreeCleanup.extend({ workItemId: z.string() })) },
+  "worktree.cleanup": { params: zWs, result: z.object({ removed: z.array(z.string()), retained: z.array(z.object({ workItemId: z.string(), worktreePath: z.string(), reason: z.string() })) }) },
   "sessionNavigation.create": {
     params: z.object({ sessionId: z.string().min(1), targetSessionId: z.string().min(1), reason: z.string().trim().optional() }),
     result: zSessionNavigation

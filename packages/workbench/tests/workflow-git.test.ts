@@ -2,7 +2,6 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { contract, git, setup, submission } from "./workflow-fixture.js";
-import { WorkbenchService } from "../src/workbench-service.js";
 import { DocsService } from "../src/docs.js";
 
 const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
@@ -56,53 +55,6 @@ it("observes external Git commits through filesystem events and sends changed re
   expect((await service.getWorkItem(workspaceId, item.workItemId)).run.resumeMessage).toContain("+external change");
 });
 
-it("merges a verified optional worktree, resumes cleanup after restart, exposes Inbox and rolls back in the original session", async () => {
-  const { service, options, workspaceId, root } = await fixture();
-  await writeFile(join(root, "result.txt"), "base\n");
-  await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "base result");
-  const branch = "work/result", worktreePath = join(root, ".vermillion", "worktrees", "result");
-  await git(root, "worktree", "add", "-b", branch, worktreePath);
-  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "original", branch, worktreePath });
-  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "original" });
-  await writeFile(join(worktreePath, "result.txt"), "worker\n");
-  await git(worktreePath, "add", "result.txt"); await git(worktreePath, "commit", "-qm", "worker result");
-  let active = true;
-  service.setWorkerActiveChecker(() => active);
-  let releaseEnvironment!: () => void;
-  const released = new Promise<void>((resolve) => { releaseEnvironment = resolve; });
-  const release = vi.fn(async (sessionId: string) => {
-    expect(sessionId).toBe("original");
-    await released;
-  });
-  service.setWorkerEnvironmentReleaser(release);
-  const merging = await service.submitWorkItem(workspaceId, item.workItemId, submission);
-  expect(merging.status).toBe("merging");
-  expect(release).not.toHaveBeenCalled();
-  await access(worktreePath);
-  expect((await service.listActions(workspaceId)).some((action) => action.stage === "cleanup" && action.status === "pending")).toBe(true);
-  active = false;
-  const restarted = new WorkbenchService(options);
-  restarted.setWorkerEnvironmentReleaser(release);
-  const cleanup = restarted.continueIntegrations(workspaceId);
-  try {
-    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
-    await access(worktreePath);
-    releaseEnvironment();
-    await cleanup;
-  } finally { releaseEnvironment(); await cleanup; await restarted.dispose(); }
-  const closed = await service.getWorkItem(workspaceId, item.workItemId);
-  expect(closed.status).toBe("closed"); expect(closed.merge?.commit).toBeTruthy();
-  expect((await readFile(join(root, "result.txt"), "utf8")).replace(/\r\n/g, "\n")).toBe("worker\n");
-  await expect(access(worktreePath)).rejects.toThrow();
-  expect(await service.listInbox()).toMatchObject([{ kind: "merged", workItem: { workItemId: item.workItemId } }]);
-  const rolled = await service.rollbackWorkItem(workspaceId, item.workItemId, "Change requested");
-  const rollback = (await service.listActions(workspaceId)).find((action) => action.kind === "integration" && action.integration.operation === "rollback");
-  expect(rollback?.failure).toBeUndefined();
-  expect(release).toHaveBeenCalledTimes(2);
-  expect(rolled).toMatchObject({ status: "queued", run: { sessionId: "original" } });
-  expect((await readFile(join(root, "result.txt"), "utf8")).replace(/\r\n/g, "\n")).toBe("base\n");
-});
-
 it("removes only an empty residual directory after Git already unregistered a worktree", async () => {
   const { root } = await fixture();
   const docs = new DocsService(root), path = join(root, ".vermillion", "worktrees", "residual");
@@ -147,6 +99,8 @@ it("records and rolls back a root execution commit rather than treating code wor
   const commit = await git(root, "rev-parse", "HEAD");
   const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, evidence: { ...submission.evidence, commit } });
   expect(closed).toMatchObject({ status: "closed", merge: { commit } });
+  expect(release).not.toHaveBeenCalled();
+  await service.releaseIdleWorkers(workspaceId);
   expect(release).toHaveBeenCalledWith("root-worker");
   expect(closed.merge?.diffStat).toContain("result.txt");
   await service.rollbackWorkItem(workspaceId, item.workItemId, "Remove result");
@@ -163,31 +117,9 @@ it("releases a cancelled root worker after its active turn ends", async () => {
   await service.cancelWorkItem(workspaceId, item.workItemId);
   expect(release).not.toHaveBeenCalled();
   active = false;
-  await service.continueIntegrations(workspaceId);
+  await service.releaseIdleWorkers(workspaceId);
   expect(release).toHaveBeenCalledExactlyOnceWith("root-worker");
   expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("cancelled");
-});
-
-it("keeps cleanup and the original environment resumable when release fails", async () => {
-  let now = Date.now();
-  const { root, service, workspaceId } = await fixture(() => new Date(now).toISOString());
-  const branch = "work/release", worktreePath = join(root, ".vermillion", "worktrees", "release");
-  await git(root, "worktree", "add", "-b", branch, worktreePath);
-  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "original", branch, worktreePath });
-  const release = vi.fn(async () => {});
-  release.mockRejectedValueOnce(new Error("execution environment is still closing"));
-  service.setWorkerEnvironmentReleaser(release);
-  await service.cancelWorkItem(workspaceId, item.workItemId);
-  await access(worktreePath);
-  expect((await service.listActions(workspaceId)).find((action) => action.kind === "integration")).toMatchObject({
-    stage: "cleanup", status: "retry", attempts: 1, failure: "execution environment is still closing"
-  });
-  expect((await service.getWorkItem(workspaceId, item.workItemId)).run).toMatchObject({ sessionId: "original", worktreePath });
-  now += 60_000;
-  await service.continueIntegrations(workspaceId);
-  expect(release).toHaveBeenCalledTimes(2);
-  await expect(access(worktreePath)).rejects.toThrow();
-  expect((await service.getWorkItem(workspaceId, item.workItemId)).run.sessionId).toBe("original");
 });
 
 it("rejects untracked scoped root code and reverts every owned commit while retaining interleaved docs and unrelated commits", async () => {

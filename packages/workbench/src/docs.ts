@@ -282,8 +282,10 @@ export class DocsService {
   }
 
   async dropWorktree(worktreePath: string, branch: string, discard = false): Promise<void> {
-    const registered = (await git(this.rootPath, ["worktree", "list", "--porcelain", "-z"]))
-      .split("\0").some((field) => field.startsWith("worktree ") && samePath(field.slice(9), worktreePath));
+    if (samePath(worktreePath, this.rootPath)) throw new Error("Cannot remove the workspace root");
+    const registrations = (await git(this.rootPath, ["worktree", "list", "--porcelain", "-z"])).split("\0\0");
+    const registered = registrations.find((entry) => entry.split("\0").some((field) => field.startsWith("worktree ") && samePath(field.slice(9), worktreePath)));
+    if (registered && !registered.split("\0").includes("branch refs/heads/" + branch)) throw new Error("Worktree branch ownership changed: " + worktreePath);
     if (registered) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
     else if (await exists(worktreePath)) {
       if ((await readdir(worktreePath)).length) throw new Error("已注销的 worktree 目录仍有内容，保留以待检查：" + worktreePath);

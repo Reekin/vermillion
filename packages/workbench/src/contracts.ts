@@ -270,12 +270,12 @@ export const zExecution = zProcess.extend({
 });
 export type Execution = z.infer<typeof zExecution>;
 
-/** One item's serialized Git operation, including its durable cleanup checkpoint. */
+/** One item's serialized Git operation. */
 export const zIntegration = zProcess.extend({
   kind: z.literal("integration"),
-  stage: z.enum(["merge", "rollback", "cleanup"]),
+  stage: z.enum(["merge", "rollback"]),
   integration: z.object({
-    operation: z.enum(["merge", "rollback", "cancel"]),
+    operation: z.enum(["merge", "rollback"]),
     before: z.string().optional(),
     target: z.string().optional(),
     targets: z.array(z.string()).optional(),
@@ -290,12 +290,22 @@ export const zWorkflowAction = z.discriminatedUnion("kind", [zExecution, zIntegr
 export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
 
+export const zWorktreeCleanup = z.object({
+  sessionId: z.string().optional(),
+  worktreePath: z.string(),
+  branch: z.string(),
+  discard: z.boolean(),
+  detachedAt: z.string().optional()
+});
+export type WorktreeCleanup = z.infer<typeof zWorktreeCleanup>;
+
 /** Contract and business state stay distinct from the process, but commit atomically. */
 export const zWorkItemRecord = z.object({
   workItemId: z.string(),
   item: zWorkItem.omit({ run: true }),
   execution: zExecution,
-  integrations: z.array(zIntegration)
+  integrations: z.array(zIntegration),
+  cleanup: z.array(zWorktreeCleanup).default([])
 });
 export type WorkItemRecord = z.infer<typeof zWorkItemRecord>;
 

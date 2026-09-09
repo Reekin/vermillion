@@ -51,6 +51,7 @@
 - 发单模式的执行入口是 `work.start`；Worker 通过 `workItem.create` 建单并登记执行会话，文档使用 `docs.commit` 按相关路径提交，refs 保存文档路径、段落和 commit。现做模式直接完成实现，不为同一件事再开工。
 - 工单记录准备、排队、执行、等待合入、等待用户和结束状态；只有已关闭满足依赖。submit 接收 evidence、review 和 verify，验证通过后由工作台串行合入并关闭；Inbox 展示结果并支持附理由回滚。
 - 引用文档出现新提交时通知 Worker 并更新引用；变更送达那一轮的旧提交作废，保留成果后按新合同续跑。
+- 合入成功即关闭工单；Worker turn 结束后退订执行环境，后台每 5 分钟回收已登记且不再使用的 worktree。占用或删除失败保留候选等待下次，不阻塞工单完成。登记、复用和回收共享工作区串行边界。
 
 ## UI 规范
 - 所有控件复用 chat-shell 的 CSS 变量与 `Button`：3-5px 圆角、hairline、单色、等宽大写区块标题。token 在 `ui/app/app.css`。

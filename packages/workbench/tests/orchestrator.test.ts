@@ -1,12 +1,47 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
-import { contract, setup } from "./workflow-fixture.js";
+import { contract, setup, submission } from "./workflow-fixture.js";
 
 const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
 const orchestrators: Orchestrator[] = [];
 afterEach(async () => {
   for (const orchestrator of orchestrators.splice(0)) await orchestrator.dispose();
   for (const f of fixtures.splice(0)) await f.cleanup();
+});
+
+it("detaches a completed worker after its turn ends without waiting for release ACK", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  let ack!: () => void;
+  vi.mocked(f.runner.release).mockImplementation(() => new Promise<void>((resolve) => { ack = resolve; }));
+  try {
+    expect((await f.service.submitWorkItem(f.workspaceId, item.workItemId, submission)).status).toBe("closed");
+    expect(f.runner.release).not.toHaveBeenCalled();
+    f.complete("original");
+    await vi.waitFor(() => expect(f.runner.release).toHaveBeenCalledExactlyOnceWith("original"));
+    const next = await f.service.createWorkItem(f.workspaceId, contract);
+    await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, next.workItemId)).status).toBe("running"));
+  } finally { ack?.(); }
+});
+
+it("unsubscribes again after a user follows up in a completed worker session", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  await f.service.submitWorkItem(f.workspaceId, item.workItemId, submission);
+  f.complete("original");
+  await vi.waitFor(() => expect(f.runner.release).toHaveBeenCalledOnce());
+  f.active.add("original");
+  await f.service.releaseIdleWorkers(f.workspaceId);
+  expect(f.runner.release).toHaveBeenCalledOnce();
+  f.complete("original", "user-followup");
+  await vi.waitFor(() => expect(f.runner.release).toHaveBeenCalledTimes(2));
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("closed");
 });
 
 async function fixture() {

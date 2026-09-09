@@ -59,31 +59,27 @@ try {
   } finally { clearTimeout(turnTimeout); off(); }
   const mcp = await port.rpc("mcpServerStatus/list", {});
   stage("started", { threadId: thread.id, mcp: mcp.data?.map((server) => server.name) });
-  // A cwd lock must be present before release for this probe to establish the original failure.
+  // Unsubscribing must finish even when the engine retains a cwd lock during its idle grace period.
   try { await rmdir(cwd); stage("no-lock-before-release"); await mkdir(cwd); }
   catch (error) { stage("locked-before-release", { code: error.code }); }
-  try { await port.releaseSessionExecution("probe"); }
-  catch (error) {
-    stage("release-failed", { message: error.message, loaded: await port.rpc("thread/loaded/list", {}) });
-    try { await rmdir(cwd); stage("directory-removable-despite-missing-close"); }
-    catch (lock) { stage("directory-still-locked", { code: lock.code }); }
-    throw error;
-  }
-  stage("released-after-thread-closed");
+  await port.releaseSessionExecution("probe");
+  stage("execution-unsubscribed");
   const history = await port.readThread(thread.id, true);
   stage("history-readable", { threadId: history.id, turns: history.turns.length });
-  await rmdir(cwd);
-  stage("directory-removed-with-app-server-running", { runtime: port.getState() });
-  await mkdir(cwd);
+  try { await rmdir(cwd); stage("directory-available-for-cleanup"); await mkdir(cwd); }
+  catch (error) {
+    if (!["EBUSY", "EPERM", "EACCES"].includes(error.code)) throw error;
+    stage("cleanup-deferred-while-occupied", { code: error.code });
+  }
   const resumed = await port.resumeThread(thread.id, cwd);
   port.attachThreadToSession("probe", resumed.id);
   stage("resumed", { sameThread: resumed.id === thread.id });
   await port.releaseSessionExecution("probe");
-  await rmdir(cwd);
-  stage("resumed-environment-released");
+  stage("resumed-environment-unsubscribed");
   success = true;
 } finally {
   await port.stop(); // This port owns only the new probe app-server.
+  await rm(cwd, { recursive: true, force: true });
   await writeFile(join(root, "report.json"), JSON.stringify(report, null, 2));
   await rm(codexHome, { recursive: true, force: true });
   console.log(JSON.stringify({ success, report: join(root, "report.json") }));

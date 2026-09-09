@@ -46,6 +46,8 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workItem.heartbeat": (p) => service.heartbeatWorkItem(p.workspaceId, p.workItemId, p.lastTurnId),
     "workItem.submit": (p) => service.submitWorkItem(p.workspaceId, p.workItemId, p),
     "inbox.acknowledge": (p) => service.acknowledgeWorkItem(p.workspaceId, p.workItemId),
+    "worktree.list": (p) => service.listWorktreeCleanup(p.workspaceId),
+    "worktree.cleanup": (p) => service.cleanupWorktrees(p.workspaceId),
     "workItem.rollback": (p) => service.rollbackWorkItem(p.workspaceId, p.workItemId, p.reason),
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
     "action.list": (p) => service.listActions(p.workspaceId),

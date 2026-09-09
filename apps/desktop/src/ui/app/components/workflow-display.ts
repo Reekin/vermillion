@@ -3,7 +3,7 @@ import { actionIsOpen, type WorkflowAction, type WorkItem } from "@vermillion/wo
 export const roleLabel: Record<string, string> = { worker: "Worker", workbench: "工作台", "design-partner": "设计伙伴", maintainer: "Maintainer", liaison: "Liaison" };
 export const actionStatusLabel: Record<WorkflowAction["status"], string> = { pending: "待接手", running: "处理中", retry: "等待重试", decision: "待决策", done: "已解决", cancelled: "已取消" };
 export const actionKindLabel: Record<WorkflowAction["kind"], string> = { execute: "执行恢复", integration: "合入处置" };
-const stageLabel: Record<WorkflowAction["stage"], string> = { open: "打开会话", deliver: "送达消息", execute: "执行", merge: "合入", rollback: "回滚", cleanup: "清理" };
+const stageLabel: Record<WorkflowAction["stage"], string> = { open: "打开会话", deliver: "送达消息", execute: "执行", merge: "合入", rollback: "回滚" };
 export const actionRoleLabel = (action: WorkflowAction) => roleLabel[action.kind === "execute" ? "worker" : "workbench"];
 
 export const dispositionSummary = (action: WorkflowAction): string[] => action.history.flatMap((entry) => {

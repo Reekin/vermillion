@@ -52,6 +52,7 @@ export class WorkbenchService {
   private readonly sessionNavigation?: SessionNavigationPort;
   private readonly launcher?: AppLauncher;
   private readonly now: () => string;
+  private readonly releasedWorkers = new Set<string>();
   private readonly contexts = new Map<string, WorkspaceContext>();
   private readonly contextLoads = new Map<string, Promise<WorkspaceContext>>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
@@ -469,6 +470,10 @@ export class WorkbenchService {
     workspaceId: string,
     input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { sessionId?: string; sourceSessionId?: string; sourceTurnId?: string; treeId?: string; requestId?: string; worktreePath?: string; branch?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[] }
   ): Promise<WorkItem> {
+    return this.integrate(workspaceId, () => this.createWorkItemRecord(workspaceId, input));
+  }
+
+  private async createWorkItemRecord(workspaceId: string, input: Parameters<WorkbenchService["createWorkItem"]>[1]): Promise<WorkItem> {
     const now = this.now();
     const { store } = await this.context(workspaceId);
     if (!!input.worktreePath !== !!input.branch) throw new Error("worktreePath 与 branch 必须同时提供。");
@@ -509,6 +514,10 @@ export class WorkbenchService {
   /** Worker claimed the item; records the session and worktree it runs in. */
   /** A (re)start begins a new turn: the pending message is claimed and any stale-turn mark from the previous run is over. */
   async startWorkItem(workspaceId: string, workItemId: string, run: Pick<Execution, "sessionId" | "heartbeatAt">): Promise<WorkItem> {
+    return this.integrate(workspaceId, () => this.startWorkItemRecord(workspaceId, workItemId, run));
+  }
+
+  private async startWorkItemRecord(workspaceId: string, workItemId: string, run: Pick<Execution, "sessionId" | "heartbeatAt">): Promise<WorkItem> {
     const current = await this.getWorkItem(workspaceId, workItemId);
     if (current.status !== "queued" && !(current.status === "running" && current.run.sessionId === run.sessionId)) throw new Error("只有可执行的排队工单可以启动，已结束或等待合入的工单不能重新认领。");
     if (await this.isWorkItemBlocked(workspaceId, workItemId)) throw new Error("工单仍有未解决的等待条件，请读取 action.list。");
@@ -600,8 +609,6 @@ export class WorkbenchService {
           } else {
             integration = { ...integration, ...await docs.rootResult(item.evidence?.commit, item.run.baseCommit, item.scope.allowedPaths) };
           }
-          action = await this.updateAction(workspaceId, action, (action) => ({ ...action, integration, stage: "cleanup" }));
-          item = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, merge: { commit: integration.commit, commits: integration.commits, diffStat: integration.diffStat, mergedAt: this.now() } }));
         }
         if (action.stage === "rollback") {
           if (!integration.before) {
@@ -611,22 +618,26 @@ export class WorkbenchService {
           let commit: string | undefined;
           for (const target of [...(integration.targets ?? [integration.target!])].reverse()) commit = await docs.rollbackMerge(target, integration.before);
           integration = { ...integration, commit };
-          action = await this.updateAction(workspaceId, action, (action) => ({ ...action, integration, stage: "cleanup" }));
-          item = await this.mutateWorkItem(workspaceId, workItemId, (current) => ({ ...current, merge: { ...current.merge!, rollbackCommit: commit, acknowledgedAt: this.now() } }));
         }
-        if (action.stage === "cleanup") {
-          if (item.run.sessionId && this.workerActive?.(item.run.sessionId)) continue;
-          if (item.run.sessionId) await this.releaseWorkerEnvironment?.(item.run.sessionId);
-          if (item.run.worktreePath && item.run.branch) {
-            await docs.dropWorktree(item.run.worktreePath, item.run.branch, integration.operation === "cancel");
-          }
-          await this.updateExecution(workspaceId, workItemId, (execution, current) => ({ item: { ...current, status: integration.operation === "cancel" ? "cancelled" : integration.operation === "rollback" ? "queued" : "closed",
-            merge: integration.operation === "merge" ? { commit: integration.commit, commits: integration.commits, diffStat: integration.diffStat, mergedAt: current.merge?.mergedAt ?? this.now() }
-              : integration.operation === "rollback" ? { ...current.merge!, rollbackCommit: integration.commit, acknowledgedAt: this.now() } : current.merge },
-            execution: { ...execution, worktreePath: undefined, branch: undefined, baseCommit: integration.operation === "rollback" ? integration.commit : execution.baseCommit,
-              message: integration.operation === "rollback" ? "用户回滚：" + integration.reason + "。重新判断隔离目录，需要时自行创建并通过 workItem.update 登记。" : execution.message } }));
-          await this.finishAction(workspaceId, action.actionId, "已完成 " + integration.operation + " 及清理。");
-        }
+        const { store } = await this.context(workspaceId);
+        const now = this.now();
+        await store.mutateRecord(workItemId, (record) => {
+          const rollback = integration.operation === "rollback";
+          const detached = rollback ? record : this.detachWorktree(record, false);
+          return { ...detached,
+            cleanup: rollback ? detached.cleanup.map((candidate) => ({ ...candidate, detachedAt: undefined })) : detached.cleanup,
+            item: { ...record.item, status: rollback ? "queued" : "closed", updatedAt: now,
+              merge: rollback ? { ...record.item.merge!, rollbackCommit: integration.commit, acknowledgedAt: now }
+                : { commit: integration.commit, commits: integration.commits, diffStat: integration.diffStat, mergedAt: now } },
+            execution: { ...detached.execution, status: rollback ? "pending" : "done", stage: rollback ? "deliver" : detached.execution.stage,
+              updatedAt: now, baseCommit: rollback ? integration.commit : detached.execution.baseCommit,
+              message: rollback ? "用户回滚：" + integration.reason + "。重新判断隔离目录，需要时创建新 worktree 并通过 workItem.update 登记。" : detached.execution.message },
+            integrations: record.integrations.map((entry) => entry.actionId === action.actionId
+              ? { ...entry, integration, status: "done", updatedAt: now } : entry)
+          };
+        });
+        this.emit({ type: "workItems.changed", workspaceId });
+        this.emit({ type: "actions.changed", workspaceId });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         if (error instanceof WorktreeMergeConflict || error instanceof WorktreeNotReady) {
@@ -670,21 +681,109 @@ export class WorkbenchService {
   }
 
   async cancelWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.integrate(workspaceId, () => this.cancelResult(workspaceId, workItemId));
+  }
+
+  private async cancelResult(workspaceId: string, workItemId: string): Promise<WorkItem> {
     const item = await this.getWorkItem(workspaceId, workItemId);
+    if (item.status === "cancelled") return item;
     if (item.status === "closed") throw new Error("已合入工单请使用回滚入口，不能取消已完成成果。");
-    const cancelled = await this.updateExecution(workspaceId, workItemId, (execution, current) => ({
-      item: { ...current, status: "cancelled" }, execution: { ...execution, status: "cancelled" }
-    }));
-    for (const action of await this.listActions(workspaceId)) {
-      if (action.workItemId === workItemId && actionIsOpen(action)) await this.updateAction(workspaceId, action, (action) => ({ ...action, status: "cancelled" }));
-    }
+    const { store } = await this.context(workspaceId);
+    const cancelled = await store.mutateRecord(workItemId, (record) => {
+      const detached = this.detachWorktree(record, true);
+      return { ...detached, item: { ...record.item, status: "cancelled", updatedAt: this.now() },
+        execution: { ...detached.execution, status: "cancelled", updatedAt: this.now() },
+        integrations: record.integrations.map((action) => actionIsOpen(action) ? { ...action, status: "cancelled", updatedAt: this.now() } : action) };
+    });
     const dependants = (await this.listWorkItems(workspaceId)).filter((w) => !["closed", "cancelled"].includes(w.status) && w.dependsOn.includes(workItemId)).map((w) => w.workItemId);
     this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants });
-    if (item.run.sessionId || (item.run.worktreePath && item.run.branch)) {
-      await this.createAction(workspaceId, { kind: "integration", workItemId: workItemId, status: "pending", stage: "cleanup", message: "取消后的工作目录清理。", integration: { operation: "cancel", diffStat: "" } });
-      await this.continueIntegrations(workspaceId);
-    }
+    this.emit({ type: "workItems.changed", workspaceId });
+    this.emit({ type: "actions.changed", workspaceId });
     return cancelled;
+  }
+
+  private detachWorktree(record: WorkItemRecord, discard: boolean): WorkItemRecord {
+    const { sessionId, worktreePath, branch } = record.execution;
+    return { ...record,
+      cleanup: worktreePath && branch ? [...record.cleanup, { sessionId, worktreePath, branch, discard }] : record.cleanup,
+      execution: { ...record.execution, worktreePath: undefined, branch: undefined }
+    };
+  }
+
+  async listWorktreeCleanup(workspaceId: string) {
+    return (await (await this.context(workspaceId)).store.listRecords())
+      .flatMap((record) => record.cleanup.map((candidate) => ({ workItemId: record.workItemId, ...candidate })));
+  }
+
+  /** A user can resume a completed worker directly, without reopening its work item. */
+  async workerTurnCompleted(workspaceId: string, sessionId: string): Promise<void> {
+    await this.integrate(workspaceId, async () => {
+      this.releasedWorkers.delete(sessionId);
+      const { store } = await this.context(workspaceId);
+      for (const record of await store.listRecords()) {
+        if (!record.cleanup.some((candidate) => candidate.sessionId === sessionId && candidate.detachedAt)) continue;
+        await store.mutateRecord(record.workItemId, (current) => ({ ...current,
+          cleanup: current.cleanup.map((candidate) => candidate.sessionId === sessionId ? { ...candidate, detachedAt: undefined } : candidate) }));
+      }
+    });
+  }
+
+  /** Requests unsubscribe only for idle terminal workers; never waits for native thread shutdown. */
+  async releaseIdleWorkers(workspaceId: string): Promise<void> {
+    await this.integrate(workspaceId, async () => {
+      const items = await this.listWorkItems(workspaceId);
+      const { store } = await this.context(workspaceId);
+      const candidates = await this.listWorktreeCleanup(workspaceId);
+      const owners = new Set(items.filter((item) => !["closed", "cancelled"].includes(item.status)).map((item) => item.run.sessionId));
+      for (const sessionId of owners) if (sessionId) this.releasedWorkers.delete(sessionId);
+      for (const item of items) {
+        const sessionId = item.run.sessionId;
+        if (!sessionId || owners.has(sessionId) || this.workerActive?.(sessionId) || this.releasedWorkers.has(sessionId) || !this.releaseWorkerEnvironment) continue;
+        const owned = candidates.filter((candidate) => candidate.sessionId === sessionId);
+        if (owned.length && owned.every((candidate) => candidate.detachedAt)) continue;
+        this.releasedWorkers.add(sessionId);
+        try {
+          void this.releaseWorkerEnvironment(sessionId).then(async () => {
+            for (const candidate of owned) await store.mutateRecord(candidate.workItemId, (record) => ({ ...record,
+              cleanup: record.cleanup.map((entry) => ["closed", "cancelled"].includes(record.item.status) && entry.sessionId === sessionId && entry.worktreePath === candidate.worktreePath && entry.branch === candidate.branch
+                ? { ...entry, detachedAt: this.now() } : entry) }));
+          }).catch(() => this.releasedWorkers.delete(sessionId));
+        } catch { this.releasedWorkers.delete(sessionId); }
+      }
+    });
+  }
+
+  /** Only persisted, detached ownership can authorize deletion. Busy paths remain for the next sweep. */
+  async cleanupWorktrees(workspaceId: string) {
+    return this.integrate(workspaceId, async () => {
+      const { store, docs } = await this.context(workspaceId);
+      const removed: string[] = [];
+      const retained: Array<{ workItemId: string; worktreePath: string; reason: string }> = [];
+      for (const candidate of await this.listWorktreeCleanup(workspaceId)) {
+        const items = await this.listWorkItems(workspaceId);
+        const reused = items.some((item) => !["closed", "cancelled"].includes(item.status) &&
+          ((candidate.sessionId && item.run.sessionId === candidate.sessionId) || item.run.branch === candidate.branch ||
+            (item.run.worktreePath && this.sameWorktreePath(item.run.worktreePath, candidate.worktreePath))));
+        let reason = reused ? "owned" :
+          candidate.sessionId && this.workerActive?.(candidate.sessionId) ? "active" :
+          candidate.sessionId && !candidate.detachedAt ? "subscribed" : undefined;
+        if (!reason) {
+          try {
+            await docs.dropWorktree(candidate.worktreePath, candidate.branch, candidate.discard);
+            await store.mutateRecord(candidate.workItemId, (record) => ({ ...record,
+              cleanup: record.cleanup.filter((entry) => entry.worktreePath !== candidate.worktreePath || entry.branch !== candidate.branch) }));
+            removed.push(candidate.worktreePath);
+          } catch (error) { reason = error instanceof Error ? error.message : String(error); }
+        }
+        if (reason) retained.push({ workItemId: candidate.workItemId, worktreePath: candidate.worktreePath, reason });
+      }
+      return { removed, retained };
+    });
+  }
+
+  private sameWorktreePath(left: string, right: string): boolean {
+    const normalize = (path: string) => process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path);
+    return normalize(left) === normalize(right);
   }
 
   async updateWorkItem(
@@ -692,6 +791,11 @@ export class WorkbenchService {
     workItemId: string,
     input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk" | "needs" | "dependsOn">> & { note: string; worktreePath?: string; branch?: string }
   ): Promise<WorkItem> {
+    return input.worktreePath ? this.integrate(workspaceId, () => this.updateWorkItemRecord(workspaceId, workItemId, input))
+      : this.updateWorkItemRecord(workspaceId, workItemId, input);
+  }
+
+  private async updateWorkItemRecord(workspaceId: string, workItemId: string, input: Parameters<WorkbenchService["updateWorkItem"]>[2]): Promise<WorkItem> {
     const { note, worktreePath, branch, ...changes } = input;
     if (!!worktreePath !== !!branch) throw new Error("worktreePath 与 branch 必须同时提供。");
     if (changes.needs?.some((need) => ["browser", "desktop"].includes(need.trim()))) throw new Error("needs 必须指明具体共享实例。");
