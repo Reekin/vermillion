@@ -65,7 +65,7 @@ import { ChatTreePanel, type ChatTreePanelProps } from "./ChatTreePanel.js";
 import { GitBranch } from "lucide-react";
 import { useRendererDiagnostics } from "./use-renderer-diagnostics.js";
 import { ComposerContainer } from "./composer/ComposerContainer.js";
-import type { ComposerExecutionSelection } from "./composer/composer-types.js";
+import type { ComposerActions, ComposerExecutionSelection } from "./composer/composer-types.js";
 import "./chat-shell.css";
 
 const CHAT_TREE_VISIBLE_KEY = "vermillion.chatTreeVisible";
@@ -101,6 +101,8 @@ export type SessionPaneProps = {
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
+  composerDraftKey?: string;
+  onComposerChange?: (actions: ComposerActions | undefined) => void;
   onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
@@ -593,6 +595,8 @@ export const SessionPane = ({
   createSession,
   initializeDraftExecution,
   composerExtras,
+  composerDraftKey,
+  onComposerChange,
   onViewChange,
   renderChatTree,
   renderTurnNavigation,
@@ -1098,6 +1102,8 @@ export const SessionPane = ({
         </div>
 
         <ComposerContainer
+          contentDraftKey={composerDraftKey}
+          onComposerChange={onComposerChange}
           draftKey={pendingSend?.operationId ?? operations.find((operation) => operation.targetSessionId === activeSessionId)?.operationId ?? activeSessionId}
           initializeDraftExecution={initializeDraftExecution}
           extraExecutionControls={composerExtras}

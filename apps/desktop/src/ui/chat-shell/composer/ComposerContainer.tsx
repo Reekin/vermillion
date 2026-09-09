@@ -1,5 +1,6 @@
 import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { ReactElement, ReactNode } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type {
   ApprovalRequest,
   Attachment,
@@ -17,6 +18,7 @@ import type { InteractionResponseInput } from "../InteractionFlowView.js";
 import { useComposerController } from "../use-composer-controller.js";
 import { ComposerPanel } from "./ComposerPanel.js";
 import type {
+  ComposerActions,
   ComposerExecutionSelection,
   ComposerModelExecutionPreferences
 } from "./composer-types.js";
@@ -27,6 +29,8 @@ export type ComposerContainerProps = {
   activeSession?: ChatSession;
   activeSessionId?: string;
   draftKey?: string;
+  contentDraftKey?: string;
+  onComposerChange?: (actions: ComposerActions | undefined) => void;
   threadGoal?: ThreadGoal;
   selectedEngineId: string;
   engineSurface?: EngineSurfaceRpc;
@@ -65,6 +69,8 @@ export const ComposerContainer = ({
   activeSession,
   activeSessionId,
   draftKey,
+  contentDraftKey,
+  onComposerChange,
   threadGoal,
   selectedEngineId,
   engineSurface,
@@ -98,6 +104,7 @@ export const ComposerContainer = ({
     activeSession,
     activeSessionId,
     draftKey,
+    contentDraftKey,
     threadGoal,
     selectedEngineId,
     engineSurface,
@@ -122,6 +129,14 @@ export const ComposerContainer = ({
     onRequestTranscriptBottom,
     onExecutionPreferenceChange
   });
+
+  const submitRef = useRef(composer.onSubmitWithInstruction);
+  submitRef.current = composer.onSubmitWithInstruction;
+  const submitWithInstruction = useCallback((instruction: string) => submitRef.current(instruction), []);
+  useEffect(() => {
+    onComposerChange?.({ hasContent: composer.hasComposedInput, canSubmit: composer.canSubmit, submitWithInstruction });
+  }, [onComposerChange, composer.hasComposedInput, composer.canSubmit, submitWithInstruction]);
+  useEffect(() => () => onComposerChange?.(undefined), [onComposerChange]);
 
   return (
     <ComposerPanel

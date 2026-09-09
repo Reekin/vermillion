@@ -348,6 +348,8 @@ type UseComposerControllerInput = {
   activeSessionId?: string;
   /** Stable through the transition from an accepted branch operation to its session. */
   draftKey?: string;
+  /** Keeps unsent content across navigation without sharing session configuration or queues. */
+  contentDraftKey?: string;
   threadGoal?: ThreadGoal;
   selectedEngineId: string;
   engineSurface?: EngineSurfaceRpc;
@@ -387,6 +389,7 @@ export type UseComposerControllerResult = ComposerViewModel & {
   ) => void;
   onTextareaSelect: (selectionStart: number) => void;
   onPrimaryAction: () => Promise<void>;
+  onSubmitWithInstruction: (instruction: string) => Promise<void>;
   onQueueCurrent: () => void;
   onStop: () => Promise<void>;
   onSuggestionHover: (index: number) => void;
@@ -414,6 +417,7 @@ export const useComposerController = (
   input: UseComposerControllerInput
 ): UseComposerControllerResult => {
   const draftKey = input.draftKey ?? input.activeSessionId;
+  const contentDraftKey = input.contentDraftKey ?? draftKey;
   const [draftBySessionId, setDraftBySessionId] = useState<Record<string, string>>({});
   const [detachedDraft, setDetachedDraft] = useState("");
   const [detachedAttachments, setDetachedAttachments] = useState<ComposerAttachment[]>([]);
@@ -444,12 +448,13 @@ export const useComposerController = (
   const [isSkillsLoading, setIsSkillsLoading] = useState(false);
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(0);
   const mountedRef = useRef(true);
+  const contentRevisionRef = useRef(0);
   const selectedSkillsRef = useRef<ComposerSkillReference[]>([]);
   const attachmentDraftsRef = useRef<Record<string, ComposerAttachment[]>>({});
   const detachedAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
-  const previousSessionIdRef = useRef<string | undefined>(undefined);
+  const previousContentDraftKeyRef = useRef(contentDraftKey);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -493,11 +498,11 @@ export const useComposerController = (
     [input.activeSession, input.interruptTurns]
   );
 
-  const draft = draftKey
-    ? (draftBySessionId[draftKey] ?? "")
+  const draft = contentDraftKey
+    ? (draftBySessionId[contentDraftKey] ?? "")
     : detachedDraft;
-  const attachments = draftKey
-    ? (attachmentDrafts[draftKey] ?? [])
+  const attachments = contentDraftKey
+    ? (attachmentDrafts[contentDraftKey] ?? [])
     : detachedAttachments;
   const queue = input.activeSessionId
     ? (queueBySessionId[input.activeSessionId] ?? [])
@@ -618,13 +623,14 @@ export const useComposerController = (
   }, []);
 
   useEffect(() => {
-    if (previousSessionIdRef.current === draftKey) {
+    if (previousContentDraftKeyRef.current === contentDraftKey) {
       return;
     }
-    previousSessionIdRef.current = draftKey;
+    previousContentDraftKeyRef.current = contentDraftKey;
+    contentRevisionRef.current += 1;
     selectedSkillsRef.current = [];
     setSelectedSkills([]);
-  }, [draftKey]);
+  }, [contentDraftKey]);
 
   useEffect(() => {
     if (!input.selectedEngineId || !supportsTurnConfiguration) {
@@ -734,10 +740,11 @@ export const useComposerController = (
   }, [input.skillsCwd, input.onStatusNotice, input.transport]);
 
   const setDraft = (value: string): void => {
-    if (draftKey) {
+    contentRevisionRef.current += 1;
+    if (contentDraftKey) {
       setDraftBySessionId((current) => ({
         ...current,
-        [draftKey]: value
+        [contentDraftKey]: value
       }));
       return;
     }
@@ -757,6 +764,7 @@ export const useComposerController = (
   };
 
   const replaceSelectedSkills = (nextSkills: ComposerSkillReference[]): void => {
+    contentRevisionRef.current += 1;
     selectedSkillsRef.current = nextSkills;
     setSelectedSkills(nextSkills);
   };
@@ -827,7 +835,7 @@ export const useComposerController = (
   }, [suggestionQuery?.trigger, suggestionQuery?.query]);
 
   const getAttachmentsForSession = (
-    sessionId = draftKey
+    sessionId = contentDraftKey
   ): ComposerAttachment[] =>
     sessionId ? (attachmentDraftsRef.current[sessionId] ?? []) : detachedAttachmentsRef.current;
 
@@ -839,6 +847,7 @@ export const useComposerController = (
     } = {}
   ): void => {
     const currentAttachments = getAttachmentsForSession(sessionId);
+    contentRevisionRef.current += 1;
     if (options.releaseCurrent ?? true) {
       releaseComposerAttachments(currentAttachments);
     }
@@ -909,8 +918,10 @@ export const useComposerController = (
     });
   };
 
-  const moveCurrentInputToQueue = (source: QueuedComposerMessage["source"]): void => {
-    const text = draft.trim();
+  const moveCurrentInputToQueue = (
+    source: QueuedComposerMessage["source"],
+    text = draft.trim()
+  ): void => {
     const currentSkills = selectedSkillsRef.current;
     const currentAttachments = getAttachmentsForSession();
     if (!text && currentSkills.length === 0 && currentAttachments.length === 0) {
@@ -925,7 +936,7 @@ export const useComposerController = (
     });
     replaceSelectedSkills([]);
     if (input.activeSessionId) {
-      replaceAttachmentsForSession(draftKey, [], {
+      replaceAttachmentsForSession(contentDraftKey, [], {
         releaseCurrent: false
       });
     }
@@ -1115,35 +1126,47 @@ export const useComposerController = (
         });
         return;
       }
+      const submittedRevision = contentRevisionRef.current;
       const succeeded = await dispatchGoalCommand(goalCommand);
-      if (!succeeded) {
+      if (!succeeded || submittedRevision !== contentRevisionRef.current) {
         return;
       }
       onDraftChange("");
       return;
     }
+    await submitCurrentInput(draft);
+  };
+
+  const submitCurrentInput = async (text: string): Promise<void> => {
     if (intent === "queue") {
-      moveCurrentInputToQueue("user-queue");
+      moveCurrentInputToQueue("user-queue", text.trim());
       return;
     }
     const currentAttachments = getAttachmentsForSession();
-    const currentDraft = draft;
+    const submittedRevision = contentRevisionRef.current;
     const succeeded = await dispatchPayload({
-      text: currentDraft,
+      text,
       payloadSkills: selectedSkillsRef.current,
       payloadAttachments: currentAttachments,
       mode: intent,
       turnId: activeTurnId,
       execution: intent === "steer" ? undefined : execution
     });
-    if (!succeeded) {
+    if (!succeeded || submittedRevision !== contentRevisionRef.current) {
       return;
     }
     onDraftChange("");
     replaceSelectedSkills([]);
-    replaceAttachmentsForSession(draftKey, [], {
+    replaceAttachmentsForSession(contentDraftKey, [], {
       releaseCurrent: true
     });
+  };
+
+  const onSubmitWithInstruction = async (instruction: string): Promise<void> => {
+    if (!canSubmit) {
+      return;
+    }
+    await submitCurrentInput([draft.trim(), instruction.trim()].filter(Boolean).join("\n\n"));
   };
 
   const onQueueCurrent = (): void => {
@@ -1266,7 +1289,7 @@ export const useComposerController = (
     files: Iterable<File>,
     origin: "picker" | "drop" | "paste"
   ): Promise<void> => {
-    const targetSessionId = draftKey;
+    const targetSessionId = contentDraftKey;
     if (input.isOpeningSelectedSession || isDispatching) {
       return;
     }
@@ -1387,7 +1410,7 @@ export const useComposerController = (
     const next = currentAttachments.filter(
       (attachment) => attachment.attachment.attachmentId !== attachmentId
     );
-    replaceAttachmentsForSession(draftKey, next, {
+    replaceAttachmentsForSession(contentDraftKey, next, {
       releaseCurrent: false
     });
   };
@@ -1405,7 +1428,7 @@ export const useComposerController = (
     }
     onDraftChange(item.text);
     replaceSelectedSkills(item.skills);
-    replaceAttachmentsForSession(draftKey, item.attachments, {
+    replaceAttachmentsForSession(contentDraftKey, item.attachments, {
       releaseCurrent: true
     });
     if (item.execution) {
@@ -1560,6 +1583,7 @@ export const useComposerController = (
     onDraftChange,
     onTextareaSelect: setCursorPosition,
     onPrimaryAction,
+    onSubmitWithInstruction,
     onQueueCurrent,
     onStop,
     onSuggestionHover: setHighlightedSuggestionIndex,

@@ -12,6 +12,12 @@ import type { ComposerStatusModel } from "../composer-status.js";
 
 export type ComposerIntent = "send" | "steer" | "queue";
 
+export type ComposerActions = {
+  hasContent: boolean;
+  canSubmit: boolean;
+  submitWithInstruction: (instruction: string) => Promise<void>;
+};
+
 export type ComposerExecutionSelection = {
   modelId: string;
   reasoningOptionId?: string;

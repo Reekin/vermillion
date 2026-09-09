@@ -7,6 +7,7 @@ import { SessionPane } from "../chat-shell/SessionPane.js";
 import { WorkbenchChatTree } from "./components/WorkbenchChatTree.js";
 import { DocsPanel } from "./components/DocsPanel.js";
 import { StartWorkButton } from "./components/StartWorkButton.js";
+import type { ComposerActions } from "../chat-shell/composer/composer-types.js";
 import { InboxPanel } from "./components/InboxPanel.js";
 import { Modal } from "./components/Modal.js";
 import { Rail } from "./components/Rail.js";
@@ -51,6 +52,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
+  const [composerActions, setComposerActions] = useState<ComposerActions>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
   const [navigationError, setNavigationError] = useState<string>();
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
@@ -187,6 +189,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               createSession={createSession}
               initializeDraftExecution={initializeDraftExecution}
               onViewChange={setWorkTarget}
+              composerDraftKey="think"
+              onComposerChange={setComposerActions}
               renderTurnNavigation={renderSessionNavigation}
               renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} />}
               composerExtras={
@@ -196,7 +200,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
           </main>
           <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">
             <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
-              <StartWorkButton {...workTarget} onStart={async (input) => {
+              <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
                 if (!sessionWorkspaceId) throw new Error("请先选择会话。");
                 await store.getState().client.request("work.start", { workspaceId: sessionWorkspaceId, ...input });
                 store.getState().setDocCommit({ kind: "work", title: openSession?.title ?? "当前会话" });
