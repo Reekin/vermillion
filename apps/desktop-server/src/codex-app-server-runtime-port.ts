@@ -1365,7 +1365,7 @@ export class CodexAppServerRuntimePort
       await this.rpc("thread/inject_items", {
         threadId: result.thread.id,
         items: [{ type: "message", role: "developer", content: [{ type: "input_text", text:
-          "当前分支角色已切换为 Worker。此前设计伙伴角色及其发单/现做模式约束不再适用于本分支。以下是本分支的开发者指令：\n\n" + options.developerInstructions
+          "当前分支角色已切换为 Worker。此前设计伙伴角色的指令不再适用于本分支。以下是本分支的开发者指令：\n\n" + options.developerInstructions
         }] }]
       });
     }
@@ -1742,15 +1742,11 @@ export class CodexAppServerRuntimePort
   }
 
   private async injectWorkbenchContext(threadId: string, params: CodexRuntimeRequest["params"], options: RuntimeOperationOptions): Promise<void> {
-    const mode = params.thinkMode;
-    if (typeof params.workspaceId !== "string" && mode !== "dispatch" && mode !== "execute") return;
+    if (typeof params.workspaceId !== "string") return;
     const text = [
       "当前工作台会话（wrapper ID，用于 CLI）：",
       `sessionId: ${params.sessionId}`,
-      ...(typeof params.workspaceId === "string" ? [`workspaceId: ${params.workspaceId}`] : []),
-      ...(mode === "dispatch" || mode === "execute"
-        ? [`本轮工作台模式：${mode === "dispatch" ? "发单" : "现做"}。按设计伙伴角色中的对应模式规则处理本轮需求。此前轮次的模式不适用于本轮。`]
-        : [])
+      `workspaceId: ${params.workspaceId}`
     ].join("\n");
     await this.rpc("thread/inject_items", {
       threadId,

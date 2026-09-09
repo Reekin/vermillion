@@ -102,7 +102,6 @@ export type SessionPaneProps = {
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
   onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
-  getSendOptions?: () => Pick<import("../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
 };
@@ -595,7 +594,6 @@ export const SessionPane = ({
   initializeDraftExecution,
   composerExtras,
   onViewChange,
-  getSendOptions,
   renderChatTree,
   renderTurnNavigation,
   allowChatTree = true
@@ -1103,7 +1101,6 @@ export const SessionPane = ({
           draftKey={pendingSend?.operationId ?? operations.find((operation) => operation.targetSessionId === activeSessionId)?.operationId ?? activeSessionId}
           initializeDraftExecution={initializeDraftExecution}
           extraExecutionControls={composerExtras}
-          getSendOptions={getSendOptions}
           transport={transport}
           activeSession={activeSession}
           activeSessionId={activeSessionId}

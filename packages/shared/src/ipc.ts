@@ -9,7 +9,7 @@ import {
   zSessionId,
   zTurnId
 } from "./common.js";
-import { commandTypes, zCommandEnvelopeSchema, zThinkMode, zChatTreeSendInputSchema, zChatTreeSendOperationSchema } from "./commands.js";
+import { commandTypes, zCommandEnvelopeSchema, zChatTreeSendInputSchema, zChatTreeSendOperationSchema } from "./commands.js";
 import { zChatSessionSchema, zDomainSnapshotSchema } from "./domain.js";
 import {
   zEngineDefinitionRpcSchema,
@@ -54,7 +54,6 @@ export const sessionRpcMethods = [
   "chatTree.submit",
   "chatTree.retry",
   "chatTree.operations",
-  "chatTree.setMode",
   "delegation.get",
   "worktree.get",
   "checkpoint.get",
@@ -302,7 +301,6 @@ const zConversationGraphSnapshotSchema = z.object({
 const zChatTreeSnapshotSchema = z.object({
   sessionId: zSessionId,
   treeId: zSessionId.optional(),
-  thinkMode: zThinkMode.optional(),
   currentSessionId: zSessionId.optional(),
   memberSessionIds: z.array(zSessionId).optional(),
   windows: z.array(z.lazy(() => zSessionWindowSchema)).optional(),
@@ -724,12 +722,6 @@ const zChatTreeSubmitRequestSchema = z.object({ id: zRequestId, method: z.litera
 const zChatTreeRetryRequestSchema = z.object({ id: zRequestId, method: z.literal("chatTree.retry"), params: z.object({ operationId: z.string().min(1) }) });
 const zChatTreeOperationsRequestSchema = z.object({ id: zRequestId, method: z.literal("chatTree.operations"), params: z.object({ sessionId: zSessionId }) });
 
-const zChatTreeSetModeRequestSchema = z.object({
-  id: zRequestId,
-  method: z.literal("chatTree.setMode"),
-  params: z.object({ sessionId: zSessionId, mode: zThinkMode })
-});
-
 const zDelegationGetRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("delegation.get"),
@@ -918,7 +910,6 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zChatTreeSubmitRequestSchema,
   zChatTreeRetryRequestSchema,
   zChatTreeOperationsRequestSchema,
-  zChatTreeSetModeRequestSchema,
   zDelegationGetRequestSchema,
   zWorktreeGetRequestSchema,
   zCheckpointGetRequestSchema,
@@ -1173,13 +1164,6 @@ const zChatTreeSubmitResponseSchema = z.object({ id: zRequestId, method: z.liter
 const zChatTreeRetryResponseSchema = z.object({ id: zRequestId, method: z.literal("chatTree.retry"), ok: z.literal(true), result: zChatTreeSendOperationSchema });
 const zChatTreeOperationsResponseSchema = z.object({ id: zRequestId, method: z.literal("chatTree.operations"), ok: z.literal(true), result: z.object({ operations: z.array(zChatTreeSendOperationSchema) }) });
 
-const zChatTreeSetModeResponseSchema = z.object({
-  id: zRequestId,
-  method: z.literal("chatTree.setMode"),
-  ok: z.literal(true),
-  result: z.object({ mode: zThinkMode })
-});
-
 const zDelegationGetResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("delegation.get"),
@@ -1388,7 +1372,6 @@ export const zSessionRpcResponseSchema = z.union([
   zChatTreeSubmitResponseSchema,
   zChatTreeRetryResponseSchema,
   zChatTreeOperationsResponseSchema,
-  zChatTreeSetModeResponseSchema,
   zDelegationGetResponseSchema,
   zWorktreeGetResponseSchema,
   zCheckpointGetResponseSchema,

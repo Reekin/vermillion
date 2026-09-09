@@ -15,8 +15,7 @@ import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
-import { ConfigurationSelect, InlineNotice } from "./components/ui.js";
-import { useThinkMode } from "./use-think-mode.js";
+import { InlineNotice } from "./components/ui.js";
 import { WorkspacesPanel, WorkspacesSwitcher } from "./components/WorkspacesPanel.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
@@ -83,7 +82,6 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     client: store.getState().client,
     open: (target: SessionNavigation) => openSessionTarget(target.targetWorkspaceId, target.targetSessionId)
   }), [store, openSessionTarget]);
-  const thinkMode = useThinkMode(transport, sessionId);
   const workspaceIds = useMemo(() => workspaces.map((w) => w.workspaceId), [workspaces]);
   // Think shows only the user's own design sessions; agent sessions live under Workspaces → 会话.
   const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "user" });
@@ -128,11 +126,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         sessionProfile: execution,
         metadata: { cwd: workspace.rootPath, developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
       });
-      await transport.chatTree.setMode({ sessionId: created.sessionId, mode: thinkMode.mode });
       setSessionId(created.sessionId);
       return created.sessionId;
     },
-    [draftWorkspaceId, workspaceById, transport, store, thinkMode.mode]
+    [draftWorkspaceId, workspaceById, transport, store]
   );
 
   const onSelect = useCallback(
@@ -189,19 +186,12 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               reloadSignal={reloadSignal}
               createSession={createSession}
               initializeDraftExecution={initializeDraftExecution}
-              getSendOptions={thinkMode.getSendOptions}
               onViewChange={setWorkTarget}
               renderTurnNavigation={renderSessionNavigation}
               renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} />}
-              composerExtras={<>
+              composerExtras={
                 <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
-                <ConfigurationSelect label="模式" aria-label="模式" value={thinkMode.mode} disabled={!thinkMode.ready}
-                  onChange={(event) => void thinkMode.choose(event.target.value as import("@vermillion/shared").ThinkMode)}>
-                  <option value="dispatch">发单</option>
-                  <option value="execute">现做</option>
-                </ConfigurationSelect>
-                {thinkMode.error && <InlineNotice tone="error">{thinkMode.error}</InlineNotice>}
-              </>}
+              }
             />
           </main>
           <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">

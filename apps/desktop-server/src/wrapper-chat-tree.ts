@@ -32,11 +32,6 @@ export class WrapperChatTreeService {
 
   public dispose(): void { this.unsubscribe(); }
 
-  public async setMode(sessionId: string, mode: import("@vermillion/shared").ThinkMode) {
-    await this.options.sessionIndexStore.setTreeMode(sessionId, mode);
-    return { mode };
-  }
-
   private async loadMember(sessionId: string): Promise<void> {
     if (this.loaded.has(sessionId)) return;
     const existing = this.loading.get(sessionId);
@@ -115,7 +110,6 @@ export class WrapperChatTreeService {
     const visibleTurnIds = currentNodeId ? currentPath.slice(0, currentPath.indexOf(currentNodeId) + 1) : [];
     const tree: ChatTreeSnapshot = {
       sessionId, treeId, currentSessionId, memberSessionIds: members,
-      thinkMode: index.getTreeMode(treeId),
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
       supportsJump: true, currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
       nodes: nodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
@@ -242,7 +236,7 @@ export class WrapperChatTreeService {
       const receipt = await send({ commandId: randomUUID(), command: {
         type: "sendUserMessage", sessionId: operation.targetSessionId,
         messageId: randomUUID(), content: operation.content, attachments: structuredClone(operation.attachments),
-        execution: structuredClone(operation.execution), thinkMode: operation.thinkMode
+        execution: structuredClone(operation.execution)
       } });
       if (!receipt.accepted || !receipt.turnId) throw new Error(receipt.error?.message || "Branch message was not accepted.");
       operation.turnId = receipt.turnId;

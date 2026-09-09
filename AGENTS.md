@@ -49,7 +49,7 @@
 - 领域定义是普通文档：`.vermillion/docs/domains/<id>.md`，正文自然语言说明覆盖范围和触发条件，frontmatter `standards:` 列规范文档路径。Worker 建单时读全部定义，语义判断工单涉及哪些领域，把相应 standards 作为 refs 附上。Workspaces → Domain 页列出并编辑这个目录。
 
 ## 工单
-- 发单模式的执行入口是 `work.start`；Worker 通过 `workItem.create` 建单并登记执行会话，文档使用 `docs.commit` 按相关路径提交，refs 保存文档路径、段落和 commit。现做模式直接完成实现，不为同一件事再开工。
+- 开工入口是 `work.start`；Worker 通过 `workItem.create` 建单并登记执行会话，文档使用 `docs.commit` 按相关路径提交，refs 保存文档路径、段落和 commit。
 - 工单记录准备、排队、执行、等待合入、等待用户和结束状态；只有已关闭满足依赖。submit 接收 evidence、review 和 verify，验证通过后由工作台串行合入并关闭；Inbox 展示结果并支持附理由回滚。
 - 引用文档出现新提交时通知 Worker 并更新引用；变更送达那一轮的旧提交作废，保留成果后按新合同续跑。
 - 合入成功即关闭工单；Worker turn 结束后退订执行环境，后台每 5 分钟回收已登记且不再使用的 worktree。占用或删除失败保留候选等待下次，不阻塞工单完成。登记、复用和回收共享工作区串行边界。

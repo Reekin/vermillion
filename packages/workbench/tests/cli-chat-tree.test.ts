@@ -27,7 +27,7 @@ describe("chat tree CLI operations", () => {
   it("forwards operation parameters and results through the desktop endpoint", async () => {
     const operation = { operationId: "op-1", status: "queued" };
     const calls = [
-      { method: "chatTree.submit", params: { sessionId: "s-1", nodeId: "n-1", content: "continue", attachments: [], execution: { engineId: "codex" }, thinkMode: "tree" }, result: operation },
+      { method: "chatTree.submit", params: { sessionId: "s-1", nodeId: "n-1", content: "continue", attachments: [], execution: { engineId: "codex" } }, result: operation },
       { method: "chatTree.retry", params: { operationId: "op-1" }, result: operation },
       { method: "chatTree.operations", params: { sessionId: "s-1" }, result: { operations: [operation] } }
     ];

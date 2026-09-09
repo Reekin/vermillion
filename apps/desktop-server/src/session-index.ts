@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { ChatSession, SessionRelationType } from "@vermillion/shared";
-import { zThinkMode, type ThinkMode } from "@vermillion/shared";
 import {
   loadJsonFile,
   PersistentStoreCorruptionError,
@@ -44,7 +43,6 @@ const sessionIndexDocumentSchema = z.object({
   version: z.literal(1),
   entries: z.array(sessionIndexEntrySchema).default([]),
   relations: z.array(sessionRelationIndexSchema).default([]),
-  treeModes: z.record(z.string(), zThinkMode).default({}),
   treeViews: z.record(z.string(), z.object({
     sessionId: z.string(),
     nodeId: z.string().optional(),
@@ -238,8 +236,7 @@ export class SessionIndexStore {
     version: 1,
     entries: [],
     relations: [],
-    treeViews: {},
-    treeModes: {}
+    treeViews: {}
   };
   private loadPromise: Promise<void> | undefined;
   private persistPromise: Promise<void> | undefined;
@@ -294,20 +291,6 @@ export class SessionIndexStore {
 
   public getTreeView(sessionId: string): SessionIndexDocument["treeViews"][string] | undefined {
     return this.document.treeViews[this.getTreeId(sessionId)];
-  }
-
-  public getTreeMode(sessionId: string): ThinkMode {
-    return this.document.treeModes[this.getTreeId(sessionId)] ?? "dispatch";
-  }
-
-  public async setTreeMode(sessionId: string, mode: ThinkMode): Promise<void> {
-    await this.ready();
-    if (!this.getEntry(sessionId)) throw new Error(`Unknown session: ${sessionId}`);
-    this.document = {
-      ...this.document,
-      treeModes: { ...this.document.treeModes, [this.getTreeId(sessionId)]: mode }
-    };
-    await this.persist();
   }
 
   public async setTreeView(sessionId: string, view: SessionIndexDocument["treeViews"][string]): Promise<void> {

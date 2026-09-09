@@ -820,11 +820,6 @@ export class SessionShellService {
     return { operations: this.wrapperChatTree.listOperations(input.sessionId) };
   }
 
-  public async setChatTreeMode(input: { sessionId: string; mode: import("@vermillion/shared").ThinkMode }) {
-    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
-    return this.wrapperChatTree.setMode(input.sessionId, input.mode);
-  }
-
   public async getDelegation(sessionId: string): Promise<DelegationSnapshot> {
     if (!this.capabilities) {
       const context = this.sessionIdentity.resolveContext(sessionId);

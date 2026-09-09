@@ -24,7 +24,6 @@ import type {
 export type ComposerContainerProps = {
   transport: DesktopTransport;
   extraExecutionControls?: ReactNode;
-  getSendOptions?: () => Pick<import("../../../transport/desktop-transport.js").ChatSendInput, "thinkMode">;
   activeSession?: ChatSession;
   activeSessionId?: string;
   draftKey?: string;
@@ -63,7 +62,6 @@ export type ComposerContainerProps = {
 export const ComposerContainer = ({
   transport,
   extraExecutionControls,
-  getSendOptions,
   activeSession,
   activeSessionId,
   draftKey,
@@ -96,7 +94,6 @@ export const ComposerContainer = ({
   onRespondInteraction
 }: ComposerContainerProps): ReactElement => {
   const composer = useComposerController({
-    getSendOptions,
     transport,
     activeSession,
     activeSessionId,

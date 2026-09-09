@@ -8,7 +8,7 @@ import { DomainService } from "./domain-service.js";
 import { RuntimeOrchestrator } from "./runtime-orchestrator.js";
 import { createCodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
 
-it.each([undefined, "worker"])("delivers wrapper identity and suppresses Think mode for role %s", async (role) => {
+it.each([undefined, "worker"])("delivers wrapper identity for role %s", async (role) => {
   const directory = mkdtempSync(join(tmpdir(), "vermillion-context-"));
   const requestLog = join(directory, "requests.jsonl");
   const port = createCodexAppServerRuntimePort({
@@ -45,14 +45,16 @@ it.each([undefined, "worker"])("delivers wrapper identity and suppresses Think m
     const session = await orchestrator.createSession({ engineId: "codex", workspaceId: "workspace-context", metadata: role ? { role } : {} });
     await orchestrator.executeCommand({
       commandId: "send-context",
-      command: { type: "sendUserMessage", sessionId: session.sessionId, messageId: "message-context", content: "hello", attachments: [], thinkMode: "dispatch" }
+      command: { type: "sendUserMessage", sessionId: session.sessionId, messageId: "message-context", content: "hello", attachments: [] }
     });
     const requests = readFileSync(requestLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     const injected = requests.find((request) => request.method === "thread/inject_items");
     expect(injected.params.items[0]).toMatchObject({ role: "developer" });
-    expect(injected.params.items[0].content[0].text).toContain("sessionId: session-wrapper-context");
-    expect(injected.params.items[0].content[0].text).toContain("workspaceId: workspace-context");
-    expect(injected.params.items[0].content[0].text.includes("本轮工作台模式")).toBe(role !== "worker");
+    expect(injected.params.items[0].content[0].text).toBe([
+      "当前工作台会话（wrapper ID，用于 CLI）：",
+      "sessionId: session-wrapper-context",
+      "workspaceId: workspace-context"
+    ].join("\n"));
     expect(requests.findIndex((request) => request.method === "thread/inject_items"))
       .toBeLessThan(requests.findIndex((request) => request.method === "turn/start"));
   } finally {

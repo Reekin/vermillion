@@ -715,7 +715,6 @@ export class RuntimeOrchestrator {
       ...envelope,
       command: {
         ...envelope.command,
-        ...(session.metadata?.role === "worker" ? { thinkMode: undefined } : {}),
         ...(workspaceId ? { workspaceId } : {}),
         ...(cwd ? { cwd } : {}),
         ...(providerSessionId ? { providerSessionId } : {}),

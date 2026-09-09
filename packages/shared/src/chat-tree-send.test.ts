@@ -5,7 +5,7 @@ describe("branch send RPC contracts", () => {
   const input = { sessionId: "root", nodeId: "turn-a", content: "",
     attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png",
       displayUri: "image.png", name: "image.png" }],
-    execution: { modelId: "model", reasoningOptionId: "high", serviceTierId: null }, thinkMode: "execute" };
+    execution: { modelId: "model", reasoningOptionId: "high", serviceTierId: null } };
 
   it("preserves attachment-only submissions and execution options through request and operation responses", () => {
     expect(parseSessionRpcRequest({ id: "request", method: "chatTree.submit", params: input }).params).toEqual(input);

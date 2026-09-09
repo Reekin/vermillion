@@ -52,7 +52,7 @@ async function fixture() {
   const send = vi.fn(async (_command: CommandEnvelope) => ({ accepted: true, turnId: "new-turn" }));
   const input: ChatTreeSendInput = { sessionId: "root", nodeId: "a", content: "branch question",
     attachments: [{ attachmentId: "attachment", mimeType: "image/png", uri: "file:///image.png", name: "image.png" }],
-    execution: { modelId: "model", reasoningOptionId: "high", serviceTierId: null }, thinkMode: "execute" };
+    execution: { modelId: "model", reasoningOptionId: "high", serviceTierId: null } };
   return { service, index, snapshot, load, changed, fork, addBranch, send, input };
 }
 
@@ -118,7 +118,7 @@ describe("asynchronous wrapper branch sends", () => {
     forkGate.resolve(await f.addBranch("branch-a", "a"));
     await vi.waitFor(() => expect(f.send).toHaveBeenCalledTimes(1));
     expect(f.send.mock.calls[0]![0].command).toMatchObject({ sessionId: "branch-a", content: original.content,
-      attachments: original.attachments, execution: original.execution, thinkMode: original.thinkMode });
+      attachments: original.attachments, execution: original.execution });
     expect(f.service.listOperations("root")[0]!.status).toBe("sending");
     expect((await f.service.get("root")).currentNodeId).toBe("b");
     sendGate.resolve({ accepted: true, turnId: "new-turn" });

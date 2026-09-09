@@ -90,7 +90,6 @@ export type WorkspaceRemoveInput = {
 };
 
 export type ChatSendInput = {
-  thinkMode?: import("@vermillion/shared").ThinkMode;
   sessionId: string;
   content: string;
   messageId?: string;
@@ -109,7 +108,6 @@ export type ChatInterruptInput = {
 };
 
 export type ChatSteerInput = {
-  thinkMode?: import("@vermillion/shared").ThinkMode;
   sessionId: string;
   turnId: string;
   content: string;
@@ -324,7 +322,6 @@ export type DesktopTransport = {
     submit: (input: import("@vermillion/shared").ChatTreeSendInput) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
     retry: (input: { operationId: string }) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
     operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
-    setMode: (input: { sessionId: string; mode: import("@vermillion/shared").ThinkMode }) => Promise<{ mode: import("@vermillion/shared").ThinkMode }>;
     get: (sessionId: string) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
       sessionId: string;
@@ -823,13 +820,11 @@ export const createDesktopTransport = (
           content: input.content,
           messageId: input.messageId ?? createId(),
           attachments: input.attachments ?? [],
-          thinkMode: input.thinkMode,
           execution: input.execution
         }),
       steer: (input: ChatSteerInput) =>
         sendCommand({
           type: "steerTurn",
-          thinkMode: input.thinkMode,
           sessionId: input.sessionId,
           turnId: input.turnId,
           content: input.content,
@@ -876,7 +871,6 @@ export const createDesktopTransport = (
       submit: (input) => rpc.request("chatTree.submit", input),
       retry: (input) => rpc.request("chatTree.retry", input),
       operations: (input) => rpc.request("chatTree.operations", input),
-      setMode: (input) => rpc.request("chatTree.setMode", input),
       get: async (sessionId: string) => {
         const result = await rpc.request("chatTree.get", {
           sessionId
