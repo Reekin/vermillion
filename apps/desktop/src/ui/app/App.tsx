@@ -74,10 +74,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     setNavigationTarget({ sessionId: targetSessionId, workspaceId });
     setSessionId(targetSessionId);
     if (workspaceFilterId && workspaceFilterId !== workspaceId) setWorkspaceFilterId(workspaceId);
-    setReloadSignal((value) => value + 1);
+    sessionStore.dispatch({ type: "store/sessionBrowserChanged" });
     store.getState().browseWorkspace(workspaceId);
     store.setState({ workspaceSection: "sessions", panel: "workbench", overlay: undefined });
-  }, [store, transport, workspaceFilterId]);
+  }, [store, sessionStore, transport, workspaceFilterId]);
   useEffect(() => {
     store.setState({ navigateSession: (workspaceId, id, turnId) => {
       setNavigationError(undefined);
