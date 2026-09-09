@@ -22,9 +22,9 @@ export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
 
   const notice = result && (result.kind === "commit" ? "已提交文档 · " + result.message : "已开工 · " + result.title);
   return (
-    <StatusBar icon={ListTodo} label={`当前任务: ${tasks.length}`} notice={notice} open={open} onOpenChange={setOpen}>
-      <PanelHeader title="当前任务" />
-      {error ? <InlineNotice tone="error">任务加载失败：{error}</InlineNotice> : tasks.length === 0 && <EmptyState title="当前没有任务" />}
+    <StatusBar icon={ListTodo} label={`当前工单: ${tasks.length}`} notice={notice} open={open} onOpenChange={setOpen}>
+      <PanelHeader title="当前工单" />
+      {error ? <InlineNotice tone="error">工单加载失败：{error}</InlineNotice> : tasks.length === 0 && <EmptyState title="当前没有工单" />}
       <ul>
         {tasks.map((task) => {
           const row = (

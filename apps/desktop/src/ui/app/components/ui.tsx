@@ -171,7 +171,7 @@ export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenCha
           <Popover.Trigger render={<Button variant="ghost" size="sm" />}><Icon size={13} aria-hidden="true" />{label}</Popover.Trigger>
           <Popover.Portal>
             <Popover.Positioner side="top" align="start" sideOffset={6} className="z-50">
-              <Popover.Popup aria-label="当前任务" className={floatingPanelClass}>
+              <Popover.Popup aria-label="当前工单" className={floatingPanelClass}>
                 {children}
               </Popover.Popup>
             </Popover.Positioner>
