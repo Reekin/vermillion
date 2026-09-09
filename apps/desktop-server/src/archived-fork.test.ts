@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parseDomainSnapshot } from "@vermillion/shared";
 import { SessionIndexStore } from "./session-index.js";
 import { WrapperChatTreeService } from "./wrapper-chat-tree.js";
+import { SessionReconciliationService } from "./session-discovery.js";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -32,8 +33,13 @@ it("excludes archived forks from loading and projection while keeping live forks
   });
   await index.setTreeView("root", { sessionId: "clarification", nodeId: "clarification-turn" });
   await index.archiveSession("clarification", time);
+  // A late runtime snapshot was captured before archive and carries no archive field.
+  await index.upsertSession({ workspaceId: "workspace", session: {
+    ...snapshot.sessions[1]!, title: "Late completion", updatedAt: "2026-09-07T00:01:00Z"
+  } });
   const reloaded = new SessionIndexStore({ baseDir });
   await reloaded.ready();
+  expect(reloaded.getEntry("clarification")).toMatchObject({ archivedAt: time, title: "Late completion" });
   const load = vi.fn(async (id: string) => {
     if (id === "clarification") throw new Error("session is archived");
     return true;
@@ -63,4 +69,49 @@ it("excludes archived forks from loading and projection while keeping live forks
   } finally {
     service.dispose();
   }
+});
+
+it("repairs a missing archive marker from the provider without breaking the first tree load", async () => {
+  const baseDir = await mkdtemp(join(tmpdir(), "archived-fork-"));
+  dirs.push(baseDir);
+  const index = new SessionIndexStore({ baseDir });
+  const time = "2026-09-07T00:00:00Z";
+  const snapshot = parseDomainSnapshot({
+    conversations: [{ conversationId: "conversation", workspaceId: "workspace", participantEngineIds: ["codex"],
+      sessionIds: ["root"], createdAt: time, updatedAt: time }],
+    sessions: [{ sessionId: "root", conversationId: "conversation", engineId: "codex", status: "idle", createdAt: time, updatedAt: time }],
+    turns: [{ turnId: "root-turn", sessionId: "root", status: "completed", startedAt: time }]
+  });
+  await index.upsertSession({ workspaceId: "workspace", session: snapshot.sessions[0]! });
+  await index.upsertSession({ workspaceId: "workspace", providerKind: "codex-thread", providerSessionId: "archived-provider",
+    session: { ...snapshot.sessions[0]!, sessionId: "clarification" } });
+  await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "root", childSessionId: "clarification", relationType: "fork", sourceTurnId: "root-turn" });
+  const runtimeService = {
+    getSnapshot: () => snapshot, getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
+    listSessions: () => snapshot.sessions, getRevision: () => "initial", subscribe: () => () => {}
+  } as never;
+  const hydrate = vi.fn(async () => { throw new Error("session archived-provider is archived. Run `codex unarchive archived-provider` to unarchive it first."); });
+  const reconciliation = new SessionReconciliationService({
+    workspaceRegistry: {} as never, sessionIndexStore: index, runtimeService,
+    providers: [{ engineId: "codex", hydrateSession: hydrate } as never]
+  });
+  const service = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index, reconciliation, fork: vi.fn() });
+  try {
+    expect((await service.get("root")).memberSessionIds).toEqual(["root"]);
+    expect(index.getEntry("clarification")?.archivedAt).toBeTruthy();
+    const reloaded = new SessionIndexStore({ baseDir });
+    await reloaded.ready();
+    expect(reloaded.getTreeMembers("root")).toEqual(["root"]);
+    await service.get("root");
+    expect(hydrate).toHaveBeenCalledTimes(1);
+    await index.upsertSession({ workspaceId: "workspace", providerKind: "codex-thread", providerSessionId: "live-provider",
+      session: { ...snapshot.sessions[0]!, sessionId: "live" } });
+    await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "root", childSessionId: "live", relationType: "fork", sourceTurnId: "root-turn" });
+    hydrate.mockRejectedValueOnce(new Error("connection lost"));
+    const cold = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index, reconciliation, fork: vi.fn() });
+    try {
+      await expect(cold.get("root")).rejects.toThrow("connection lost");
+      expect(index.getEntry("live")?.archivedAt).toBeUndefined();
+    } finally { cold.dispose(); }
+  } finally { service.dispose(); }
 });

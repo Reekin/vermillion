@@ -403,7 +403,7 @@ export class SessionIndexStore {
       updatedAt: input.session.updatedAt,
       lastCompletedTurnAt:
         input.lastCompletedTurnAt ?? existing?.lastCompletedTurnAt,
-      archivedAt: input.session.archivedAt,
+      archivedAt: input.session.archivedAt ?? existing?.archivedAt,
       lastTurnId: input.session.lastTurnId,
       unreadState: input.unreadState ?? existing?.unreadState ?? "read",
       source: input.source ?? existing?.source ?? "registry",

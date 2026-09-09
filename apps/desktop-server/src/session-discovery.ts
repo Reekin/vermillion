@@ -1576,9 +1576,17 @@ export class SessionReconciliationService {
       isCancelled?: () => boolean;
     } = {}
   ): Promise<boolean> {
-    const hydrated = await provider.hydrateSession(entry, {
-      isCancelled: input.isCancelled
-    });
+    let hydrated: HydratedSessionSnapshot | undefined;
+    try {
+      hydrated = await provider.hydrateSession(entry, { isCancelled: input.isCancelled });
+    } catch (error) {
+      if (entry.providerKind !== codexProviderKind || !entry.providerSessionId ||
+          !(error instanceof Error) || !error.message.includes(`session ${entry.providerSessionId} is archived.`)) {
+        throw error;
+      }
+      await this.sessionIndexStore.archiveSessions([entry.sessionId]);
+      return false;
+    }
     if (!hydrated || input.isCancelled?.()) {
       return false;
     }

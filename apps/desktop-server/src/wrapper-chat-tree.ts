@@ -47,7 +47,10 @@ export class WrapperChatTreeService {
       const force = Boolean(session && entry?.providerSessionId &&
         session.status !== "running" && session.status !== "awaiting_approval");
       const loaded = await this.options.reconciliation.ensureSessionLoaded(sessionId, { force });
-      if (!loaded) throw new Error(`Unable to load tree member: ${sessionId}`);
+      if (!loaded) {
+        if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt) return;
+        throw new Error(`Unable to load tree member: ${sessionId}`);
+      }
       this.loaded.add(sessionId);
     })().finally(() => this.loading.delete(sessionId));
     this.loading.set(sessionId, task);
