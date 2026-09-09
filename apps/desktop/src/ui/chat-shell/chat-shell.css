@@ -2023,6 +2023,7 @@ label.awb-configuration-control > span {
 
 .awb-chat-tree-column {
   flex: 0 0 300px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
