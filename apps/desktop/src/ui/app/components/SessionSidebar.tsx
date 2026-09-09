@@ -1,11 +1,11 @@
-import { CornerDownRight, Pin, Plus } from "lucide-react";
-import type { MouseEvent } from "react";
+import { ChevronDown, ChevronRight, CornerDownRight, Pin, Plus } from "lucide-react";
+import { useState, type MouseEvent } from "react";
 import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
-import { Badge, Button, Field, ListRow } from "./ui.js";
+import { Badge, Button, Field, IconButton, ListRow } from "./ui.js";
 import { roleLabel } from "./workflow-display.js";
 
 type SessionSidebarProps = {
@@ -29,11 +29,26 @@ type SessionSidebarProps = {
 };
 
 export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
+  const toggleCollapsed = (sessionId: string) => setCollapsedIds((current) => {
+    const next = new Set(current);
+    if (next.has(sessionId)) next.delete(sessionId);
+    else next.add(sessionId);
+    return next;
+  });
   /** A session row; subagents it spawned render nested beneath it, indented one level per depth. */
   const renderRow = (session: SidebarSession, depth = 0) => (
     <li key={session.sessionId}>
       <ListRow
         depth={depth}
+        leadingAction={session.subagents.length > 0 && (
+          <IconButton
+            icon={collapsedIds.has(session.sessionId) ? ChevronRight : ChevronDown}
+            label={`${collapsedIds.has(session.sessionId) ? "展开" : "折叠"}子会话：${session.title}`}
+            aria-expanded={!collapsedIds.has(session.sessionId)}
+            onClick={() => toggleCollapsed(session.sessionId)}
+          />
+        )}
         selected={selectedSessionId === session.sessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))}
         onClick={() => onOpen(session.sessionId)}
         onContextMenu={(event) => onOpenMenu(event, session.sessionId)}
@@ -52,7 +67,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         meta={!workspaceFilterId ? workspaceLabelById.get(session.workspaceId) ?? session.workspaceId : undefined}
         trailing={formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}
       />
-      {session.subagents.length > 0 && (
+      {session.subagents.length > 0 && !collapsedIds.has(session.sessionId) && (
         <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId: session.workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>
       )}
     </li>
