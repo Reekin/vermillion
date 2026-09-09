@@ -949,6 +949,7 @@ export class WorkbenchService {
     const card = await store.decisions.get(decisionId);
     if (!card) throw new Error("Unknown decision: " + decisionId);
     if (card.answer || card.withdrawn) throw new Error("决策已答复或撤回，不能重复答复。");
+    if (card.kind === "attempts" && (!answer.key || answer.note?.trim())) throw new Error("运行故障请选择重试或取消，不接受备注答复。");
     if (!answer.key && !answer.note?.trim()) throw new Error("Answer needs an option key or a note");
     if (answer.key && !card.options.some((o) => o.key === answer.key)) throw new Error("Unknown option: " + answer.key);
     const answered = await store.decisions.put({ ...card, answer: { ...answer, at: this.now() }, deliveryPending: true });

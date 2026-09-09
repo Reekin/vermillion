@@ -103,7 +103,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
           );
         })}
       </ul>
-      <form
+      {card.kind !== "attempts" && <form
         className="mt-3 flex items-end gap-2"
         onSubmit={(event) => {
           event.preventDefault();
@@ -112,11 +112,11 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       >
         <Field kind="textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注" className="min-w-0 flex-1" />
         <Button type="submit" disabled={busy || !note.trim()} className="shrink-0">仅以备注答复</Button>
-      </form>
+      </form>}
       </>}
       {answered && <DetailSection title="答复结果">
         <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
-        <p>{card.deliveryPending ? "答复已保存，等待送达 Worker" : "答复已送达 Worker"}</p>
+        <p>{card.kind === "attempts" ? (card.deliveryPending ? "操作已保存，等待处理" : "操作已处理") : (card.deliveryPending ? "答复已保存，等待送达 Worker" : "答复已送达 Worker")}</p>
         <Button size="sm" variant="ghost" onClick={() => dismissDecision(item.workspaceId, card.decisionId)}>知道了</Button>
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>

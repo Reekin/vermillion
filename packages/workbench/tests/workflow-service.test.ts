@@ -49,6 +49,9 @@ it("retains the preparation session through failure backoff and exposes exhauste
   expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "failed", attempts: 5, workerSessionId: "preparing-worker" });
   const card = (await service.listDecisions(workspaceId))[0]!;
   expect(card.requestId).toBe(request.requestId);
+  await expect(service.answerDecision(workspaceId, card.decisionId, { note: "继续" })).rejects.toThrow("请选择重试或取消");
+  await expect(service.answerDecision(workspaceId, card.decisionId, { key: "retry", note: "继续" })).rejects.toThrow("不接受备注答复");
+  expect((await service.listDecisions(workspaceId))[0]!.answer).toBeUndefined();
   expect(await service.listInbox()).toMatchObject([{ kind: "decision", card: { requestId: request.requestId } }]);
   await service.answerDecision(workspaceId, card.decisionId, { key: "retry" });
   expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "preparing", attempts: 0, workerSessionId: "preparing-worker" });
