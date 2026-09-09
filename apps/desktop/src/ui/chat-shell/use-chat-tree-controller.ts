@@ -1,4 +1,5 @@
 import { isHistoricalChatTreePosition } from "./chat-tree-send-target.js";
+import { recordUiOperation } from "../../diagnostics/ui-performance.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
@@ -41,6 +42,7 @@ export const useChatTreeController = (input: {
   const refreshChatTree = useCallback(async (): Promise<void> => {
     if (!sessionId || sessionIdRef.current !== sessionId) return;
     const requestId = ++requestIdRef.current;
+    const startedAt = performance.now();
     const isCurrent = () => sessionIdRef.current === sessionId && requestId === requestIdRef.current;
     try {
       const [initialTree, result] = await Promise.all([
@@ -93,6 +95,8 @@ export const useChatTreeController = (input: {
     } catch (error) {
       if (!isCurrent()) return;
       throw error;
+    } finally {
+      recordUiOperation("chat-tree.refresh", startedAt, { sessionId }, "async");
     }
   }, [sessionId, store, transport]);
 

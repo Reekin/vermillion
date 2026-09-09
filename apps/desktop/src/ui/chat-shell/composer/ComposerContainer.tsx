@@ -1,6 +1,7 @@
 import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { ReactElement, ReactNode } from "react";
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useLayoutEffect } from "react";
+import { recordUiOperation } from "../../../diagnostics/ui-performance.js";
 import type {
   ApprovalRequest,
   Attachment,
@@ -100,6 +101,8 @@ export const ComposerContainer = memo(({
   onRespondApproval,
   onRespondInteraction
 }: ComposerContainerProps): ReactElement => {
+  const renderStartedAt = performance.now();
+  useLayoutEffect(() => { recordUiOperation("react.composer.commit", renderStartedAt, undefined, "render"); });
   const composer = useComposerController({
     transport,
     activeSession,

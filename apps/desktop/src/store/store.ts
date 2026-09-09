@@ -4,6 +4,7 @@ import {
   createHydrateSnapshotAction,
   createIngestEventAction
 } from "./intake.js";
+import { recordUiOperation } from "../diagnostics/ui-performance.js";
 import { rendererMetaReducer } from "./meta-reducer.js";
 import {
   createInitialRendererStoreState,
@@ -149,6 +150,7 @@ export const createRendererStore = (
   };
 
   const dispatch = (action: RendererStoreAction): RendererStoreState => {
+    const startedAt = performance.now();
     const previousState = state;
     const disposedConversationIdBeforeMutation =
       action.type === "store/disposeSession"
@@ -268,6 +270,11 @@ export const createRendererStore = (
     for (const listener of listeners) {
       listener(state, action);
     }
+    recordUiOperation("store." + action.type, startedAt, {
+      events: action.type === "store/ingestEnvelopes" ? action.envelopes.length : 1,
+      sessions: changes?.sessionIds.size ?? 0,
+      turns: changes?.turnIds.size ?? 0
+    });
     return state;
   };
 

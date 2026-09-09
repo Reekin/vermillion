@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { normalizeEventTimestamp, recentUiOperations } from "../../diagnostics/ui-performance.js";
 import type { DiagnosticsWriteInputRpc } from "@vermillion/shared";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 
@@ -22,8 +23,8 @@ const diagnosticId = `renderer-${Date.now().toString(36)}-${Math.random()
 const heartbeatIntervalMs = 30_000;
 const eventLoopProbeIntervalMs = 1_000;
 const stallWarningThresholdMs = 1_000;
-const inputDelayWarningThresholdMs = 250;
-const longTaskWarningThresholdMs = 250;
+const inputDelayWarningThresholdMs = 50;
+const longTaskWarningThresholdMs = 100;
 const incidentCooldownMs = 60_000;
 const maxDiagnosticBytes = 32 * 1024;
 
@@ -160,14 +161,7 @@ const describeEventTarget = (target: EventTarget | null): Record<string, unknown
     return {};
   }
   return {
-    tagName: target.tagName.toLowerCase(),
-    id: target.id || undefined,
-    className:
-      typeof target.className === "string"
-        ? target.className.split(/\s+/).filter(Boolean).slice(0, 4).join(" ")
-        : undefined,
-    role: target.getAttribute("role") ?? undefined,
-    ariaLabel: target.getAttribute("aria-label") ?? undefined
+    tagName: target.tagName.toLowerCase()
   };
 };
 
@@ -178,6 +172,7 @@ export const useRendererDiagnostics = (input: {
   eventCursor?: string;
 }): void => {
   const contextRef = useRef<RendererDiagnosticsContext>({});
+  const inputStatsRef = useRef({ count: 0, delayedQueueCount: 0, delayedFrameCount: 0, maxDelayMs: 0, maxQueueWaitMs: 0 });
   const lagStatsRef = useRef({
     maxLagMs: 0,
     sampleCount: 0,
@@ -211,6 +206,10 @@ export const useRendererDiagnostics = (input: {
     let expectedTick = window.performance.now() + eventLoopProbeIntervalMs;
     const eventLoopIntervalId = window.setInterval(() => {
       const actual = window.performance.now();
+      if (document.visibilityState !== "visible") {
+        expectedTick = actual + eventLoopProbeIntervalMs;
+        return;
+      }
       const lagMs = Math.max(0, Math.round(actual - expectedTick));
       expectedTick = actual + eventLoopProbeIntervalMs;
       lagStatsRef.current.sampleCount += 1;
@@ -222,12 +221,15 @@ export const useRendererDiagnostics = (input: {
           kind: "renderer-stall" as const,
           metrics: {
             lagMs,
+            startTimeMs: actual - lagMs,
+            timeOriginMs: performance.timeOrigin,
             sampleCount: lagStatsRef.current.sampleCount,
             stallCount: lagStatsRef.current.stallCount
           },
           context: {
             href: window.location.href,
             visibilityState: document.visibilityState,
+            recentOperations: recentUiOperations(actual - lagMs, actual),
             memory: getMemorySnapshot()
           }
         };
@@ -239,7 +241,7 @@ export const useRendererDiagnostics = (input: {
           occurredAt: sample.at,
           metrics: sample.metrics,
           context: sample.context
-        }, { cooldownKey: "renderer-stall" });
+        }, { cooldownKey: "renderer-stall", cooldownMs: 1_000 });
       }
     }, eventLoopProbeIntervalMs);
 
@@ -248,6 +250,13 @@ export const useRendererDiagnostics = (input: {
       const longTaskStats = longTaskStatsRef.current;
       const occurredAt = nowIso();
       const metrics = {
+        timeOriginMs: performance.timeOrigin,
+        startTimeMs: performance.now(),
+        inputCount: inputStatsRef.current.count,
+        delayedQueueInputCount: inputStatsRef.current.delayedQueueCount,
+        delayedInputFrameCount: inputStatsRef.current.delayedFrameCount,
+        maxInputDelayMs: inputStatsRef.current.maxDelayMs,
+        maxInputQueueWaitMs: inputStatsRef.current.maxQueueWaitMs,
         maxLagMs: lagStats.maxLagMs,
         lagSampleCount: lagStats.sampleCount,
         stallCount: lagStats.stallCount,
@@ -271,6 +280,7 @@ export const useRendererDiagnostics = (input: {
           visibilityState: document.visibilityState
         }
       });
+      inputStatsRef.current = { count: 0, delayedQueueCount: 0, delayedFrameCount: 0, maxDelayMs: 0, maxQueueWaitMs: 0 };
       lagStatsRef.current = {
         maxLagMs: 0,
         sampleCount: 0,
@@ -300,11 +310,15 @@ export const useRendererDiagnostics = (input: {
                   kind: "renderer-long-task" as const,
                   metrics: {
                     durationMs: Math.round(entry.duration),
-                    startTimeMs: Math.round(entry.startTime)
+                    startTimeMs: entry.startTime,
+                    timeOriginMs: performance.timeOrigin
                   },
                   context: {
+                    recentOperations: recentUiOperations(entry.startTime, entry.startTime + entry.duration),
+                    attribution: ((entry as PerformanceEntry & { attribution?: PerformanceEntry[] }).attribution ?? []).slice(0, 8).map((item) => ({ name: item.name, entryType: item.entryType, startTime: item.startTime, duration: item.duration })),
                     name: entry.name,
                     entryType: entry.entryType,
+                    visibilityState: document.visibilityState,
                     href: window.location.href,
                     memory: getMemorySnapshot()
                   }
@@ -317,7 +331,7 @@ export const useRendererDiagnostics = (input: {
                   occurredAt: sample.at,
                   metrics: sample.metrics,
                   context: sample.context
-                }, { cooldownKey: "renderer-long-task" });
+                }, { cooldownKey: "renderer-long-task", cooldownMs: 1_000 });
               }
             }
           })
@@ -326,58 +340,82 @@ export const useRendererDiagnostics = (input: {
       entryTypes: ["longtask"]
     });
 
+    // One pending sample/frame bounds work during key repeat and IME bursts.
+    let pendingInput: { startedAt: number; handlerStartedAt: number; eventType: string; target: Record<string, unknown>; count: number } | undefined;
+    let inputFrame: number | undefined;
+    const handleVisibilityChange = (): void => {
+      expectedTick = performance.now() + eventLoopProbeIntervalMs;
+      if (inputFrame !== undefined) window.cancelAnimationFrame(inputFrame);
+      inputFrame = undefined;
+      pendingInput = undefined;
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     const handleUserInput = (event: Event): void => {
-      const startedAt = nowIso();
-      const startedMs = window.performance.now();
-      window.requestAnimationFrame(() => {
-        const delayMs = Math.max(0, Math.round(window.performance.now() - startedMs));
-        const target = describeEventTarget(event.target);
-        const sample = {
-          at: startedAt,
-          kind: "ui-input-delay" as const,
-          metrics: {
-            delayMs
-          },
-          context: {
-            eventType: event.type,
-            target,
-            href: window.location.href
-          }
-        };
+      if (document.visibilityState !== "visible") return;
+      const handlerStartedAt = performance.now();
+      const startedAt = normalizeEventTimestamp(event.timeStamp, handlerStartedAt);
+      const queueWaitMs = handlerStartedAt - startedAt;
+      inputStatsRef.current.count += 1;
+      inputStatsRef.current.delayedQueueCount += Number(queueWaitMs >= inputDelayWarningThresholdMs);
+      inputStatsRef.current.maxQueueWaitMs = Math.max(inputStatsRef.current.maxQueueWaitMs, queueWaitMs);
+      if (pendingInput) {
+        pendingInput.count += 1;
+        if (startedAt < pendingInput.startedAt) {
+          pendingInput.startedAt = startedAt;
+          pendingInput.handlerStartedAt = handlerStartedAt;
+          pendingInput.eventType = event.type;
+          pendingInput.target = describeEventTarget(event.target);
+        }
+        return;
+      }
+      pendingInput = { startedAt, handlerStartedAt, eventType: event.type, target: describeEventTarget(event.target), count: 1 };
+      inputFrame = window.requestAnimationFrame(() => {
+        inputFrame = undefined;
+        const sample = pendingInput!;
+        pendingInput = undefined;
+        const frameAt = performance.now();
+        const delayMs = frameAt - sample.startedAt;
+        const stats = inputStatsRef.current;
+        stats.delayedFrameCount += Number(delayMs >= inputDelayWarningThresholdMs);
+        stats.maxDelayMs = Math.max(stats.maxDelayMs, delayMs);
         if (delayMs >= inputDelayWarningThresholdMs) {
           writer.write({
             kind: "ui-input-delay",
             severity: "warning",
             source: "renderer-diagnostics",
-            message: "User input waited too long for the next animation frame.",
-            occurredAt: startedAt,
-            metrics: sample.metrics,
-            context: sample.context
-          }, { cooldownKey: "ui-input-delay" });
+            message: "User input queue and next-frame delay detected.",
+            occurredAt: nowIso(),
+            metrics: {
+              delayMs,
+              queueDelayMs: sample.handlerStartedAt - sample.startedAt,
+              frameDelayMs: frameAt - sample.handlerStartedAt,
+              startTimeMs: sample.startedAt,
+              handlerStartTimeMs: sample.handlerStartedAt,
+              frameTimeMs: frameAt,
+              timeOriginMs: performance.timeOrigin,
+              inputCount: sample.count
+            },
+            context: {
+              eventType: sample.eventType,
+              target: sample.target,
+              recentOperations: recentUiOperations(sample.startedAt, frameAt)
+            }
+          }, { cooldownKey: "ui-input-delay", cooldownMs: 1_000 });
         }
       });
     };
-
-    window.addEventListener("pointerdown", handleUserInput, {
-      capture: true,
-      passive: true
-    });
-    window.addEventListener("keydown", handleUserInput, {
-      capture: true,
-      passive: true
-    });
-
+    const inputEvents = ["pointerdown", "keydown", "beforeinput", "input", "compositionstart", "compositionupdate", "compositionend"];
+    for (const eventType of inputEvents) {
+      window.addEventListener(eventType, handleUserInput, { capture: true, passive: true });
+    }
     return () => {
       writer.dispose();
       window.clearInterval(eventLoopIntervalId);
       window.clearInterval(heartbeatIntervalId);
       observer?.disconnect();
-      window.removeEventListener("pointerdown", handleUserInput, {
-        capture: true
-      });
-      window.removeEventListener("keydown", handleUserInput, {
-        capture: true
-      });
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (inputFrame !== undefined) window.cancelAnimationFrame(inputFrame);
+      for (const eventType of inputEvents) window.removeEventListener(eventType, handleUserInput, { capture: true });
     };
   }, [input.transport]);
 };

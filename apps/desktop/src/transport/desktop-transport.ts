@@ -1,3 +1,4 @@
+import { recordUiOperation } from "../diagnostics/ui-performance.js";
 import type {
   Attachment,
   BackgroundRunSnapshotRpc,
@@ -986,7 +987,7 @@ export const createDesktopTransport = (
         let disposed = false;
         let cancelScheduledDrain: CancelScheduledWork | undefined;
         let scheduledBackgroundDrain = false;
-        const envelopeQueue: Array<{ envelope: EventEnvelope; bytes: number }> = [];
+        const envelopeQueue: Array<{ envelope: EventEnvelope; bytes: number; queuedAt: number }> = [];
         let envelopeQueueHead = 0;
         const pendingEnvelopeCount = (): number =>
           envelopeQueue.length - envelopeQueueHead;
@@ -1068,6 +1069,8 @@ export const createDesktopTransport = (
             return;
           }
           const startedAt = monotonicNow();
+          const queuedAt = envelopeQueue[envelopeQueueHead]!.queuedAt;
+          recordUiOperation("events.queue", queuedAt, { pending: pendingEnvelopeCount() }, "async");
           const batch: EventEnvelope[] = [];
           let batchBytes = 0;
           while (
@@ -1091,6 +1094,10 @@ export const createDesktopTransport = (
             batch.push(queued.envelope);
           }
           deliverEnvelopes(batch);
+          recordUiOperation("events.drain", startedAt, {
+            events: batch.length, bytes: batchBytes, pending: pendingEnvelopeCount(),
+            streamPending: streamPendingCount, queueWaitMs: Math.round(startedAt - queuedAt)
+          });
           if (pendingEnvelopeCount() === 0) {
             envelopeQueue.length = 0;
             envelopeQueueHead = 0;
@@ -1163,6 +1170,7 @@ export const createDesktopTransport = (
             input.onPush?.(push);
             envelopeQueue.push({
               envelope: push.envelope,
+              queuedAt: monotonicNow(),
               bytes: utf8ByteLength(push.envelope)
             });
             addEnvelopeToBacklogStats(push.envelope);

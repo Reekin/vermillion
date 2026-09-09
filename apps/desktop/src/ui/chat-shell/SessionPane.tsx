@@ -3,6 +3,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -23,6 +24,7 @@ import type {
   SessionWindowRpc
 } from "@vermillion/shared";
 import type { ChatTreeSendOperation } from "@vermillion/shared";
+import { recordUiOperation } from "../../diagnostics/ui-performance.js";
 import { PendingBranchMessage } from "./PendingBranchMessage.js";
 import {
   resolveEngineExecutionPreference,
@@ -605,6 +607,8 @@ export const SessionPane = ({
   renderTurnNavigation,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
+  const renderStartedAt = performance.now();
+  useLayoutEffect(() => { recordUiOperation("react.session-pane.commit", renderStartedAt, undefined, "render"); });
   const state = useRendererStoreState(store);
   const [availableEngines, setAvailableEngines] = useState<EngineDefinitionRpc[]>([]);
   const [engineSurfacesById, setEngineSurfacesById] = useState<
@@ -818,7 +822,12 @@ export const SessionPane = ({
     [participants]
   );
   const transcriptRows = useMemo(
-    () => buildTurnTranscriptRows(domain, turns, participantDirectory),
+    () => {
+      const startedAt = performance.now();
+      const rows = buildTurnTranscriptRows(domain, turns, participantDirectory);
+      recordUiOperation("transcript.project", startedAt, { turns: turns.length, rows: rows.length });
+      return rows;
+    },
     [domain, turns, participantDirectory]
   );
   const transcriptContentVersion = useMemo(
