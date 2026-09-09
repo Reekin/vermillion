@@ -474,19 +474,69 @@ export class WorkbenchService {
   async failAction(workspaceId: string, actionId: string, failure: string): Promise<WorkflowAction> {
     const action = await this.getAction(workspaceId, actionId);
     if (!actionIsOpen(action) || action.status === "decision") return action;
+    const failed = await this.updateAction(workspaceId, action, (action) => this.failedAction(action, failure),
+      action.kind === "execute" ? (item) => ({ ...item, status: RETRY_MINUTES[action.attempts] === undefined ? "decision" : "queued" }) : undefined);
+    await this.ensureFailureDecision(workspaceId, failed);
+    return this.getAction(workspaceId, actionId);
+  }
+
+  private failedAction<T extends WorkflowAction>(action: T, failure: string): T {
     const attempts = action.attempts + 1;
     const delay = RETRY_MINUTES[attempts - 1];
-    const failed = await this.updateAction(workspaceId, action, (action) => ({ ...action, attempts, failure, status: delay === undefined ? "decision" : "retry",
+    return { ...action, attempts, failure, status: delay === undefined ? "decision" : "retry",
       retryAt: delay === undefined ? undefined : new Date(Date.parse(this.now()) + delay * 60_000).toISOString(),
-      history: [...action.history, { at: this.now(), event: "failed:" + action.stage, message: failure }] }),
-      action.kind === "execute" ? (item) => ({ ...item, status: delay === undefined ? "decision" : "queued" }) : undefined);
-    if (delay === undefined && !(await this.listDecisions(workspaceId)).some((card) => card.actionId === actionId && !card.answer && !card.withdrawn)) {
+      history: [...action.history, { at: this.now(), event: "failed:" + action.stage, message: failure }] };
+  }
+
+  private async ensureFailureDecision(workspaceId: string, failed: WorkflowAction): Promise<void> {
+    const action = failed;
+    const actionId = action.actionId;
+    if (failed.status === "decision" && !(await this.listDecisions(workspaceId)).some((card) => card.actionId === actionId && !card.answer && !card.withdrawn)) {
       await this.createDecision(workspaceId, { actionId, kind: "attempts", workItemId: action.workItemId, sessionId: action.kind === "execute" ? action.sessionId : undefined,
         question: "自动恢复已用尽，要再试还是取消当前工作？", context: "工作台已尝试自动恢复四次，仍未完成当前处理。原会话与成果保留，选择再试后会从未完成的动作继续。",
         details: "阶段：" + action.stage + "\n受影响工单：" + action.workItemId + "\n" + failed.history.filter((h) => h.event.startsWith("failed:")).map((h) => h.at + " " + h.message).join("\n"),
         options: [{ key: "retry", label: "再试", detail: "清零此处理过程的失败计数，从未完成动作继续。" }, { key: "cancel", label: "取消当前工作", detail: "取消该过程关联的工单；已合入成果保持保留。" }], recommended: "retry", recommendation: "故障已排除时可沿原处理过程继续。" });
     }
-    return this.getAction(workspaceId, actionId);
+  }
+
+  /** Completion's ownership test and all execution changes share one record transaction. */
+  async settleWorkerTurn(workspaceId: string, workItemId: string, input: {
+    ownsExecution: () => boolean; turnId?: string; scheduled: boolean; finishReason: string; failure?: string; maxIdleTurns: number; completion: string;
+  }): Promise<{ status: "done" | "failed"; note: string } | undefined> {
+    const result = await this.transactRecord(workspaceId, workItemId, (record) => {
+      if (!record) throw new Error("Unknown work item: " + workItemId);
+      if (input.turnId && record.execution.staleTurnId === input.turnId) record = { ...record, execution: { ...record.execution, staleTurnId: undefined } };
+      if (!input.ownsExecution()) return { record, result: undefined };
+      const action = record.execution;
+      let execution = action;
+      let item = record.item;
+      let note: string;
+      let failure: string | undefined;
+      if (!actionIsOpen(action) || action.status === "decision") note = action.status;
+      else if (item.status === "queued" || action.stage === "deliver") {
+        if (item.status === "queued") execution = { ...action, stage: "deliver", status: "pending" };
+        note = "待送达后续消息";
+      } else if (item.status !== "running") {
+        execution = { ...action, status: "done", retryAt: undefined,
+          history: [...action.history, { at: this.now(), event: "resolved", message: "工单已进入 " + item.status }] };
+        note = "已交接";
+      } else if (!input.scheduled) return { record, result: undefined };
+      else if (input.finishReason !== "completed" || action.idleTurns >= input.maxIdleTurns) {
+        failure = input.finishReason !== "completed" ? "turn " + input.finishReason + (input.failure ? ": " + input.failure : "")
+          : "连续未落实处置：" + input.completion;
+        execution = this.failedAction(action, failure);
+        item = { ...item, status: execution.status === "decision" ? "decision" : "queued" };
+        note = failure;
+      } else {
+        execution = { ...action, heartbeatAt: this.now(), idleTurns: action.idleTurns + 1, stage: "deliver", status: "pending",
+          message: action.message + "\n尚未落实处置。请执行：" + input.completion };
+        note = "要求落实具体动作";
+      }
+      return { record: { ...record, item: { ...item, updatedAt: this.now() }, execution: { ...execution, updatedAt: this.now() } },
+        result: { status: failure ? "failed" as const : "done" as const, note, failed: failure ? execution : undefined } };
+    });
+    if (result?.failed) await this.ensureFailureDecision(workspaceId, result.failed);
+    return result;
   }
 
   /** Dependencies and agent actions share one durable queue; facts, not delivery receipts, release waiting work. */

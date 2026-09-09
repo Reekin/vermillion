@@ -300,6 +300,7 @@ it("keeps a user-started turn when the previous completion is delayed, without i
   await vi.waitFor(() => expect(cleanup).toHaveBeenCalled());
   expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ status: "running", stage: "execute", idleTurns: 0, attempts: 0 });
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBeUndefined();
+  expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1, status: "running" });
   expect(f.runner.interrupt).not.toHaveBeenCalled();
   expect(f.runner.send).toHaveBeenCalledOnce();
   expect(f.runner.resume).toHaveBeenCalledOnce();
@@ -309,7 +310,36 @@ it("keeps a user-started turn when the previous completion is delayed, without i
   await f.orchestrator.dispose();
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
   expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0 });
+  expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 2, status: "running" });
   expect(f.runner.send).toHaveBeenCalledOnce();
+});
+
+it("atomically drops old idle accounting when a user starts while completion persistence is waiting", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  const settle = f.service.settleWorkerTurn.bind(f.service);
+  const waiting = vi.spyOn(f.service, "settleWorkerTurn");
+  const heartbeat = vi.spyOn(f.service, "heartbeatWorkItem");
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  waiting.mockImplementationOnce(async (...args) => { await gate; return settle(...args); });
+  f.complete("original", "turn-1");
+  try {
+    await vi.waitFor(() => expect(waiting).toHaveBeenCalledOnce());
+    f.startTurn("original", "user-turn");
+  } finally { release(); }
+  await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1 }));
+  f.complete("original", "turn-1");
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  await f.orchestrator.dispose();
+  expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1, status: "running" });
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", idleTurns: 0, attempts: 0, message: "" });
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+  expect(heartbeat).not.toHaveBeenCalled(); // Heartbeat and idle accounting now share the guarded record commit.
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect(f.runner.resume).toHaveBeenCalledOnce();
 });
 
 it("counts a scheduled turn once when turn-started and completion notifications are repeated", async () => {
@@ -336,8 +366,8 @@ it("tracks a new turn opened by steer fallback without marking its submission st
     return {};
   });
   await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "Updated", objective: "Updated result" });
-  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", message: "" }));
   await vi.waitFor(() => expect(f.runner.steer).toHaveBeenCalledOnce());
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", message: "" }));
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBeUndefined();
   f.complete("original", "fallback-turn");
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));

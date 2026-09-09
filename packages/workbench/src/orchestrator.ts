@@ -34,7 +34,7 @@ export type OrchestratorOptions = {
 };
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
-type WorkerTurn = { turnId?: string; scheduled: boolean; settled?: boolean };
+type WorkerTurn = { turnId?: string; scheduled: boolean; settled?: boolean; bound?: WorkerBinding };
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 // A replacement orchestrator takes ownership only after the previous generation's in-flight task drains.
 const workspaceQueues = new Map<string, Promise<void>>();
@@ -50,6 +50,7 @@ export class Orchestrator {
   private readonly disposers: Array<() => void> = [];
   private readonly runsBySession = new Map<string, WorkerBinding>();
   private readonly turnsBySession = new Map<string, WorkerTurn>();
+  private readonly unsettledTurns = new Map<string, Set<WorkerTurn>>();
   private readonly settling = new Map<string, number>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly preparing = new Map<string, string>();
@@ -94,7 +95,7 @@ export class Orchestrator {
     }));
     if (this.runner.onTurnStarted) this.disposers.push(this.runner.onTurnStarted((event) => {
       if (this.turnsBySession.get(event.sessionId)?.turnId === event.turnId) return;
-      this.turnsBySession.set(event.sessionId, { turnId: event.turnId, scheduled: false });
+      this.trackTurn(event.sessionId, { turnId: event.turnId, scheduled: false });
     }));
     this.disposers.push(this.runner.onTurnCompleted((event) => {
       // Install the barrier synchronously: a queued reconcile may run before this event is processed.
@@ -127,20 +128,16 @@ export class Orchestrator {
   }
 
   private async settleTurn(event: Parameters<Parameters<AgentRunner["onTurnCompleted"]>[0]>[0]): Promise<void> {
-    const bound = this.runsBySession.get(event.sessionId);
-    const turn = this.turnsBySession.get(event.sessionId);
+    const turn = [...(this.unsettledTurns.get(event.sessionId) ?? [])].find((turn) => !turn.turnId || turn.turnId === event.turnId);
+    const bound = turn?.bound;
     const workspaces = await this.service.listWorkspaces();
     try {
       await Promise.all(workspaces.map(({ workspaceId }) => this.enqueue(workspaceId, async () => {
         await this.service.workerTurnCompleted(workspaceId, event.sessionId);
-        if (bound?.workspaceId === workspaceId && bound.run.workItemId) {
-          const item = await this.service.getWorkItem(workspaceId, bound.run.workItemId);
-          if (item.run.staleTurnId === event.turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, undefined);
-        }
-        if (bound?.workspaceId === workspaceId && turn && !turn.settled &&
-            (!turn.turnId || turn.turnId === event.turnId) && this.turnsBySession.get(event.sessionId) === turn) {
+        if (bound?.workspaceId === workspaceId && turn && !turn.settled) {
           await this.onTurn(bound, turn, event.finishReason, event.failure);
           turn.settled = true;
+          this.unsettledTurns.get(event.sessionId)?.delete(turn);
         }
         if (this.preparing.get(event.sessionId) === workspaceId &&
             (!turn?.turnId || turn.turnId === event.turnId) && this.turnsBySession.get(event.sessionId) === turn) {
@@ -153,6 +150,10 @@ export class Orchestrator {
         }
       })));
     } finally {
+      if (turn && !bound) {
+        turn.settled = true;
+        this.unsettledTurns.get(event.sessionId)?.delete(turn);
+      }
       const remaining = this.settling.get(event.sessionId)! - 1;
       if (remaining) this.settling.set(event.sessionId, remaining);
       else this.settling.delete(event.sessionId);
@@ -161,6 +162,14 @@ export class Orchestrator {
         await this.reconcile(workspaceId);
       });
     }
+  }
+
+  private trackTurn(sessionId: string, turn: WorkerTurn): void {
+    turn.bound = this.runsBySession.get(sessionId);
+    this.turnsBySession.set(sessionId, turn);
+    const pending = this.unsettledTurns.get(sessionId) ?? new Set<WorkerTurn>();
+    pending.add(turn);
+    this.unsettledTurns.set(sessionId, pending);
   }
 
   private async reconcile(workspaceId: string): Promise<void> {
@@ -173,7 +182,7 @@ export class Orchestrator {
     await this.service.continueIntegrations(workspaceId);
     let actions = await this.service.listActions(workspaceId);
     // Completed actions can still have a final turn in flight. Keep the owner until it ends.
-    for (const bound of [...this.runsBySession.values()].filter((b) => b.workspaceId === workspaceId)) {
+    for (const bound of [...this.runsBySession.values()].filter((b) => b.workspaceId === workspaceId && b.run.status === "running")) {
       const action = actions.find((a) => a.actionId === bound.actionId);
       if ((!action || !actionIsOpen(action) || action.status === "decision") && !this.active(bound.run.sessionId)) {
         await this.release(bound, "done", action?.status ?? "done");
@@ -207,7 +216,7 @@ export class Orchestrator {
   }
 
   private active(sessionId: string): boolean {
-    return this.settling.has(sessionId) || (this.runner.isActive?.(sessionId) ?? this.runsBySession.has(sessionId));
+    return this.settling.has(sessionId) || (this.runner.isActive?.(sessionId) ?? this.runsBySession.get(sessionId)?.run.status === "running");
   }
 
   private clearRetryTimer(workspaceId: string): void {
@@ -227,9 +236,9 @@ export class Orchestrator {
       if (sessionId && this.settling.has(sessionId)) return;
       const priorTurn = sessionId ? this.turnsBySession.get(sessionId) : undefined;
       // A returned submission belongs to the old turn until its completion has settled.
-      if (bound && priorTurn?.scheduled && !priorTurn.settled &&
+      if (bound?.run.status === "running" && priorTurn?.scheduled && !priorTurn.settled &&
           (item.status === "queued" || (priorTurn.turnId && !this.runner.isActive?.(sessionId!)))) return;
-      if (sessionId && !bound) {
+      if (sessionId && (!bound || bound.run.status !== "running")) {
         const role = await this.workerRole(root);
         if (!await this.runner.resume(sessionId, { cwd, developerInstructions: role.content, modelConfig: role.modelConfig, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
       }
@@ -257,7 +266,9 @@ export class Orchestrator {
       }
       const wasActive = this.runner.isActive?.(sessionId) ?? !!bound;
       this.runsBySession.set(sessionId, bound?.run.runId === run.runId ? bound : { workspaceId, actionId: action.actionId, run });
-      if (wasActive && !this.turnsBySession.has(sessionId)) this.turnsBySession.set(sessionId, {
+      const tracked = this.turnsBySession.get(sessionId);
+      if (tracked && !tracked.settled) tracked.bound = this.runsBySession.get(sessionId);
+      if (wasActive && !this.turnsBySession.has(sessionId)) this.trackTurn(sessionId, {
         turnId: this.runner.getActiveTurnId?.(sessionId), scheduled: false
       });
       const wasQueued = item.status === "queued";
@@ -283,7 +294,7 @@ export class Orchestrator {
         const sent = await this.runner.send(sessionId, message);
         const turn = this.turnsBySession.get(sessionId);
         const turnId = sent?.turnId ?? this.runner.getActiveTurnId?.(sessionId);
-        if (!turn || turn === before) this.turnsBySession.set(sessionId, { turnId, scheduled: true });
+        if (!turn || turn === before) this.trackTurn(sessionId, { turnId, scheduled: true });
         else if (turn.turnId === turnId) turn.scheduled = true;
       }
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
@@ -299,8 +310,8 @@ export class Orchestrator {
   }
 
   private async release(bound: WorkerBinding, status: "done" | "failed", note: string): Promise<void> {
-    if (this.runsBySession.get(bound.run.sessionId) === bound) this.runsBySession.delete(bound.run.sessionId);
-    await this.service.putRun(bound.workspaceId, { ...bound.run, status, note, endedAt: this.now() });
+    bound.run = { ...bound.run, status, note, endedAt: this.now() };
+    await this.service.putRun(bound.workspaceId, bound.run);
   }
 
   private async fail(workspaceId: string, actionId: string, reason: string): Promise<void> {
@@ -311,32 +322,14 @@ export class Orchestrator {
   }
 
   private async onTurn(bound: WorkerBinding, turn: WorkerTurn, finishReason: string, failure?: string): Promise<void> {
-    const { workspaceId, actionId } = bound;
-    const action = (await this.service.listActions(workspaceId)).find((a) => a.actionId === actionId);
-    const item = bound.run.role === "worker" && bound.run.workItemId ? await this.service.getWorkItem(workspaceId, bound.run.workItemId) : undefined;
-    if (this.turnsBySession.get(bound.run.sessionId) !== turn || this.runsBySession.get(bound.run.sessionId) !== bound) return;
+    const ownsExecution = () => this.turnsBySession.get(bound.run.sessionId) === turn && this.runsBySession.get(bound.run.sessionId) === bound;
+    const result = bound.run.workItemId ? await this.service.settleWorkerTurn(bound.workspaceId, bound.run.workItemId, {
+      ownsExecution, turnId: turn.turnId, scheduled: turn.scheduled, finishReason, failure, maxIdleTurns: this.maxIdleTurns, completion: this.completion()
+    }) : undefined;
+    // Every turn settles its own run once, even when a newer turn already owns the execution.
     bound.run = { ...bound.run, turns: bound.run.turns + 1 };
-    if (!action || action.kind !== "execute" || !actionIsOpen(action) || action.status === "decision") {
-      await this.release(bound, "done", action?.status ?? "done");
-    } else if (item?.status === "queued" || action.stage === "deliver") {
-      // Existing continuation wins over failure/idle accounting, including stale-contract returns.
-      if (item?.status === "queued") await this.service.updateAction(workspaceId, action, (latest) => ({ ...latest, stage: "deliver", status: "pending" }));
-      await this.release(bound, "done", "待送达后续消息");
-    } else if (action.kind === "execute" && item?.status !== "running") {
-      await this.service.finishAction(workspaceId, actionId, "工单已进入 " + item?.status);
-      await this.release(bound, "done", "已交接");
-    } else if (!turn.scheduled) {
-      await this.service.putRun(workspaceId, bound.run);
-    } else if (finishReason !== "completed") {
-      await this.fail(workspaceId, actionId, "turn " + finishReason + (failure ? ": " + failure : ""));
-    } else if (action.idleTurns >= this.maxIdleTurns) {
-      await this.fail(workspaceId, actionId, "连续未落实处置：" + this.completion());
-    } else {
-      if (item) await this.service.heartbeatWorkItem(workspaceId, item.workItemId);
-      await this.service.updateAction(workspaceId, action, (action) => ({ ...action, idleTurns: action.idleTurns + 1, stage: "deliver", status: "pending",
-        message: action.message + "\n尚未落实处置。请执行：" + this.completion() }));
-      await this.release(bound, "done", "要求落实具体动作");
-    }
+    if (result && ownsExecution()) await this.release(bound, result.status, result.note);
+    else await this.service.putRun(bound.workspaceId, bound.run);
   }
 
   private async workerMessage(workspaceId: string, item: WorkItem, cwd: string): Promise<string> {
