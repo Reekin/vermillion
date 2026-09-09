@@ -41,14 +41,14 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
     <li key={session.sessionId}>
       <ListRow
         depth={depth}
-        leadingAction={session.subagents.length > 0 && (
+        leadingAction={session.subagents.length > 0 ? (
           <IconButton
             icon={collapsedIds.has(session.sessionId) ? ChevronRight : ChevronDown}
             label={`${collapsedIds.has(session.sessionId) ? "展开" : "折叠"}子会话：${session.title}`}
             aria-expanded={!collapsedIds.has(session.sessionId)}
             onClick={() => toggleCollapsed(session.sessionId)}
           />
-        )}
+        ) : <span aria-hidden="true" />}
         selected={selectedSessionId === session.sessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))}
         onClick={() => onOpen(session.sessionId)}
         onContextMenu={(event) => onOpenMenu(event, session.sessionId)}
