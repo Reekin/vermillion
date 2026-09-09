@@ -3,7 +3,7 @@ import type { InboxItem, WorkItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { useWorkflowContext } from "../use-workflow-context.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { actionStatusLabel, dispositionSummary, roleLabel } from "./workflow-display.js";
+import { actionStatusLabel, dispositionSummary, actionRoleLabel } from "./workflow-display.js";
 import { statusLabel } from "./task-labels.js";
 import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotice, DetailSection, ListRow } from "./ui.js";
 
@@ -44,7 +44,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
   const card = data?.decisions.find((entry) => entry.decisionId === item.card.decisionId) ?? item.card;
   const action = data?.actions.find((entry) => entry.actionId === card.actionId);
   const dispositions = action ? dispositionSummary(action) : [];
-  const relatedIds = [...new Set([...(action?.workItemIds ?? []), ...(card.workItemId ? [card.workItemId] : [])])];
+  const relatedIds = [...new Set([...(action ? [action.workItemId] : []), ...(card.workItemId ? [card.workItemId] : [])])];
   const sessionId = card.sessionId ?? data?.workItems.find((entry) => entry.workItemId === card.workItemId)?.run.sessionId;
   const retainDecision = store((s) => s.retainDecision);
   const dismissDecision = store((s) => s.dismissDecision);
@@ -120,7 +120,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
         <Button size="sm" variant="ghost" onClick={() => dismissDecision(item.workspaceId, card.decisionId)}>知道了</Button>
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
-        <p>{roleLabel[action.role]} · {actionStatusLabel[action.status]}</p>
+        <p>{actionRoleLabel(action)} · {actionStatusLabel[action.status]}</p>
         {dispositions.length ? dispositions.slice(-5).map((summary, index) => <p key={index}>{summary}</p>) : <p>尚无已执行的自动处置。</p>}
       </DetailSection>}
       {relatedIds.length > 0 && <DetailSection title="相关工单">{relatedIds.map((id) => {

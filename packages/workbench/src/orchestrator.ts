@@ -1,4 +1,4 @@
-import { effectiveNeeds, actionIsOpen, type AgentRun, type WorkflowAction, type WorkItem, type RoleExecutionOverrides } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type WorkItem, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 
@@ -13,14 +13,10 @@ export type AgentRunner = {
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
   resume: (sessionId: string, options?: { cwd?: string; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
+  /** Closes the idle execution environment and its child processes; preserves session history for resume. */
+  release: (sessionId: string) => Promise<void>;
   /** True while the runtime is executing a turn, including tool/model waits. */
   isActive?: (sessionId: string) => boolean;
-  /** Text of the last assistant message in the session, if any. */
-  lastReply: (sessionId: string) => string | undefined;
-  /** All assistant messages of the session's latest turn, in order. */
-  turnMessages: (sessionId: string) => string[];
-  /** Offers a tool to sessions whose metadata.role matches; handler receives the calling session id. */
-  registerTool: (tool: { role: string; name: string; description: string; inputSchema: unknown; handle: (args: Record<string, unknown>, callerSessionId: string) => Promise<string> }) => void;
   onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed"; failure?: string }) => void) => () => void;
 };
 
@@ -38,7 +34,7 @@ const createId = (prefix: string): string => prefix + "-" + Date.now().toString(
 // A replacement orchestrator takes ownership only after the previous generation's in-flight task drains.
 const workspaceQueues = new Map<string, Promise<void>>();
 
-/** One durable dispatch/recovery path for all responsibility owners. */
+/** Resumes each item's execution and drains workspace integration checkpoints. */
 export class Orchestrator {
   private readonly service: WorkbenchService;
   private readonly roles: RoleService;
@@ -63,6 +59,7 @@ export class Orchestrator {
   start(): void {
     this.disposed = false;
     this.disposers.push(this.service.setWorkerActiveChecker((sessionId) => this.active(sessionId)));
+    this.disposers.push(this.service.setWorkerEnvironmentReleaser((sessionId) => this.runner.release(sessionId)));
     if (this.runner.resolveSourceTurn) this.disposers.push(this.service.setSourceTurnResolver(this.runner.resolveSourceTurn));
     this.disposers.push(this.service.registerScheduler());
     this.disposers.push(this.service.subscribe((event) => {
@@ -127,28 +124,20 @@ export class Orchestrator {
     // Completed actions can still have a final turn in flight. Keep the owner until it ends.
     for (const bound of [...this.runsBySession.values()].filter((b) => b.workspaceId === workspaceId)) {
       const action = actions.find((a) => a.actionId === bound.actionId);
-      if ((!action || !actionIsOpen(action) || action.status === "decision" || action.status === "waiting") && !this.active(bound.run.sessionId)) {
+      if ((!action || !actionIsOpen(action) || action.status === "decision") && !this.active(bound.run.sessionId)) {
         await this.release(bound, "done", action?.status ?? "done");
       }
     }
     actions = await this.service.listActions(workspaceId);
-    const claimed = new Set<string>();
     for (const action of actions) {
       if (this.disposed) break;
-      if (action.role === "workbench" || !actionIsOpen(action) || action.status === "decision" || action.status === "waiting") continue;
-      if (claimed.has(action.ownerKey)) continue;
-      const occupying = [...this.runsBySession.values()].find((b) => b.workspaceId === workspaceId &&
-        actions.some((a) => a.actionId === b.actionId && a.ownerKey === action.ownerKey));
-      if (occupying && occupying.actionId !== action.actionId) continue;
-      claimed.add(action.ownerKey);
+      if (action.kind !== "execute" || !actionIsOpen(action) || action.status === "decision") continue;
       if (action.retryAt && Date.parse(action.retryAt) > Date.parse(this.now())) continue;
-      if (action.role === "worker") {
-        const items = await this.service.listWorkItems(workspaceId);
-        const item = items.find((i) => i.workItemId === action.workItemIds[0]);
-        if (!item || await this.service.isWorkItemBlocked(workspaceId, item.workItemId)) continue;
-        const running = items.filter((i) => i.status === "running" && i.workItemId !== item.workItemId);
-        if (running.length >= scheduler.maxWorkers || running.some((i) => effectiveNeeds(i).some((need) => effectiveNeeds(item).includes(need)))) continue;
-      }
+      const items = await this.service.listWorkItems(workspaceId);
+      const item = items.find((i) => i.workItemId === action.workItemId);
+      if (!item || !["queued", "running"].includes(item.status) || await this.service.isWorkItemBlocked(workspaceId, item.workItemId)) continue;
+      const running = items.filter((i) => i.status === "running" && i.workItemId !== item.workItemId);
+      if (running.length >= scheduler.maxWorkers || running.some((i) => effectiveNeeds(i).some((need) => effectiveNeeds(item).includes(need)))) continue;
       await this.dispatch(workspaceId, action);
     }
     await this.scheduleRetry(workspaceId);
@@ -176,56 +165,49 @@ export class Orchestrator {
     this.retryTimers.delete(workspaceId);
   }
 
-  private async dispatch(workspaceId: string, initial: WorkflowAction): Promise<void> {
+  private async dispatch(workspaceId: string, initial: Execution): Promise<void> {
     let action = initial;
     try {
       const root = await this.service.workspaceRoot(workspaceId);
-      let item = action.role === "worker" ? await this.service.getWorkItem(workspaceId, action.workItemIds[0]!) : undefined;
-      let cwd = item?.run.worktreePath ?? root;
+      let item = await this.service.getWorkItem(workspaceId, action.workItemId);
+      const cwd = action.worktreePath ?? root;
       let sessionId = action.sessionId;
       const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
       if (sessionId && !bound) {
-        if (!await this.runner.resume(sessionId, { cwd, title: item ? "Worker · " + item.title : undefined, metadata: { role: "worker", workItemId: item?.workItemId, sourceSessionId: item?.sourceSessionId, sourceTurnId: item?.sourceTurnId, treeId: item?.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
-
+        if (!await this.runner.resume(sessionId, { cwd, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
       }
       if (!sessionId) {
-        if (action.stage !== "open") action = await this.service.putAction(workspaceId, { ...action, stage: "open" });
-        const previous = [...await this.service.listActions(workspaceId)].reverse().find((a) => a.actionId !== action.actionId && a.ownerKey === action.ownerKey && a.sessionId);
-        const candidate = item?.run.sessionId ?? previous?.sessionId;
-        if (candidate && await this.runner.resume(candidate, { cwd, title: item ? "Worker · " + item.title : undefined, metadata: { role: "worker", workItemId: item?.workItemId, sourceSessionId: item?.sourceSessionId, sourceTurnId: item?.sourceTurnId, treeId: item?.treeId } })) sessionId = candidate;
-        else {
-          if (candidate) throw new Error("原执行会话无法恢复：" + candidate);
-          const role = await this.workerRole(root);
-          const developerInstructions = role.content;
-          if (item?.run.forkSessionId && item.run.forkTurnId) {
-            ({ sessionId } = await this.runner.fork({ workspaceId, sourceSessionId: item.run.forkSessionId, sourceTurnId: item.run.forkTurnId,
-              developerInstructions, modelConfig: role.modelConfig, title: "Worker · " + item.title,
-              metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId } }));
-            if (!await this.runner.resume(sessionId, { cwd })) throw new Error("无法恢复工单分支");
-          } else ({ sessionId } = await this.runner.open({ workspaceId, cwd, developerInstructions, modelConfig: role.modelConfig,
-            title: action.role + " · " + (item?.title ?? workspaceId),
-            metadata: { role: action.role, actionId: action.actionId, workItemId: item?.workItemId ?? action.workItemIds[0] } }));
-        }
-        action = await this.service.putAction(workspaceId, { ...action, sessionId, stage: "deliver", status: "running" });
+        if (action.stage !== "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "open" }));
+        const role = await this.workerRole(root);
+        const developerInstructions = role.content;
+        if (action.forkSessionId && action.forkTurnId) {
+          ({ sessionId } = await this.runner.fork({ workspaceId, sourceSessionId: action.forkSessionId, sourceTurnId: action.forkTurnId,
+            developerInstructions, modelConfig: role.modelConfig, title: "Worker · " + item.title,
+            metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId } }));
+          if (!await this.runner.resume(sessionId, { cwd })) throw new Error("无法恢复工单分支");
+        } else ({ sessionId } = await this.runner.open({ workspaceId, cwd, developerInstructions, modelConfig: role.modelConfig,
+          title: "Worker · " + item.title,
+          metadata: { role: "worker", actionId: action.actionId, workItemId: item.workItemId } }));
+        action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, sessionId, stage: "deliver", status: "running" }));
       }
       let run = (await this.service.listRuns(workspaceId)).find((r) => r.runId === action.runId && r.sessionId === sessionId);
       if (!run || run.status !== "running") {
-        run = await this.service.putRun(workspaceId, { runId: createId("run"), role: action.role === "workbench" ? "worker" : action.role,
-          actionId: action.actionId, sessionId, workItemId: item?.workItemId ?? action.workItemIds[0],
- status: "running", turns: 0, startedAt: this.now() });
-        action = await this.service.putAction(workspaceId, { ...action, runId: run.runId });
+        run = await this.service.putRun(workspaceId, { runId: createId("run"), role: "worker",
+          actionId: action.actionId, sessionId, workItemId: item.workItemId,
+          status: "running", turns: 0, startedAt: this.now() });
+        const runId = run.runId;
+        action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, runId }));
       }
       const wasActive = this.runner.isActive?.(sessionId) ?? !!bound;
       this.runsBySession.set(sessionId, { workspaceId, actionId: action.actionId, run });
-      if (item && item.status === "queued") item = await this.service.startWorkItem(workspaceId, item.workItemId, { ...item.run, sessionId, heartbeatAt: this.now() });
-      else if (item && item.run.sessionId !== sessionId) item = await this.service.patchWorkItemRun(workspaceId, item.workItemId, { sessionId });
+      if (item.status === "queued") item = await this.service.startWorkItem(workspaceId, item.workItemId, { sessionId, heartbeatAt: this.now() });
       if (action.stage === "execute" && wasActive) return;
       if (action.stage === "execute") {
         // An unbound inactive execute stage is a restart recovery, not evidence of failure.
-        action = await this.service.putAction(workspaceId, { ...action, stage: "deliver", status: "pending",
-          message: action.message + "\n会话已恢复。核对当前成果与持久化处置结果，继续尚未完成的动作。" });
+        action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending",
+          message: action.message + "\n会话已恢复。核对当前成果与持久化处置结果，继续尚未完成的动作。" }));
       }
-      if (action.stage === "open") action = await this.service.putAction(workspaceId, { ...action, stage: "deliver" });
+      if (action.stage === "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver" }));
       const message = await this.actionMessage(workspaceId, action, cwd);
       // Delivery is durable even when send throws. The same session and message are retried.
       if (wasActive) {
@@ -233,11 +215,8 @@ export class Orchestrator {
         if (item && turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, turnId);
       } else await this.runner.send(sessionId, message);
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
-      const current = (await this.service.listActions(workspaceId)).find((a) => a.actionId === action.actionId)!;
-      if (current.message === action.message && current.stage === "deliver" && actionIsOpen(current) && current.status !== "decision") {
-        await this.service.putAction(workspaceId, { ...current, status: "running", stage: "execute", deliveredAt: this.now(), retryAt: undefined });
-        if (item?.run.resumeMessage && !wasActive) await this.service.patchWorkItemRun(workspaceId, item.workItemId, { resumeMessage: undefined });
-      }
+      await this.service.updateAction(workspaceId, action, (latest) => latest.message === action.message && latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
+        ? { ...latest, status: "running", stage: "execute", message: "", deliveredAt: this.now(), retryAt: undefined } : latest);
     } catch (error) {
       await this.fail(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
     }
@@ -261,7 +240,7 @@ export class Orchestrator {
     const action = (await this.service.listActions(workspaceId)).find((a) => a.actionId === actionId);
     const item = bound.run.role === "worker" && bound.run.workItemId ? await this.service.getWorkItem(workspaceId, bound.run.workItemId) : undefined;
     if (item && item.run.staleTurnId && item.run.staleTurnId === turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, undefined);
-    if (!action || !actionIsOpen(action) || action.status === "decision" || action.status === "waiting") {
+    if (!action || action.kind !== "execute" || !actionIsOpen(action) || action.status === "decision") {
       await this.release(bound, "done", action?.status ?? "done");
     } else if (action.kind === "execute" && item?.status !== "running") {
       await this.service.finishAction(workspaceId, actionId, "工单已进入 " + item?.status);
@@ -271,11 +250,11 @@ export class Orchestrator {
     } else if (action.stage === "deliver") {
       await this.release(bound, "done", "待送达后续消息");
     } else if (action.idleTurns >= this.maxIdleTurns) {
-      await this.fail(workspaceId, actionId, "连续未落实处置：" + this.completion(action));
+      await this.fail(workspaceId, actionId, "连续未落实处置：" + this.completion());
     } else {
       if (item) await this.service.heartbeatWorkItem(workspaceId, item.workItemId);
-      await this.service.putAction(workspaceId, { ...action, idleTurns: action.idleTurns + 1, stage: "deliver", status: "pending",
-        message: action.message + "\n尚未落实处置。请执行：" + this.completion(action) });
+      await this.service.updateAction(workspaceId, action, (action) => ({ ...action, idleTurns: action.idleTurns + 1, stage: "deliver", status: "pending",
+        message: action.message + "\n尚未落实处置。请执行：" + this.completion() }));
       await this.release(bound, "done", "要求落实具体动作");
     }
     await this.reconcile(workspaceId);
@@ -287,7 +266,6 @@ export class Orchestrator {
     const branch = item.run.branch;
     const related = "sourceSessionId: " + (item.sourceSessionId ?? "") + "\nsourceTurnId: " + (item.sourceTurnId ?? "");
     const prior = [
-      ...(item.run.resumeMessage ? [item.run.resumeMessage] : []),
       ...item.rejections.map((r) => "用户打回：" + r.reason),
       ...item.decisions.map((d) => "已决策：" + d),
       ...(item.run.lastFailure ? ["上次运行失败：" + item.run.lastFailure] : [])
@@ -311,7 +289,7 @@ export class Orchestrator {
     ].join("\n");
   }
 
-  private completion(_action: WorkflowAction): string {
+  private completion(): string {
     return "完成后调用 workItem.submit 提交证据、review 和逐条验收；需要用户取舍时调用 decision.create。";
   }
 
@@ -321,10 +299,10 @@ export class Orchestrator {
       "\n\n## verifier subagent prompt（spawn 时原样传入，并附 acceptance、refs 与 diff）\n" + verifier!.content };
   }
 
-  private async actionMessage(workspaceId: string, action: WorkflowAction, cwd: string): Promise<string> {
-    const item = await this.service.getWorkItem(workspaceId, action.workItemIds[0]!);
+  private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {
+    const item = await this.service.getWorkItem(workspaceId, action.workItemId);
     return [await this.workerMessage(workspaceId, item, cwd), "sessionId: " + action.sessionId,
-      "actionId: " + action.actionId, action.message, action.failure ?? "", this.completion(action)].join("\n");
+      "actionId: " + action.actionId, action.message, action.failure ?? "", this.completion()].join("\n");
   }
 
   private async prepareRequests(workspaceId: string): Promise<void> {
@@ -369,13 +347,13 @@ export class Orchestrator {
 
   private async deliverUpdate(workspaceId: string, workItemId: string, sessionId: string, note: string): Promise<void> {
     const item = await this.service.getWorkItem(workspaceId, workItemId);
-    const action = (await this.service.listActions(workspaceId)).find((a) => a.kind === "execute" && a.workItemIds.includes(workItemId) && actionIsOpen(a));
+    const action = (await this.service.listActions(workspaceId)).find((a) => a.kind === "execute" && a.workItemId === workItemId && actionIsOpen(a));
     if (await this.service.isWorkItemBlocked(workspaceId, workItemId)) {
       // The service persists the waiting condition before this event. Stop work on the old contract.
       await this.runner.interrupt(sessionId);
-    } else if (action && item.status === "running") {
-      await this.service.putAction(workspaceId, { ...action, stage: "deliver", status: "pending", idleTurns: 0,
-        message: "工单已调整：" + note + "\n立即重新执行 vermillion workItem.get 读取最新合同，按新合同继续；已完成但不再需要的部分回退。" });
+    } else if (action?.kind === "execute" && item.status === "running") {
+      await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending", idleTurns: 0,
+        message: "工单已调整：" + note + "\n立即重新执行 vermillion workItem.get 读取最新合同，按新合同继续；已完成但不再需要的部分回退。" }));
     }
     await this.reconcile(workspaceId);
   }

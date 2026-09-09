@@ -2,6 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it("releases the execution environment through the session facade", async () => {
+    const shell = { releaseSessionExecution: vi.fn().mockResolvedValue(undefined) };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    await runner.release("worker");
+    expect(shell.releaseSessionExecution).toHaveBeenCalledWith("worker");
+    shell.releaseSessionExecution.mockRejectedValue(new Error("turn is active"));
+    await expect(runner.release("worker")).rejects.toThrow("turn is active");
+  });
   it.each([true, false])("forks a completed source in the background with Worker identity (cached=%s)", async (cached) => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),

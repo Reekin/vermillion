@@ -46,7 +46,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     return () => { active = false; unsubscribe(); };
   }, [client, workspaceId]);
   const itemRuns = runs.filter((run) => run.workItemId === workItemId).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  const itemActions = actions.filter((action) => action.workItemIds.includes(workItemId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const itemActions = actions.filter((action) => action.workItemId === workItemId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const sessionId = item?.run.sessionId ?? itemRuns[0]?.sessionId;
   const itemDecisions = decisions?.filter((card) => card.workItemId === workItemId || itemActions.some((action) => action.actionId === card.actionId) || item?.decisions.includes(card.decisionId));
   return <Modal title="工单详情" onClose={onClose} width={800}>

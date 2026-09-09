@@ -36,7 +36,6 @@ import type {
 } from "../../transport/desktop-transport.js";
 import { connectDesktopTransportToStore } from "../../transport/store-bridge.js";
 import { renderTurnExtensions } from "../../features/engine-extensions/turn-extension-registry.js";
-import { SessionNavigationSlot } from "../app/session-navigation.js";
 import { ImageLightbox, type ImageLightboxState } from "./ImageLightbox.js";
 import { MessageMarkdownView } from "./MessageMarkdownView.js";
 import {
@@ -62,7 +61,7 @@ import {
 } from "./use-renderer-store-state.js";
 import { useTranscriptViewportController } from "./use-transcript-viewport-controller.js";
 import { useChatTreeController } from "./use-chat-tree-controller.js";
-import { ChatTreePanel } from "./ChatTreePanel.js";
+import { ChatTreePanel, type ChatTreePanelProps } from "./ChatTreePanel.js";
 import { GitBranch } from "lucide-react";
 import { useRendererDiagnostics } from "./use-renderer-diagnostics.js";
 import { ComposerContainer } from "./composer/ComposerContainer.js";
@@ -89,6 +88,8 @@ const autoRefreshBacklogCooldownMs = 30_000;
 const autoRefreshBacklogStreamThreshold = 500;
 
 export type SessionPaneProps = {
+  renderTurnNavigation?: (position: { sessionId: string; turnId: string }) => ReactNode;
+  renderChatTree?: (props: ChatTreePanelProps & { onSelectSession: (sessionId: string) => void }) => ReactNode;
   store: RendererStore;
   transport: DesktopTransport;
   /** Tree entry to display; undefined renders the draft state (no session yet). */
@@ -107,6 +108,7 @@ export type SessionPaneProps = {
 };
 
 type TranscriptPaneProps = {
+  renderTurnNavigation?: SessionPaneProps["renderTurnNavigation"];
   pendingSend?: ChatTreeSendOperation;
   onRetrySend: (operationId: string) => Promise<void>;
   transcriptRef: RefObject<HTMLElement | null>;
@@ -371,7 +373,8 @@ const TranscriptPane = memo(
     onRespondApproval,
     onRespondInteraction,
     pendingSend,
-    onRetrySend
+    onRetrySend,
+    renderTurnNavigation
   }: TranscriptPaneProps): ReactElement => (
     <section
       className="awb-transcript"
@@ -551,9 +554,9 @@ const TranscriptPane = memo(
                     refreshSignal: engineExtensionRefreshSignal
                   })
                 : null}
-              {!isUserTurn && !isFollowedBySameTurn && <SessionNavigationSlot
-                sessionId={visibleRow.turn.sessionId} turnId={visibleRow.turn.turnId}
-              />}
+              {!isUserTurn && !isFollowedBySameTurn && renderTurnNavigation?.({
+                sessionId: visibleRow.turn.sessionId, turnId: visibleRow.turn.turnId
+              })}
             </article>
           );
         })}
@@ -562,6 +565,7 @@ const TranscriptPane = memo(
     </section>
   ),
   (previous, next) =>
+    previous.renderTurnNavigation === next.renderTurnNavigation &&
     previous.pendingSend === next.pendingSend &&
     previous.onRetrySend === next.onRetrySend &&
     previous.renderedTranscriptRows === next.renderedTranscriptRows &&
@@ -592,6 +596,8 @@ export const SessionPane = ({
   composerExtras,
   onViewChange,
   getSendOptions,
+  renderChatTree,
+  renderTurnNavigation,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
   const state = useRendererStoreState(store);
@@ -1050,6 +1056,7 @@ export const SessionPane = ({
         <div className="awb-main__body">
           <div className="awb-transcript-column">
           <TranscriptPane
+            renderTurnNavigation={renderTurnNavigation}
             pendingSend={pendingSend}
             onRetrySend={retrySend}
             transcriptRef={viewport.transcriptRef}
@@ -1077,16 +1084,16 @@ export const SessionPane = ({
           {allowChatTree && showChatTree && (
             <aside className="awb-chat-tree-column" aria-label="对话树">
               <section className="awb-detail__graph">
-                <ChatTreePanel
-                  operations={operations}
-                  chatTree={activeChatTree}
-                  onSelectWorker={(id) => {
+                {(renderChatTree ?? ((props) => <ChatTreePanel {...props} />))({
+                  operations,
+                  chatTree: activeChatTree,
+                  onSelectSession: (id) => {
                     void transport.sessionBrowser.activate(id, { focusTree: true }).then(() => refreshChatTree());
-                  }}
-                  onJump={sessionId ? (nodeId) => {
+                  },
+                  onJump: sessionId ? (nodeId) => {
                     void onJumpChatTree(nodeId).then(() => viewport.scrollToBottom(sessionId));
-                  } : undefined}
-                />
+                  } : undefined
+                })}
               </section>
             </aside>
           )}

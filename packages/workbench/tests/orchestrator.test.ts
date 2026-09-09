@@ -22,11 +22,11 @@ async function fixture() {
     }),
     resolveSourceTurn: vi.fn(async () => "source-turn"),
     resume: vi.fn(async () => true),
+    release: vi.fn(async () => {}),
     send: vi.fn(async (id) => { active.add(id); }),
     steer: vi.fn(async () => ({ turnId: "active-turn" })),
     interrupt: vi.fn(async (id) => { active.delete(id); }),
     isActive: (id) => active.has(id),
-    lastReply: () => "", turnMessages: () => [], registerTool: () => {},
     onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
   };
   const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner });

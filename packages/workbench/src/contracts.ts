@@ -61,6 +61,7 @@ export const zVerifyResult = z.object({
 
 export const zRejection = z.object({ reason: z.string().min(1), at: z.string() });
 
+/** Read-only API projection of Execution; never stored on the work-item contract. */
 export const zRun = z.object({
   forkSessionId: z.string().optional(),
   forkTurnId: z.string().optional(),
@@ -70,12 +71,12 @@ export const zRun = z.object({
   heartbeatAt: z.string().optional(),
   worktreePath: z.string().optional(),
   branch: z.string().optional(),
-  /** Next message for this worker's session (user feedback, or the wake-up once a deferred-on item closes); the scheduler resumes that session instead of opening a new one. Cleared when claimed. */
+  /** Pending execution delivery; cleared only after delivery succeeds. */
   resumeMessage: z.string().optional(),
   /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
   attempts: z.number().int().nonnegative().optional(),
-  /** Earliest automatic retry time; persisted so restarting the scheduler preserves backoff. */
+  /** Earliest automatic retry time from the persisted execution. */
   retryAt: z.string().datetime().optional(),
   /** Set when a contract change was steered into a turn already in progress; a submit from that same turn is void. Cleared when the turn ends. */
   staleTurnId: z.string().optional()
@@ -113,6 +114,7 @@ export const zWorkItem = z.object({
   }).optional(),
   rejections: z.array(zRejection),
   decisions: z.array(z.string()),
+  /** Derived execution view for callers; runtime mutations use Execution directly. */
   run: zRun,
   createdAt: z.string(),
   updatedAt: z.string()
@@ -243,23 +245,35 @@ export const zAgentRun = z.object({
 });
 export type AgentRun = z.infer<typeof zAgentRun>;
 
-/** A durable unit of responsibility. Delivery and turn completion do not satisfy its completion condition. */
-export const zWorkflowAction = z.object({
+/** Durable process metadata shared by execution and integration checkpoints. */
+const zProcess = z.object({
   actionId: z.string(),
-  kind: z.enum(["execute", "integration"]),
-  role: z.enum(["worker", "workbench"]),
-  ownerKey: z.string(),
-  workItemIds: z.array(z.string()),
-  status: z.enum(["pending", "running", "waiting", "retry", "decision", "done", "cancelled"]),
-  stage: z.enum(["worktree", "open", "deliver", "execute", "merge", "rollback", "cleanup"]),
+  workItemId: z.string(),
+  status: z.enum(["pending", "running", "retry", "decision", "done", "cancelled"]),
   message: z.string(),
-  sessionId: z.string().optional(),
-  runId: z.string().optional(),
-  deliveredAt: z.string().optional(),
   attempts: z.number().int().nonnegative(),
-  idleTurns: z.number().int().nonnegative(),
   retryAt: z.string().optional(),
   failure: z.string().optional(),
+  history: z.array(z.object({ at: z.string(), event: z.string(), message: z.string(), decisionId: z.string().optional() })),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+/** The sole owner of a worker's runtime state and pending delivery. */
+export const zExecution = zProcess.extend({
+  ...zRun.omit({ resumeMessage: true, lastFailure: true, attempts: true, retryAt: true }).shape,
+  kind: z.literal("execute"),
+  stage: z.enum(["open", "deliver", "execute"]),
+  runId: z.string().optional(),
+  deliveredAt: z.string().optional(),
+  idleTurns: z.number().int().nonnegative()
+});
+export type Execution = z.infer<typeof zExecution>;
+
+/** One item's serialized Git operation, including its durable cleanup checkpoint. */
+export const zIntegration = zProcess.extend({
+  kind: z.literal("integration"),
+  stage: z.enum(["merge", "rollback", "cleanup"]),
   integration: z.object({
     operation: z.enum(["merge", "rollback", "cancel"]),
     before: z.string().optional(),
@@ -269,13 +283,26 @@ export const zWorkflowAction = z.object({
     commits: z.array(z.string()).optional(),
     diffStat: z.string(),
     reason: z.string().optional()
-  }).optional(),
-  history: z.array(z.object({ at: z.string(), event: z.string(), message: z.string(), decisionId: z.string().optional() })),
-  createdAt: z.string(),
-  updatedAt: z.string()
+  })
 });
+export type Integration = z.infer<typeof zIntegration>;
+export const zWorkflowAction = z.discriminatedUnion("kind", [zExecution, zIntegration]);
 export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
+
+/** Contract and business state stay distinct from the process, but commit atomically. */
+export const zWorkItemRecord = z.object({
+  workItemId: z.string(),
+  item: zWorkItem.omit({ run: true }),
+  execution: zExecution,
+  integrations: z.array(zIntegration)
+});
+export type WorkItemRecord = z.infer<typeof zWorkItemRecord>;
+
+export const projectWorkItem = ({ item, execution }: WorkItemRecord): WorkItem => ({
+  ...item,
+  run: zRun.parse({ ...execution, lastFailure: execution.failure, resumeMessage: execution.message || undefined })
+});
 
 export const zSessionNavigation = z.object({
   navigationId: z.string().min(1),

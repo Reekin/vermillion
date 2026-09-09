@@ -1,12 +1,12 @@
 import type { WorkflowAction } from "@vermillion/workbench/client";
 import { Badge, Button, DetailSection } from "./ui.js";
-import { actionKindLabel, actionStatusLabel, recoveryCondition, roleLabel } from "./workflow-display.js";
+import { actionKindLabel, actionStatusLabel, recoveryCondition, actionRoleLabel } from "./workflow-display.js";
 
 export const WorkflowDetails = ({ actions, onOpenSession }: { actions: WorkflowAction[]; onOpenSession: (id: string) => void }) => <>
   {actions.map((action) => <DetailSection key={action.actionId} title={actionKindLabel[action.kind]}>
     <div className="flex flex-wrap items-center gap-2">
-      <Badge>{actionStatusLabel[action.status]}</Badge><span>{roleLabel[action.role]}</span>
-      {action.sessionId && <Button variant="ghost" outlined size="sm" onClick={() => onOpenSession(action.sessionId!)}>处理会话</Button>}
+      <Badge>{actionStatusLabel[action.status]}</Badge><span>{actionRoleLabel(action)}</span>
+      {action.kind === "execute" && action.sessionId && <Button variant="ghost" outlined size="sm" onClick={() => onOpenSession(action.sessionId!)}>处理会话</Button>}
     </div>
     <DetailSection title="问题">{action.message}</DetailSection>
     {action.status !== "done" && action.status !== "cancelled" && <>

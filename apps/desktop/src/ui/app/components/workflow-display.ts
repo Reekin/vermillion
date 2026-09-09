@@ -1,9 +1,10 @@
 import { actionIsOpen, type WorkflowAction, type WorkItem } from "@vermillion/workbench/client";
 
 export const roleLabel: Record<string, string> = { worker: "Worker", workbench: "工作台", "design-partner": "设计伙伴", maintainer: "Maintainer", liaison: "Liaison" };
-export const actionStatusLabel: Record<WorkflowAction["status"], string> = { pending: "待接手", running: "处理中", waiting: "等待条件", retry: "等待重试", decision: "待决策", done: "已解决", cancelled: "已取消" };
+export const actionStatusLabel: Record<WorkflowAction["status"], string> = { pending: "待接手", running: "处理中", retry: "等待重试", decision: "待决策", done: "已解决", cancelled: "已取消" };
 export const actionKindLabel: Record<WorkflowAction["kind"], string> = { execute: "执行恢复", integration: "合入处置" };
-const stageLabel: Record<WorkflowAction["stage"], string> = { worktree: "准备工作目录", open: "打开会话", deliver: "送达消息", execute: "执行", merge: "合入", rollback: "回滚", cleanup: "清理" };
+const stageLabel: Record<WorkflowAction["stage"], string> = { open: "打开会话", deliver: "送达消息", execute: "执行", merge: "合入", rollback: "回滚", cleanup: "清理" };
+export const actionRoleLabel = (action: WorkflowAction) => roleLabel[action.kind === "execute" ? "worker" : "workbench"];
 
 export const dispositionSummary = (action: WorkflowAction): string[] => action.history.flatMap((entry) => {
   const stage = entry.event.startsWith("failed:") ? entry.event.slice(7) : "";
@@ -13,7 +14,7 @@ export const dispositionSummary = (action: WorkflowAction): string[] => action.h
 });
 
 export const waitingActions = (actions: WorkflowAction[], item: WorkItem) => actions.filter((action) =>
-  action.workItemIds.includes(item.workItemId) && actionIsOpen(action) && (!["execute", "integration"].includes(action.kind) || ["waiting", "retry", "decision"].includes(action.status))
+  action.workItemId === item.workItemId && actionIsOpen(action) && ["retry", "decision"].includes(action.status)
 ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
 export const waitingReason = (action: WorkflowAction) => {

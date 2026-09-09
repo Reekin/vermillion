@@ -35,7 +35,7 @@ CLI 与桌面共用同一个服务和方法表；CLI 的写入会通过文件监
 ## 数据位置
 
 - 全局：`~/.vermillion/`（workspace 注册表、会话索引、`roles/` 角色 prompt）
-- 每个 workspace：`<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 覆盖）、`work-requests/` `workitems/` `decisions/` `runs/` `actions/`（一条一 JSON）、`scheduler.json`。Worker 按需创建独立 worktree 并在工单登记位置。工作台运行记录排除在 git 之外。
+- 每个 workspace：`<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 覆盖）、`work-requests/`（开工请求）、`workitems/`（每张工单的合同、执行过程和合入检查点）、`decisions/`（决策）、`runs/`（历史运行记录）、`scheduler.json`。工单和过程查询共享同一份存储记录。Worker 按需创建独立 worktree 并在工单登记位置。工作台运行记录排除在 git 之外。
 
 ## 结构
 

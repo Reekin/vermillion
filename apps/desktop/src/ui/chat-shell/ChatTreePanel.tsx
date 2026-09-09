@@ -1,11 +1,6 @@
-import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
-import { SessionNavigationContext } from "../app/session-navigation.js";
-import { statusLabel } from "../app/components/task-labels.js";
-import { projectChatTreeWorkers } from "./chat-tree-workers.js";
-import { useContext, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useMemo, type ReactElement, type ReactNode } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import { buildChatTreeGraphLayout } from "./chat-tree-layout.js";
-import { Badge, ListRow, SectionLabel } from "../app/components/ui.js";
 
 const NODE_RADIUS = 7;
 const CONNECTOR_CURVE_OFFSET = 24;
@@ -16,7 +11,9 @@ export type ChatTreePanelProps = {
   loading?: boolean;
   error?: string;
   onJump?: (nodeId: string) => void;
-  onSelectWorker?: (sessionId: string) => void;
+  highlightedNodeIds?: readonly string[];
+  footer?: ReactNode;
+  renderNodeStatus?: (status: string) => ReactNode;
 };
 
 const shortLabel = (node: ChatTreeSnapshotRpc["nodes"][number]): string => {
@@ -30,35 +27,11 @@ export const ChatTreePanel = ({
   error,
   operations = [],
   onJump,
-  onSelectWorker
+  highlightedNodeIds = [],
+  footer,
+  renderNodeStatus = (status) => status
 }: ChatTreePanelProps): ReactElement => {
-  const context = useContext(SessionNavigationContext);
-  const workspaceId = chatTree?.windows?.flatMap((window) => window.snapshot.conversations).find((conversation) => conversation.workspaceId)?.workspaceId;
-  const [requests, setRequests] = useState<WorkRequest[]>([]);
-  const [items, setItems] = useState<WorkItem[]>([]);
-  const [workersError, setWorkersError] = useState<string>();
-  useEffect(() => {
-    setItems([]);
-    setRequests([]);
-    if (!context || !workspaceId) return;
-    let active = true;
-    let generation = 0;
-    const refresh = async () => {
-      const request = ++generation;
-      try {
-        const [result, requests] = await Promise.all([context.client.request("workItem.list", { workspaceId }), context.client.request("work.list", { workspaceId })]);
-        if (active && request === generation) { setItems(result); setRequests(requests); setWorkersError(undefined); }
-      } catch (caught) { if (active && request === generation) setWorkersError((caught as Error).message); }
-    };
-    void refresh();
-    const unsubscribe = context.client.subscribe((event) => {
-      if ((event.type === "workItems.changed" || event.type === "workRequests.changed") && event.workspaceId === workspaceId) void refresh();
-    });
-    return () => { active = false; unsubscribe(); };
-  }, [context, workspaceId]);
-  const { workers, tree: visibleTree } = useMemo(() => projectChatTreeWorkers(chatTree, items, requests), [chatTree, items, requests]);
-  const workerNodeIds = new Set(workers.flatMap((worker) => worker.nodeIds));
-  const graph = useMemo(() => buildChatTreeGraphLayout(visibleTree), [visibleTree]);
+  const graph = useMemo(() => buildChatTreeGraphLayout(chatTree), [chatTree]);
   const canvasWidth = Math.max(graph.width, 180);
   const graphNodeById = useMemo(
     () => new Map(graph.nodes.map((entry) => [entry.node.nodeId, entry] as const)),
@@ -140,7 +113,7 @@ export const ChatTreePanel = ({
               key={operation?.operationId ?? entry.node.nodeId}
               data-virtual={virtual ? "true" : undefined}
               type="button"
-              className={`awb-chat-tree__graph-node${entry.isCurrent ? " is-current" : ""}${entry.node.status === "pending" ? " is-running" : ""}${workerNodeIds.has(entry.node.nodeId) ? " is-worker" : ""}`}
+              className={`awb-chat-tree__graph-node${entry.isCurrent ? " is-current" : ""}${entry.node.status === "pending" ? " is-running" : ""}${highlightedNodeIds.includes(entry.node.nodeId) ? " is-highlighted" : ""}`}
               style={{
                 left: `${entry.x}px`,
                 top: `${entry.y}px`
@@ -153,20 +126,12 @@ export const ChatTreePanel = ({
               aria-current={entry.isCurrent ? "step" : undefined}
             >
               <span className="awb-chat-tree__graph-node-dot" />
-              {status && entry.isCurrent && <span className={`absolute top-full ${entry.x > canvasWidth / 2 ? "right-0" : "left-0"}`}><Badge>{status}</Badge></span>}
+              {status && entry.isCurrent && <span className={`absolute top-full ${entry.x > canvasWidth / 2 ? "right-0" : "left-0"}`}>{renderNodeStatus(status)}</span>}
             </button>
           ); })}
         </div>
       </div>
-      {workers.length > 0 && <div className="max-h-60 shrink-0 overflow-auto border-t border-border">
-        <SectionLabel>Worker</SectionLabel>
-        {workersError && <p className="awb-detail__empty">{workersError}</p>}
-        <ul>{workers.map((worker) => <li key={worker.key}>
-          <ListRow title={worker.title} meta={worker.failure} selected={worker.sessionId === chatTree.currentSessionId}
-            trailing={<Badge status={worker.status === "failed" ? "decision" : worker.status}>{worker.status === "failed" ? "失败" : statusLabel[worker.status]}</Badge>}
-            onClick={worker.sessionId ? () => worker.nodeId ? onJump?.(worker.nodeId) : onSelectWorker?.(worker.sessionId!) : undefined} />
-        </li>)}</ul>
-      </div>}
+      {footer}
     </div>
   );
 };

@@ -139,6 +139,8 @@ describe("SessionPane", () => {
 
   it("renders the transcript, heading, and pending approvals for an active session", () => {
     const store = hydrateSession();
+    const renderTurnNavigation = vi.fn(({ sessionId, turnId }: { sessionId: string; turnId: string }) =>
+      <span data-navigation={`${sessionId}/${turnId}`}>Open linked session</span>);
 
     const html = renderToStaticMarkup(
       <SessionPane
@@ -146,12 +148,15 @@ describe("SessionPane", () => {
         transport={transport}
         sessionId="session-1"
         createSession={createSession}
+        renderTurnNavigation={renderTurnNavigation}
       />
     );
 
     expect(html).toContain("Refactor the shell");
     expect(html).toContain("first line");
     expect(html).toContain("second line");
+    expect(html).toContain('data-navigation="session-1/turn-1"');
+    expect(renderTurnNavigation).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-1", turnId: "turn-1" });
     expect(html).toContain('class="awb-chat-entry__timestamp"');
     expect(html).toContain('aria-label="Pending approvals"');
     expect(html).toContain("Approve shell command");

@@ -7,7 +7,7 @@ import { WorkItemDialog } from "./WorkItemDialog.js";
 import { statusLabel } from "./task-labels.js";
 import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, Stepper, Toggle } from "./ui.js";
 
-import { roleLabel, waitingActions, waitingReason } from "./workflow-display.js";
+import { roleLabel, actionRoleLabel, waitingActions, waitingReason } from "./workflow-display.js";
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
 
 const relativeTime = (iso: string) => {
@@ -43,7 +43,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
         leading={<Badge>{item.risk}</Badge>}
         title={<span title={item.title}>{item.title}</span>}
         onClick={onOpen}
-        meta={blockers.length ? blockers.map((action) => <div key={action.actionId}>{waitingReason(action)} · {roleLabel[action.role]}</div>) : waitingFor.length ? "等待 " + waitingFor.join("、") + " · 工作台" : undefined}
+        meta={blockers.length ? blockers.map((action) => <div key={action.actionId}>{waitingReason(action)} · {actionRoleLabel(action)}</div>) : waitingFor.length ? "等待 " + waitingFor.join("、") + " · 工作台" : undefined}
         titleClassName={muted || !isOpenWorkItem(item) ? "text-faint-foreground" : undefined}
         columns={{
           info: info && <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,

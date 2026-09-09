@@ -17,7 +17,10 @@ it("keeps requests and every prepared item durable without dispatch until the pr
   const first = await service.createWorkItem(workspaceId, { ...contract, requestId: request.requestId, sessionId: "prep" });
   const next = await service.createWorkItem(workspaceId, { ...contract, requestId: request.requestId, dependsOn: [first.workItemId] });
   await service.refreshActions(workspaceId);
-  expect(await service.listActions(workspaceId)).toEqual([]);
+  expect(await service.listActions(workspaceId)).toMatchObject([
+    { kind: "execute", workItemId: first.workItemId, stage: "open" },
+    { kind: "execute", workItemId: next.workItemId, stage: "open" }
+  ]);
   await expect(service.startWorkItem(workspaceId, first.workItemId, { sessionId: "prep" })).rejects.toThrow();
   const restarted = new WorkbenchService(options);
   try {
@@ -102,7 +105,7 @@ it("bounds verifier rejection independently of runtime failures and resumes afte
   } finally { await restarted.dispose(); }
 });
 
-it("reads historical work items without retired fields and leaves every historical file unchanged", async () => {
+it("rejects unsupported historical state before dispatch and leaves every historical file unchanged", async () => {
   const { root, service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, contract);
   const path = join(root, ".vermillion", "workitems", item.workItemId + ".json");
@@ -111,9 +114,120 @@ it("reads historical work items without retired fields and leaves every historic
   await mkdir(join(root, ".vermillion", "missions"));
   const missionPath = join(root, ".vermillion", "missions", "old.json");
   await writeFile(missionPath, '{"historical":true}');
-  expect(await new WorkspaceStore(root).workItems.list()).toEqual([item]);
+  await expect(new WorkspaceStore(root).workItems.list()).rejects.toThrow("Unsupported or invalid workbench record");
+  await expect(service.refreshActions(workspaceId)).rejects.toThrow("Convert stored data explicitly");
   expect(await readFile(path, "utf8")).toBe(raw);
   expect(await readFile(missionPath, "utf8")).toBe('{"historical":true}');
+});
+
+it("blocks preparation at workspace load when separate action history requires conversion", async () => {
+  const { root, service, options, workspaceId } = await fixture();
+  await service.startWork(workspaceId, { sessionId: "design", turnId: "source" });
+  const actionsDir = join(root, ".vermillion", "actions");
+  await mkdir(actionsDir);
+  const path = join(actionsDir, "historical.json");
+  const raw = JSON.stringify({ actionId: "historical", status: "running", sessionId: "original" });
+  await writeFile(path, raw);
+  const restarted = new WorkbenchService(options);
+  try {
+    await expect(restarted.listWorkRequests(workspaceId)).rejects.toThrow("Unsupported separate action records");
+    expect(await readFile(path, "utf8")).toBe(raw);
+  } finally { await restarted.dispose(); }
+});
+
+it("persists runtime only in Execution and preserves concurrent contract, heartbeat and delivery changes", async () => {
+  const { root, service, options, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "original" });
+  const execution = (await service.listActions(workspaceId))[0]!;
+  if (execution.kind !== "execute") throw new Error("Expected execution");
+  await Promise.all([
+    service.updateWorkItem(workspaceId, item.workItemId, { title: "Adjusted", note: "Read updated contract" }),
+    service.heartbeatWorkItem(workspaceId, item.workItemId, "latest-turn"),
+    service.updateAction(workspaceId, execution, (current) => ({ ...current, stage: "deliver" }))
+  ]);
+  await service.failAction(workspaceId, execution.actionId, "model unavailable");
+  const path = join(root, ".vermillion", "workitems", item.workItemId + ".json");
+  const stored = JSON.parse(await readFile(path, "utf8"));
+  expect(stored.item).toMatchObject({ title: "Adjusted", status: "queued" });
+  expect(stored.item).not.toHaveProperty("run");
+  expect(stored.execution).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", attempts: 1, failure: "model unavailable", stage: "deliver" });
+  expect(stored.execution.message).toContain("Read updated contract");
+  expect(stored.execution).not.toHaveProperty("resumeMessage");
+  expect(stored.execution).not.toHaveProperty("lastFailure");
+  const restarted = new WorkbenchService(options);
+  try {
+    const projected = await restarted.getWorkItem(workspaceId, item.workItemId);
+    expect(projected.run).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", attempts: 1, lastFailure: "model unavailable", retryAt: stored.execution.retryAt });
+    expect(projected.run.resumeMessage).toBe(stored.execution.message);
+    const decision = await restarted.createDecision(workspaceId, { workItemId: item.workItemId, question: "Continue?", context: "Retry", options: [{ key: "retry", label: "Retry" }] });
+    await restarted.answerDecision(workspaceId, decision.decisionId, { key: "retry" });
+    expect((await restarted.getWorkItem(workspaceId, item.workItemId)).run).toMatchObject({ attempts: 0 });
+    expect((await restarted.getWorkItem(workspaceId, item.workItemId)).run.lastFailure).toBeUndefined();
+    expect((await restarted.listActions(workspaceId))[0]!.actionId).toBe(execution.actionId);
+  } finally { await restarted.dispose(); }
+});
+
+it("publishes merging and its sole integration atomically while event-driven refresh runs", async () => {
+  const { root, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  service.setWorkerActiveChecker(() => true);
+  const pending: Promise<void>[] = [];
+  const observed: Array<{ status: string; integrations: number }> = [];
+  const unsubscribe = service.subscribe((event) => {
+    if (event.type !== "workItems.changed") return;
+    pending.push((async () => {
+      const stored = JSON.parse(await readFile(join(root, ".vermillion", "workitems", item.workItemId + ".json"), "utf8"));
+      observed.push({ status: stored.item.status, integrations: stored.integrations.length });
+      await service.refreshActions(workspaceId);
+    })());
+  });
+  try {
+    expect((await service.submitWorkItem(workspaceId, item.workItemId, submission)).status).toBe("merging");
+    while (pending.length) await Promise.all(pending.splice(0));
+    expect(observed.some((entry) => entry.status === "merging")).toBe(true);
+    expect(observed.filter((entry) => entry.status === "merging").every((entry) => entry.integrations === 1)).toBe(true);
+    expect((await service.listActions(workspaceId)).filter((action) => action.kind === "integration")).toHaveLength(1);
+  } finally { unsubscribe(); }
+});
+
+it("claims only one active integration under the shared record lock", async () => {
+  const { root, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, contract);
+  const firstStore = new WorkspaceStore(root), secondStore = new WorkspaceStore(root);
+  const integration = { kind: "integration" as const, workItemId: item.workItemId, status: "pending" as const,
+    stage: "merge" as const, message: "Merge", attempts: 0, history: [], createdAt: item.createdAt, updatedAt: item.updatedAt,
+    integration: { operation: "merge" as const, diffStat: "" } };
+  const results = await Promise.all([firstStore, secondStore].map((store, index) => store.actions.createIntegration(
+    { ...integration, actionId: "integration-" + index }, (current) => ({ ...current, status: "merging" }))));
+  expect(results[0]!.actionId).toBe(results[1]!.actionId);
+  expect((await service.listActions(workspaceId)).filter((action) => action.kind === "integration")).toHaveLength(1);
+  expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("merging");
+});
+
+it("publishes coherent execution and business states for failure, decision, answer and cancellation", async () => {
+  const { root, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = (await service.listActions(workspaceId))[0]!;
+  const observations: Promise<void>[] = [];
+  const unsubscribe = service.subscribe((event) => {
+    if (event.type !== "actions.changed" && event.type !== "workItems.changed") return;
+    observations.push((async () => {
+      const stored = JSON.parse(await readFile(join(root, ".vermillion", "workitems", item.workItemId + ".json"), "utf8"));
+      expect(stored.item.status === "decision").toBe(stored.execution.status === "decision");
+      expect(stored.item.status === "cancelled").toBe(stored.execution.status === "cancelled");
+      if (stored.execution.status === "retry") expect(stored.item.status).toBe("queued");
+    })());
+  });
+  try {
+    for (let index = 0; index < 5; index++) await service.failAction(workspaceId, action.actionId, "temporarily unavailable");
+    const exhausted = (await service.listDecisions(workspaceId))[0]!;
+    await service.answerDecision(workspaceId, exhausted.decisionId, { key: "retry" });
+    const question = await service.createDecision(workspaceId, { workItemId: item.workItemId, question: "Continue?", context: "User choice", options: [{ key: "cancel", label: "Cancel" }] });
+    await service.answerDecision(workspaceId, question.decisionId, { key: "cancel" });
+    await Promise.all(observations);
+  } finally { unsubscribe(); }
 });
 
 it("serializes root code writers on the actual shared directory while allowing a read-only operation", async () => {
@@ -130,6 +244,7 @@ it("serializes root code writers on the actual shared directory while allowing a
 });
 
 it("exposes the work-item workflow without retired handoff commands", () => {
+  expect(workbenchRpc["workItem.start"].params.safeParse({ workspaceId: "workspace", workItemId: "item", run: { sessionId: "worker", attempts: 99 } }).success).toBe(false);
   for (const method of ["mission.create", "workItem.defer", "workItem.recover", "decision.withdraw", "workspace.repair.submit", "session.ask"])
     expect(Object.hasOwn(workbenchRpc, method)).toBe(false);
 });

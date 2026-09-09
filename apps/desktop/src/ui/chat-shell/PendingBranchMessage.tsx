@@ -1,5 +1,5 @@
 import { appendAttachmentMarkdown, type ChatTreeSendOperation } from "@vermillion/shared";
-import { Button, InlineNotice } from "../app/components/ui.js";
+import { Button } from "./Button.js";
 import { MessageMarkdownView } from "./MessageMarkdownView.js";
 
 export const PendingBranchMessage = ({ operation, onRetry, onPreviewImage }: {
@@ -19,7 +19,7 @@ export const PendingBranchMessage = ({ operation, onRetry, onPreviewImage }: {
       startedAt: ""
     }} onPreviewImage={onPreviewImage} />
     {operation.status === "failed" && <>
-      <InlineNotice tone="error" className="break-words">{operation.error}</InlineNotice>
+      <p role="alert" className="awb-pending-message-error">{operation.error}</p>
       <Button onClick={() => void onRetry(operation.operationId)}>重试发送</Button>
     </>}
   </article>

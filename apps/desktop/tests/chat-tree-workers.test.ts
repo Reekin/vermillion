@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
 import { isHistoricalChatTreePosition } from "../src/ui/chat-shell/chat-tree-send-target.js";
-import { projectChatTreeWorkers } from "../src/ui/chat-shell/chat-tree-workers.js";
+import { projectChatTreeWorkers } from "../src/ui/app/chat-tree-workers.js";
 
 const tree = (currentSessionId = "design"): ChatTreeSnapshotRpc => ({
   sessionId: "design", treeId: "design", currentSessionId, currentNodeId: currentSessionId === "design" ? "source" : "worker-tip",

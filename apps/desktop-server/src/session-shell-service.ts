@@ -145,6 +145,7 @@ const resolveComposerSlashSuggestions = (
 
 export type SessionShellServiceOptions = {
   runtimeService: SessionRuntimeService;
+  releaseSessionExecution?: (sessionId: string) => Promise<void>;
   wrapperChatTree?: WrapperChatTreeService;
   sessionCatalog: SessionCatalogService;
   capabilities?: CapabilityRegistry;
@@ -179,6 +180,7 @@ export type SessionShellServiceOptions = {
 export class SessionShellService {
   private readonly wrapperChatTree: WrapperChatTreeService | undefined;
   private readonly runtimeService: SessionRuntimeService;
+  private readonly releaseSessionExecutionImpl: SessionShellServiceOptions["releaseSessionExecution"];
   private readonly sessionCatalog: SessionCatalogService;
   private readonly capabilities: CapabilityRegistry | undefined;
   private readonly skillsProvider:
@@ -209,6 +211,7 @@ export class SessionShellService {
   public constructor(options: SessionShellServiceOptions) {
     this.wrapperChatTree = options.wrapperChatTree;
     this.runtimeService = options.runtimeService;
+    this.releaseSessionExecutionImpl = options.releaseSessionExecution;
     this.sessionCatalog = options.sessionCatalog;
     this.capabilities = options.capabilities;
     this.skillsProvider = options.skillsProvider;
@@ -365,6 +368,14 @@ export class SessionShellService {
 
   public getSnapshot(): DomainSnapshot {
     return this.runtimeService.getSnapshot();
+  }
+
+  public async releaseSessionExecution(sessionId: string): Promise<void> {
+    if (this.getSnapshot().turns.some((turn) => turn.sessionId === sessionId && turn.status !== "completed")) {
+      throw new Error(`Cannot release session ${sessionId}: a turn is active.`);
+    }
+    if (!this.releaseSessionExecutionImpl) throw new Error("Execution release is unavailable for this runtime.");
+    await this.releaseSessionExecutionImpl(sessionId);
   }
 
   public isSessionPartiallyHydrated(sessionId: string): boolean {

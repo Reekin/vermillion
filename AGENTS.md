@@ -10,7 +10,7 @@
 ## 分层
 - `packages/shared` / `core` / `adapters` / `apps/desktop-server`：会话引擎（codex app-server 适配、会话/turn 投影、会话浏览查询）。标识符前缀 `Session*`。
 - `packages/workbench`：工作台领域（Workspace / Doc / 开工 / WorkItem / DecisionCard / Inbox）。标识符前缀 `Workbench*`。renderer 只能引用 `@vermillion/workbench/client`。
-- `apps/desktop/src/ui/chat-shell`：`SessionPane`（transcript + composer + 会话打开/切换/审批），props 只有 `store / transport / sessionId / createSession / composerExtras`。它不拥有侧栏和右栏。
+- `apps/desktop/src/ui/chat-shell`：`SessionPane` 负责 transcript、composer、会话打开/切换/审批。应用壳通过展示数据、渲染插槽和回调接入业务；会话区不引用应用壳的 Context 或工作台业务类型，不自行查询工单。
 - `apps/desktop/src/ui/app`：应用壳。侧栏、Docs 树、Inbox、Workspaces、workspace 选择都在这里。思考页列用户的会话树；从讨论 fork 出的 Worker 在树底部列表进入，选中后显示对应分支。冷启动的 Worker 在 Workspaces → 会话 阅读。工单和 Inbox 的会话入口按来源导航到相应位置。
 - 界面开发从 `apps/desktop/src/ui/app/components/ui.tsx`（组件入口）和 `app.css` 的 `@theme`（变量）开始，规则见 `.vermillion/docs/Foundation/UIUX/Standards.md`。`pnpm --filter @vermillion/desktop lint:ui` 拦硬编码颜色/任意字号/`awb-*`/裸表单控件；会话区 `ui/chat-shell` 保留 `awb-*`，turn 扩展块用 `app.css` 的 `vm-*`。
 
@@ -23,6 +23,7 @@
 - 全局 `~/.vermillion/`：workspace 注册表（引擎的 `workspace-registry.json` 是唯一注册表）、会话索引、`roles/<role>.md`（角色 prompt 的全局版本）。
 - 每个 workspace `<root>/.vermillion/` 保存 `docs/`（真相源，走 git）、`roles/`（角色 prompt 的 workspace 覆盖）、开工、工单、决策和运行记录。运行记录通过服务与 CLI/RPC 更新，不直接编辑文件。
 - 所有 agent 会话 cwd = workspace 根（Worker 使用 worktree 时是 worktree 根）；`allowedPaths` 限定修改范围，是否使用 worktree 由 Worker 判断并登记。Doc 只允许在 `.vermillion/docs/` 下。查询 git 状态只读（`status -z`），不碰 index。
+- 单张工单的合同、执行过程与合入检查点保存在统一记录中，执行过程是当前运行状态的唯一来源。工单查询里的 `run` 由执行过程投影，不单独持久化；历史运行记录只用于追溯。
 
 ## 角色 prompt
 - 默认版本是 `packages/workbench/roles/<role>.md`（打包后在 `resources/app/roles/`）。启动时 `RoleService.ensureGlobal` 把缺失的角色补到 `~/.vermillion/roles/`；已存在的不覆盖。开发期间以 `~/.vermillion/roles/` 为准（用户直接改那里），提交前 `cp ~/.vermillion/roles/*.md packages/workbench/roles/` 反向同步。

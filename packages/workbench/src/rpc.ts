@@ -19,7 +19,6 @@ import {
   zRisk,
   zRoleFile,
   zResolvedRole,
-  zRun,
   zScope,
   zVerifyResult,
   zWorkItem,
@@ -84,7 +83,7 @@ export const workbenchRpc = {
     }),
     result: zWorkItem
   },
-  "workItem.start": { params: zWi.extend({ run: zRun }), result: zWorkItem },
+  "workItem.start": { params: zWi.extend({ run: z.object({ sessionId: z.string().optional(), heartbeatAt: z.string().optional() }).strict() }), result: zWorkItem },
   "workItem.heartbeat": { params: zWi.extend({ lastTurnId: z.string().optional() }), result: zWorkItem },
   "workItem.submit": {
     params: zWi.extend({ evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifyResult.omit({ verifiedAt: true }) }),

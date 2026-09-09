@@ -28,12 +28,12 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
     service.listWorkItems(workspaceId), service.listActions(workspaceId),
     service.listDecisions(workspaceId), service.getScheduler(workspaceId)
   ]);
-  const related = allActions.filter((a) => a.workItemIds.includes(workItemId));
+  const related = allActions.filter((a) => a.workItemId === workItemId);
   const actions = related.filter(actionIsOpen);
   const decisions = cards.filter((c) => !c.answer && !c.withdrawn && (c.workItemId === workItemId || actions.some((a) => a.actionId === c.actionId)));
   const dependencies = item.dependsOn.map((id) => ({ workItemId: id, status: items.find((i) => i.workItemId === id)?.status ?? "missing" }));
-  const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => a.kind !== "execute" || ["waiting", "retry", "decision"].includes(a.status))
-    .map((a) => ({ reason: a.failure ?? a.message, role: a.role, sessionId: a.sessionId, actionId: a.actionId, next: nextFor(a) }));
+  const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => a.kind !== "execute" || ["retry", "decision"].includes(a.status))
+    .map((a) => ({ reason: a.failure ?? a.message, role: a.kind === "execute" ? "worker" : "workbench", sessionId: a.kind === "execute" ? a.sessionId : undefined, actionId: a.actionId, next: nextFor(a) }));
   for (const dependency of dependencies.filter((d) => d.status !== "closed"))
     blockers.push({ reason: `前置 ${dependency.workItemId}: ${dependency.status}`, role: dependency.status === "cancelled" ? "worker" : "workbench", next: dependency.status === "cancelled" ? "用户调整依赖或取消。" : "等待前置关闭。" });
   for (const card of decisions) blockers.push({ reason: card.question, role: "user", sessionId: card.sessionId, actionId: card.actionId, next: "用户答复 decision.answer。" });

@@ -4,6 +4,7 @@ import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { SessionPane } from "../chat-shell/SessionPane.js";
+import { WorkbenchChatTree } from "./components/WorkbenchChatTree.js";
 import { DocsPanel } from "./components/DocsPanel.js";
 import { StartWorkButton } from "./components/StartWorkButton.js";
 import { InboxPanel } from "./components/InboxPanel.js";
@@ -22,7 +23,7 @@ import { useSessionActions } from "./use-session-actions.js";
 import { createWorkbenchStore, type Panel } from "./workbench-store.js";
 import { createRendererWorkbenchClient } from "./workbench-client.js";
 import "./app.css";
-import { SessionNavigationContext } from "./session-navigation.js";
+import { SessionNavigationContext, renderSessionNavigation } from "./session-navigation.js";
 import type { SessionNavigation } from "@vermillion/workbench/client";
 
 type AppProps = {
@@ -190,6 +191,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               initializeDraftExecution={initializeDraftExecution}
               getSendOptions={thinkMode.getSendOptions}
               onViewChange={setWorkTarget}
+              renderTurnNavigation={renderSessionNavigation}
+              renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} />}
               composerExtras={<>
                 <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                 <ConfigurationSelect label="模式" aria-label="模式" value={thinkMode.mode} disabled={!thinkMode.ready}

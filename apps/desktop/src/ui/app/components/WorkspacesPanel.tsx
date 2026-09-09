@@ -4,6 +4,8 @@ import { type DecisionCard, type RoleFile, type WorkbenchClient, type WorkItem }
 import type { RendererStore } from "../../../store/store.js";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { SessionPane, formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
+import { WorkbenchChatTree } from "./WorkbenchChatTree.js";
+import { renderSessionNavigation } from "../session-navigation.js";
 import type { WorkbenchStore, WorkspaceSection } from "../workbench-store.js";
 import { useSessionSidebar, type SidebarSession } from "../use-session-sidebar.js";
 import { useSessionActions } from "../use-session-actions.js";
@@ -162,7 +164,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
               {section === "workItems" && viewError ? <EmptyState title="工单加载失败" hint={viewError} /> : section === "workItems" && view && (
                 <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={compact} onExpand={onExpand} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
               )}
-              {section === "sessions" && <AgentSessionsSection transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} compact={compact} />}
+              {section === "sessions" && <AgentSessionsSection client={client} transport={transport} sessionStore={sessionStore} workspaceId={activeWorkspaceId} selected={agentSessionId} onSelect={selectAgentSession} compact={compact} />}
               {section === "docs" && <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />}
               {section === "domains" && (
                 <DomainsSection client={client} workspaceId={activeWorkspaceId} docs={view?.docs.map((d) => d.path) ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
@@ -191,7 +193,7 @@ export const WorkspacesPanel = ({ store, transport, sessionStore, pickDirectory,
  * Sessions the workbench started in this workspace (Worker): a list on the left, the selected
  * session's transcript and composer on the right. Same reading surface as Think, scoped to agents.
  */
-const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, onSelect, compact }: { transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; selected: string | undefined; onSelect: (sessionId: string | undefined) => void; compact: boolean }) => {
+const AgentSessionsSection = ({ client, transport, sessionStore, workspaceId, selected, onSelect, compact }: { client: WorkbenchClient; transport: DesktopTransport; sessionStore: RendererStore; workspaceId: string; selected: string | undefined; onSelect: (sessionId: string | undefined) => void; compact: boolean }) => {
   const workspaceIds = useMemo(() => [workspaceId], [workspaceId]);
   const { sessions, hasMore, loading, loadMore, reload, findSession } = useSessionSidebar({ transport, store: sessionStore, workspaceIds, kind: "agent" });
   const [reloadSignal, setReloadSignal] = useState(0);
@@ -236,7 +238,7 @@ const AgentSessionsSection = ({ transport, sessionStore, workspaceId, selected, 
       </aside>
       <main className="relative min-w-0 flex-1">
         {selected ? (
-          <SessionPane store={sessionStore} transport={transport} sessionId={selected} reloadSignal={reloadSignal} allowChatTree={!compact} createSession={async () => { throw new Error("Agent sessions are started by the workbench."); }} />
+          <SessionPane store={sessionStore} transport={transport} sessionId={selected} reloadSignal={reloadSignal} allowChatTree={!compact} renderTurnNavigation={renderSessionNavigation} renderChatTree={(props) => <WorkbenchChatTree {...props} client={client} />} createSession={async () => { throw new Error("Agent sessions are started by the workbench."); }} />
         ) : (
           <EmptyState title="选择一个会话" hint="左侧是这个 workspace 里 agent 的会话。" />
         )}

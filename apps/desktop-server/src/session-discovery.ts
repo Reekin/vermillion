@@ -976,7 +976,8 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     if (!threadId) {
       return false;
     }
-    if (this.codexRuntimePort.getThreadIdForSession(entry.sessionId) === threadId) {
+    if (this.codexRuntimePort.getThreadIdForSession(entry.sessionId) === threadId
+      && !this.codexRuntimePort.isThreadExecutionReleased(threadId)) {
       return true;
     }
     const thread = await this.codexRuntimePort.resumeThread(threadId);
@@ -994,12 +995,11 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     if (!threadId) {
       return undefined;
     }
-    this.codexRuntimePort.attachThreadToSession(entry.sessionId, threadId);
-    const thread = await this.codexRuntimePort.resumeThread(threadId);
+    const thread = await this.codexRuntimePort.readThread(threadId, true);
     if (input.isCancelled?.()) {
       return undefined;
     }
-    this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id);
+    this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id, false);
     await this.refreshThreadGoal(entry.sessionId);
     const workspaceId = entry.workspaceId;
     const conversation = parseConversation({
@@ -1126,7 +1126,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       ...thread,
       turns: pageTurns
     };
-    this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id);
+    this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id, false);
     await this.refreshThreadGoal(entry.sessionId);
     const workspaceId = entry.workspaceId;
     const conversation = parseConversation({

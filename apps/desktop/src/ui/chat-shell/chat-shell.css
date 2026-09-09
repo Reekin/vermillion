@@ -2230,11 +2230,18 @@ label.awb-configuration-control > span {
   background: var(--awb-accent);
 }
 
-.awb-chat-tree__graph-node.is-worker .awb-chat-tree__graph-node-dot {
+.awb-pending-message-error {
+  color: var(--awb-ink-strong);
+  font-size: var(--awb-text-caption);
+  padding: 0 16px 8px;
+  overflow-wrap: anywhere;
+}
+
+.awb-chat-tree__graph-node.is-highlighted .awb-chat-tree__graph-node-dot {
   border-color: var(--awb-accent-strong);
   background: var(--awb-accent-soft);
   border-radius: 3px;
 }
-.awb-chat-tree__graph-node.is-worker.is-current .awb-chat-tree__graph-node-dot {
+.awb-chat-tree__graph-node.is-highlighted.is-current .awb-chat-tree__graph-node-dot {
   background: var(--awb-accent-strong);
 }

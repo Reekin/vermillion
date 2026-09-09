@@ -11,6 +11,8 @@ const roleLabels: Record<string, string> = {
   "design-partner": "设计伙伴", worker: "Worker", maintainer: "Maintainer", liaison: "Liaison"
 };
 
+export const renderSessionNavigation = (position: { sessionId: string; turnId: string }) => <SessionNavigationSlot {...position} />;
+
 /** Workbench links belong to the source turn, independently of its engine extensions. */
 export const SessionNavigationSlot = ({ sessionId, turnId }: { sessionId: string; turnId: string }) => {
   const context = useContext(SessionNavigationContext);

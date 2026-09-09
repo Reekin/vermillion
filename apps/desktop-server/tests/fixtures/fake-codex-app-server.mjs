@@ -1937,6 +1937,7 @@ const handleRequest = (payload) => {
         });
         return;
       case "thread/unsubscribe":
+        send({ method: "thread/closed", params: { threadId: payload.params.threadId } });
         send({
           id: payload.id,
           result: {

@@ -53,6 +53,7 @@ import type { ThreadReadResponse } from "./codex-app-server-generated/v2/ThreadR
 import type { ThreadResumeParams } from "./codex-app-server-generated/v2/ThreadResumeParams.js";
 import type { ThreadResumeResponse } from "./codex-app-server-generated/v2/ThreadResumeResponse.js";
 import type { ThreadUnsubscribeParams } from "./codex-app-server-generated/v2/ThreadUnsubscribeParams.js";
+import type { ThreadUnsubscribeResponse } from "./codex-app-server-generated/v2/ThreadUnsubscribeResponse.js";
 import type { TurnInterruptParams } from "./codex-app-server-generated/v2/TurnInterruptParams.js";
 import type { TurnSteerParams } from "./codex-app-server-generated/v2/TurnSteerParams.js";
 import type { TurnStartResponse } from "./codex-app-server-generated/v2/TurnStartResponse.js";
@@ -470,6 +471,8 @@ const summarizeUserMessage = (
     .join("\n\n");
 
 const subagentParentThreadId = (thread: Thread): string | undefined => {
+  const parentThreadId = optionalString((thread as Thread & { parentThreadId?: string | null }).parentThreadId);
+  if (parentThreadId) return parentThreadId;
   const source = thread.source as unknown;
   if (!isRecord(source)) {
     return undefined;
@@ -869,6 +872,7 @@ export class CodexAppServerRuntimePort
   private readonly rpcClient: JsonRpcLineClient;
   private readonly pipelineDiagnostics: RuntimePipelineDiagnostics | undefined;
   private readonly threadIdBySessionId = new Map<string, string>();
+  private readonly unloadedThreadIds = new Set<string>();
   private readonly sessionIdByThreadId = new Map<string, string>();
   private readonly sessionIdsByThreadId = new Map<string, Set<string>>();
   private readonly pendingTurnSessionIdByThreadId = new Map<string, string>();
@@ -1085,6 +1089,7 @@ export class CodexAppServerRuntimePort
   }
 
   private clearRuntimeState(): void {
+    this.unloadedThreadIds.clear();
     this.pendingApprovalsById.clear();
     this.pendingApprovalResolutionsById.clear();
     this.threadIdBySessionId.clear();
@@ -1211,7 +1216,13 @@ export class CodexAppServerRuntimePort
     return this.threadIdBySessionId.get(sessionId);
   }
 
-  public attachThreadToSession(sessionId: string, threadId: string): void {
+  public isThreadExecutionReleased(threadId: string): boolean {
+    return this.unloadedThreadIds.has(threadId);
+  }
+
+  public attachThreadToSession(sessionId: string, threadId: string, executionLoaded = true): void {
+    if (executionLoaded) this.unloadedThreadIds.delete(threadId);
+    else if (!this.sessionIdsByThreadId.has(threadId)) this.unloadedThreadIds.add(threadId);
     const previousThreadId = this.threadIdBySessionId.get(sessionId);
     if (previousThreadId && previousThreadId !== threadId) {
       const previousSessionIds = this.sessionIdsByThreadId.get(previousThreadId);
@@ -1332,6 +1343,7 @@ export class CodexAppServerRuntimePort
       sandbox: selected.sandbox ?? null,
       ...(developerInstructions ? { developerInstructions: await this.appendDeveloperInstructions(developerInstructions, cwd, options) } : {})
     } satisfies ThreadResumeParams, options)) as ThreadResumeResponse;
+    this.unloadedThreadIds.delete(result.thread.id);
     return result.thread;
   }
 
@@ -1363,9 +1375,59 @@ export class CodexAppServerRuntimePort
 
   public async unsubscribeThread(threadId: string): Promise<void> {
     await this.start(this.startConfig);
-    await this.rpc("thread/unsubscribe", {
-      threadId
-    } satisfies ThreadUnsubscribeParams);
+    await this.rpc("thread/unsubscribe", { threadId } satisfies ThreadUnsubscribeParams);
+  }
+
+  public async releaseThreadExecution(threadId: string, timeoutMs = 30_000): Promise<void> {
+    await this.start(this.startConfig);
+    let closed!: () => void;
+    let fail!: (error: Error) => void;
+    const completion = new Promise<void>((resolve, reject) => { closed = resolve; fail = reject; });
+    const unsubscribe = this.rpcClient.onNotification((event) => {
+      if (event.method === "thread/closed" && isRecord(event.params) && event.params.threadId === threadId) closed();
+    });
+    const unsubscribeState = this.subscribeState((state) => {
+      if (state === "failed" || state === "stopped") fail(new Error(`Codex stopped while releasing thread ${threadId}.`));
+    });
+    const timeout = setTimeout(() => fail(new Error(
+      `Timed out after ${timeoutMs}ms releasing thread ${threadId}: thread/closed was not received.`
+    )), timeoutMs);
+    try {
+      await Promise.all([completion, (async () => {
+        const result = await this.rpc("thread/unsubscribe", { threadId } satisfies ThreadUnsubscribeParams,
+          { timeoutMs }) as ThreadUnsubscribeResponse;
+        if (result.status === "notLoaded") closed();
+        else if (result.status === "notSubscribed") {
+          throw new Error(`Cannot release thread ${threadId}: this connection is not subscribed and the thread is still loaded.`);
+        }
+      })()]);
+      this.unloadedThreadIds.add(threadId);
+    } finally {
+      clearTimeout(timeout);
+      unsubscribe();
+      unsubscribeState();
+    }
+  }
+
+  /** Release the execution tree without archiving its persisted conversations. */
+  public async releaseSessionExecution(sessionId: string): Promise<void> {
+    const threadId = this.threadIdBySessionId.get(sessionId);
+    if (!threadId) return;
+    const owned = new Set<string>();
+    const visit = (id: string): void => {
+      if (owned.has(id)) return;
+      owned.add(id);
+      for (const child of this.childThreadIdsByParentThreadId.get(id) ?? []) visit(child);
+    };
+    visit(threadId);
+    for (const id of owned) {
+      if (this.activeTurnByThreadId.has(id) || this.pendingTurnSessionIdByThreadId.has(id)) {
+        throw new Error(`Cannot release thread ${id}: a turn is active.`);
+      }
+    }
+    for (const id of [...owned].reverse()) {
+      if (!this.unloadedThreadIds.has(id)) await this.releaseThreadExecution(id);
+    }
   }
 
   public async interruptThread(
@@ -2019,10 +2081,11 @@ export class CodexAppServerRuntimePort
     developerInstructions?: string
   ): Promise<string> {
     const existing = this.threadIdBySessionId.get(sessionId);
-    if (existing && (!providerSessionId || existing === providerSessionId)) {
+    if (existing && !this.unloadedThreadIds.has(existing) && (!providerSessionId || existing === providerSessionId)) {
       return existing;
     }
 
+    providerSessionId ??= existing;
     if (providerSessionId) {
       const resumed = await this.resumeThreadInCurrentProcess(
         providerSessionId,
@@ -2432,6 +2495,10 @@ export class CodexAppServerRuntimePort
 
   private handleNotification(method: string, params: Record<string, unknown>): void {
     switch (method) {
+      case "thread/closed": {
+        this.unloadedThreadIds.add(String(params.threadId));
+        return;
+      }
       case "thread/started": {
         const thread = isRecord(params.thread) ? (params.thread as Thread) : undefined;
         if (!thread || typeof thread.id !== "string") {
@@ -3440,7 +3507,7 @@ export class CodexAppServerRuntimePort
     }
 
     for (const receiverThreadId of item.receiverThreadIds) {
-      this.registerSubagentThread(item.senderThreadId, receiverThreadId);
+      if (item.tool === "spawnAgent") this.registerSubagentThread(item.senderThreadId, receiverThreadId);
       const childSessionId = discoveredCodexSessionId(receiverThreadId);
       this.subagentSessionIds.add(childSessionId);
       this.attachThreadToSession(childSessionId, receiverThreadId);

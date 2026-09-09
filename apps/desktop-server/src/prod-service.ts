@@ -236,6 +236,7 @@ export const createSessionRuntimeService = (
 
   const shellService = new SessionShellService({
     runtimeService,
+    releaseSessionExecution: (sessionId) => codexRuntimePort.releaseSessionExecution(sessionId),
     wrapperChatTree: new WrapperChatTreeService({
       runtimeService,
       sessionIndexStore,

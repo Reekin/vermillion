@@ -6,20 +6,6 @@ type SessionShell = ReturnType<typeof createSessionRuntimeService>;
 
 const createId = (): string => "cmd-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
-const turnAssistantTexts = (shell: SessionShell, sessionId: string, includeCommentary: boolean): string[] => {
-  const snapshot = shell.getSnapshot();
-  const turn = snapshot.turns.filter((t) => t.sessionId === sessionId).at(-1);
-  if (!turn) return [];
-  return snapshot.messageBlocks
-    .filter((b) => b.turnId === turn.turnId && b.role === "assistant" && (includeCommentary || b.phase !== "commentary") && typeof b.text === "string" && b.text.trim())
-    .map((b) => b.text!.trim());
-};
-
-const lastAssistantText = (shell: SessionShell, sessionId: string): string | undefined => {
-  const text = turnAssistantTexts(shell, sessionId, false).join("\n").trim();
-  return text || undefined;
-};
-
 /** Background agent sessions for the orchestrator: same engine and session list as the UI, opened headlessly. */
 export const createAgentRunner = (shell: SessionShell, engineId: string): AgentRunner => ({
   open: async (input) => {
@@ -103,25 +89,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     }
   },
   isActive: (sessionId) => shell.getSnapshot().turns.some((turn) => turn.sessionId === sessionId && turn.status !== "completed"),
-  lastReply: (sessionId) => lastAssistantText(shell, sessionId),
-  turnMessages: (sessionId) => turnAssistantTexts(shell, sessionId, true),
-  registerTool: (tool) => {
-    shell.hostTools?.register({
-      namespace: "vermillion",
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema as never,
-      isAvailable: (context) => shell.getSessionMetadata(context.sessionId)?.role === tool.role,
-      handle: async (invocation) => {
-        try {
-          const text = await tool.handle((invocation.arguments ?? {}) as Record<string, unknown>, invocation.context.sessionId);
-          return { contentItems: [{ type: "inputText", text }], success: true };
-        } catch (error) {
-          return { contentItems: [{ type: "inputText", text: error instanceof Error ? error.message : String(error) }], success: false };
-        }
-      }
-    });
-  },
+  release: (sessionId) => shell.releaseSessionExecution(sessionId),
   onTurnCompleted: (listener) => {
     const failures = new Map<string, string>();
     return shell.subscribe(

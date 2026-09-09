@@ -131,6 +131,7 @@ describe("Session discovery and reconciliation", () => {
     const attachThreadToSession = vi.fn();
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         getThreadIdForSession: vi.fn().mockReturnValue("thread-main"),
         resumeThread,
         attachThreadToSession
@@ -151,6 +152,7 @@ describe("Session discovery and reconciliation", () => {
     const attachThreadToSession = vi.fn();
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         getThreadIdForSession: vi.fn().mockReturnValue(undefined),
         resumeThread,
         attachThreadToSession
@@ -172,6 +174,7 @@ describe("Session discovery and reconciliation", () => {
   it("matches codex thread cwd values that include the windows device prefix", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({
           data: [
             createThread({
@@ -209,6 +212,7 @@ describe("Session discovery and reconciliation", () => {
   it("discovers codex fork relations from thread fork parents", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({
           data: [
             createThread({
@@ -247,6 +251,7 @@ describe("Session discovery and reconciliation", () => {
   it("prefers the subagent relation when codex also reports the same fork parent", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({
           data: [
             createThread({
@@ -298,6 +303,7 @@ describe("Session discovery and reconciliation", () => {
     readRollout.mockClear();
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({
           data: [listedThread],
           nextCursor: null
@@ -340,6 +346,7 @@ describe("Session discovery and reconciliation", () => {
     };
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({
           data: [listedThread],
           nextCursor: null
@@ -371,7 +378,8 @@ describe("Session discovery and reconciliation", () => {
       .mockResolvedValueOnce({ data: [sharedThread, otherThread], nextCursor: null });
     const readThread = vi.fn();
     const provider = new CodexSessionDiscoveryProvider({
-      codexRuntimePort: { listThreads, readThread } as never
+      codexRuntimePort: {
+        isThreadExecutionReleased: () => false, listThreads, readThread } as never
     });
 
     const discovered = await provider.discoverWorkspaces([
@@ -405,6 +413,7 @@ describe("Session discovery and reconciliation", () => {
     const readThread = vi.fn();
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({ data: threads, nextCursor: null }),
         readThread
       } as never
@@ -448,6 +457,7 @@ describe("Session discovery and reconciliation", () => {
     const attachThreadToSession = vi.fn();
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         readThread,
         listThreadTurns,
         resumeThread,
@@ -500,7 +510,8 @@ describe("Session discovery and reconciliation", () => {
     expect(resumeThread).not.toHaveBeenCalled();
     expect(attachThreadToSession).toHaveBeenCalledWith(
       "codex-thread:thread-page",
-      "thread-page"
+      "thread-page",
+      false
     );
   });
 
@@ -567,6 +578,7 @@ describe("Session discovery and reconciliation", () => {
     });
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         readThread,
         listThreadTurns,
         attachThreadToSession: vi.fn()
@@ -625,6 +637,7 @@ describe("Session discovery and reconciliation", () => {
     const attachThreadToSession = vi.fn();
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         readThread,
         listThreadTurns,
         attachThreadToSession
@@ -853,6 +866,7 @@ describe("Session discovery and reconciliation", () => {
     });
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         readThread,
         listThreadTurns,
         attachThreadToSession: vi.fn()
@@ -1152,8 +1166,9 @@ describe("Session discovery and reconciliation", () => {
 
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads,
-        resumeThread,
+        readThread: resumeThread,
         attachThreadToSession,
         refreshThreadGoalForSession
       } as never
@@ -1215,7 +1230,8 @@ describe("Session discovery and reconciliation", () => {
 
     expect(attachThreadToSession).toHaveBeenCalledWith(
       "codex-thread:thread-root",
-      "thread-root"
+      "thread-root",
+      false
     );
     expect(refreshThreadGoalForSession).toHaveBeenCalledWith(
       "codex-thread:thread-root"
@@ -1353,6 +1369,7 @@ describe("Session discovery and reconciliation", () => {
 
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({
           data: [
             createThread({
@@ -1502,10 +1519,28 @@ describe("Session discovery and reconciliation", () => {
     ]);
   });
 
+  it("reads a released Worker without recreating its execution environment", async () => {
+    const readThread = vi.fn().mockResolvedValue(createThread({ id: "thread-released" }));
+    const resumeThread = vi.fn();
+    const provider = new CodexSessionDiscoveryProvider({ codexRuntimePort: {
+      isThreadExecutionReleased: () => true,
+      readThread, resumeThread, attachThreadToSession: vi.fn()
+    } as never });
+    const hydrated = await provider.hydrateSession({
+      workspaceId: "workspace-1", sessionId: "worker", conversationId: "conversation-1",
+      engineId: "codex", providerKind: "codex-thread", providerSessionId: "thread-released",
+      createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z"
+    });
+    expect(hydrated?.session.sessionId).toBe("worker");
+    expect(readThread).toHaveBeenCalledWith("thread-released", true);
+    expect(resumeThread).not.toHaveBeenCalled();
+  });
+
   it("keeps hydrated message blocks distinct when different sessions reuse item ids", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi
+        isThreadExecutionReleased: () => false,
+        readThread: vi
           .fn()
           .mockImplementation(async (threadId: string) => ({
             ...createThread({
@@ -1641,7 +1676,8 @@ describe("Session discovery and reconciliation", () => {
 
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi.fn().mockResolvedValue({
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue({
           ...createThread({
             id: "thread-rollout-time",
             name: "Thread rollout time",
@@ -1832,7 +1868,8 @@ describe("Session discovery and reconciliation", () => {
 
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi.fn().mockResolvedValue({
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue({
           ...createThread({
             id: "thread-repeated-prompt",
             name: "Thread repeated prompt",
@@ -1976,7 +2013,8 @@ describe("Session discovery and reconciliation", () => {
 
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi.fn().mockResolvedValue({
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue({
           ...createThread({
             id: "thread-injected-context",
             name: "Thread injected context",
@@ -2115,7 +2153,8 @@ describe("Session discovery and reconciliation", () => {
 
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi.fn().mockResolvedValue({
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue({
           ...createThread({
             id: "thread-compacted",
             name: "Thread compacted",
@@ -2178,7 +2217,8 @@ describe("Session discovery and reconciliation", () => {
   it("hydrates reasoning and web search items as generic tool calls", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi.fn().mockResolvedValue({
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue({
           ...createThread({
             id: "thread-process",
             name: "Process thread",
@@ -2278,7 +2318,8 @@ describe("Session discovery and reconciliation", () => {
   it("recovers the explicit final answer or falls back to the last agent message", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi.fn().mockResolvedValue({
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue({
           ...createThread({
             id: "thread-final-answer",
             name: "Thread final answer",
@@ -2385,7 +2426,8 @@ describe("Session discovery and reconciliation", () => {
   it("serializes local image inputs as markdown images with file URLs", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
-        resumeThread: vi.fn().mockResolvedValue({
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue({
           ...createThread({
             id: "thread-images",
             name: "Images",
@@ -2546,6 +2588,7 @@ describe("Session discovery and reconciliation", () => {
 
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
         listThreads: vi.fn().mockResolvedValue({
           data: [createThread({ id: "thread-fresh" })],
           nextCursor: null
@@ -2590,7 +2633,8 @@ describe("Session discovery and reconciliation", () => {
       nextCursor: null
     });
     const provider = new CodexSessionDiscoveryProvider({
-      codexRuntimePort: { listThreads } as never
+      codexRuntimePort: {
+        isThreadExecutionReleased: () => false, listThreads } as never
     });
 
     const discovered = await provider.discoverWorkspaces([{
