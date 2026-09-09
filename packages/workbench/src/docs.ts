@@ -401,6 +401,7 @@ export class DocsService {
     });
     const gitWatcher = this.gitDir ? watch(this.gitDir, { recursive: true }, (_event, filename) => {
       const path = String(filename ?? "").replace(/\\/g, "/");
+      if (path === "index") notify("docs");
       if (path === "HEAD" || path === "packed-refs" || path.startsWith("refs/")) notify("git");
     }) : undefined;
     return { close: () => { stateWatcher.close(); gitWatcher?.close(); for (const timer of timers.values()) clearTimeout(timer); } };

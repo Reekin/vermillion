@@ -55,6 +55,29 @@ it("observes external Git commits through filesystem events and sends changed re
   expect((await service.getWorkItem(workspaceId, item.workItemId)).run.resumeMessage).toContain("+external change");
 });
 
+it("refreshes Explorer after external commits and index-only changes without active work items", async () => {
+  const { service, workspaceId, root } = await fixture();
+  const path = ".vermillion/docs/status.md";
+  await service.writeDoc(workspaceId, path, "saved content\n");
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const changed = vi.fn();
+  const unsubscribe = service.subscribe((event) => { if (event.type === "docs.changed") changed(); });
+  try {
+    await git(root, "add", path);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    changed.mockClear();
+    await git(root, "commit", "-qm", "External commit");
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    expect(await service.pendingDocChanges(workspaceId)).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    changed.mockClear();
+    await git(root, "rm", "--cached", path);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    expect(await service.pendingDocChanges(workspaceId)).not.toEqual([]);
+  } finally { unsubscribe(); }
+});
+
 it("removes only an empty residual directory after Git already unregistered a worktree", async () => {
   const { root } = await fixture();
   const docs = new DocsService(root), path = join(root, ".vermillion", "worktrees", "residual");

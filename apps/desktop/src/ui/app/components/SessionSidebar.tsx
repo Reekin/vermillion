@@ -49,6 +49,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
             {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label="pinned" />}
           </>
         }
+        meta={!workspaceFilterId ? workspaceLabelById.get(session.workspaceId) ?? session.workspaceId : undefined}
         trailing={formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}
       />
       {session.subagents.length > 0 && (

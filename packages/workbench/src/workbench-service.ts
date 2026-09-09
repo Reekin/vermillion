@@ -174,6 +174,7 @@ export class WorkbenchService {
     try {
       context.watcher = docs.watch((area) => {
         if (area === "git") {
+          this.emit({ type: "docs.changed", workspaceId });
           void this.integrate(workspaceId, () => this.refreshDocRefs(workspaceId)).catch((error) => console.error("[workbench] document revision", workspaceId, error));
           return;
         }

@@ -23,6 +23,7 @@
 - 查询 Git 状态使用只读 `status -z`，不修改 index。
 - 角色 prompt 开发以 `~/.vermillion/roles/` 为准；修改角色时先改对应全局文件，提交前同步到 `packages/workbench/roles/`。配置与覆盖规则见[角色](.vermillion/docs/Workbench/Roles/PRD.md)。
 - 修改 UI 不在页面重复定义组件样式；会话区不反向引用应用壳业务，具体边界见架构和 UI 规范。
+- 设计变更、开发规范等信息全部更新在`.vermillion/docs/domains/`
 
 ## 经验积累
 
