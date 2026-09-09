@@ -843,7 +843,8 @@ export class WorkbenchService {
       return {
         ...record,
         item: { ...item, ...changes, status, decisions, updatedAt: this.now() },
-        execution: { ...execution, ...(worktreePath ? { worktreePath, branch } : {}), message: [execution.message, "工单已调整：" + note].filter(Boolean).join("\n"), updatedAt: this.now() }
+        execution: { ...execution, ...(worktreePath ? { worktreePath, branch } : {}),
+          message: status === "decision" ? execution.message : [execution.message, "工单已调整：" + note].filter(Boolean).join("\n"), updatedAt: this.now() }
 
       };
     });

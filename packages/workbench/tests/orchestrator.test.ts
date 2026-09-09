@@ -224,3 +224,57 @@ it("steers changed contracts into an active worker and voids the old turn's subm
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBe("active-turn"));
   expect(f.runner.steer).toHaveBeenCalled();
 });
+
+it("delivers decision answers and parked adjustments once without replaying worker instructions", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  const initial = vi.mocked(f.runner.send).mock.calls[0]![1];
+  expect(initial).toContain("你负责工单");
+  expect(initial).toContain("workItem.get");
+  expect(initial).toContain("完成后必须调用");
+  for (const note of ["First answer", "Second answer"]) {
+    const card = await f.service.createDecision(f.workspaceId, { workItemId: item.workItemId,
+      sessionId: "original", question: "Continue?", context: "Choice", options: [{ key: "yes", label: "Continue" }] });
+    f.complete("original");
+    await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "Adjustment for " + note });
+    const count = vi.mocked(f.runner.send).mock.calls.length;
+    await f.service.answerDecision(f.workspaceId, card.decisionId, { key: "yes", note });
+    await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(count + 1));
+    expect(vi.mocked(f.runner.send).mock.calls.at(-1)).toEqual(["original",
+      "用户决策答复：Continue? -> Continue (" + note + ")；挂起期间工单调整：Adjustment for " + note]);
+  }
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).decisions).toHaveLength(2);
+});
+
+it("steers only the latest committed document diff and resumes without the opening message", async () => {
+  const f = await fixture();
+  const path = ".vermillion/docs/Task/PRD.md";
+  await f.service.writeDoc(f.workspaceId, path, "Baseline\n");
+  const baseline = await f.service.commitDocs(f.workspaceId, { message: "baseline", paths: [path] });
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original",
+    refs: [{ path, commit: baseline.commit }] });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  for (const content of ["First change\n", "Second change\n"]) {
+    await f.service.writeDoc(f.workspaceId, path, content);
+    const diff = await f.service.docDiff(f.workspaceId, path);
+    const count = vi.mocked(f.runner.steer).mock.calls.length;
+    const committed = await f.service.commitDocs(f.workspaceId, { message: content.trim(), paths: [path] });
+    await vi.waitFor(() => expect(f.runner.steer).toHaveBeenCalledTimes(count + 1));
+    expect(vi.mocked(f.runner.steer).mock.calls.at(-1)).toEqual(["original",
+      "工单已调整：引用文档已提交 " + committed.commit + "\n" + diff +
+      "\n立即重新执行 vermillion workItem.get 读取最新合同，按新合同继续；已完成但不再需要的部分回退。"]);
+  }
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBe("active-turn");
+  await f.orchestrator.dispose();
+  f.active.clear();
+  const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
+  orchestrators.push(restarted);
+  restarted.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)).toEqual(["original", "会话已恢复。核对当前成果与持久化处置结果，继续尚未完成的动作。"]);
+});
