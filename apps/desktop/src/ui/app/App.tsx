@@ -242,7 +242,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         </div>
         <Modal contained presentation={overlay === "inbox" ? "modal" : panel === "inbox" ? "page" : "hidden"}
           title="Inbox" onClose={closeOverlay} onExpand={() => setPanel("inbox")}>
-          <InboxPanel store={store} />
+          <InboxPanel store={store} includeProcessed={overlay !== "inbox" && panel === "inbox"} />
         </Modal>
         {panel === "settings" && <section className="h-full" aria-label="设置">
           <PanelHeader title="设置" />

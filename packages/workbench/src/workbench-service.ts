@@ -1015,15 +1015,15 @@ export class WorkbenchService {
 
   // ---- inbox ----
 
-  async listInbox(): Promise<InboxItem[]> {
+  async listInbox(includeProcessed = false): Promise<InboxItem[]> {
     const items: InboxItem[] = [];
     for (const workspace of await this.listWorkspaces()) {
       const { store } = await this.context(workspace.workspaceId);
       for (const card of await store.decisions.list()) {
-        if (!card.answer && !card.withdrawn) items.push({ kind: "decision", workspaceId: workspace.workspaceId, card });
+        if (card.answer ? includeProcessed : !card.withdrawn) items.push({ kind: "decision", workspaceId: workspace.workspaceId, card });
       }
       for (const workItem of await this.listWorkItems(workspace.workspaceId)) {
-        if (workItem.status !== "closed" || !workItem.merge || workItem.merge.acknowledgedAt) continue;
+        if (!workItem.merge || (workItem.merge.acknowledgedAt ? !includeProcessed : workItem.status !== "closed")) continue;
         items.push({ kind: "merged", workspaceId: workspace.workspaceId, workItem });
       }
     }

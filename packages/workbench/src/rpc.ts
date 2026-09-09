@@ -141,7 +141,7 @@ export const workbenchRpc = {
   /** Pick an option (key), write a free answer (note only), or both. */
   "decision.answer": { params: zWs.extend({ decisionId: z.string().min(1), key: z.string().min(1).optional(), note: z.string().optional() }), result: zDecisionCard },
 
-  "inbox.list": { params: zEmpty, result: z.array(zInboxItem) },
+  "inbox.list": { params: z.object({ includeProcessed: z.boolean().optional() }), result: z.array(zInboxItem) },
 
   "app.start": {
     params: z.object({ dataDir: z.string().min(1), userDataDir: z.string().min(1).optional(), port: z.number().int().min(1024).max(65535), env: z.record(z.string()).optional() }),

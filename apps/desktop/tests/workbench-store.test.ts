@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkbenchClient, WorkbenchEvent, WorkItem } from "@vermillion/workbench/client";
+import type { InboxItem, WorkbenchClient, WorkbenchEvent, WorkItem } from "@vermillion/workbench/client";
 import { createWorkbenchStore } from "../src/ui/app/workbench-store.js";
 
 const item = (workItemId: string, status: WorkItem["status"], treeId?: string) => ({ workItemId, title: workItemId, status, treeId }) as WorkItem;
@@ -18,6 +18,27 @@ const setup = (data: Record<string, { items: WorkItem[] }>) => {
 };
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("refreshes pending counts and durable Inbox history together after processing", async () => {
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
+  let listener!: (event: WorkbenchEvent) => void;
+  let inbox = [
+    { kind: "decision", workspaceId: "a", card: { decisionId: "d" } },
+    { kind: "merged", workspaceId: "a", workItem: { workItemId: "m", merge: {} } }
+  ] as InboxItem[];
+  const request = vi.fn(async (method: string) => method === "inbox.list" ? inbox : []);
+  const store = createWorkbenchStore({ request, subscribe: (fn) => { listener = fn; return () => {}; } } as WorkbenchClient);
+  const disconnect = store.getState().connect();
+  await vi.waitFor(() => expect(store.getState().inbox).toHaveLength(2));
+  inbox = inbox.map((entry) => entry.kind === "decision"
+    ? { ...entry, card: { ...entry.card, answer: { key: "go", at: "now" } } }
+    : { ...entry, workItem: { ...entry.workItem, merge: { ...entry.workItem.merge!, acknowledgedAt: "now" } } });
+  listener({ type: "decisions.changed", workspaceId: "a" });
+  await vi.waitFor(() => expect(store.getState().inbox).toEqual([]));
+  expect(store.getState().inboxHistory).toEqual(inbox);
+  expect(request).toHaveBeenCalledWith("inbox.list", { includeProcessed: true });
+  disconnect();
+});
 
 describe("global task summary", () => {
   it("counts every unfinished work item across source trees and workspaces", async () => {
