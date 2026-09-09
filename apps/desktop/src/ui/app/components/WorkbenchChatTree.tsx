@@ -32,7 +32,11 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, ...props
     try {
       const result = await transport.chatTree.nodeAction({ sessionId: menu.sessionId, nodeId: menu.nodeId, action });
       if (result.action === "copy_session_id" || result.action === "copy_awb_session_id") {
-        await writeClipboardText(result.copiedText);
+        try {
+          await writeClipboardText(result.copiedText);
+        } catch {
+          throw new Error("无法写入剪贴板，请重试。");
+        }
         setNotice({ text: "已复制 " + result.copiedText });
       }
     } catch (error) {
