@@ -14,7 +14,7 @@ import type {
   WorkbenchEvent,
   Workspace
 } from "./contracts.js";
-import { effectiveNeeds, actionIsOpen, type WorkflowAction, type Execution, type Integration, type WorkItemRecord } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, projectWorkItem, type WorkflowAction, type Execution, type Integration, type WorkItemRecord } from "./contracts.js";
 import type { SessionNavigationPort } from "./session-navigation.js";
 import { DocsService, WorktreeMergeConflict, WorktreeNotReady } from "./docs.js";
 import { RoleService } from "./roles.js";
@@ -294,7 +294,7 @@ export class WorkbenchService {
   }
 
   async listWorkItems(workspaceId: string): Promise<WorkItem[]> {
-    const list = await (await this.context(workspaceId)).store.workItems.list();
+    const list = (await (await this.context(workspaceId)).store.listRecords()).map(projectWorkItem);
     return list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
@@ -344,8 +344,9 @@ export class WorkbenchService {
     for (const item of await this.listWorkItems(workspaceId)) {
       if (item.status === "preparing" && item.requestId === request.requestId) {
         if (!item.run.sessionId && !forkTurnId) throw new Error("无法解析准备分支末端，不能 fork 其余工单。");
-        await this.updateExecution(workspaceId, item.workItemId, (execution, current) => ({ item: { ...current, status: "queued" },
-          execution: { ...execution, ...(!execution.sessionId ? { forkSessionId: sessionId, forkTurnId } : {}) } }));
+        await this.mutateRecord(workspaceId, item.workItemId, (record) => ({ ...record,
+          item: { ...record.item, status: "queued", updatedAt: this.now() },
+          execution: { ...record.execution, ...(!record.execution.sessionId ? { forkSessionId: sessionId, forkTurnId } : {}), updatedAt: this.now() } }));
       }
     }
     for (const request of await this.listWorkRequests(workspaceId)) {
@@ -379,43 +380,52 @@ export class WorkbenchService {
   }
 
   async getWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
-    const item = await (await this.context(workspaceId)).store.workItems.get(workItemId);
-    if (!item) throw new Error("Unknown work item: " + workItemId);
-    return item;
+    const record = await (await this.context(workspaceId)).store.getRecord(workItemId);
+    if (!record) throw new Error("Unknown work item: " + workItemId);
+    return projectWorkItem(record);
   }
 
   async listActions(workspaceId: string): Promise<WorkflowAction[]> {
-    return (await this.context(workspaceId)).store.actions.list();
+    return (await (await this.context(workspaceId)).store.listRecords()).flatMap((record) => [record.execution, ...record.integrations]);
   }
 
   async createAction(workspaceId: string, input: Omit<Integration, "actionId" | "history" | "createdAt" | "updatedAt" | "attempts">, mutateItem?: (item: WorkItemRecord["item"]) => WorkItemRecord["item"]): Promise<Integration> {
     const now = this.now();
-    const saved = await (await this.context(workspaceId)).store.actions.createIntegration({ ...input, actionId: createId("action"), attempts: 0, history: [{ at: now, event: "created", message: input.message }], createdAt: now, updatedAt: now }, mutateItem);
-    this.emit({ type: "actions.changed", workspaceId });
-    this.emit({ type: "workItems.changed", workspaceId });
-    return saved;
+    return this.transactRecord(workspaceId, input.workItemId, (current) => {
+      if (!current) throw new Error("Unknown work item: " + input.workItemId);
+      const active = current.integrations.find(actionIsOpen);
+      if (active) {
+        if (active.integration.operation !== input.integration.operation) throw new Error("Another integration is still active for " + input.workItemId);
+        return { record: current, result: active };
+      }
+      const action: Integration = { ...input, actionId: createId("action"), attempts: 0, history: [{ at: now, event: "created", message: input.message }], createdAt: now, updatedAt: now };
+      return { record: { ...current, item: mutateItem ? mutateItem(current.item) : current.item, integrations: [...current.integrations, action] }, result: action };
+    });
   }
 
   async updateAction<T extends WorkflowAction>(workspaceId: string, action: T, mutate: (current: T) => T, mutateItem?: (item: WorkItemRecord["item"]) => WorkItemRecord["item"]): Promise<T> {
-    const saved = await (await this.context(workspaceId)).store.actions.update(action,
-      (current) => ({ ...mutate(current), updatedAt: this.now() }), mutateItem);
-    this.emit({ type: "actions.changed", workspaceId });
-    this.emit({ type: "workItems.changed", workspaceId });
-    return saved;
+    return this.transactRecord(workspaceId, action.workItemId, (current) => {
+      if (!current) throw new Error("Unknown work item: " + action.workItemId);
+      const saved = action.kind === "execute" ? current.execution : current.integrations.find((entry) => entry.actionId === action.actionId);
+      if (!saved) throw new Error("Unknown process: " + action.actionId);
+      const updated: WorkflowAction = { ...mutate(saved as T), updatedAt: this.now() };
+      const record: WorkItemRecord = { ...current,
+        item: mutateItem ? mutateItem(current.item) : current.item,
+        ...(updated.kind === "execute" ? { execution: updated } : { integrations: current.integrations.map((entry) => entry.actionId === updated.actionId ? updated : entry) }) };
+      return { record, result: updated as T };
+    });
   }
 
-  private async updateExecution(workspaceId: string, workItemId: string, mutate: (execution: Execution, item: WorkItemRecord["item"]) => { execution: Execution; item?: WorkItemRecord["item"] }): Promise<WorkItem> {
-    const saved = await (await this.context(workspaceId)).store.updateExecution(workItemId, (execution, item) => {
-      const next = mutate(execution, item);
-      return { execution: { ...next.execution, updatedAt: this.now() }, item: { ...(next.item ?? item), updatedAt: this.now() } };
-    });
+  private async transactRecord<T>(workspaceId: string, workItemId: string, update: (current: WorkItemRecord | undefined) => { record: WorkItemRecord; result: T }, events: WorkbenchEvent[] = []): Promise<T> {
+    const saved = await (await this.context(workspaceId)).store.transactRecord(workItemId, update);
+    for (const event of events) this.emit(event);
     this.emit({ type: "workItems.changed", workspaceId });
     this.emit({ type: "actions.changed", workspaceId });
     return saved;
   }
 
   private async getAction(workspaceId: string, actionId: string): Promise<WorkflowAction> {
-    const action = await (await this.context(workspaceId)).store.actions.get(actionId);
+    const action = (await this.listActions(workspaceId)).find((entry) => entry.actionId === actionId);
     if (!action) throw new Error("Unknown action: " + actionId);
     return action;
   }
@@ -480,9 +490,9 @@ export class WorkbenchService {
     if (input.needs?.some((need) => ["browser", "desktop"].includes(need.trim()))) throw new Error("needs 必须指明具体共享实例，例如 browser:qa-profile。");
     const request = input.requestId ? await store.workRequests.get(input.requestId) : undefined;
     if (input.requestId && (!request || request.status !== "preparing" || (input.sessionId && request.workerSessionId !== input.sessionId))) throw new Error("requestId 必须属于当前准备分支。");
-    if (input.sessionId && (await store.workItems.list()).some((item) => item.run.sessionId === input.sessionId && !["closed", "cancelled"].includes(item.status))) throw new Error("同一执行分支只能绑定一张未结束工单。其他工单请 fork 兄弟分支。");
+    if (input.sessionId && (await this.listWorkItems(workspaceId)).some((item) => item.run.sessionId === input.sessionId && !["closed", "cancelled"].includes(item.status))) throw new Error("同一执行分支只能绑定一张未结束工单。其他工单请 fork 兄弟分支。");
     await this.checkDependencies(workspaceId, "(new)", input.dependsOn ?? []);
-    const item = await store.workItems.create({
+    const item: WorkItemRecord["item"] = {
       workItemId: createId("wi"),
       sourceSessionId: request?.sourceSessionId ?? input.sourceSessionId, sourceTurnId: request?.sourceTurnId ?? input.sourceTurnId, treeId: request?.treeId ?? input.treeId, requestId: input.requestId,
       title: input.title.trim(),
@@ -499,16 +509,24 @@ export class WorkbenchService {
       decisions: [],
       createdAt: now,
       updatedAt: now
-    }, { sessionId: input.sessionId, worktreePath: input.worktreePath, branch: input.branch });
-    this.emit({ type: "workItems.changed", workspaceId });
-    return item;
+    };
+    return this.transactRecord(workspaceId, item.workItemId, (current) => {
+      if (current) throw new Error("Work item already exists: " + item.workItemId);
+      const record: WorkItemRecord = { workItemId: item.workItemId, item, integrations: [], cleanup: [], execution: {
+        sessionId: input.sessionId, worktreePath: input.worktreePath, branch: input.branch,
+        kind: "execute", actionId: "execution-" + item.workItemId, workItemId: item.workItemId,
+        status: "pending", stage: "open", message: "", attempts: 0, idleTurns: 0, history: [], createdAt: now, updatedAt: now
+      } };
+      return { record, result: projectWorkItem(record) };
+    });
   }
 
-  private async mutateWorkItem(workspaceId: string, workItemId: string, mutate: (item: WorkItemRecord["item"]) => WorkItemRecord["item"]): Promise<WorkItem> {
-    const { store } = await this.context(workspaceId);
-    const updated = await store.workItems.update(workItemId, (item) => ({ ...mutate(item), updatedAt: this.now() }));
-    this.emit({ type: "workItems.changed", workspaceId });
-    return updated;
+  private async mutateRecord(workspaceId: string, workItemId: string, mutate: (record: WorkItemRecord) => WorkItemRecord, events: WorkbenchEvent[] = []): Promise<WorkItem> {
+    return this.transactRecord(workspaceId, workItemId, (current) => {
+      if (!current) throw new Error("Unknown work item: " + workItemId);
+      const record = mutate(current);
+      return { record, result: projectWorkItem(record) };
+    }, events);
   }
 
   /** Worker claimed the item; records the session and worktree it runs in. */
@@ -525,15 +543,17 @@ export class WorkbenchService {
     const scheduler = await this.getScheduler(workspaceId);
     if (occupied.length >= scheduler.maxWorkers || occupied.some((item) => effectiveNeeds(item).some((need) => effectiveNeeds(current).includes(need)))) throw new Error("并发或共享资源尚未释放，保持排队。");
     const baseCommit = current.run.baseCommit ?? await (await this.context(workspaceId)).docs.head().catch(() => undefined);
-    return this.updateExecution(workspaceId, workItemId, (execution, item) => ({
-      item: { ...item, status: "running" },
-      execution: { ...execution, sessionId: run.sessionId ?? execution.sessionId, heartbeatAt: run.heartbeatAt ?? execution.heartbeatAt,
-        baseCommit, retryAt: undefined, staleTurnId: undefined }
+    return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+      item: { ...record.item, status: "running", updatedAt: this.now() },
+      execution: { ...record.execution, sessionId: run.sessionId ?? record.execution.sessionId, heartbeatAt: run.heartbeatAt ?? record.execution.heartbeatAt,
+        baseCommit, retryAt: undefined, staleTurnId: undefined, updatedAt: this.now() }
     }));
   }
 
   async heartbeatWorkItem(workspaceId: string, workItemId: string, lastTurnId?: string): Promise<WorkItem> {
-    return this.updateExecution(workspaceId, workItemId, (execution) => ({ execution: { ...execution, lastTurnId: lastTurnId ?? execution.lastTurnId, heartbeatAt: this.now() } }));
+    return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+      item: { ...record.item, updatedAt: this.now() },
+      execution: { ...record.execution, lastTurnId: lastTurnId ?? record.execution.lastTurnId, heartbeatAt: this.now(), updatedAt: this.now() } }));
   }
 
   /** Verified work merges immediately; unsuccessful submissions return to the same worker. */
@@ -553,21 +573,22 @@ export class WorkbenchService {
     if (current.run.staleTurnId) {
       return this.returnWorkItem(workspaceId, workItemId, "提交作废：合同在本轮进行中被调整");
     }
-    const submitted = await this.mutateWorkItem(workspaceId, workItemId, (item) => {
+    const submitted = await this.mutateRecord(workspaceId, workItemId, (record) => {
       const verify = { ...input.verify, verifiedAt: now };
-      return {
-        ...item,
+      return { ...record, item: {
+        ...record.item,
+        updatedAt: this.now(),
         evidence: { ...input.evidence, submittedAt: now },
         review: input.review,
         verify
-      };
+      } };
     });
     const failed = input.verify.items.filter((entry) => !entry.pass);
     const missing = submitted.acceptance.some((_, index) => !input.verify.items.some((entry) => entry.index === index));
     if (input.verify.verdict !== "pass" || failed.length || missing) {
       const reason = "验收未通过：" + (failed.map((entry) => entry.evidence).join("\n") || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
       const failures = (submitted.verificationFailures ?? 0) + 1;
-      await this.mutateWorkItem(workspaceId, workItemId, (item) => ({ ...item, verificationFailures: failures }));
+      await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record, item: { ...record.item, verificationFailures: failures, updatedAt: this.now() } }));
       if (failures >= 2) {
         await this.createDecision(workspaceId, { workItemId, sessionId: submitted.run.sessionId, question: "验收连续未通过，需要调整目标或继续返工吗？",
           context: "已连续两次提交未通过验收，原会话和成果保留。", details: reason,
@@ -619,9 +640,8 @@ export class WorkbenchService {
           for (const target of [...(integration.targets ?? [integration.target!])].reverse()) commit = await docs.rollbackMerge(target, integration.before);
           integration = { ...integration, commit };
         }
-        const { store } = await this.context(workspaceId);
         const now = this.now();
-        await store.mutateRecord(workItemId, (record) => {
+        await this.mutateRecord(workspaceId, workItemId, (record) => {
           const rollback = integration.operation === "rollback";
           const detached = rollback ? record : this.detachWorktree(record, false);
           return { ...detached,
@@ -636,8 +656,6 @@ export class WorkbenchService {
               ? { ...entry, integration, status: "done", updatedAt: now } : entry)
           };
         });
-        this.emit({ type: "workItems.changed", workspaceId });
-        this.emit({ type: "actions.changed", workspaceId });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         if (error instanceof WorktreeMergeConflict || error instanceof WorktreeNotReady) {
@@ -652,16 +670,17 @@ export class WorkbenchService {
   }
 
   private async returnWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
-    return this.updateExecution(workspaceId, workItemId, (execution, item) => ({
-      item: { ...item, status: "queued", evidence: undefined, verify: undefined, rejections: [...item.rejections, { reason, at: this.now() }] },
-      execution: { ...execution, idleTurns: 0, staleTurnId: undefined, message: [execution.message, reason].filter(Boolean).join("\n") }
+    return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+      item: { ...record.item, status: "queued", evidence: undefined, verify: undefined, rejections: [...record.item.rejections, { reason, at: this.now() }], updatedAt: this.now() },
+      execution: { ...record.execution, idleTurns: 0, staleTurnId: undefined, message: [record.execution.message, reason].filter(Boolean).join("\n"), updatedAt: this.now() }
     }));
   }
 
   async acknowledgeWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
-    return this.mutateWorkItem(workspaceId, workItemId, (item) => {
+    return this.mutateRecord(workspaceId, workItemId, (record) => {
+      const { item } = record;
       if (item.status !== "closed" || !item.merge) throw new Error("Work item has no merged notification");
-      return { ...item, merge: { ...item.merge, acknowledgedAt: this.now() } };
+      return { ...record, item: { ...item, merge: { ...item.merge, acknowledgedAt: this.now() }, updatedAt: this.now() } };
     });
   }
 
@@ -688,17 +707,13 @@ export class WorkbenchService {
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.status === "cancelled") return item;
     if (item.status === "closed") throw new Error("已合入工单请使用回滚入口，不能取消已完成成果。");
-    const { store } = await this.context(workspaceId);
-    const cancelled = await store.mutateRecord(workItemId, (record) => {
+    const dependants = (await this.listWorkItems(workspaceId)).filter((w) => !["closed", "cancelled"].includes(w.status) && w.dependsOn.includes(workItemId)).map((w) => w.workItemId);
+    const cancelled = await this.mutateRecord(workspaceId, workItemId, (record) => {
       const detached = this.detachWorktree(record, true);
       return { ...detached, item: { ...record.item, status: "cancelled", updatedAt: this.now() },
         execution: { ...detached.execution, status: "cancelled", updatedAt: this.now() },
         integrations: record.integrations.map((action) => actionIsOpen(action) ? { ...action, status: "cancelled", updatedAt: this.now() } : action) };
-    });
-    const dependants = (await this.listWorkItems(workspaceId)).filter((w) => !["closed", "cancelled"].includes(w.status) && w.dependsOn.includes(workItemId)).map((w) => w.workItemId);
-    this.emit({ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants });
-    this.emit({ type: "workItems.changed", workspaceId });
-    this.emit({ type: "actions.changed", workspaceId });
+    }, [{ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants }]);
     return cancelled;
   }
 
@@ -722,7 +737,7 @@ export class WorkbenchService {
       const { store } = await this.context(workspaceId);
       for (const record of await store.listRecords()) {
         if (!record.cleanup.some((candidate) => candidate.sessionId === sessionId && candidate.detachedAt)) continue;
-        await store.mutateRecord(record.workItemId, (current) => ({ ...current,
+        await this.mutateRecord(workspaceId, record.workItemId, (current) => ({ ...current,
           cleanup: current.cleanup.map((candidate) => candidate.sessionId === sessionId ? { ...candidate, detachedAt: undefined } : candidate) }));
       }
     });
@@ -732,7 +747,6 @@ export class WorkbenchService {
   async releaseIdleWorkers(workspaceId: string): Promise<void> {
     await this.integrate(workspaceId, async () => {
       const items = await this.listWorkItems(workspaceId);
-      const { store } = await this.context(workspaceId);
       const candidates = await this.listWorktreeCleanup(workspaceId);
       const owners = new Set(items.filter((item) => !["closed", "cancelled"].includes(item.status)).map((item) => item.run.sessionId));
       for (const sessionId of owners) if (sessionId) this.releasedWorkers.delete(sessionId);
@@ -744,7 +758,7 @@ export class WorkbenchService {
         this.releasedWorkers.add(sessionId);
         try {
           void this.releaseWorkerEnvironment(sessionId).then(async () => {
-            for (const candidate of owned) await store.mutateRecord(candidate.workItemId, (record) => ({ ...record,
+            for (const candidate of owned) await this.mutateRecord(workspaceId, candidate.workItemId, (record) => ({ ...record,
               cleanup: record.cleanup.map((entry) => ["closed", "cancelled"].includes(record.item.status) && entry.sessionId === sessionId && entry.worktreePath === candidate.worktreePath && entry.branch === candidate.branch
                 ? { ...entry, detachedAt: this.now() } : entry) }));
           }).catch(() => this.releasedWorkers.delete(sessionId));
@@ -756,7 +770,7 @@ export class WorkbenchService {
   /** Only persisted, detached ownership can authorize deletion. Busy paths remain for the next sweep. */
   async cleanupWorktrees(workspaceId: string) {
     return this.integrate(workspaceId, async () => {
-      const { store, docs } = await this.context(workspaceId);
+      const { docs } = await this.context(workspaceId);
       const removed: string[] = [];
       const retained: Array<{ workItemId: string; worktreePath: string; reason: string }> = [];
       for (const candidate of await this.listWorktreeCleanup(workspaceId)) {
@@ -770,7 +784,7 @@ export class WorkbenchService {
         if (!reason) {
           try {
             await docs.dropWorktree(candidate.worktreePath, candidate.branch, candidate.discard);
-            await store.mutateRecord(candidate.workItemId, (record) => ({ ...record,
+            await this.mutateRecord(workspaceId, candidate.workItemId, (record) => ({ ...record,
               cleanup: record.cleanup.filter((entry) => entry.worktreePath !== candidate.worktreePath || entry.branch !== candidate.branch) }));
             removed.push(candidate.worktreePath);
           } catch (error) { reason = error instanceof Error ? error.message : String(error); }
@@ -804,7 +818,8 @@ export class WorkbenchService {
     const occupied = changes.needs?.length
       ? new Set((await this.listWorkItems(workspaceId)).filter((item) => item.workItemId !== workItemId && item.status === "running").flatMap((item) => item.needs))
       : new Set<string>();
-    const updated = await this.updateExecution(workspaceId, workItemId, (execution, item) => {
+    const updated = await this.mutateRecord(workspaceId, workItemId, (record) => {
+      const { execution, item } = record;
       if (item.status === "closed" || item.status === "cancelled") throw new Error("Work item is " + item.status + ": " + workItemId);
       const conflict = item.status === "running" ? changes.needs?.find((need) => occupied.has(need)) : undefined;
       if (conflict !== undefined) throw new Error("Resource is in use: " + conflict + ". Release it before updating this running work item.");
@@ -812,13 +827,16 @@ export class WorkbenchService {
       // While parked the note lives on the decision card and reaches the worker inside the answer line.
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
       return {
-        item: { ...item, ...changes, status, decisions },
-        execution: { ...execution, ...(worktreePath ? { worktreePath, branch } : {}), message: [execution.message, "工单已调整：" + note].filter(Boolean).join("\n") }
+        ...record,
+        item: { ...item, ...changes, status, decisions, updatedAt: this.now() },
+        execution: { ...execution, ...(worktreePath ? { worktreePath, branch } : {}), message: [execution.message, "工单已调整：" + note].filter(Boolean).join("\n"), updatedAt: this.now() }
 
       };
     });
     if (changes.dependsOn?.some((id) => !current.dependsOn.includes(id)) && updated.status === "running") {
-      await this.updateExecution(workspaceId, workItemId, (execution, item) => ({ item: { ...item, status: "queued" }, execution: { ...execution, message: "依赖调整已落实。前置关闭后读取最新合同，rebase 后继续。" } }));
+      await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+        item: { ...record.item, status: "queued", updatedAt: this.now() },
+        execution: { ...record.execution, message: "依赖调整已落实。前置关闭后读取最新合同，rebase 后继续。", updatedAt: this.now() } }));
     }
     if (updated.status === "running" && updated.run.sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId, sessionId: updated.run.sessionId, note });
     // Parked on a decision: the user reads the change on the card before answering; the answer carries it to the worker.
@@ -847,7 +865,8 @@ export class WorkbenchService {
 
   /** Orchestrator: marks/clears the turn during which a contract change landed mid-flight. */
   async setWorkItemStaleTurn(workspaceId: string, workItemId: string, staleTurnId: string | undefined): Promise<WorkItem> {
-    return this.updateExecution(workspaceId, workItemId, (execution) => ({ execution: { ...execution, staleTurnId } }));
+    return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+      item: { ...record.item, updatedAt: this.now() }, execution: { ...record.execution, staleTurnId, updatedAt: this.now() } }));
   }
 
   /**
@@ -955,7 +974,7 @@ export class WorkbenchService {
       decisions: item.decisions.includes(message) ? item.decisions : [...item.decisions, message],
       verificationFailures: recoveryChoice === "retry" ? 0 : item.verificationFailures });
     if (!action || !actionIsOpen(action)) {
-      if (card.workItemId) await this.mutateWorkItem(workspaceId, card.workItemId, recordAnswer);
+      if (card.workItemId) await this.mutateRecord(workspaceId, card.workItemId, (record) => ({ ...record, item: { ...recordAnswer(record.item), updatedAt: this.now() } }));
       return;
     }
     if (recoveryChoice === "cancel") {
@@ -987,7 +1006,7 @@ export class WorkbenchService {
       for (const card of await store.decisions.list()) {
         if (!card.answer && !card.withdrawn) items.push({ kind: "decision", workspaceId: workspace.workspaceId, card });
       }
-      for (const workItem of await store.workItems.list()) {
+      for (const workItem of await this.listWorkItems(workspace.workspaceId)) {
         if (workItem.status !== "closed" || !workItem.merge || workItem.merge.acknowledgedAt) continue;
         items.push({ kind: "merged", workspaceId: workspace.workspaceId, workItem });
       }

@@ -17,6 +17,7 @@
 ## 状态与事件
 - workspace 有三种含义，分开存：`draftWorkspaceId`（New Chat 用，composer 里选）、会话自带的 workspaceId（来自引擎）、`browsingWorkspaceId`（Docs 面板用，跟随打开的会话，草稿态跟随 draft）。
 - 领域层每次写操作 emit `WorkbenchEvent`；`.vermillion/` 目录有 fs 监听，CLI/agent 的外部写入产生同样的事件。UI 只订阅事件，禁止轮询。
+- 工单状态由 `WorkbenchService` 在整份 `WorkItemRecord` 事务内转换，提交后统一发布工单和动作事件。`WorkspaceStore` 只负责记录查询与串行事务，查询投影不提供写入口。
 - 查询结果带 workspaceId，store 丢弃与当前 browsing 不匹配的响应。
 
 ## 持久化

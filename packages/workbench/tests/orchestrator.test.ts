@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
+import { DocsService } from "../src/docs.js";
 import { contract, git, setup, submission } from "./workflow-fixture.js";
 
 const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
@@ -56,6 +57,36 @@ it("unsubscribes again after a user follows up in a completed worker session", a
   f.complete("original", "user-followup");
   await vi.waitFor(() => expect(f.runner.release).toHaveBeenCalledTimes(2));
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("closed");
+});
+
+it("interrupts a cancelled worker before sending work to the next shared-resource owner", async () => {
+  // Exercise service-event ordering independently of filesystem notification timing.
+  const watcher = vi.spyOn(DocsService.prototype, "watch").mockReturnValue({ close() {} });
+  const f = await fixture();
+  const needs = ["browser:shared-profile"];
+  const first = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker-a", needs }).finally(() => watcher.mockRestore());
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  const second = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker-b", needs });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect((await f.service.getWorkItem(f.workspaceId, second.workItemId)).status).toBe("queued");
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect(f.active.has("worker-a")).toBe(true);
+
+  const order: string[] = [];
+  vi.mocked(f.runner.interrupt).mockImplementation(async (id) => {
+    order.push("interrupt:" + id);
+    f.active.delete(id);
+  });
+  vi.mocked(f.runner.send).mockImplementation(async (id) => {
+    order.push("send:" + id);
+    f.active.add(id);
+  });
+  await f.service.cancelWorkItem(f.workspaceId, first.workItemId);
+  await vi.waitFor(() => expect(order).toContain("send:worker-b"));
+  expect(order).toEqual(["interrupt:worker-a", "send:worker-b"]);
+  expect((await f.service.getWorkItem(f.workspaceId, second.workItemId)).status).toBe("running");
 });
 
 async function fixture() {

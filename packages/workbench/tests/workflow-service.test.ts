@@ -114,7 +114,7 @@ it("rejects unsupported historical state before dispatch and leaves every histor
   await mkdir(join(root, ".vermillion", "missions"));
   const missionPath = join(root, ".vermillion", "missions", "old.json");
   await writeFile(missionPath, '{"historical":true}');
-  await expect(new WorkspaceStore(root).workItems.list()).rejects.toThrow("Unsupported or invalid workbench record");
+  await expect(new WorkspaceStore(root).listRecords()).rejects.toThrow("Unsupported or invalid workbench record");
   await expect(service.refreshActions(workspaceId)).rejects.toThrow("Convert stored data explicitly");
   expect(await readFile(path, "utf8")).toBe(raw);
   expect(await readFile(missionPath, "utf8")).toBe('{"historical":true}');
@@ -192,17 +192,19 @@ it("publishes merging and its sole integration atomically while event-driven ref
 });
 
 it("claims only one active integration under the shared record lock", async () => {
-  const { root, service, workspaceId } = await fixture();
+  const { service, options, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, contract);
-  const firstStore = new WorkspaceStore(root), secondStore = new WorkspaceStore(root);
+  const secondService = new WorkbenchService(options);
   const integration = { kind: "integration" as const, workItemId: item.workItemId, status: "pending" as const,
     stage: "merge" as const, message: "Merge", attempts: 0, history: [], createdAt: item.createdAt, updatedAt: item.updatedAt,
     integration: { operation: "merge" as const, diffStat: "" } };
-  const results = await Promise.all([firstStore, secondStore].map((store, index) => store.actions.createIntegration(
-    { ...integration, actionId: "integration-" + index }, (current) => ({ ...current, status: "merging" }))));
-  expect(results[0]!.actionId).toBe(results[1]!.actionId);
-  expect((await service.listActions(workspaceId)).filter((action) => action.kind === "integration")).toHaveLength(1);
-  expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("merging");
+  try {
+    const results = await Promise.all([service, secondService].map((owner) => owner.createAction(
+      workspaceId, integration, (current) => ({ ...current, status: "merging" }))));
+    expect(results[0]!.actionId).toBe(results[1]!.actionId);
+    expect((await service.listActions(workspaceId)).filter((action) => action.kind === "integration")).toHaveLength(1);
+    expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("merging");
+  } finally { await secondService.dispose(); }
 });
 
 it("publishes coherent execution and business states for failure, decision, answer and cancellation", async () => {
