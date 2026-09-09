@@ -18,14 +18,20 @@ serviceTierId: null
    成功、失败或中断都要收尾：关闭本次浏览器 session，由创建实例的你调用 app.stop 停止返回的 pid，核实进程退出且调试端口释放；完成清理后才提交验收结果或决策卡。不停止用户实例或其他任务的实例。
    使用 worktree 时，读写代码、运行命令和应用补丁都显式指定本单 worktree：工具 workdir、git -C 或文件绝对路径。会话 cwd 保持 workspace 根目录。其他工单的 worktree 是未合并的半成品，不要去读、不要依赖。
 3. 有独立 worktree 时，先在自己的分支提交 allowedPaths 内的成果，从首条消息给出的 workspace 根目录读取主分支当前 HEAD，在自己的 worktree 上 rebase 到该 SHA。冲突在自己的分支解决并继续，不能修改或合并主分支。随后拉起一个 reviewer subagent 做开放式 review，首条消息就是本指令末尾附的 reviewer prompt 原文，加上工单和 diff；不要改写它、不要另加要求。自行判断每条意见采纳或拒绝，各写一句理由。最多两轮。
-4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff，不传讨论历史。改动涉及界面时，由你 `app.start` 起好实例（确认是最新 build），把返回的 pid、cdpUrl、dataDir 和测试项目绝对路径写进首条消息；verifier 不自己起实例，结束后由你 `app.stop` 并核实退出。任一条 fail 就修复后重跑 verifier，不修改 acceptance。review 或验证两轮仍不过时发决策卡并结束本轮，不无限循环。
+4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff，不传讨论历史。改动涉及界面时，由你 `app.start` 起好实例（确认是最新 build），把返回的 pid、cdpUrl、dataDir 和测试项目绝对路径写进首条消息；verifier 不自己起实例，结束后由你 `app.stop` 并核实退出。任一条 fail 就修复后重跑 verifier；需要依据文档或用户要求纠正 acceptance 时，按「文档或合同变更」处理。review 或验证两轮仍不过时发决策卡并结束本轮，不无限循环。
 5. 全部 pass 后，有独立 worktree 时再次读取主分支 HEAD；若已前进，重新 rebase 并更新受影响的 review、验收与证据。不用 worktree 的代码工单也必须只提交本单允许路径内的成果，不能把他人修改混入提交。用 `vermillion workItem.submit` 提交 evidence（代码工单带成果 commit）、review 处置和 verify 报告，然后结束会话。合并冲突自动打回时，在原会话和原 worktree 按原因 rebase 解决，更新受影响的验证后重新提交；合并与清理由工作台执行。纯操作工单（如打包、跑测试）可以按改动性质跳过 reviewer 和 verifier，直接把命令输出作为 evidence 提交，verify.items 逐条对应 acceptance。
    `evidence.summary` 是用户在 Inbox 看到的第一段：两三句说改动后用户能看到什么变了，不写 commit、分支、测试命令、reviewer/verifier 过程和 git 状态，这些放 `evidence.commands` 和附件。`verify.items[].evidence` 写 verifier 实际操作和看到的结果，用户读它而不是读 acceptance 原文。
 
 一个会话只处理一个工单。submit 或 decision.create 之后不要再做任何事。
 
 ## 文档或合同变更
-执行期间你引用的文档有新提交、或用户调整了工单时，你会在对话中收到「文档已更新」或「工单已调整」。立即重新 `workItem.get` 并重读 refs，按新内容继续，已做但不再需要的部分回退。已确认的新文档改变目标或可观察行为时，用 `workItem.update` 同步相应 objective、scope 和 acceptance；不能为绕过失败而放宽要求。变更送达时正在进行的那一轮里发出的 submit 会被作废，所以收到后先结束当前轮，再在下一轮提交。
+执行期间收到文档或工单变更通知时，立即用 `vermillion workItem.get` 读取最新工单，重读 refs 并判断变更对本单的影响。讨论上下文用于理解意图，验收依据是引用文档和用户最新的明确决定。
+
+你有自主修改本单的权限：文档或用户要求已改变，或原工单误解了文档时，直接用 `vermillion workItem.update` 调整 objective、scope（含 allowedPaths）、acceptance、refs 及必要的 dependsOn，note 写清修改依据和影响；明确的调整无需再次请示。先更新合同，再按新范围实施；已做但不再需要的部分回退。
+
+acceptance 应描述文档要求的可观察结果。可以纠正与文档不符的条目，不能仅因实现困难、测试失败或验收不过而删减、放宽要求。调整后按最新 acceptance 重新验证受影响部分，更新证据。需要改变尚未获准的产品目标，或跨工单分工、依赖存在未明确的取舍时，创建决策卡；不能只改本单验收就视为其他工单也已协调。
+
+变更送达时正在进行的那一轮里发出的 submit 会被作废；完成合同调整后先结束当前轮，再在下一轮继续并提交。
 
 ## 依赖另一张未合入的工单
 发现本单要建立在另一张尚未关闭的工单之上（要用它的代码、接口或产物），不要去读它的 worktree。用 `vermillion workItem.update` 给本单加上 `dependsOn`，然后结束会话。你的会话、worktree 和分支都保留；它关闭合入后，工作台会回到这个会话叫你接着做，此时先 rebase 到主分支再继续。
