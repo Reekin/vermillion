@@ -10,4 +10,6 @@ Windows 先用 `netsh interface ipv4 show excludedportrange protocol=tcp` 检查
 
 验收实例运行在独立隐藏桌面，窗口和焦点不影响用户，操作与截图走 CDP。
 
+输入订阅的 Electron DOM 回归：在仓库根运行 `node apps/desktop/tests/renderer-selection-smoke.mjs`，检查后台交替输出、可见路径切换、审批与完成通知和草稿保留。
+
 界面验收结束后关闭对应的 agent-browser session，并通过 `app.stop` 停止本次实例，核实调试端口已释放。

@@ -54,6 +54,28 @@ const envelope = (eventId: string): EventEnvelope => ({
 });
 
 describe("renderer store domain replica", () => {
+  it("keeps background and later-turn streams outside visible turn notifications while retaining content", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot());
+    store.ingestEvent({ type: "session.created", conversationId: "conversation-a", sessionId: "session-b", engineId: "agent-a", status: "idle" });
+    const visible = vi.fn();
+    const dispose = store.subscribeTurn("turn-visible", visible);
+    const meta = vi.fn();
+    store.subscribeMeta(meta);
+    for (const [sessionId, turnId] of [["session-a", "turn-later"], ["session-b", "turn-background"]]) {
+      store.ingestEvent({ type: "message.delta", sessionId, turnId, messageId: turnId, delta: "retained" });
+      expect(store.getDomainReadModel().getMessageBlock(turnId + ":md")?.text).toBe("retained");
+    }
+    expect(visible).not.toHaveBeenCalled();
+    expect(meta).not.toHaveBeenCalled();
+    store.ingestEvent({ type: "message.delta", sessionId: "session-a", turnId: "turn-visible", messageId: "visible", delta: "live" });
+    expect(visible).toHaveBeenCalledOnce();
+    dispose();
+    store.ingestEvent({ type: "message.delta", sessionId: "session-a", turnId: "turn-visible", messageId: "visible", delta: " content" });
+    expect(visible).toHaveBeenCalledOnce();
+    expect(store.getDomainReadModel().getMessageBlock("visible:md")?.text).toBe("live content");
+  });
+
   it("exposes a read model backed by renderer domain state", () => {
     const store = createRendererStore();
     const initialSnapshot = store.getSubscriptionSnapshot();

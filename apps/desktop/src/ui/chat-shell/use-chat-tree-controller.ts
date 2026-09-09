@@ -1,5 +1,5 @@
 import { isHistoricalChatTreePosition } from "./chat-tree-send-target.js";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
@@ -9,6 +9,8 @@ import {
   statusNoticeErrorDetails,
   type ComposerStatusNotice
 } from "./composer-status.js";
+
+const emptyOperations: ChatTreeSendOperation[] = [];
 
 export const useChatTreeController = (input: {
   store: RendererStore;
@@ -118,11 +120,11 @@ export const useChatTreeController = (input: {
     });
   }, [refreshChatTree, input.refreshSignal, onStatusNotice]);
 
-  const operations = sends && sends.sessionId === sessionId ? sends.operations : [];
-  const chatTree = projectChatTreeSends(
-    loaded && loaded.entrySessionId === sessionId ? loaded.tree : undefined,
-    operations,
-    selectedSend
+  const operations = sends && sends.sessionId === sessionId ? sends.operations : emptyOperations;
+  const loadedTree = loaded && loaded.entrySessionId === sessionId ? loaded.tree : undefined;
+  const chatTree = useMemo(
+    () => projectChatTreeSends(loadedTree, operations, selectedSend),
+    [loadedTree, operations, selectedSend]
   );
   const pendingSend = operations.find((op) =>
     (op.operationId === chatTree?.currentNodeId || op.turnId === chatTree?.currentNodeId) &&
