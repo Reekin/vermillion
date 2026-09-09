@@ -8,7 +8,7 @@ export type CommitOutcome =
   | { kind: "commit"; commit: string; message: string }
   | { kind: "work"; title: string };
 export type TaskTarget = { workspaceId: string; kind: "workItem"; id: string };
-export type TaskSummary = TaskTarget & { title: string; status: WorkItem["status"] };
+export type TaskSummary = TaskTarget & { title: string; status: WorkItem["status"]; sessionId?: string };
 
 /** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
 export type WorkspaceView = {
@@ -89,7 +89,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           const workItems = await client.request("workItem.list", { workspaceId });
           const tasks: TaskSummary[] = workItems
             .filter((item) => item.status !== "closed" && item.status !== "cancelled")
-            .map((item) => ({ workspaceId, kind: "workItem", id: item.workItemId, title: item.title, status: item.status }));
+            .map((item) => ({ workspaceId, kind: "workItem", id: item.workItemId, title: item.title, status: item.status, sessionId: item.run?.sessionId }));
           return tasks;
         }));
         if (generation === tasksGeneration) set({ tasks: groups.flat(), tasksError: undefined });
