@@ -505,7 +505,8 @@ export class WorkbenchService {
   }): Promise<{ status: "done" | "failed"; note: string } | undefined> {
     const result = await this.transactRecord(workspaceId, workItemId, (record) => {
       if (!record) throw new Error("Unknown work item: " + workItemId);
-      if (input.turnId && record.execution.staleTurnId === input.turnId) record = { ...record, execution: { ...record.execution, staleTurnId: undefined } };
+      const contractChanged = !!input.turnId && record.execution.staleTurnId === input.turnId;
+      if (contractChanged) record = { ...record, execution: { ...record.execution, staleTurnId: undefined } };
       if (!input.ownsExecution()) return { record, result: undefined };
       const action = record.execution;
       let execution = action;
@@ -513,8 +514,9 @@ export class WorkbenchService {
       let note: string;
       let failure: string | undefined;
       if (!actionIsOpen(action) || action.status === "decision") note = action.status;
-      else if (item.status === "queued" || action.stage === "deliver") {
-        if (item.status === "queued") execution = { ...action, stage: "deliver", status: "pending" };
+      else if (item.status === "queued" || action.stage === "deliver" || contractChanged) {
+        execution = { ...action, stage: "deliver", status: "pending",
+          message: contractChanged && !action.message ? "本轮已结束。重新执行 vermillion workItem.get 读取最新合同，按新合同继续。" : action.message };
         note = "待送达后续消息";
       } else if (item.status !== "running") {
         execution = { ...action, status: "done", retryAt: undefined,

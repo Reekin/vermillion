@@ -256,7 +256,8 @@ export class Orchestrator {
           metadata: { role: "worker", actionId: action.actionId, workItemId: item.workItemId } }));
         action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, sessionId, stage: "deliver", status: "running" }));
       }
-      let run = (await this.service.listRuns(workspaceId)).find((r) => r.runId === action.runId && r.sessionId === sessionId);
+      let run = bound?.run.status === "running" && bound.run.runId === action.runId ? bound.run
+        : (await this.service.listRuns(workspaceId)).find((r) => r.runId === action.runId && r.sessionId === sessionId);
       if (!run || run.status !== "running") {
         run = await this.service.putRun(workspaceId, { runId: createId("run"), role: "worker",
           actionId: action.actionId, sessionId, workItemId: item.workItemId,

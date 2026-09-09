@@ -279,6 +279,21 @@ it("waits for a returned submission's turn and its completion settlement before 
   expect(f.runner.send).toHaveBeenCalledTimes(2);
 });
 
+it("continues an updated contract without idle accounting when the stale turn ends without submitting", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", deliveredAt: expect.any(String) }));
+  await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "Updated contract", objective: "Updated result" });
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBe("turn-1"));
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", message: "" }));
+  f.complete("original", "turn-1");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(f.runner.send).mock.calls[1]).toEqual(["original", "本轮已结束。重新执行 vermillion workItem.get 读取最新合同，按新合同继续。"]);
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0 });
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBeUndefined();
+});
+
 it("keeps a user-started turn when the previous completion is delayed, without idle-failure accounting", async () => {
   const f = await fixture(true);
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
@@ -340,6 +355,25 @@ it("atomically drops old idle accounting when a user starts while completion per
   expect(heartbeat).not.toHaveBeenCalled(); // Heartbeat and idle accounting now share the guarded record commit.
   expect(f.runner.send).toHaveBeenCalledOnce();
   expect(f.runner.resume).toHaveBeenCalledOnce();
+});
+
+it("does not recover a tracked turn across an asynchronous run reload during reconciliation", async () => {
+  const f = await fixture(true);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", deliveredAt: expect.any(String) }));
+  const listRuns = f.service.listRuns.bind(f.service);
+  vi.spyOn(f.service, "listRuns").mockImplementationOnce(async (...args) => {
+    const runs = await listRuns(...args);
+    f.complete("original", "turn-1");
+    return runs;
+  });
+  const dispatch = vi.spyOn(f.service, "workspaceRoot");
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  await vi.waitFor(() => expect(dispatch).toHaveBeenCalled());
+  await f.orchestrator.dispose();
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0, message: "" });
 });
 
 it("counts a scheduled turn once when turn-started and completion notifications are repeated", async () => {
