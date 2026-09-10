@@ -473,6 +473,7 @@ export type SessionDiscoveryProvider = {
     entry: SessionIndexEntry,
     input?: {
       isCancelled?: () => boolean;
+      historySources?: { entry: SessionIndexEntry; sourceTurnId: string }[];
     }
   ) => Promise<HydratedSessionSnapshot | undefined>;
   hydrateSessionWindow?: (
@@ -1005,13 +1006,30 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     entry: SessionIndexEntry,
     input: {
       isCancelled?: () => boolean;
+      historySources?: { entry: SessionIndexEntry; sourceTurnId: string }[];
     } = {}
   ): Promise<HydratedSessionSnapshot | undefined> {
     const threadId = entry.providerSessionId;
     if (!threadId) {
       return undefined;
     }
-    return this.withHistory(entry, async (header, restored) => {
+    const readHistory = async (read: (thread: Thread, restored: boolean) => Promise<HydratedSessionSnapshot | undefined>) => {
+      if (!entry.archivedAt || !input.historySources) return this.withHistory(entry, read);
+      const header = await this.codexRuntimePort.readThread(threadId, false);
+      let sharedTurns: Thread["turns"] = [];
+      for (const source of input.historySources) {
+        const turns = await this.withHistory(source.entry, async (thread, restored) => {
+          const history = restored ? thread : await this.codexRuntimePort.readThread(thread.id, true);
+          const end = history.turns.findIndex((turn) => turn.id === source.sourceTurnId);
+          if (end < 0) throw new Error(`Fork point ${source.sourceTurnId} is missing from ${thread.id}`);
+          return history.turns.slice(0, end + 1);
+        });
+        // Every source contains a prefix of the same archived linear history.
+        if (turns.length > sharedTurns.length) sharedTurns = turns;
+      }
+      return read({ ...header, turns: sharedTurns }, true);
+    };
+    return readHistory(async (header, restored) => {
       const thread = restored ? header : await this.codexRuntimePort.readThread(threadId, true);
       if (input.isCancelled?.()) {
         return undefined;
@@ -1595,7 +1613,25 @@ export class SessionReconciliationService {
   ): Promise<boolean> {
     let hydrated: HydratedSessionSnapshot | undefined;
     try {
-      hydrated = await provider.hydrateSession(entry, { isCancelled: input.isCancelled });
+      const historySources: { entry: SessionIndexEntry; sourceTurnId: string }[] = [];
+      if (entry.archivedAt) {
+        const forks = this.sessionIndexStore.listRelations(entry.workspaceId)
+          .filter((relation) => relation.relationType === "fork");
+        const visit = (parentSessionId: string, sourceTurnId?: string): void => {
+          for (const fork of forks.filter((relation) => relation.parentSessionId === parentSessionId)) {
+            const child = this.sessionIndexStore.getEntry(fork.childSessionId);
+            const boundary = sourceTurnId ?? fork.sourceTurnId;
+            if (!child || !boundary) continue;
+            if (child.archivedAt) visit(child.sessionId, boundary);
+            else historySources.push({ entry: child, sourceTurnId: boundary });
+          }
+        };
+        visit(entry.sessionId);
+      }
+      hydrated = await provider.hydrateSession(entry, {
+        isCancelled: input.isCancelled,
+        historySources: entry.archivedAt ? historySources : undefined
+      });
     } catch (error) {
       if (entry.providerKind !== codexProviderKind || !entry.providerSessionId ||
           !(error instanceof Error) || !error.message.includes(`session ${entry.providerSessionId} is archived.`)) {

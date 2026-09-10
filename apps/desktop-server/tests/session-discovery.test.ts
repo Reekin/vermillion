@@ -14,6 +14,7 @@ import {
 } from "../src/engine-extensions/codex/turn-changes-store.js";
 import { SessionIndexStore } from "../src/session-index.js";
 import { SessionRuntimeService } from "../src/runtime-service.js";
+import { WrapperChatTreeService } from "../src/wrapper-chat-tree.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";
 import {
   consumeCodexRolloutTimestampForItem,
@@ -1517,6 +1518,74 @@ describe("Session discovery and reconciliation", () => {
       conversationId: "conversation-discovered:session-root-local",
       providerSessionId: "thread-child"
     });
+  });
+
+  it("cold-loads archived ancestors from surviving inherited histories without changing node ownership", async () => {
+    const baseDir = await createTempDir();
+    const index = new SessionIndexStore({ baseDir });
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const runtimeService = new SessionRuntimeService({
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
+    });
+    const histories: Record<string, string[]> = {
+      root: ["r"], A: ["r", "a1", "a2", "a-tail"],
+      B: ["r", "a1", "b1", "b-tail"], C: ["r", "a1", "b1", "c"], D: ["r", "a1", "a2", "d"]
+    };
+    for (const id of Object.keys(histories)) {
+      await index.upsertSession({ workspaceId: "workspace-1", session: {
+        ...buildHydratedWindow(id).session,
+        archivedAt: ["A", "B"].includes(id) ? "2026-09-10T00:00:00Z" : undefined
+      }, providerKind: "codex-thread", providerSessionId: `thread-${id}` });
+    }
+    for (const [parentSessionId, childSessionId, sourceTurnId] of [
+      ["root", "A", "r"], ["A", "B", "a1"], ["B", "C", "b1"], ["A", "D", "a2"]
+    ]) await index.upsertRelation({ workspaceId: "workspace-1", parentSessionId: parentSessionId!,
+      childSessionId: childSessionId!, sourceTurnId, relationType: "fork" });
+    const historyThread = (threadId: string): Thread => ({
+      ...createThread({ id: threadId }),
+      turns: histories[threadId.slice(7)]!.map((id) => ({
+        id, status: "completed", error: null,
+        items: [{ id: `question-${id}`, type: "userMessage", content: [{ type: "text", text: id, text_elements: [] }] }]
+      }))
+    });
+    const readThread = vi.fn(async (threadId: string, includeTurns: boolean) => {
+      if (includeTurns && ["thread-A", "thread-B"].includes(threadId)) {
+        throw new Error("paginated_threads is not supported yet");
+      }
+      return includeTurns ? historyThread(threadId) : {
+        ...createThread({ id: threadId }), status: { type: "notLoaded" as const }
+      };
+    });
+    const resumeThread = vi.fn(async (threadId: string) => {
+      if (["thread-A", "thread-B"].includes(threadId)) throw new Error("Archived threads cannot resume");
+      return historyThread(threadId);
+    });
+    const provider = new CodexSessionDiscoveryProvider({ codexRuntimePort: {
+      readThread, resumeThread, releaseHistoryRead: vi.fn(), attachThreadToSession: vi.fn()
+    } as never });
+    const reconciliation = new SessionReconciliationService({ workspaceRegistry, sessionIndexStore: index,
+      runtimeService, providers: [provider] });
+    const treeService = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index,
+      reconciliation, fork: vi.fn() });
+    try {
+      const tree = await treeService.get("C");
+      expect(tree.visibleTurnIds).toEqual(["r", "a1", "b1", "c"]);
+      expect(Object.fromEntries(tree.nodes.map((node) => [node.nodeId, node.sessionId]))).toEqual({
+        r: "root", a1: "A", a2: "A", b1: "B", c: "C", d: "D"
+      });
+      const snapshot = runtimeService.getSnapshot();
+      expect(snapshot.messageBlocks.filter((block) => block.turnId === "a1")).toEqual([
+        expect.objectContaining({ sessionId: "A", text: "a1" })
+      ]);
+      expect(index.getEntry("A")).toMatchObject({ archivedAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-A" });
+      expect(index.getEntry("B")).toMatchObject({ archivedAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-B" });
+      expect(resumeThread.mock.calls.flat()).not.toContain("thread-A");
+      expect(resumeThread.mock.calls.flat()).not.toContain("thread-B");
+      await treeService.jump("C", "d");
+      expect((await treeService.get("C")).visibleTurnIds).toEqual(["r", "a1", "a2", "d"]);
+    } finally {
+      treeService.dispose();
+    }
   });
 
   it("uses index-backed fork parent aliases when hydrating provider relations", async () => {

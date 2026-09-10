@@ -144,7 +144,12 @@ export class WrapperChatTreeService {
     await this.options.sessionIndexStore.ready();
     const members = this.options.sessionIndexStore.getTreeMembers(sessionId);
     if (!members.some((id) => this.loaded.has(id))) {
-      await Promise.all(members.map((id) => this.loadMember(id)));
+      if (members.some((id) => this.options.sessionIndexStore.getEntry(id)?.archivedAt)) {
+        // Ancestors borrow surviving histories before those members load themselves.
+        for (const id of members) await this.loadMember(id);
+      } else {
+        await Promise.all(members.map((id) => this.loadMember(id)));
+      }
     } else {
       for (const id of members.filter((id) => !this.loaded.has(id) && !this.loading.has(id))) {
         void this.loadMember(id).then(() => this.changed(sessionId)).catch(() => {});
