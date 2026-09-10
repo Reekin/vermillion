@@ -127,7 +127,10 @@ export class CodexMapper
                 ? { providerSessionId: result.providerSessionId }
                 : {})
             }
-          : { type: "command_accepted" }
+          : envelope.command.type === "steerTurn" && turnId && sessionId &&
+              (result?.delivery === "steered" || result?.delivery === "start_or_steer")
+            ? { type: "turn_delivered", sessionId, turnId, delivery: result.delivery }
+            : { type: "command_accepted" }
     });
   }
 

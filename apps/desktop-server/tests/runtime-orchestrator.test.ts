@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapter } from "@vermillion/adapters";
+import { CodexAdapter } from "@vermillion/adapters";
 import type { RuntimeEvent } from "@vermillion/shared";
-import { readSessionExecutionProfile } from "@vermillion/shared";
+import { parseSessionRpcResponse, readSessionExecutionProfile } from "@vermillion/shared";
 import { DomainService } from "../src/domain-service.js";
+import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
 import { RuntimeOrchestrator } from "../src/runtime-orchestrator.js";
 import type { SessionAgentBinding } from "../src/runtime-types.js";
 
@@ -1542,6 +1544,128 @@ describe("RuntimeOrchestrator", () => {
       expect.any(Error)
     );
     warn.mockRestore();
+  });
+
+  it.each(["steered", "start_or_steer", "rejected", "disconnected"] as const)(
+    "registers shared steering only after actual delivery, preserving handoff events: %s", async (delivery) => {
+      let listener: Parameters<AgentAdapter["subscribe"]>[0] | undefined;
+      const gate = createDeferred();
+      const emit = (event: RuntimeEvent) => listener?.({ eventId: `event-${Math.random()}`, event });
+      const adapter: AgentAdapter = {
+        id: "steer-adapter", kind: "codex", getLifecycleState: () => "ready",
+        initialize: async () => {}, dispose: async () => {},
+        subscribe: (next) => { listener = next; return () => { listener = undefined; }; },
+        executeCommand: async (envelope) => {
+          emit({ type: "turn.completed", sessionId: "worker", turnId: "old", finishReason: "completed" });
+          if (delivery === "steered" || delivery === "start_or_steer") {
+            emit({ type: "turn.started", sessionId: "worker", turnId: "actual" });
+            emit({ type: "message.started", sessionId: "worker", turnId: "actual", messageId: "native-echo", role: "user" });
+            emit({ type: "message.completed", sessionId: "worker", turnId: "actual", messageId: "native-echo", role: "user", finalText: "update" });
+          }
+          await gate.promise;
+          if (delivery === "disconnected") throw new Error("connection lost");
+          return { commandId: envelope.commandId, commandType: envelope.command.type,
+            accepted: delivery !== "rejected",
+            ...(delivery === "rejected" ? {} : { outcome: {
+              type: "turn_delivered" as const, sessionId: "worker", turnId: "actual", delivery
+            } }) };
+        }
+      };
+      const domainService = new DomainService({ now: () => "2026-09-10T00:00:00Z",
+        createSessionId: () => "worker", assertEngineRegistered: () => {},
+        resolveEngineCapabilities: () => ["chat"], publishRuntimeEvent: () => {} });
+      const orchestrator = new RuntimeOrchestrator({ domainService,
+        sessionIndexSyncService: { syncSession: async () => {}, syncRelation: async () => {}, markSessionUnreadCompleted: async () => {} } as never,
+        workspaceSelectionService: { activateSelection: async () => {} } as never,
+        publishRuntimeEvent: () => {}, agentBindings: [{
+          descriptor: { engineId: "codex", displayName: "Codex", capabilities: ["chat"] }, adapter
+        }] });
+      await orchestrator.createSession({ engineId: "codex" });
+      domainService.commitRuntimeEvent({ type: "turn.started", sessionId: "worker", turnId: "old" });
+      const command = { commandId: "update", command: { type: "steerTurn" as const,
+        sessionId: "worker", turnId: "old", messageId: "local-update", content: "update", attachments: [] } };
+      const pending = orchestrator.executeCommand(command);
+      // Attach the rejection assertion before releasing the gate.
+      const failed = delivery === "disconnected" ? expect(pending).rejects.toThrow("connection lost") : undefined;
+      await flushAsyncWork();
+      expect(domainService.getSnapshot().messageBlocks).toEqual([]);
+      await expect(orchestrator.executeCommand({ ...command, commandId: "overlap" })).resolves.toMatchObject({ accepted: false });
+      gate.resolve();
+      if (failed) await failed;
+      else if (delivery === "rejected") await expect(pending).resolves.toMatchObject({ accepted: false });
+      else {
+        const receipt = await pending;
+        expect(receipt).toMatchObject({ accepted: true, turnId: "actual", delivery });
+        expect(parseSessionRpcResponse({ id: "receipt", method: "runtime.command", ok: true, result: receipt }))
+          .toMatchObject({ result: { accepted: true, turnId: "actual", delivery } });
+      }
+      const snapshot = domainService.getSnapshot();
+      expect(snapshot.turns.find((turn) => turn.turnId === "old")).toMatchObject({ status: "completed", messageIds: [] });
+      if (delivery === "steered" || delivery === "start_or_steer") {
+        expect(snapshot.messageBlocks).toEqual([expect.objectContaining({ messageId: "local-update", turnId: "actual", text: "update" })]);
+        expect(snapshot.turns.find((turn) => turn.turnId === "actual")?.messageIds).toEqual(["local-update"]);
+      } else expect(snapshot.messageBlocks).toEqual([]);
+      await orchestrator.dispose();
+    }
+  );
+
+  it("blocks same-session user send while no-active steering fallback is pending", async () => {
+    const fallbackEntered = createDeferred();
+    const releaseFallback = createDeferred();
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath });
+    vi.spyOn(port, "start").mockResolvedValue();
+    let starts = 0;
+    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockImplementation(async (method) => {
+        if (method === "thread/start") return { thread: { id: "thread" } };
+        if (method === "turn/steer") throw Object.assign(new Error("no active turn to steer"), {
+          code: "runtime_protocol_error", details: { method: "turn/steer", jsonRpcCode: -32600 }
+        });
+        if (method === "turn/start") {
+          if (++starts === 1) return { turn: { id: "old" } };
+          fallbackEntered.resolve();
+          await releaseFallback.promise;
+          return { turn: { id: "fallback" } };
+        }
+        throw new Error(`Unexpected RPC: ${String(method)}`);
+      });
+    const domainService = new DomainService({ now: () => "2026-09-10T00:00:00Z",
+      createSessionId: () => "worker", assertEngineRegistered: () => {},
+      resolveEngineCapabilities: () => ["chat"], publishRuntimeEvent: () => {} });
+    const orchestrator = new RuntimeOrchestrator({ domainService,
+      sessionIndexSyncService: { syncSession: async () => {}, syncRelation: async () => {}, markSessionUnreadCompleted: async () => {} } as never,
+      workspaceSelectionService: { activateSelection: async () => {} } as never,
+      publishRuntimeEvent: () => {}, agentBindings: [{
+        descriptor: { engineId: "codex", displayName: "Codex", capabilities: ["chat"] },
+        adapter: new CodexAdapter({ runtimePort: port, fallbackAgentId: "codex" })
+      }] });
+    let steering: ReturnType<RuntimeOrchestrator["executeCommand"]> | undefined;
+    try {
+      await orchestrator.createSession({ engineId: "codex" });
+      await port.request({ id: "initial", method: "turn/start", params: { sessionId: "worker", content: "initial" } });
+      domainService.commitRuntimeEvent({ type: "turn.started", sessionId: "worker", turnId: "old" });
+      steering = orchestrator.executeCommand({ commandId: "update", command: {
+        type: "steerTurn", sessionId: "worker", turnId: "old", messageId: "update-message", content: "update", attachments: []
+      } });
+      await fallbackEntered.promise;
+      await expect(orchestrator.executeCommand({ commandId: "user-send", command: {
+        type: "sendUserMessage", sessionId: "worker", messageId: "user-message", content: "user question", attachments: []
+      } })).resolves.toMatchObject({ accepted: false });
+      expect(rpc.mock.calls.map(([method]) => method)).toEqual(["thread/start", "turn/start", "turn/steer", "turn/start"]);
+      expect(domainService.getSnapshot().turns.map((turn) => turn.turnId)).toEqual(["old"]);
+      expect(domainService.getSnapshot().messageBlocks).toEqual([]);
+      releaseFallback.resolve();
+      await expect(steering).resolves.toMatchObject({ accepted: true, turnId: "fallback", delivery: "start_or_steer" });
+      expect(domainService.getSnapshot().messageBlocks).toEqual([
+        expect.objectContaining({ messageId: "update-message", turnId: "fallback", text: "update" })
+      ]);
+      expect(domainService.getSnapshot().turns.map((turn) => turn.turnId).sort()).toEqual(["fallback", "old"]);
+      expect(starts).toBe(2);
+    } finally {
+      releaseFallback.resolve();
+      await steering?.catch(() => {});
+      await orchestrator.dispose();
+    }
   });
 
   it("rejects mismatched canonical events and restores idle after adapter failure", async () => {

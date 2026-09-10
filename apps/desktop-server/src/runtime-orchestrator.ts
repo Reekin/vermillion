@@ -335,22 +335,32 @@ export class RuntimeOrchestrator {
       }
       case "steerTurn": {
         const session = this.domainService.requireSession(envelope.command.sessionId);
-        this.localUserMessageIdByTurn.set(
-          envelope.command.turnId,
-          envelope.command.messageId
-        );
-        this.domainService.commitSteerUserMessage(envelope.command);
-        const receipt = await this.forwardSessionCommand(envelope.command.sessionId, envelope, {
-          before: () => {
-            this.domainService.commitRuntimeEvent({
-              type: "session.updated",
-              conversationId: session.conversationId,
-              sessionId: session.sessionId,
-              status: "running"
-            });
+        if (this.pendingSendStartBySessionId.has(session.sessionId)) {
+          return this.accept(envelope, false);
+        }
+        const pendingStart: PendingSendStart = { bufferedEvents: [] };
+        this.pendingSendStartBySessionId.set(session.sessionId, pendingStart);
+        try {
+          const result = await this.forwardSessionCommandResult(session.sessionId, envelope);
+          const outcome = result.outcome;
+          if (!result.accepted || outcome?.type !== "turn_delivered" || outcome.sessionId !== session.sessionId) {
+            return { ...this.accept(envelope, false), ...(result.error ? { error: result.error } : {}) };
           }
-        });
-        return receipt;
+          this.localUserMessageIdByTurn.set(outcome.turnId, envelope.command.messageId);
+          if (outcome.delivery === "start_or_steer") {
+            this.domainService.commitAcceptedUserMessage({ ...envelope.command, type: "sendUserMessage" }, outcome.turnId);
+          } else {
+            this.domainService.commitSteerUserMessage({ ...envelope.command, turnId: outcome.turnId });
+          }
+          return this.accept(envelope, true, {
+            sessionId: outcome.sessionId, turnId: outcome.turnId, delivery: outcome.delivery
+          });
+        } finally {
+          // During a handoff this buffer can also contain the old turn's completion.
+          // Preserve those events on rejection, without publishing an unaccepted input.
+          this.pendingSendStartBySessionId.delete(session.sessionId);
+          this.drainPendingSendEvents(pendingStart);
+        }
       }
       case "interruptTurn":
         return this.forwardSessionCommand(envelope.command.sessionId, envelope);
@@ -628,6 +638,7 @@ export class RuntimeOrchestrator {
     canonicalTurn: {
       sessionId?: string;
       turnId?: string;
+      delivery?: "steered" | "start_or_steer";
       providerSessionId?: string;
     } = {}
   ): CommandReceipt {

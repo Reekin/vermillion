@@ -659,6 +659,65 @@ describe("Codex app-server runtime port", () => {
     }
   });
 
+  it.each([
+    { rejection: "no active turn to steer", expected: ["turn/steer", "turn/start"], delivery: "start_or_steer" },
+    { rejection: "expected active turn id `old` but found `new`", expected: ["turn/steer", "turn/steer"], delivery: "steered" }
+  ])("delivers shared steering after confirmed rejection: $rejection", async ({ rejection, expected, delivery }) => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
+    vi.spyOn(port, "start").mockResolvedValue();
+    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockResolvedValueOnce({ thread: { id: "thread" } })
+      .mockResolvedValueOnce({ turn: { id: "old" } });
+    await port.request({ id: "start", method: "turn/start", params: { sessionId: "worker", content: "initial" } });
+    rpc.mockReset().mockResolvedValueOnce({}).mockRejectedValueOnce(Object.assign(new Error(rejection), {
+      code: "runtime_protocol_error", details: { method: "turn/steer", jsonRpcCode: -32600 }
+    })).mockResolvedValueOnce(delivery === "steered" ? { turnId: "new" } : { turn: { id: "new" } });
+    const response = await port.request({ id: "update", method: "turn/steer", params: {
+      sessionId: "worker", workspaceId: "workspace", turnId: "old", content: "update", attachments: []
+    } });
+    expect(response.result).toEqual({ accepted: true, sessionId: "worker", turnId: "new", delivery });
+    expect(rpc.mock.calls.map(([method]) => method)).toEqual(["thread/inject_items", ...expected]);
+    expect(rpc.mock.calls[2]![1]).toEqual(expect.objectContaining({ threadId: "thread", input: [{ type: "text", text: "update", text_elements: [] }] }));
+    if (delivery === "steered") expect(rpc.mock.calls[2]![1]).toHaveProperty("expectedTurnId", "new");
+  });
+
+  it.each([
+    new Error("connection lost"),
+    Object.assign(new Error("no active turn to steer"), { code: "runtime_request_timeout", details: { method: "turn/steer" } }),
+    Object.assign(new Error("cannot steer a review turn"), { code: "runtime_protocol_error", details: { method: "turn/steer" } })
+  ])("does not redeliver uncertain or unsupported steering rejection: %s", async (error) => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
+    vi.spyOn(port, "start").mockResolvedValue();
+    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockResolvedValueOnce({ thread: { id: "thread" } })
+      .mockResolvedValueOnce({ turn: { id: "old" } });
+    await port.request({ id: "start", method: "turn/start", params: { sessionId: "worker", content: "initial" } });
+    rpc.mockReset().mockRejectedValue(error);
+    await expect(port.request({ id: "update", method: "turn/steer", params: {
+      sessionId: "worker", turnId: "old", content: "update"
+    } })).rejects.toBe(error);
+    expect(rpc).toHaveBeenCalledOnce();
+  });
+
+  it("bounds repeated turn mismatches without starting or duplicating input", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
+    vi.spyOn(port, "start").mockResolvedValue();
+    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockResolvedValueOnce({ thread: { id: "thread" } })
+      .mockResolvedValueOnce({ turn: { id: "old" } });
+    await port.request({ id: "start", method: "turn/start", params: { sessionId: "worker", content: "initial" } });
+    const rejection = (expected: string, actual: string) => Object.assign(
+      new Error(`expected active turn id \`${expected}\` but found \`${actual}\``),
+      { code: "runtime_protocol_error", details: { method: "turn/steer", jsonRpcCode: -32600 } }
+    );
+    const second = rejection("new", "newer");
+    rpc.mockReset().mockRejectedValueOnce(rejection("old", "new")).mockRejectedValueOnce(second);
+    await expect(port.request({ id: "update", method: "turn/steer", params: {
+      sessionId: "worker", turnId: "old", content: "update"
+    } })).rejects.toBe(second);
+    expect(rpc.mock.calls.map(([method]) => method)).toEqual(["turn/steer", "turn/steer"]);
+  });
+
   it("resumes the provider thread before starting a turn when no runtime binding exists", async () => {
     const port = createCodexAppServerRuntimePort({
       commandPath: process.execPath,

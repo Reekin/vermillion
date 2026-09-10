@@ -188,6 +188,7 @@ export type SessionCapabilityContext = ResolvedSessionContext & {
 };
 
 export type SessionActionOptions = {
+  preserveExecution?: boolean;
   fromTurnId?: string;
   activateFork?: boolean;
   cwd?: string;

@@ -186,10 +186,10 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
       if (!threadId) {
         throw new Error("Resume is unavailable without a provider thread id.");
       }
-      await this.codexRuntimePort.interruptThread(threadId, {
-        bestEffort: true
-      });
-      await this.codexRuntimePort.unsubscribeThread(threadId);
+      if (!input.preserveExecution) {
+        await this.codexRuntimePort.interruptThread(threadId, { bestEffort: true });
+        await this.codexRuntimePort.unsubscribeThread(threadId);
+      }
       const cwd = input.cwd ?? input.session?.metadata?.cwd ?? input.indexEntry?.metadata?.cwd;
       const storedInstructions = input.session?.metadata?.developerInstructions ?? input.indexEntry?.metadata?.developerInstructions;
       const instructions = input.developerInstructions ?? storedInstructions;
@@ -202,6 +202,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         await this.codexRuntimePort.injectDeveloperInstructions(thread.id, input.developerInstructions);
       }
       this.codexRuntimePort.attachThreadToSession(input.sessionId, thread.id);
+      if (input.preserveExecution) this.codexRuntimePort.trackResumedTurn(input.sessionId, thread);
       if (input.cwd || input.metadata || input.developerInstructions !== undefined) {
         await input.runtimeService.updateSessionMetadata(input.sessionId,
           { ...input.metadata, ...(input.cwd ? { cwd: input.cwd } : {}),

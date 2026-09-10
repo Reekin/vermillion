@@ -8,6 +8,18 @@ const codexProviderHandle = (providerSessionId = "thread-1") => ({
 });
 
 describe("CodexSessionActionsProvider", () => {
+  it("reconnects background execution without interrupting, unsubscribing or reinjecting the same role", async () => {
+    const port = { resumeThread: vi.fn().mockResolvedValue({ id: "thread-1", turns: [{ id: "active", status: "inProgress" }] }),
+      interruptThread: vi.fn(), unsubscribeThread: vi.fn(), attachThreadToSession: vi.fn(), trackResumedTurn: vi.fn(), injectDeveloperInstructions: vi.fn() };
+    const provider = new CodexSessionActionsProvider({ codexRuntimePort: port as unknown as CodexAppServerRuntimePort });
+    await provider.runAction({ sessionId: "worker", action: "resume", preserveExecution: true,
+      providerHandle: codexProviderHandle(), session: { metadata: { developerInstructions: "WORKER" } } as never,
+      sessionIndexStore: {} as never, runtimeService: {} as never });
+    expect(port.interruptThread).not.toHaveBeenCalled();
+    expect(port.unsubscribeThread).not.toHaveBeenCalled();
+    expect(port.injectDeveloperInstructions).not.toHaveBeenCalled();
+    expect(port.trackResumedTurn).toHaveBeenCalledWith("worker", expect.objectContaining({ id: "thread-1" }));
+  });
   it("switches explicit role instructions once and retains them on subsequent resumes", async () => {
     const session = { metadata: { cwd: "I:/workspace", developerInstructions: "PREPARATION_ROLE" } };
     const resumeThread = vi.fn().mockResolvedValue({ id: "thread-worker" });

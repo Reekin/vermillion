@@ -280,6 +280,8 @@ export const zExecution = zProcess.extend({
   stage: z.enum(["open", "deliver", "execute"]),
   runId: z.string().optional(),
   deliveredAt: z.string().optional(),
+  /** Most recent turn started by scheduler delivery, used to recover its origin. */
+  scheduledTurnId: z.string().optional(),
   idleTurns: z.number().int().nonnegative()
 });
 export type Execution = z.infer<typeof zExecution>;

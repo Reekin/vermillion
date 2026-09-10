@@ -89,10 +89,18 @@ it("interrupts a cancelled worker before sending work to the next shared-resourc
   expect((await f.service.getWorkItem(f.workspaceId, second.workItemId)).status).toBe("running");
 });
 
-async function fixture() {
+async function fixture(trackTurns = false) {
   const f = await setup(); fixtures.push(f);
   const active = new Set<string>();
   const listeners = new Set<Parameters<AgentRunner["onTurnCompleted"]>[0]>();
+  const started = new Set<Parameters<NonNullable<AgentRunner["onTurnStarted"]>>[0]>();
+  const activeTurns = new Map<string, string>();
+  let turnSequence = 0;
+  const startTurn = (sessionId: string, turnId: string) => {
+    active.add(sessionId);
+    activeTurns.set(sessionId, turnId);
+    for (const listener of started) listener({ sessionId, turnId });
+  };
   let sequence = 0;
   const runner: AgentRunner = {
     open: vi.fn(async () => ({ sessionId: "open-" + ++sequence })),
@@ -103,19 +111,33 @@ async function fixture() {
     resolveSourceTurn: vi.fn(async () => "source-turn"),
     resume: vi.fn(async () => true),
     release: vi.fn(async () => {}),
-    send: vi.fn(async (id) => { active.add(id); }),
-    steer: vi.fn(async () => ({ turnId: "active-turn" })),
+    send: vi.fn(async (id) => {
+      if (!trackTurns) { active.add(id); return; }
+      const turnId = "turn-" + ++turnSequence;
+      startTurn(id, turnId);
+      return { turnId };
+    }),
+    steer: vi.fn(async (id) => ({ turnId: activeTurns.get(id) ?? "active-turn" })),
     interrupt: vi.fn(async (id) => { active.delete(id); }),
     isActive: (id) => active.has(id),
+    ...(trackTurns ? {
+      getActiveTurnId: (id: string) => activeTurns.get(id),
+      onTurnStarted: (listener: Parameters<NonNullable<AgentRunner["onTurnStarted"]>>[0]) => {
+        started.add(listener); return () => { started.delete(listener); };
+      }
+    } : {}),
     onTurnCompleted: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
   };
   const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner });
   orchestrators.push(orchestrator);
-  const complete = (sessionId: string, turnId = "end") => {
-    active.delete(sessionId);
-    for (const listener of listeners) listener({ sessionId, turnId, finishReason: "completed" });
+  const complete = (sessionId: string, turnId = activeTurns.get(sessionId) ?? "end", finishReason: "completed" | "failed" = "completed") => {
+    if (!activeTurns.has(sessionId) || activeTurns.get(sessionId) === turnId) {
+      active.delete(sessionId);
+      activeTurns.delete(sessionId);
+    }
+    for (const listener of listeners) listener({ sessionId, turnId, finishReason, ...(finishReason === "failed" ? { failure: "Runtime failed" } : {}) });
   };
-  return { ...f, runner, active, orchestrator, complete };
+  return { ...f, runner, active, orchestrator, complete, startTurn };
 }
 
 it("sends composed input and configured preparation together after the selected source finishes", async () => {
@@ -223,6 +245,269 @@ it("steers changed contracts into an active worker and voids the old turn's subm
   await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "New criterion", objective: "Updated result" });
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBe("active-turn"));
   expect(f.runner.steer).toHaveBeenCalled();
+});
+
+it("waits for a returned submission's turn and its completion settlement before sending its continuation", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "Updated contract", objective: "Updated result" });
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBe("turn-1"));
+  expect((await f.service.submitWorkItem(f.workspaceId, item.workItemId, submission)).status).toBe("queued");
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  const settled = vi.spyOn(f.service, "workerTurnCompleted");
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  settled.mockImplementationOnce(async () => { await gate; });
+  f.complete("original", "turn-1");
+  try {
+    await vi.waitFor(() => expect(settled).toHaveBeenCalled());
+    expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("queued");
+    expect(f.runner.send).toHaveBeenCalledOnce();
+    expect(f.runner.steer).toHaveBeenCalledOnce();
+  } finally { release(); }
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  const continuation = vi.mocked(f.runner.send).mock.calls[1]![1];
+  expect(continuation).toContain("提交作废");
+  expect(continuation).not.toContain("尚未落实处置");
+  expect(continuation).not.toContain("你负责工单");
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0 });
+  f.complete("original", "turn-1");
+  await vi.waitFor(() => expect(settled).toHaveBeenCalledTimes(2));
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+  expect(f.runner.send).toHaveBeenCalledTimes(2);
+});
+
+it("continues an updated contract without idle accounting when the stale turn ends without submitting", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", deliveredAt: expect.any(String) }));
+  await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "Updated contract", objective: "Updated result" });
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBe("turn-1"));
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", message: "" }));
+  f.complete("original", "turn-1");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(f.runner.send).mock.calls[1]).toEqual(["original", "本轮已结束。重新执行 vermillion workItem.get 读取最新合同，按新合同继续。"]);
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0 });
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBeUndefined();
+});
+
+it("keeps a user-started turn when the previous completion is delayed, without idle-failure accounting", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  const completed = vi.spyOn(f.service, "workerTurnCompleted");
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", deliveredAt: expect.any(String) }));
+  await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "New contract", objective: "Updated result" });
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBe("turn-1"));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  completed.mockImplementationOnce(async () => { await gate; });
+  f.complete("original", "turn-1");
+  try {
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
+    f.startTurn("original", "user-turn");
+  } finally { release(); }
+  const cleanup = vi.spyOn(f.service, "releaseIdleWorkers");
+  await vi.waitFor(() => expect(cleanup).toHaveBeenCalled());
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ status: "running", stage: "execute", idleTurns: 0, attempts: 0 });
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBeUndefined();
+  expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1, status: "running" });
+  expect(f.runner.interrupt).not.toHaveBeenCalled();
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect(f.runner.resume).toHaveBeenCalledOnce();
+  cleanup.mockClear();
+  f.complete("original", "user-turn");
+  await vi.waitFor(() => expect(cleanup).toHaveBeenCalled());
+  await f.orchestrator.dispose();
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0 });
+  expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 2, status: "running" });
+  expect(f.runner.send).toHaveBeenCalledOnce();
+});
+
+it("atomically drops old idle accounting when a user starts while completion persistence is waiting", async () => {
+  const f = await fixture(true);
+  const timeline: Array<{ event: string; at: string; elapsedMs: number; sessionId: string; turnId: string; turns?: number }> = [];
+  const startedAt = performance.now();
+  const record = (event: string, turnId: string, turns?: number) => timeline.push({
+    event, at: new Date().toISOString(), elapsedMs: performance.now() - startedAt, sessionId: "original", turnId,
+    ...(turns === undefined ? {} : { turns })
+  });
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  const settle = f.service.settleWorkerTurn.bind(f.service);
+  const waiting = vi.spyOn(f.service, "settleWorkerTurn");
+  const heartbeat = vi.spyOn(f.service, "heartbeatWorkItem");
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  waiting.mockImplementationOnce(async (workspaceId, workItemId, input) => {
+    record("settlement.waiting", input.turnId!);
+    await gate;
+    return settle(workspaceId, workItemId, { ...input, ownsExecution: () => {
+      record("transaction.processing", input.turnId!);
+      return input.ownsExecution();
+    } });
+  });
+  record("completion.emitted", "turn-1");
+  f.complete("original", "turn-1");
+  try {
+    await vi.waitFor(() => expect(waiting).toHaveBeenCalledOnce());
+    record("turn.started", "user-turn");
+    f.startTurn("original", "user-turn");
+  } finally { release(); }
+  await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1 }));
+  record("run.counted", "turn-1", (await f.service.listRuns(f.workspaceId))[0]!.turns);
+  record("completion.duplicate.emitted", "turn-1");
+  f.complete("original", "turn-1");
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  await f.orchestrator.dispose();
+  expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1, status: "running" });
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", idleTurns: 0, attempts: 0, message: "" });
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+  expect(heartbeat).not.toHaveBeenCalled(); // Heartbeat and idle accounting now share the guarded record commit.
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect(f.runner.resume).toHaveBeenCalledOnce();
+  record("run.final", "turn-1", (await f.service.listRuns(f.workspaceId))[0]!.turns);
+  expect(timeline.map(({ event }) => event)).toEqual([
+    "completion.emitted", "settlement.waiting", "turn.started", "transaction.processing",
+    "run.counted", "completion.duplicate.emitted", "run.final"
+  ]);
+  expect(timeline.every((entry, index) => index === 0 || entry.elapsedMs >= timeline[index - 1]!.elapsedMs)).toBe(true);
+  expect(timeline.filter(({ turns }) => turns !== undefined).map(({ turns }) => turns)).toEqual([1, 1]);
+  console.info("[controlled worker turn handoff]", JSON.stringify({ workItemId: item.workItemId, timeline }, null, 2));
+});
+
+it("does not recover a tracked turn across an asynchronous run reload during reconciliation", async () => {
+  const f = await fixture(true);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", deliveredAt: expect.any(String) }));
+  const listRuns = f.service.listRuns.bind(f.service);
+  vi.spyOn(f.service, "listRuns").mockImplementationOnce(async (...args) => {
+    const runs = await listRuns(...args);
+    f.complete("original", "turn-1");
+    return runs;
+  });
+  const dispatch = vi.spyOn(f.service, "workspaceRoot");
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  await vi.waitFor(() => expect(dispatch).toHaveBeenCalled());
+  await f.orchestrator.dispose();
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0, message: "" });
+});
+
+it("counts a scheduled turn once when turn-started and completion notifications are repeated", async () => {
+  const f = await fixture(true);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  f.startTurn("original", "turn-1");
+  f.complete("original", "turn-1");
+  f.complete("original", "turn-1");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 1, attempts: 0 });
+  expect((await f.service.listRuns(f.workspaceId)).filter((run) => run.status === "done")).toHaveLength(1);
+});
+
+it.each(["completed", "failed"] as const)("recovers scheduled %s accounting after reconstruction", async (finishReason) => {
+  const f = await fixture(true);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", scheduledTurnId: "turn-1" }));
+  await f.orchestrator.dispose();
+  const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
+  orchestrators.push(restarted);
+  restarted.start();
+  await vi.waitFor(() => expect(f.runner.resume).toHaveBeenCalledTimes(2));
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  f.complete("original", "turn-1", finishReason);
+  if (finishReason === "failed") {
+    await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ status: "retry", attempts: 1, failure: "turn failed: Runtime failed", retryAt: expect.any(String) }));
+    expect(f.runner.send).toHaveBeenCalledOnce();
+  } else {
+    await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+    expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 1, attempts: 0 });
+  }
+});
+
+it("does not exempt an active turn of unknown origin after reconstruction", async () => {
+  const f = await fixture(true);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  await f.orchestrator.dispose();
+  const action = (await f.service.listActions(f.workspaceId))[0]!;
+  await f.service.updateAction(f.workspaceId, action, (latest) => ({ ...latest, scheduledTurnId: undefined }));
+  const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
+  orchestrators.push(restarted);
+  restarted.start();
+  await vi.waitFor(() => expect(f.runner.resume).toHaveBeenCalledTimes(2));
+  f.complete("original", "turn-1");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 1, attempts: 0 });
+});
+
+it("keeps a known user followup exempt after reconstruction", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", scheduledTurnId: "turn-1" }));
+  f.startTurn("original", "user-followup");
+  f.complete("original", "turn-1");
+  await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1 }));
+  await f.orchestrator.dispose();
+  const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
+  orchestrators.push(restarted);
+  restarted.start();
+  await vi.waitFor(() => expect(f.runner.resume).toHaveBeenCalledTimes(2));
+  f.complete("original", "user-followup");
+  await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 2 }));
+  await restarted.dispose();
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", idleTurns: 0, attempts: 0, scheduledTurnId: "turn-1" });
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect(f.runner.interrupt).not.toHaveBeenCalled();
+});
+
+it("captures the started scheduled turn when send returns after its completion", async () => {
+  const f = await fixture(true);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  let completedTurnOrigin: unknown;
+  vi.mocked(f.runner.send).mockImplementationOnce(async (sessionId) => {
+    f.startTurn(sessionId, "fast-turn");
+    f.complete(sessionId, "fast-turn");
+  }).mockImplementationOnce(async (sessionId) => {
+    completedTurnOrigin = (await f.service.listActions(f.workspaceId))[0];
+    f.startTurn(sessionId, "next-turn");
+    return { turnId: "next-turn" };
+  });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(completedTurnOrigin).toMatchObject({ scheduledTurnId: "fast-turn" }));
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 1, attempts: 0 });
+});
+
+it("tracks a new turn opened by steer fallback without marking its submission stale", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  vi.mocked(f.runner.steer).mockImplementationOnce(async () => {
+    f.complete("original", "turn-1");
+    f.startTurn("original", "fallback-turn");
+    return {};
+  });
+  await f.service.updateWorkItem(f.workspaceId, item.workItemId, { note: "Updated", objective: "Updated result" });
+  await vi.waitFor(() => expect(f.runner.steer).toHaveBeenCalledOnce());
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", message: "" }));
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.staleTurnId).toBeUndefined();
+  f.complete("original", "fallback-turn");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 1, attempts: 0 });
 });
 
 it("delivers decision answers and parked adjustments once without replaying worker instructions", async () => {
