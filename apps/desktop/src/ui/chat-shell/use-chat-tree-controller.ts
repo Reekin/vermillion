@@ -138,7 +138,6 @@ export const useChatTreeController = (input: {
     setFailedSessionId(undefined);
     setSends(undefined);
     selectSend(undefined);
-    hydratedWindowKeyBySessionIdRef.current.clear();
     navigationRef.current += 1;
     return () => { requestIdRef.current += 1; };
   }, [sessionId]);
