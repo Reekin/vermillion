@@ -13,7 +13,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
-it("carries independent model overrides through the role RPC without inheriting global header fields", async () => {
+it("carries independent model overrides through the role RPC and inherits omitted append fields", async () => {
   const root = await mkdtemp(join(tmpdir(), "verm-role-execution-"));
   dirs.push(root);
   const roles = new RoleService({ globalDir: root });
@@ -28,7 +28,11 @@ it("carries independent model overrides through the role RPC without inheriting 
     });
     await client.request("role.write", { ...params, content: "---\r\nmode: append\r\nreasoningOptionId: 'low' # selection\r\nserviceTierId: null\r\n---\r\nProject" });
     expect(await client.request("role.resolve", params)).toEqual({
-      content: "Global\n\nProject", modelConfig: { reasoningOptionId: "low", serviceTierId: null }
+      content: "Global\n\nProject", modelConfig: { modelId: "global-model", reasoningOptionId: "low", serviceTierId: null }
+    });
+    await client.request("role.write", { ...params, content: "---\nmode: append\n---\n" });
+    expect(await client.request("role.resolve", params)).toEqual({
+      content: "Global", modelConfig: { modelId: "global-model", reasoningOptionId: "high", serviceTierId: "priority" }
     });
     await client.request("role.write", { ...params, content: '---\nmodel: "role-model"\nreasoningOptionId: null\n---\nProject' });
     expect(await client.request("role.resolve", params)).toEqual({

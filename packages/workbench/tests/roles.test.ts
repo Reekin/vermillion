@@ -57,7 +57,7 @@ describe("role prompt composition", () => {
       const params = { workspaceId, roleId: "worker" };
       expect(await rpc({ method: "role.write", params: { ...params, content: raw } })).toEqual({ ok: true, result: {} });
       expect(await rpc({ method: "role.read", params })).toEqual({ ok: true, result: { content: raw, source: "workspace" } });
-      expect(await rpc({ method: "role.resolve", params })).toEqual({ ok: true, result: { content: "# Global\nGlobal instructions.\n\nProject" } });
+      expect(await rpc({ method: "role.resolve", params })).toEqual({ ok: true, result: { content: "# Global\nGlobal instructions.\n\nProject", modelConfig: { modelId: "example" } } });
       expect((await rpc({ method: "role.write", params: { ...params, content: "---\nmode: invalid\n---\nBad" } })).ok).toBe(false);
       expect((await roles.read(root, "worker")).content).toBe(raw);
     } finally {

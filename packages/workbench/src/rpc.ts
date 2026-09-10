@@ -64,7 +64,7 @@ export const workbenchRpc = {
 
   "role.list": { params: zWs, result: z.array(zRoleFile) },
   "role.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string(), source: zRoleFile.shape.source }) },
-  "role.editor.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ document: zRoleDocument, source: zRoleFile.shape.source }) },
+  "role.editor.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ document: zRoleDocument, source: zRoleFile.shape.source, globalDocument: zRoleDocument.optional() }) },
   "role.editor.write": { params: zWs.extend({ roleId: z.string().min(1), document: zRoleDocument }), result: zEmpty },
   "role.resolve": { params: zWs.extend({ roleId: z.string().min(1) }), result: zResolvedRole },
   "role.write": { params: zWs.extend({ roleId: z.string().min(1), content: z.string() }), result: zEmpty },

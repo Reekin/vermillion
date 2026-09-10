@@ -282,6 +282,13 @@ export class WorkbenchService {
     return this.roles.read((await this.context(workspaceId)).rootPath, roleId);
   }
 
+  async readRoleEditor(workspaceId: string, roleId: string) {
+    const rootPath = (await this.context(workspaceId)).rootPath;
+    const role = await this.roles.read(rootPath, roleId);
+    const globalContent = await this.roles.readGlobal(roleId);
+    return { ...role, ...(globalContent === undefined ? {} : { globalContent }) };
+  }
+
   async resolveRole(workspaceId: string, roleId: string) {
     return this.roles.resolve((await this.context(workspaceId)).rootPath, roleId);
   }

@@ -24,11 +24,18 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "role.list": (p) => service.listRoles(p.workspaceId),
     "role.read": (p) => service.readRole(p.workspaceId, p.roleId),
     "role.editor.read": async (p) => {
-      const { content, source } = await service.readRole(p.workspaceId, p.roleId);
-      return { document: parseRoleDocument(content), source };
+      const { content, source, globalContent } = await service.readRoleEditor(p.workspaceId, p.roleId);
+      const document = parseRoleDocument(content);
+      const globalDocument = globalContent === undefined ? undefined : { ...parseRoleDocument(globalContent), mode: "global" as const };
+      return {
+        document: { ...document, mode: source === "global" ? "global" as const : document.mode },
+        source,
+        ...(globalDocument ? { globalDocument } : {})
+      };
     },
     "role.editor.write": async (p) => {
-      await service.writeRoleOverride(p.workspaceId, p.roleId, serializeRoleDocument(p.document));
+      if (p.document.mode === "global") await service.resetRoleOverride(p.workspaceId, p.roleId);
+      else await service.writeRoleOverride(p.workspaceId, p.roleId, serializeRoleDocument(p.document));
       return {};
     },
     "role.resolve": (p) => service.resolveRole(p.workspaceId, p.roleId),
