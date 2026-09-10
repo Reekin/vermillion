@@ -1,4 +1,4 @@
-import { useMemo, type ReactElement, type ReactNode } from "react";
+import { useMemo, type ReactElement, type ReactNode, type MouseEvent } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import { buildChatTreeGraphLayout } from "./chat-tree-layout.js";
 
@@ -11,6 +11,7 @@ export type ChatTreePanelProps = {
   loading?: boolean;
   error?: string;
   onJump?: (nodeId: string) => void;
+  onNodeContextMenu?: (event: MouseEvent, nodeId: string) => void;
   nodeMarkers?: Readonly<Record<string, string>>;
   header?: ReactNode;
   footer?: ReactNode;
@@ -28,6 +29,7 @@ export const ChatTreePanel = ({
   error,
   operations = [],
   onJump,
+  onNodeContextMenu,
   nodeMarkers = {},
   header,
   footer,
@@ -122,6 +124,7 @@ export const ChatTreePanel = ({
                 top: `${entry.y}px`
               }}
               onDoubleClick={() => onJump?.(entry.node.nodeId)}
+              onContextMenu={virtual ? undefined : (event) => onNodeContextMenu?.(event, entry.node.nodeId)}
               title={`${shortLabel(entry.node)}${status ? `\n${status}` : ""}${
                 entry.isCurrent ? "\nCurrent position." : "\nDouble-click to switch."
               }${entry.node.status === "pending" ? "\nRunning." : ""}`}

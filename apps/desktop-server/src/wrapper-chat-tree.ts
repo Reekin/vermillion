@@ -65,12 +65,16 @@ export class WrapperChatTreeService {
     const paths = new Map<string, string[]>();
     const nodes: ChatTreeNodeSnapshot[] = [];
     const turnsById = new Map<string, Turn>();
-    const windows = members.map((memberId) => {
+    let windows = members.map((memberId) => {
       const session = snapshot.sessions.find((item) => item.sessionId === memberId)!;
       const relation = relations.find((item) => item.relationType === "fork" && item.childSessionId === memberId);
       const parentPath = relation ? paths.get(relation.parentSessionId) ?? [] : [];
+      const sourceIndex = relation?.sourceTurnId ? parentPath.indexOf(relation.sourceTurnId) : -1;
+      // Archived history can end before its original fork point after a descendant reforks earlier.
+      const prefixEnd = sourceIndex < 0 && index.getEntry(memberId)?.archivedAt
+        ? parentPath.length : sourceIndex + 1;
       const prefix = relation?.sourceTurnId
-        ? parentPath.slice(0, parentPath.indexOf(relation.sourceTurnId) + 1) : [];
+        ? parentPath.slice(0, prefixEnd) : [];
       const turns = snapshot.turns.filter((turn) => turn.sessionId === memberId)
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
       let parentNodeId = prefix.at(-1);
@@ -102,9 +106,30 @@ export class WrapperChatTreeService {
         hasOlder: false, hasNewer: false
       });
     });
+    // Archived sessions supply shared history, but never a selectable/sendable path.
+    for (const memberId of members) {
+      if (index.getEntry(memberId)?.archivedAt) paths.delete(memberId);
+    }
+    const retained = new Set([...paths.values()].flat());
+    const visibleNodes = nodes.filter((node) => retained.has(node.nodeId));
+    const parentIds = new Set(visibleNodes.map((node) => node.parentNodeId));
+    const forkIds = new Set(relations.filter((relation) => relation.relationType === "fork")
+      .map((relation) => relation.childSessionId));
+    const complete = index.getTreeMembers(sessionId).every((id) => this.loaded.has(id));
+    for (const node of visibleNodes) {
+      const owner = turnsById.get(node.nodeId)!.sessionId;
+      Object.assign(node, { sessionId: owner, canArchive: complete && !parentIds.has(node.nodeId) &&
+        forkIds.has(owner) && !index.getEntry(owner)?.archivedAt });
+    }
+    windows = windows.map((window) => buildSessionWindowSnapshotFromPage({
+      ...window.snapshot, ...window,
+      session: window.snapshot.sessions.find((session) => session.sessionId === window.sessionId)!,
+      conversation: window.snapshot.conversations[0]!,
+      turns: window.snapshot.turns.filter((turn) => retained.has(turn.turnId))
+    }));
     const view = index.getTreeView(treeId);
     const stored = view && paths.has(view.sessionId) ? view : undefined;
-    const currentSessionId = stored?.sessionId ?? (paths.has(sessionId) ? sessionId : treeId);
+    const currentSessionId = stored?.sessionId ?? (paths.has(sessionId) ? sessionId : paths.keys().next().value ?? treeId);
     // Legacy views did not distinguish automatic cursors from explicit jumps; resume tip following.
     const currentNodeId = stored?.followTip === false ? stored.nodeId : paths.get(currentSessionId)?.at(-1);
     const currentPath = paths.get(currentSessionId) ?? [];
@@ -113,7 +138,7 @@ export class WrapperChatTreeService {
       sessionId, treeId, currentSessionId, memberSessionIds: members,
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
       supportsJump: true, currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
-      nodes: nodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
+      nodes: visibleNodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
       windows, fetchedAt: new Date().toISOString()
     };
     return { tree, paths, turnsById };
@@ -123,7 +148,12 @@ export class WrapperChatTreeService {
     await this.options.sessionIndexStore.ready();
     const members = this.options.sessionIndexStore.getTreeMembers(sessionId);
     if (!members.some((id) => this.loaded.has(id))) {
-      await Promise.all(members.map((id) => this.loadMember(id)));
+      if (members.some((id) => this.options.sessionIndexStore.getEntry(id)?.archivedAt)) {
+        // Ancestors borrow surviving histories before those members load themselves.
+        for (const id of members) await this.loadMember(id);
+      } else {
+        await Promise.all(members.map((id) => this.loadMember(id)));
+      }
     } else {
       for (const id of members.filter((id) => !this.loaded.has(id) && !this.loading.has(id))) {
         void this.loadMember(id).then(() => this.changed(sessionId)).catch(() => {});
@@ -145,6 +175,33 @@ export class WrapperChatTreeService {
       sessionId, nodeId: paths.get(sessionId)?.at(-1), followTip: true
     });
     this.options.runtimeService.notifyChatTreeChanged(sessionId, paths.get(sessionId) ?? []);
+  }
+
+  public async getNodeTarget(sessionId: string, nodeId: string): Promise<{ sessionId: string; canArchive: boolean }> {
+    await this.options.sessionIndexStore.ready();
+    await Promise.all(this.options.sessionIndexStore.getTreeMembers(sessionId).map((id) => this.loadMember(id)));
+    const { tree, turnsById } = this.project(sessionId);
+    if (!tree.nodes.some((node) => node.nodeId === nodeId)) throw new Error(`Unknown tree node: ${nodeId}`);
+    const owner = turnsById.get(nodeId)!.sessionId;
+    const index = this.options.sessionIndexStore;
+    return { sessionId: owner, canArchive: !index.getEntry(owner)?.archivedAt &&
+      index.listRelations().some((relation) => relation.relationType === "fork" && relation.childSessionId === owner) &&
+      !tree.nodes.some((node) => node.parentNodeId === nodeId) };
+  }
+
+  public async archiveBranch(sessionId: string, nodeId: string, archive: (memberId: string) => Promise<unknown>): Promise<{ archived: true }> {
+    const target = await this.getNodeTarget(sessionId, nodeId);
+    if (!target.canArchive) throw new Error("Only a terminal fork node can be archived.");
+    await archive(target.sessionId);
+    const index = this.options.sessionIndexStore;
+    if (index.getTreeView(sessionId)?.sessionId === target.sessionId) {
+      const { tree } = this.project(sessionId);
+      await index.setTreeView(sessionId, {
+        sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true
+      });
+    }
+    this.changed(sessionId);
+    return { archived: true };
   }
 
   public async jump(sessionId: string, nodeId: string): Promise<{ jumped: boolean }> {
@@ -191,7 +248,10 @@ export class WrapperChatTreeService {
     if (paths.get(sessionId)?.includes(nodeId)) return sessionId;
     const source = turnsById.get(nodeId)?.sessionId;
     if (!source) throw new Error(`Unknown tree node: ${nodeId}`);
-    return source;
+    if (paths.has(source)) return source;
+    const surviving = [...paths].find(([, ids]) => ids.includes(nodeId))?.[0];
+    if (!surviving) throw new Error(`Unknown tree node: ${nodeId}`);
+    return surviving;
   }
 
   private changed(sessionId: string): void {

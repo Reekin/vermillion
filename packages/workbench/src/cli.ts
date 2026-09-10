@@ -11,7 +11,7 @@ import { WorkbenchService } from "./workbench-service.js";
 import { AppLauncher, resolveAppCommand } from "./app-launcher.js";
 import { methodHelp } from "./cli-help.js";
 
-const desktopSessionMethods = ["chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"];
+const desktopSessionMethods = ["chatTree.get", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"];
 
 /** Shipped role prompts sit next to this module's parent dir both in the repo (packages/workbench/roles) and in the release (resources/app/roles). */
 const shippedRoleDefaultsDir = (): string | undefined => {
