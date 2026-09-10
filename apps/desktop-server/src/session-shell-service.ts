@@ -512,6 +512,8 @@ export class SessionShellService {
     sessionId: string;
     providerSessionId?: string;
     workspaceId: string;
+    engineId?: string;
+    providerKind?: string;
     title?: string;
     rolloutPath?: string;
   }>> {
@@ -522,6 +524,8 @@ export class SessionShellService {
       sessionId: entry.sessionId,
       ...(entry.providerSessionId ? { providerSessionId: entry.providerSessionId } : {}),
       workspaceId: entry.workspaceId,
+      ...(entry.engineId ? { engineId: entry.engineId } : {}),
+      ...(entry.providerKind ? { providerKind: entry.providerKind } : {}),
       ...(entry.title ? { title: entry.title } : {}),
       ...(typeof entry.metadata?.rolloutPath === "string" && entry.metadata.rolloutPath.trim()
         ? { rolloutPath: entry.metadata.rolloutPath }

@@ -1,5 +1,5 @@
-import { FileText, ListTodo, MessageSquare } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { ArrowUpRight, FileText, ListTodo, MessageSquare } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type { SearchHit, SearchResult, WorkbenchClient } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
 import { Badge, EmptyState, Field, InlineNotice, ListRow, SectionLabel } from "./ui.js";
@@ -7,16 +7,21 @@ import { Badge, EmptyState, Field, InlineNotice, ListRow, SectionLabel } from ".
 type SearchDialogProps = {
   client: WorkbenchClient;
   onClose: () => void;
+  onOpenWorkItem: (hit: SearchHit) => void;
+  onOpenDoc: (hit: SearchHit) => void;
+  onOpenSession: (hit: SearchHit) => void;
 };
 
 const kindLabel: Record<SearchHit["kind"], string> = {
   workItem: "工单",
-  session: "会话"
+  session: "会话",
+  doc: "文档"
 };
 
 const kindIcon: Record<SearchHit["kind"], typeof FileText> = {
   workItem: ListTodo,
-  session: MessageSquare
+  session: MessageSquare,
+  doc: FileText
 };
 
 const formatBytes = (bytes: number): string => {
@@ -65,33 +70,69 @@ const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
   );
 };
 
-const SearchResultRow = ({ hit, selected, onSelect }: { hit: SearchHit; selected: boolean; onSelect: () => void }) => {
+const SearchResultRow = ({ hit, selected, onSelect, onOpen }: { hit: SearchHit; selected: boolean; onSelect: () => void; onOpen: () => void }) => {
   const Icon = kindIcon[hit.kind];
   return (
     <li onMouseEnter={onSelect} onFocusCapture={onSelect}>
       <ListRow
         leading={<Icon size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
         title={<span title={hit.title}>{hit.title}</span>}
-        meta={hit.kind === "session" ? `${hit.workspaceLabel} · 第 ${hit.line} 行` : `第 ${hit.line} 行 · ${hit.workspaceLabel}`}
-        trailing={<Badge>{kindLabel[hit.kind]}</Badge>}
+        meta={hit.kind === "session" ? `${hit.workspaceLabel} · 第 ${hit.line} 行` : `${hit.workspaceLabel} · 第 ${hit.line} 行`}
+        trailing={<><Badge>{kindLabel[hit.kind]}</Badge><ArrowUpRight size={13} className="text-muted-foreground" aria-label="打开" /></>}
         selected={selected}
-        onClick={onSelect}
+        onClick={onOpen}
       />
     </li>
   );
 };
 
-export const SearchDialog = ({ client, onClose }: SearchDialogProps) => {
+export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpenSession }: SearchDialogProps) => {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResult>();
   const [selectedId, setSelectedId] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const generation = useRef(0);
+  const latestQuery = useRef("");
+  const queuedQuery = useRef("");
+  const changedAt = useRef(0);
+  const running = useRef(false);
+  const mounted = useRef(true);
+
+  const runSearch = useCallback(async () => {
+    if (running.current || !queuedQuery.current) return;
+    running.current = true;
+    try {
+      while (queuedQuery.current) {
+        const waitFor = Math.max(0, 180 - (Date.now() - changedAt.current));
+        if (waitFor > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, waitFor));
+        const value = queuedQuery.current;
+        queuedQuery.current = "";
+        if (!value) break;
+        try {
+          const next = await client.request("search.query", { query: value, contextLines: 3, maxResults: 200 });
+          if (mounted.current && latestQuery.current === value) {
+            setResult(next);
+            setSelectedId(next.hits[0]?.id);
+            setLoading(false);
+          }
+        } catch (caught: unknown) {
+          if (mounted.current && latestQuery.current === value) {
+            setError(caught instanceof Error ? caught.message : String(caught));
+            setLoading(false);
+          }
+        }
+      }
+    } finally {
+      running.current = false;
+      if (queuedQuery.current) void runSearch();
+    }
+  }, [client]);
 
   useEffect(() => {
     const value = query.trim();
-    const requestGeneration = ++generation.current;
+    latestQuery.current = value;
+    queuedQuery.current = value;
+    changedAt.current = Date.now();
     setResult(undefined);
     setSelectedId(undefined);
     setError(undefined);
@@ -100,22 +141,13 @@ export const SearchDialog = ({ client, onClose }: SearchDialogProps) => {
       return;
     }
     setLoading(true);
-    const timer = window.setTimeout(() => {
-      void client.request("search.query", { query: value, contextLines: 3, maxResults: 200 })
-        .then((next) => {
-          if (requestGeneration !== generation.current) return;
-          setResult(next);
-          setSelectedId(next.hits[0]?.id);
-          setLoading(false);
-        })
-        .catch((caught: unknown) => {
-          if (requestGeneration !== generation.current) return;
-          setError(caught instanceof Error ? caught.message : String(caught));
-          setLoading(false);
-        });
-    }, 180);
-    return () => window.clearTimeout(timer);
-  }, [client, query]);
+    void runSearch();
+  }, [query, runSearch]);
+
+  useEffect(() => () => {
+    mounted.current = false;
+    queuedQuery.current = "";
+  }, []);
 
   const selected = useMemo(
     () => result?.hits.find((hit) => hit.id === selectedId) ?? result?.hits[0],
@@ -124,7 +156,7 @@ export const SearchDialog = ({ client, onClose }: SearchDialogProps) => {
   const groups = useMemo(() => {
     const grouped = new Map<SearchHit["kind"], SearchHit[]>();
     for (const hit of result?.hits ?? []) grouped.set(hit.kind, [...(grouped.get(hit.kind) ?? []), hit]);
-    return (["workItem", "session"] as const).flatMap((kind) => {
+    return (["workItem", "session", "doc"] as const).flatMap((kind) => {
       const hits = grouped.get(kind);
       return hits?.length ? [{ kind, hits }] : [];
     });
@@ -135,10 +167,10 @@ export const SearchDialog = ({ client, onClose }: SearchDialogProps) => {
       <div className="flex min-h-[480px] min-w-0 flex-col">
         <div className="shrink-0 border-b border-border px-4 py-3">
           <Field
-            aria-label="搜索工单和会话"
+            aria-label="搜索工单、会话和文档"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索工单和 Vermillion 会话"
+            placeholder="搜索工单、会话和文档"
             autoFocus
           />
         </div>
@@ -151,7 +183,17 @@ export const SearchDialog = ({ client, onClose }: SearchDialogProps) => {
             {groups.map(({ kind, hits }) => (
               <section key={kind}>
                 <SectionLabel>{kindLabel[kind]} <span className="font-mono text-faint-foreground">{hits.length}</span></SectionLabel>
-                <ul>{hits.map((hit) => <SearchResultRow key={hit.id} hit={hit} selected={hit.id === selected?.id} onSelect={() => setSelectedId(hit.id)} />)}</ul>
+                <ul>{hits.map((hit) => <SearchResultRow
+                  key={hit.id}
+                  hit={hit}
+                  selected={hit.id === selected?.id}
+                  onSelect={() => setSelectedId(hit.id)}
+                  onOpen={() => {
+                    if (hit.kind === "workItem") onOpenWorkItem(hit);
+                    else if (hit.kind === "doc") onOpenDoc(hit);
+                    else onOpenSession(hit);
+                  }}
+                />)}</ul>
               </section>
             ))}
           </div>

@@ -24,7 +24,7 @@ export type WorkspaceView = {
 };
 
 /** What the text editor modal is showing: a doc under .vermillion/docs or a role prompt override. */
-export type EditorTarget = { kind: "doc"; path: string } | { kind: "role"; roleId: string };
+export type EditorTarget = { kind: "doc"; path: string; line?: number; column?: number } | { kind: "role"; roleId: string };
 
 
 export type WorkbenchState = {

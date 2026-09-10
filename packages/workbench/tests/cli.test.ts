@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ const dirs: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   delete process.env.VERMILLION_PERSISTENCE_BASE_DIR;
+  delete process.env.CODEX_HOME;
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -103,6 +104,7 @@ describe("vermillion cli", () => {
     const root = await mkdtemp(join(tmpdir(), "verm-cli-search-ws-"));
     dirs.push(base, root);
     process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+    process.env.CODEX_HOME = base;
     const out: string[] = [];
     vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
     const call = async (method: string, params: object) => {
@@ -118,8 +120,9 @@ describe("vermillion cli", () => {
       scope: { inScope: [], outOfScope: [], allowedPaths: [] },
       acceptance: [{ text: "The CLI search returns the needle" }]
     });
-    const rolloutPath = join(base, "cli-search-rollout.jsonl");
-    await writeFile(rolloutPath, "{\"payload\":{\"turn_id\":\"turn-cli\",\"text\":\"cli-search-needle\"}}\n", "utf8");
+    const rolloutPath = join(base, "sessions", "cli-search-rollout.jsonl");
+    await mkdir(join(base, "sessions"), { recursive: true });
+    await writeFile(rolloutPath, "{\"type\":\"session_meta\",\"payload\":{\"originator\":\"vermillion\"}}\n{\"payload\":{\"turn_id\":\"turn-cli\",\"text\":\"cli-search-needle\"}}\n", "utf8");
     await writeFile(join(base, "session-index.json"), JSON.stringify({
       version: 1,
       entries: [{
@@ -127,6 +130,7 @@ describe("vermillion cli", () => {
         workspaceId: workspace.workspaceId,
         conversationId: "conversation-cli-search",
         engineId: "codex",
+        providerKind: "codex-thread",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         metadata: { rolloutPath }

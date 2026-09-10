@@ -330,6 +330,8 @@ export class WorkbenchService {
       query: input,
       workspaces: await this.listWorkspaces(),
       listWorkItems: (workspaceId) => this.listWorkItems(workspaceId),
+      listDocs: (workspaceId) => this.listDocs(workspaceId),
+      readDoc: (workspaceId, path) => this.readDoc(workspaceId, path),
       sessionSearch: this.sessionSearch,
       rolloutsDir: this.rolloutsDir
     });

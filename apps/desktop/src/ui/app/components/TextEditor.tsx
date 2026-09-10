@@ -7,11 +7,11 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
   const workspaceId = store((s) => s.browsingWorkspaceId);
   const target = store((s) => s.editor);
   return workspaceId && target?.kind === "doc"
-    ? <DocumentEditor key={workspaceId + ":" + target.path} store={store} workspaceId={workspaceId} path={target.path} />
+    ? <DocumentEditor key={workspaceId + ":" + target.path + ":" + target.line + ":" + target.column} store={store} workspaceId={workspaceId} path={target.path} line={target.line} column={target.column} />
     : null;
 };
 
-const DocumentEditor = ({ store, workspaceId, path }: { store: WorkbenchStore; workspaceId: string; path: string }) => {
+const DocumentEditor = ({ store, workspaceId, path, line, column }: { store: WorkbenchStore; workspaceId: string; path: string; line?: number; column?: number }) => {
   const client = store((s) => s.client);
   const rootPath = store((s) => s.workspaces.find((w) => w.workspaceId === workspaceId)?.rootPath ?? "");
   const openEditor = store((s) => s.openEditor);
@@ -56,7 +56,7 @@ const DocumentEditor = ({ store, workspaceId, path }: { store: WorkbenchStore; w
           <div className="flex min-h-0 flex-1">
             <section className="flex min-w-0 flex-1 flex-col" aria-label="源码栏">
               <PanelHeader title="源码" />
-              <div className="min-h-0 flex-1"><SourceEditor path={path} value={content} onChange={setContent} /></div>
+              <div className="min-h-0 flex-1"><SourceEditor path={path} value={content} onChange={setContent} initialLine={line} initialColumn={column} /></div>
             </section>
             {markdown && <section className="flex min-w-0 flex-1 flex-col border-l border-border" aria-label="预览栏">
               <PanelHeader title="预览" />

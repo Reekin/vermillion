@@ -1,9 +1,9 @@
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import type { WorkItem } from "./contracts.js";
+import type { DocFile, WorkItem } from "./contracts.js";
 import { zSearchResult } from "./search-contract.js";
 import type { SearchContextLine, SearchHit, SearchQuery, SearchResult } from "./search-contract.js";
 export type { SearchContextLine, SearchHit, SearchQuery, SearchResult } from "./search-contract.js";
@@ -12,6 +12,8 @@ export type SearchSessionEntry = {
   sessionId: string;
   providerSessionId?: string;
   workspaceId: string;
+  engineId?: string;
+  providerKind?: string;
   title?: string;
   rolloutPath?: string;
 };
@@ -27,7 +29,7 @@ type SearchWorkspace = {
 };
 
 type TextDocument = {
-  kind: "workItem";
+  kind: "workItem" | "doc";
   id: string;
   workspaceId: string;
   workspaceLabel: string;
@@ -127,7 +129,7 @@ const addHit = (accumulator: SearchAccumulator, hit: SearchHit): boolean => {
     return false;
   }
   accumulator.hits.push(hit);
-  return accumulator.hits.length < accumulator.maxResults;
+  return true;
 };
 
 const searchTextDocument = (
@@ -172,7 +174,9 @@ const extractTurnId = (line: string): string | undefined => {
   const item = payload && isRecord(payload.item) ? payload.item : undefined;
   const metadata = isRecord(value.internal_chat_message_metadata_passthrough)
     ? value.internal_chat_message_metadata_passthrough
-    : undefined;
+    : isRecord(payload?.internal_chat_message_metadata_passthrough)
+      ? payload.internal_chat_message_metadata_passthrough
+      : undefined;
   return (
     asNonEmptyString(value.turn_id) ??
     asNonEmptyString(payload?.turn_id) ??
@@ -180,6 +184,21 @@ const extractTurnId = (line: string): string | undefined => {
     asNonEmptyString(item?.turn_id) ??
     asNonEmptyString(item?.turnId) ??
     asNonEmptyString(metadata?.turn_id)
+  );
+};
+
+const isVermillionRollout = (line: string): boolean => {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return false;
+  }
+  if (!isRecord(value) || value.type !== "session_meta") return false;
+  const payload = isRecord(value.payload) ? value.payload : undefined;
+  return (
+    asNonEmptyString(payload?.originator) === "vermillion" ||
+    asNonEmptyString(value.originator) === "vermillion"
   );
 };
 
@@ -242,6 +261,9 @@ const searchRolloutFile = async (
     for await (const line of reader) {
       lineNumber += 1;
       bytesScanned += Buffer.byteLength(line, "utf8") + 1;
+      if (lineNumber === 1 && !isVermillionRollout(line)) {
+        return { readable: false, bytesScanned };
+      }
 
       for (const pendingHit of pending) {
         if (pendingHit.remainingAfter > 0) {
@@ -333,7 +355,15 @@ const resolveRolloutPath = async (
   rolloutsDir: string | undefined,
   discoveredFiles: Promise<string[]> | undefined
 ): Promise<{ path?: string; discoveredFiles?: Promise<string[]> }> => {
-  if (entry.rolloutPath && await isFile(entry.rolloutPath)) {
+  const isInsideRolloutsDir = (path: string): boolean => {
+    if (!rolloutsDir) return true;
+    const pathRelativeToRollouts = relative(resolve(rolloutsDir), resolve(path));
+    return Boolean(pathRelativeToRollouts) &&
+      !isAbsolute(pathRelativeToRollouts) &&
+      pathRelativeToRollouts !== ".." &&
+      !pathRelativeToRollouts.startsWith(".." + (process.platform === "win32" ? "\\" : "/"));
+  };
+  if (entry.rolloutPath && isInsideRolloutsDir(entry.rolloutPath) && await isFile(entry.rolloutPath)) {
     return { path: entry.rolloutPath, discoveredFiles };
   }
   if (!rolloutsDir) return { discoveredFiles };
@@ -375,6 +405,12 @@ const readFileSessionEntries = async (baseDir: string): Promise<SearchSessionEnt
       ...(asNonEmptyString(rawEntry.providerSessionId)
         ? { providerSessionId: asNonEmptyString(rawEntry.providerSessionId) }
         : {}),
+      ...(asNonEmptyString(rawEntry.engineId)
+        ? { engineId: asNonEmptyString(rawEntry.engineId) }
+        : {}),
+      ...(asNonEmptyString(rawEntry.providerKind)
+        ? { providerKind: asNonEmptyString(rawEntry.providerKind) }
+        : {}),
       ...(asNonEmptyString(rawEntry.title) ? { title: asNonEmptyString(rawEntry.title) } : {}),
       ...(asNonEmptyString(metadata?.rolloutPath)
         ? { rolloutPath: asNonEmptyString(metadata?.rolloutPath) }
@@ -394,6 +430,8 @@ export const searchWorkbench = async (input: {
   query: SearchQuery;
   workspaces: SearchWorkspace[];
   listWorkItems: (workspaceId: string) => Promise<WorkItem[]>;
+  listDocs: (workspaceId: string) => Promise<DocFile[]>;
+  readDoc: (workspaceId: string, path: string) => Promise<string>;
   sessionSearch?: SessionSearchSource;
   rolloutsDir?: string;
 }): Promise<SearchResult> => {
@@ -418,12 +456,36 @@ export const searchWorkbench = async (input: {
     workspaces.map((workspace) => [workspace.workspaceId, workspace.label])
   );
 
-  const workspaceData = await Promise.all(workspaces.map(async (workspace) => ({
-    workspace,
-    workItems: await input.listWorkItems(workspace.workspaceId)
-  })));
+  const workspaceData = await Promise.all(workspaces.map(async (workspace) => {
+    const [workItems, docs] = await Promise.all([
+      input.listWorkItems(workspace.workspaceId),
+      input.listDocs(workspace.workspaceId)
+    ]);
+    const textDocs: Array<TextDocument | undefined> = await Promise.all(docs
+      .filter((doc) => doc.isText !== false)
+      .map(async (doc) => {
+        try {
+          return {
+            kind: "doc" as const,
+            id: doc.path,
+            workspaceId: workspace.workspaceId,
+            workspaceLabel: workspace.label,
+            title: doc.path.replace(/^\.vermillion\/docs\//, ""),
+            path: doc.path,
+            text: await input.readDoc(workspace.workspaceId, doc.path)
+          } satisfies TextDocument;
+        } catch {
+          return undefined;
+        }
+      }));
+    return {
+      workspace,
+      workItems,
+      textDocs: textDocs.filter((doc): doc is TextDocument => Boolean(doc))
+    };
+  }));
 
-  for (const { workspace, workItems } of workspaceData) {
+  for (const { workspace, workItems, textDocs } of workspaceData) {
     for (const workItem of workItems) {
       const document: TextDocument = {
         kind: "workItem",
@@ -437,12 +499,18 @@ export const searchWorkbench = async (input: {
       if (!searchTextDocument(document, query, contextLines, accumulator, stats)) break;
     }
     if (accumulator.truncated) break;
+    for (const document of textDocs) {
+      if (!searchTextDocument(document, query, contextLines, accumulator, stats)) break;
+    }
+    if (accumulator.truncated) break;
   }
 
   let discoveredFiles: Promise<string[]> | undefined;
   if (!accumulator.truncated && input.sessionSearch) {
     const entries = (await input.sessionSearch()).filter((entry) =>
-      workspaceLabelById.has(entry.workspaceId)
+      workspaceLabelById.has(entry.workspaceId) &&
+      entry.engineId === "codex" &&
+      entry.providerKind === "codex-thread"
     );
     for (const entry of entries) {
       const resolved = await resolveRolloutPath(entry, input.rolloutsDir, discoveredFiles);

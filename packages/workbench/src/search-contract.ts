@@ -20,7 +20,7 @@ export const zSearchQuery = z.object({
 
 export const zSearchHit = z.object({
   id: z.string().min(1),
-  kind: z.enum(["workItem", "session"]),
+  kind: z.enum(["workItem", "session", "doc"]),
   workspaceId: z.string().min(1),
   workspaceLabel: z.string().min(1),
   title: z.string().min(1),

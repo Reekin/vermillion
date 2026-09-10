@@ -27,7 +27,7 @@ const highlighting = HighlightStyle.define([
 ]);
 
 /** CodeMirror owns editing, history, line numbers and Ctrl+F search. */
-export const SourceEditor = ({ path, value, onChange }: { path: string; value: string; onChange: (value: string) => void }) => {
+export const SourceEditor = ({ path, value, onChange, initialLine, initialColumn }: { path: string; value: string; onChange: (value: string) => void; initialLine?: number; initialColumn?: number }) => {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | undefined>(undefined);
   const onChangeRef = useRef(onChange);
@@ -43,6 +43,11 @@ export const SourceEditor = ({ path, value, onChange }: { path: string; value: s
         EditorView.updateListener.of((update) => { if (update.docChanged) onChangeRef.current(update.state.doc.toString()); })
       ] })
     });
+    if (initialLine) {
+      const line = editor.state.doc.line(Math.min(Math.max(1, initialLine), editor.state.doc.lines));
+      const position = Math.min(line.from + Math.max(0, (initialColumn ?? 1) - 1), line.to);
+      editor.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: "center" }) });
+    }
     view.current = editor;
     let active = true;
     const description = LanguageDescription.matchFilename(languages, path);
