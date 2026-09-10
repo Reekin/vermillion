@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CornerDownRight, Pin, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight, Pin, Plus, Search } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
@@ -20,6 +20,7 @@ type SessionSidebarProps = {
   onWorkspaceFilter: (id: string | undefined) => void;
   onOpen: (sessionId: string) => void;
   onNewChat: () => void;
+  onSearch: () => void;
   menu: SessionMenu | undefined;
   onOpenMenu: (event: MouseEvent, sessionId: string) => void;
   onCloseMenu: () => void;
@@ -28,7 +29,7 @@ type SessionSidebarProps = {
   onClearNotice: () => void;
 };
 
-export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
+export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const toggleExpanded = (sessionId: string) => setExpandedIds((current) => {
     const next = new Set(current);
@@ -84,6 +85,11 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           <option value="">All</option>
           {[...workspaceLabelById].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </Field>
+      </div>
+      <div className="px-3 pb-2">
+        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={onSearch}>
+          <Search size={13} /> 搜索
+        </Button>
       </div>
       <ul className="min-h-0 flex-1 overflow-auto">
         {isDraft && (

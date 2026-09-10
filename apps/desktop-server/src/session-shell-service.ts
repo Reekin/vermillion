@@ -508,6 +508,27 @@ export class SessionShellService {
     return this.sessionCatalog.get(sessionId);
   }
 
+  public async listSessionSearchEntries(): Promise<Array<{
+    sessionId: string;
+    providerSessionId?: string;
+    workspaceId: string;
+    title?: string;
+    rolloutPath?: string;
+  }>> {
+    const index = this.runtimeService.getSessionIndexStore?.();
+    if (!index) return [];
+    await index.ready();
+    return index.listEntries().map((entry) => ({
+      sessionId: entry.sessionId,
+      ...(entry.providerSessionId ? { providerSessionId: entry.providerSessionId } : {}),
+      workspaceId: entry.workspaceId,
+      ...(entry.title ? { title: entry.title } : {}),
+      ...(typeof entry.metadata?.rolloutPath === "string" && entry.metadata.rolloutPath.trim()
+        ? { rolloutPath: entry.metadata.rolloutPath }
+        : {})
+    }));
+  }
+
   public async repairSessionBrowser(workspaceIds: string[]): Promise<{
     workspaces: number;
     sessions: number;

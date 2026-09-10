@@ -20,6 +20,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "docs.discard": (p) => service.discardDocs(p.workspaceId, p.paths),
     "docs.diff": async (p) => ({ diff: await service.docDiff(p.workspaceId, p.path) }),
     "docs.commit": (p) => service.commitDocs(p.workspaceId, p),
+    "search.query": (p) => service.search(p),
 
     "role.list": (p) => service.listRoles(p.workspaceId),
     "role.read": (p) => service.readRole(p.workspaceId, p.roleId),

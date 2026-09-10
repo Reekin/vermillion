@@ -22,6 +22,7 @@ import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.
 import { WorkspaceStore } from "./workspace-store.js";
 import { diagnose } from "./diagnosis.js";
 import { runtimeInfo } from "./runtime-info.js";
+import { searchWorkbench, type SearchQuery, type SearchResult, type SessionSearchSource } from "./search.js";
 
 const RETRY_MINUTES = [1, 5, 30, 300];
 
@@ -41,6 +42,8 @@ export type WorkbenchServiceOptions = {
   sessionNavigation?: SessionNavigationPort;
   /** Starts isolated app instances for acceptance; absent when running without a desktop build around. */
   launcher?: AppLauncher;
+  sessionSearch?: SessionSearchSource;
+  rolloutsDir?: string;
   now?: () => string;
 };
 
@@ -51,6 +54,8 @@ export class WorkbenchService {
   private readonly roles: RoleService;
   private readonly sessionNavigation?: SessionNavigationPort;
   private readonly launcher?: AppLauncher;
+  private readonly sessionSearch?: SessionSearchSource;
+  private readonly rolloutsDir?: string;
   private readonly now: () => string;
   private readonly releasedWorkers = new Set<string>();
   private readonly contexts = new Map<string, WorkspaceContext>();
@@ -83,6 +88,8 @@ export class WorkbenchService {
     this.roles = options.roles;
     this.sessionNavigation = options.sessionNavigation;
     this.launcher = options.launcher;
+    this.sessionSearch = options.sessionSearch;
+    this.rolloutsDir = options.rolloutsDir;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -316,6 +323,16 @@ export class WorkbenchService {
   async listWorkItems(workspaceId: string): Promise<WorkItem[]> {
     const list = (await (await this.context(workspaceId)).store.listRecords()).map(projectWorkItem);
     return list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async search(input: SearchQuery): Promise<SearchResult> {
+    return searchWorkbench({
+      query: input,
+      workspaces: await this.listWorkspaces(),
+      listWorkItems: (workspaceId) => this.listWorkItems(workspaceId),
+      sessionSearch: this.sessionSearch,
+      rolloutsDir: this.rolloutsDir
+    });
   }
 
   async startWork(workspaceId: string, input: { sessionId: string; turnId?: string; scope?: string; message?: WorkRequest["message"] }): Promise<WorkRequest> {

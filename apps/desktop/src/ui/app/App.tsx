@@ -12,6 +12,7 @@ import { InboxPanel } from "./components/InboxPanel.js";
 import { Modal } from "./components/Modal.js";
 import { Rail } from "./components/Rail.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
+import { SearchDialog } from "./components/SearchDialog.js";
 import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
@@ -65,6 +66,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [composerActions, setComposerActions] = useState<ComposerActions>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
   const [navigationError, setNavigationError] = useState<string>();
+  const [searchOpen, setSearchOpen] = useState(false);
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
     const tree = await transport.chatTree.get(targetSessionId);
     const rootId = tree.treeId ?? targetSessionId;
@@ -194,6 +196,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               store.getState().setWorkspaceSection("sessions");
               setDraftRevision((n) => n + 1);
             }}
+            onSearch={() => setSearchOpen(true)}
             menu={sessionActions.menu}
             onOpenMenu={(event, id) => void sessionActions.openMenu(event, id)}
             onCloseMenu={sessionActions.closeMenu}
@@ -258,6 +261,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       <TaskStatusBar store={store} />
       <TextEditor store={store} />
       <RoleEditor store={store} transport={transport} />
+      {searchOpen && <SearchDialog client={store.getState().client} onClose={() => setSearchOpen(false)} />}
     </div>
     </SessionNavigationContext.Provider>
   );
