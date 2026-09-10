@@ -183,7 +183,7 @@ const roleSourceLabel: Record<RoleFile["source"], string> = { global: "全局", 
 const RolesSection = ({ client, workspaceId, roles, onEdit }: { client: WorkbenchClient; workspaceId: string; roles: RoleFile[]; onEdit: (roleId: string) => void }) => (
   <div>
     <SectionLabel>角色 prompt</SectionLabel>
-    <InlineNotice>选择角色后，可设置覆盖方式和模型配置并编辑正文。修改保存到本 workspace；override 替换全局正文，append 在全局正文后追加。</InlineNotice>
+    <InlineNotice>选择角色后，可在 global、override、append 三种方式间定制 prompt 和模型配置。global 沿用全局且只读，override 使用项目正文，append 在全局正文后追加项目正文。</InlineNotice>
     <ul>
       {roles.map((role) => (
         <li key={role.roleId}>

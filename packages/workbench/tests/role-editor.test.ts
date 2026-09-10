@@ -29,17 +29,21 @@ it("saves and clears independent role settings through the editor RPC and leaves
     const { workspaceId } = await service.addWorkspace({ rootPath: root });
     const rpc = createWorkbenchRpcHandler(service);
     const params = { workspaceId, roleId: "worker" };
+    const globalDocument = { ...parseRoleDocument(globalContent), mode: "global" as const };
     const document = { ...parseRoleDocument(globalContent), mode: "append" as const, body: "\n# 项目\n正文  \n" };
-    expect(await rpc({ method: "role.editor.read", params })).toEqual({ ok: true, result: { document: parseRoleDocument(globalContent), source: "global" } });
+    expect(await rpc({ method: "role.editor.read", params })).toEqual({ ok: true, result: { document: globalDocument, source: "global", globalDocument } });
     expect(await rpc({ method: "role.editor.write", params: { ...params, document } })).toEqual({ ok: true, result: {} });
-    expect(await rpc({ method: "role.editor.read", params })).toEqual({ ok: true, result: { document, source: "workspace" } });
-    const inherited = { body: document.body, mode: "override" as const, extraHeader: "" };
-    expect(await rpc({ method: "role.editor.write", params: { ...params, document: inherited } })).toEqual({ ok: true, result: {} });
-    expect(await rpc({ method: "role.editor.read", params })).toEqual({ ok: true, result: { document: inherited, source: "workspace" } });
+    expect(await rpc({ method: "role.editor.read", params })).toEqual({ ok: true, result: { document, source: "workspace", globalDocument } });
+    const overrideDocument = { ...document, mode: "override" as const, body: globalDocument.body };
+    expect(await rpc({ method: "role.editor.write", params: { ...params, document: overrideDocument } })).toEqual({ ok: true, result: {} });
+    expect(await rpc({ method: "role.editor.read", params })).toEqual({ ok: true, result: { document: overrideDocument, source: "workspace", globalDocument } });
     const file = await readFile(join(root, ".vermillion/roles/worker.md"), "utf8");
-    expect(file).toBe('---\nmode: "override"\n---\n' + document.body);
+    expect(file).toBe('---\nmode: "override"\nmodel: "example"\nreasoningOptionId: "high"\nserviceTierId: "priority"\n---\n' + globalDocument.body);
+    expect(await rpc({ method: "role.editor.write", params: { ...params, document: globalDocument } })).toEqual({ ok: true, result: {} });
+    expect(await rpc({ method: "role.editor.read", params })).toEqual({ ok: true, result: { document: globalDocument, source: "global", globalDocument } });
+    await expect(readFile(join(root, ".vermillion/roles/worker.md"), "utf8")).rejects.toThrow();
     expect(await readFile(join(globalDir, "worker.md"), "utf8")).toBe(globalContent);
-    expect(await roles.resolve(root, "worker")).toEqual({ content: document.body });
+    expect(await roles.resolve(root, "worker")).toEqual({ content: globalDocument.body, modelConfig: { modelId: "example", reasoningOptionId: "high", serviceTierId: "priority" } });
   } finally {
     service.dispose();
     await rm(root, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { zRoleExecutionOverrides, type ResolvedRole, type RoleFile } from "./contracts.js";
+import { zRoleExecutionOverrides, type ResolvedRole, type RoleExecutionOverrides, type RoleFile } from "./contracts.js";
 import { STATE_DIR } from "./docs.js";
 
 export const ROLES_DIR = STATE_DIR + "/roles";
@@ -52,6 +52,20 @@ const parsePrompt = (content: string): { body: string; mode: "override" | "appen
   return { body: content.slice(header[0].length), mode, ...(modelConfig ? { modelConfig } : {}) };
 };
 
+const executionConfigKeys = ["modelId", "reasoningOptionId", "serviceTierId"] as const;
+
+/** Append overlays each explicitly stored field while preserving explicit null values. */
+const mergeExecutionConfig = (globalConfig: RoleExecutionOverrides | undefined, workspaceConfig: RoleExecutionOverrides | undefined): RoleExecutionOverrides | undefined => {
+  const merged: Record<string, unknown> = {};
+  for (const key of executionConfigKeys) {
+    const workspaceValue = workspaceConfig?.[key];
+    const globalValue = globalConfig?.[key];
+    if (workspaceValue !== undefined) merged[key] = workspaceValue;
+    else if (globalValue !== undefined) merged[key] = globalValue;
+  }
+  return Object.keys(merged).length ? zRoleExecutionOverrides.parse(merged) : undefined;
+};
+
 export type RoleServiceOptions = {
   /** ~/.vermillion/roles: the user's editable copy of every role prompt. */
   globalDir: string;
@@ -98,6 +112,12 @@ export class RoleService {
     throw new Error("Unknown role: " + roleId);
   }
 
+  async readGlobal(roleId: string): Promise<string | undefined> {
+    assertRoleId(roleId);
+    const path = roleFile(this.options.globalDir, roleId);
+    return await exists(path) ? readFile(path, "utf8") : undefined;
+  }
+
   async writeOverride(workspaceRoot: string, roleId: string, content: string): Promise<void> {
     assertRoleId(roleId);
     parsePrompt(content);
@@ -112,9 +132,13 @@ export class RoleService {
     const { body, mode, modelConfig } = parsePrompt(raw.content);
     const config = modelConfig ? { modelConfig } : {};
     if (raw.source === "global" || mode === "override") return { content: body, ...config };
-    const globalPath = roleFile(this.options.globalDir, roleId);
-    const global = await exists(globalPath) ? parsePrompt(await readFile(globalPath, "utf8")).body : "";
-    return { content: [global.trim(), body.trim()].filter(Boolean).join("\n\n"), ...config };
+    const globalContent = await this.readGlobal(roleId);
+    const globalPrompt = globalContent === undefined ? undefined : parsePrompt(globalContent);
+    const mergedModelConfig = mergeExecutionConfig(globalPrompt?.modelConfig, modelConfig);
+    return {
+      content: [globalPrompt?.body.trim(), body.trim()].filter(Boolean).join("\n\n"),
+      ...(mergedModelConfig ? { modelConfig: mergedModelConfig } : {})
+    };
   }
 
   async removeOverride(workspaceRoot: string, roleId: string): Promise<void> {

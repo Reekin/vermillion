@@ -2,7 +2,8 @@ import { z } from "zod";
 
 export const zRoleDocument = z.object({
   body: z.string(),
-  mode: z.enum(["override", "append"]),
+  /** `global` is an editor-only state; it is never serialized into a workspace file. */
+  mode: z.enum(["global", "override", "append"]),
   model: z.string().min(1).optional(),
   reasoningOptionId: z.string().min(1).nullable().optional(),
   serviceTierId: z.string().min(1).nullable().optional(),
