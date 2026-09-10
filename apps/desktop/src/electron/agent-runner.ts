@@ -86,22 +86,18 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
   resume: async (sessionId, options) => {
     // Background recovery must not participate in the UI's cancellable session-opening sequence.
     if (!await shell.ensureSessionLoadedForRead(sessionId)) return false;
-    try {
-      const { title, modelConfig, ...resumeOptions } = options ?? {};
-      if (modelConfig) {
-        const settings = await shell.getSettings();
-        resumeOptions.metadata = writeSessionExecutionProfile(resumeOptions.metadata, {
-          engineId,
-          ...mergeSessionExecutionProfile(resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]), modelConfig)
-        });
-      }
-      const result = await shell.runSessionAction({ sessionId, action: "resume", preserveExecution: true, ...resumeOptions });
-      if (result.action !== "resume" || !result.resumed) return false;
-      if (title) await shell.setSessionTitle(sessionId, title);
-      return true;
-    } catch {
-      return false;
+    const { title, modelConfig, ...resumeOptions } = options ?? {};
+    if (modelConfig) {
+      const settings = await shell.getSettings();
+      resumeOptions.metadata = writeSessionExecutionProfile(resumeOptions.metadata, {
+        engineId,
+        ...mergeSessionExecutionProfile(resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]), modelConfig)
+      });
     }
+    const result = await shell.runSessionAction({ sessionId, action: "resume", preserveExecution: true, ...resumeOptions });
+    if (result.action !== "resume" || !result.resumed) return false;
+    if (title) await shell.setSessionTitle(sessionId, title);
+    return true;
   },
   isActive: (sessionId) => !!shell.getActiveTurnId(sessionId),
   getActiveTurnId: (sessionId) => shell.getActiveTurnId(sessionId),

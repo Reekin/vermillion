@@ -150,9 +150,9 @@ describe("AgentRunner recovery", () => {
     expect(shell.openSession).not.toHaveBeenCalled();
   });
 
-  it("reports a provider session that cannot resume", async () => {
+  it("preserves the provider failure so recovery can report its cause", async () => {
     const { shell, runner } = setup();
     shell.runSessionAction.mockRejectedValue(new Error("Thread not found"));
-    await expect(runner.resume("worker")).resolves.toBe(false);
+    await expect(runner.resume("worker")).rejects.toThrow("Thread not found");
   });
 });
