@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { prepareSessionTreeFixture } from "./session-tree-fixture.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,11 +15,20 @@ export type AppStartInput = {
   userDataDir?: string;
   /** CDP port. */
   port: number;
+  /** Optional isolated acceptance data fixture. */
+  fixture?: "session-tree";
   /** Extra environment for the instance. */
   env?: Record<string, string>;
 };
 
-export type AppStartResult = { pid: number; cdpUrl: string; desktop: string };
+export type AppStartResult = {
+  pid: number;
+  cdpUrl: string;
+  desktop: string;
+  dataDir?: string;
+  projectPath?: string;
+  workspaceId?: string;
+};
 
 export type AppLauncherOptions = {
   /** Vermillion executable in a release, or electron + main.js in the repo. */
@@ -47,14 +57,31 @@ const waitForCdp = async (cdpUrl: string, abort: () => Promise<void>, timeoutMs 
   throw new Error("The app instance did not open its debugging port within " + timeoutMs / 1000 + "s: " + cdpUrl);
 };
 
+const waitForEndpoint = async (path: string, pid: number, abort: () => Promise<void>, timeoutMs = 30_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const endpoint = JSON.parse(await readFile(path, "utf8")) as { pid?: unknown };
+      if (endpoint.pid === pid) {
+        return;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  await abort();
+  throw new Error("The app instance did not publish its current local endpoint within " + timeoutMs / 1000 + "s: " + path);
+};
+
 export class AppLauncher {
   private readonly command: AppLauncherOptions["command"];
   private readonly scriptPath: string;
+  private readonly packageRoot: string;
   private readonly desktop: string;
 
   constructor(options: AppLauncherOptions) {
     this.command = options.command;
-    this.scriptPath = join(options.packageRoot ?? defaultPackageRoot(), "scripts", "start-on-hidden-desktop.ps1");
+    this.packageRoot = options.packageRoot ?? defaultPackageRoot();
+    this.scriptPath = join(this.packageRoot, "scripts", "start-on-hidden-desktop.ps1");
     this.desktop = options.desktop ?? "vermillion-qa";
   }
 
@@ -63,18 +90,32 @@ export class AppLauncher {
     const userDataDir = resolve(input.userDataDir ?? join(dataDir, "electron"));
     await mkdir(dataDir, { recursive: true });
     await mkdir(userDataDir, { recursive: true });
+    const fixture = input.fixture === "session-tree"
+      ? await prepareSessionTreeFixture(dataDir, this.packageRoot)
+      : undefined;
     const env = {
       ...input.env,
+      ...(fixture?.env ?? {}),
       VERMILLION_PERSISTENCE_BASE_DIR: dataDir,
       VERMILLION_USER_DATA_DIR: userDataDir,
-      VERMILLION_REMOTE_DEBUGGING_PORT: String(input.port)
+      VERMILLION_REMOTE_DEBUGGING_PORT: String(input.port),
+      ...(fixture ? { CODEX_HOME: input.env?.CODEX_HOME ?? join(dataDir, "codex") } : {})
     };
     const pid = process.platform === "win32" ? await this.startHidden(env) : await this.startPlain(env);
     const cdpUrl = "http://127.0.0.1:" + input.port;
     // Electron takes a few seconds to open its debugging port. Return only once it answers, so callers can attach
     // immediately; a CDP client that probes too early may fall back to launching its own browser.
     await waitForCdp(cdpUrl, async () => { await this.stop(pid); });
-    return { pid, cdpUrl, desktop: process.platform === "win32" ? this.desktop : "" };
+    if (fixture) {
+      await waitForEndpoint(join(dataDir, "endpoint.json"), pid, async () => { await this.stop(pid); });
+    }
+    return {
+      pid,
+      cdpUrl,
+      desktop: process.platform === "win32" ? this.desktop : "",
+      dataDir,
+      ...(fixture ? { projectPath: fixture.projectPath, workspaceId: fixture.workspaceId } : {})
+    };
   }
 
   async stop(pid: number): Promise<void> {
