@@ -526,6 +526,13 @@ const resolveHydratedLastCompletedTurnAt = (
   return latestCompletedAt;
 };
 
+const isActiveSessionStatus = (status: SessionStatus): boolean =>
+  status === "running" || status === "awaiting_approval";
+
+const mergeTurnIds = (...lists: readonly string[][]): string[] => [
+  ...new Set(lists.flat())
+];
+
 const latestIso = (
   left: string | undefined,
   right: string | undefined
@@ -1318,6 +1325,7 @@ export class SessionReconciliationService {
     string,
     SharedHydrationTask<boolean>
   >();
+  private readonly fullyHydratedSessionIds = new Set<string>();
   private readonly windowHydrationByKey = new Map<
     string,
     SharedHydrationTask<HydratedSessionWindowSnapshot | undefined>
@@ -1487,13 +1495,27 @@ export class SessionReconciliationService {
     input: {
       isCancelled?: () => boolean;
       force?: boolean;
+      requireFull?: boolean;
     } = {}
   ): Promise<boolean> {
+    const consumer: HydrationConsumer = {
+      isCancelled: input.isCancelled
+    };
     const loaded = this.runtimeService
       .listSessions({ includeArchived: true })
       .some((session) => session.sessionId === sessionId);
-    if (loaded && !input.force) {
-      return true;
+    if (
+      loaded &&
+      !input.force &&
+      (!input.requireFull || this.fullyHydratedSessionIds.has(sessionId))
+    ) {
+      const existingHydration = this.hydrationBySessionId.get(sessionId);
+      if (!existingHydration) {
+        return true;
+      }
+      existingHydration.consumers.add(consumer);
+      const loadedByExisting = await existingHydration.promise;
+      return input.isCancelled?.() ? false : loadedByExisting;
     }
 
     await this.sessionIndexStore.ready();
@@ -1505,9 +1527,6 @@ export class SessionReconciliationService {
     if (!provider) {
       return false;
     }
-    const consumer: HydrationConsumer = {
-      isCancelled: input.isCancelled
-    };
     const existingHydration = this.hydrationBySessionId.get(sessionId);
     if (existingHydration) {
       existingHydration.consumers.add(consumer);
@@ -1678,6 +1697,7 @@ export class SessionReconciliationService {
     }
     for (const ancestorSessionId of [...ancestorSessionIds].reverse()) {
       await this.ensureSessionLoaded(ancestorSessionId, {
+        requireFull: true,
         isCancelled: input.isCancelled
       });
     }
@@ -1726,11 +1746,64 @@ export class SessionReconciliationService {
         terminalStreams: normalizedHydrated.terminalStreams.filter(isOwn)
       };
     }
-    this.runtimeService.hydrateDiscoveredSession(normalizedHydrated, {
+    const committedHydrated = this.preserveLiveRuntimeState(normalizedHydrated);
+    this.runtimeService.hydrateDiscoveredSession(committedHydrated, {
       relatedIndexRelations
     });
-    await this.upsertHydratedSession(entry, normalizedHydrated, input);
-    return normalizedHydrated;
+    await this.upsertHydratedSession(entry, committedHydrated, input);
+    if (!input.partial) {
+      this.fullyHydratedSessionIds.add(entry.sessionId);
+    }
+    return committedHydrated;
+  }
+
+  private preserveLiveRuntimeState<T extends HydratedSessionSnapshot>(hydrated: T): T {
+    const current = this.runtimeService.getSnapshot();
+    const currentSession = current.sessions.find(
+      (session) => session.sessionId === hydrated.session.sessionId
+    );
+    const currentTurns = new Map(
+      current.turns
+        .filter((turn) => turn.sessionId === hydrated.session.sessionId)
+        .map((turn) => [turn.turnId, turn] as const)
+    );
+    const turns = hydrated.turns.map((turn) => {
+      const currentTurn = currentTurns.get(turn.turnId);
+      if (!currentTurn || (
+        currentTurn.status !== "completed" &&
+        !isActiveSessionStatus(currentSession?.status ?? "idle")
+      )) {
+        return turn;
+      }
+      return {
+        ...turn,
+        status: currentTurn.status,
+        finishReason: currentTurn.finishReason ?? turn.finishReason,
+        completedAt: currentTurn.completedAt ?? turn.completedAt,
+        actor: currentTurn.actor ?? turn.actor,
+        finalMessageId: currentTurn.finalMessageId ?? turn.finalMessageId,
+        messageIds: mergeTurnIds(turn.messageIds, currentTurn.messageIds),
+        toolCallIds: mergeTurnIds(turn.toolCallIds, currentTurn.toolCallIds),
+        terminalIds: mergeTurnIds(turn.terminalIds, currentTurn.terminalIds),
+        approvalRequestIds: mergeTurnIds(
+          turn.approvalRequestIds,
+          currentTurn.approvalRequestIds
+        ),
+        interactionRequestIds: mergeTurnIds(
+          turn.interactionRequestIds ?? [],
+          currentTurn.interactionRequestIds ?? []
+        )
+      };
+    });
+    const session = currentSession &&
+      isActiveSessionStatus(currentSession.status)
+      ? {
+          ...hydrated.session,
+          status: currentSession.status,
+          lastTurnId: currentSession.lastTurnId ?? hydrated.session.lastTurnId
+        }
+      : hydrated.session;
+    return { ...hydrated, session, turns };
   }
 
   private normalizeHydratedRelations<

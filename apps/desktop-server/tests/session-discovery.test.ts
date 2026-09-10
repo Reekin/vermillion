@@ -1598,6 +1598,166 @@ describe("Session discovery and reconciliation", () => {
     }
   });
 
+  it("fully loads a partially hydrated ancestor before assigning inherited turns", async () => {
+    const baseDir = await createTempDir();
+    const index = new SessionIndexStore({ baseDir });
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const runtimeService = new SessionRuntimeService({
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
+    });
+    const workspaceId = "workspace-1";
+    const time = "2026-04-19T00:00:00.000Z";
+    const makeSession = (sessionId: string, status: "idle" | "running") => ({
+      sessionId,
+      conversationId: "conversation-1",
+      engineId: "codex",
+      status,
+      title: sessionId,
+      createdAt: time,
+      updatedAt: time
+    });
+    const makeTurn = (
+      sessionId: string,
+      turnId: string,
+      offset: number,
+      status: "completed" | "streaming" = "completed"
+    ) => ({
+      turnId,
+      sessionId,
+      status,
+      ...(status === "completed" ? { finishReason: "completed" as const } : {}),
+      startedAt: `2026-04-19T00:00:0${offset}.000Z`,
+      ...(status === "completed"
+        ? { completedAt: `2026-04-19T00:00:0${offset + 1}.000Z` }
+        : {}),
+      messageIds: [],
+      toolCallIds: [],
+      terminalIds: [],
+      approvalRequestIds: []
+    });
+    const makeHydrated = (
+      sessionId: string,
+      turns: ReturnType<typeof makeTurn>[],
+      status: "idle" | "running" = "idle"
+    ) => ({
+      workspaceId,
+      conversation: {
+        conversationId: "conversation-1",
+        workspaceId,
+        participantEngineIds: ["codex"],
+        activeSessionId: sessionId,
+        sessionIds: ["parent", "child"],
+        createdAt: time,
+        updatedAt: time
+      },
+      session: makeSession(sessionId, status),
+      turns,
+      messageBlocks: [],
+      toolCalls: [],
+      terminalStreams: [],
+      sessionRelations: [],
+      runtimeBinding: {
+        providerKind: "codex-thread",
+        providerSessionId: `thread-${sessionId}`
+      }
+    });
+
+    for (const [sessionId, status] of [["parent", "running"], ["child", "idle"]] as const) {
+      await index.upsertSession({
+        workspaceId,
+        session: makeSession(sessionId, status),
+        providerKind: "codex-thread",
+        providerSessionId: `thread-${sessionId}`
+      });
+    }
+    await index.upsertRelation({
+      workspaceId,
+      parentSessionId: "parent",
+      childSessionId: "child",
+      relationType: "fork",
+      sourceTurnId: "parent-2"
+    });
+
+    runtimeService.hydrateDiscoveredSession(makeHydrated("parent", [
+      makeTurn("parent", "parent-1", 0),
+      makeTurn("parent", "parent-2", 2, "streaming"),
+      makeTurn("parent", "parent-live", 6, "streaming")
+    ], "running"));
+    let releaseParent!: () => void;
+    let parentHydrationStarted!: () => void;
+    let childHydrationReturned = false;
+    const parentHydration = new Promise<void>((resolve) => { parentHydrationStarted = resolve; });
+    const parentGate = new Promise<void>((resolve) => { releaseParent = resolve; });
+    const hydrateSession = vi.fn(async (entry: { sessionId: string }) => {
+      if (entry.sessionId === "parent") {
+        parentHydrationStarted();
+        await parentGate;
+        return makeHydrated("parent", [
+          makeTurn("parent", "parent-1", 0),
+          makeTurn("parent", "parent-2", 2, "streaming")
+        ]);
+      }
+      childHydrationReturned = true;
+      return makeHydrated("child", [
+        makeTurn("child", "parent-1", 0),
+        makeTurn("child", "parent-2", 2),
+        makeTurn("child", "child-1", 4)
+      ]);
+    });
+    const reconciliation = new SessionReconciliationService({
+      workspaceRegistry,
+      sessionIndexStore: index,
+      runtimeService,
+      providers: [{ engineId: "codex", hydrateSession }] as never
+    });
+    const treeService = new WrapperChatTreeService({
+      runtimeService,
+      sessionIndexStore: index,
+      reconciliation,
+      fork: vi.fn()
+    });
+
+    try {
+      const treePromise = treeService.get("child");
+      await parentHydration;
+      runtimeService.applyRuntimeEvent({
+        type: "turn.completed",
+        sessionId: "parent",
+        turnId: "parent-2",
+        finishReason: "completed"
+      });
+      runtimeService.applyRuntimeEvent({
+        type: "turn.started",
+        sessionId: "parent",
+        turnId: "parent-live"
+      });
+      await vi.waitFor(() => expect(childHydrationReturned).toBe(true));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runtimeService.getSnapshot().turns.some((turn) => turn.turnId === "child-1")).toBe(false);
+      releaseParent();
+      const tree = await treePromise;
+
+      expect(hydrateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "parent" }),
+        expect.objectContaining({ isCancelled: expect.any(Function) })
+      );
+      expect(tree.nodes.map(({ nodeId, parentNodeId, sessionId }) => ({
+        nodeId,
+        parentNodeId,
+        sessionId
+      }))).toEqual([
+        { nodeId: "parent-1", parentNodeId: undefined, sessionId: "parent" },
+        { nodeId: "parent-2", parentNodeId: "parent-1", sessionId: "parent" },
+        { nodeId: "parent-live", parentNodeId: "parent-2", sessionId: "parent" },
+        { nodeId: "child-1", parentNodeId: "parent-2", sessionId: "child" }
+      ]);
+      expect(tree.nodes.find((node) => node.nodeId === "parent-2")?.status).toBe("completed");
+      expect(runtimeService.getSession("parent")?.status).toBe("running");
+    } finally {
+      treeService.dispose();
+    }
+  });
+
   it("uses index-backed fork parent aliases when hydrating provider relations", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({
