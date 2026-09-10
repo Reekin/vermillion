@@ -146,8 +146,8 @@ export const workbenchRpc = {
   "inbox.list": { params: z.object({ includeProcessed: z.boolean().optional() }), result: z.array(zInboxItem) },
 
   "app.start": {
-    params: z.object({ dataDir: z.string().min(1), userDataDir: z.string().min(1).optional(), port: z.number().int().min(1024).max(65535), env: z.record(z.string()).optional() }),
-    result: z.object({ pid: z.number().int(), cdpUrl: z.string(), desktop: z.string() })
+    params: z.object({ dataDir: z.string().min(1), userDataDir: z.string().min(1).optional(), port: z.number().int().min(1024).max(65535), fixture: z.literal("session-tree").optional(), env: z.record(z.string()).optional() }),
+    result: z.object({ pid: z.number().int(), cdpUrl: z.string(), desktop: z.string(), dataDir: z.string().optional(), projectPath: z.string().optional(), workspaceId: z.string().optional() })
   },
   "app.stop": { params: z.object({ pid: z.number().int().positive() }), result: zEmpty },
 
