@@ -78,6 +78,8 @@ export const zRun = z.object({
   attempts: z.number().int().nonnegative().optional(),
   /** Earliest automatic retry time from the persisted execution. */
   retryAt: z.string().datetime().optional(),
+  /** Set when the user stopped a Worker turn; only an explicit work-item resume clears it. */
+  pauseReason: z.literal("user").optional(),
   /** Set when a contract change was steered into a turn already in progress; a submit from that same turn is void. Cleared when the turn ends. */
   staleTurnId: z.string().optional()
 });
@@ -305,6 +307,7 @@ export type Integration = z.infer<typeof zIntegration>;
 export const zWorkflowAction = z.discriminatedUnion("kind", [zExecution, zIntegration]);
 export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
+export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.pauseReason === "user";
 
 export const zWorktreeCleanup = z.object({
   sessionId: z.string().optional(),

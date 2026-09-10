@@ -32,6 +32,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
   onOpenSession: (sessionId: string, turnId?: string) => void; onCancel: () => void; onOpen: () => void;
 }) => {
   const blockers = waitingActions(actions, item);
+  const userPaused = item.run.pauseReason === "user";
   const sessionId = item.run.sessionId ?? run?.sessionId;
   const at = run?.endedAt ?? item.run.heartbeatAt ?? run?.startedAt ?? item.updatedAt;
   const info = run
@@ -43,11 +44,11 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
         leading={<Badge>{item.risk}</Badge>}
         title={<span title={item.title}>{item.title}</span>}
         onClick={onOpen}
-        meta={blockers.length ? blockers.map((action) => <div key={action.actionId}>{waitingReason(action)} · {actionRoleLabel(action)}</div>) : waitingFor.length ? "等待 " + waitingFor.join("、") + " · 工作台" : undefined}
+        meta={userPaused ? undefined : blockers.length ? blockers.map((action) => <div key={action.actionId}>{waitingReason(action)} · {actionRoleLabel(action)}</div>) : waitingFor.length ? "等待 " + waitingFor.join("、") + " · 工作台" : undefined}
         titleClassName={muted || !isOpenWorkItem(item) ? "text-faint-foreground" : undefined}
         columns={{
           info: info && <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
-          status: <Badge status={item.status} muted={muted}>{statusLabel[item.status]}</Badge>,
+          status: <Badge status={item.status} muted={muted}>{userPaused ? "用户暂停" : statusLabel[item.status]}</Badge>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
           action: sessionId && <SessionLink sessionId={sessionId} onOpenSession={onOpenSession} />
         }}

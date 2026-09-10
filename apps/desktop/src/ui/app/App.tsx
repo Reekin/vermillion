@@ -213,6 +213,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   reloadSignal={reloadSignal}
                   createSession={createSession}
                   initializeDraftExecution={initializeDraftExecution}
+                  onBeforeStop={sessionWorkspaceId ? (workerSessionId) => store.getState().client.request("workItem.pause", {
+                    workspaceId: sessionWorkspaceId,
+                    sessionId: workerSessionId
+                  }).then(() => undefined) : undefined}
                   onViewChange={setWorkTarget}
                   composerDraftKey="think"
                   onComposerChange={setComposerActions}

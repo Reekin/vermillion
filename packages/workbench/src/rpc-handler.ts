@@ -52,6 +52,8 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "worktree.cleanup": (p) => service.cleanupWorktrees(p.workspaceId),
     "workItem.rollback": (p) => service.rollbackWorkItem(p.workspaceId, p.workItemId, p.reason),
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
+    "workItem.pause": (p) => service.pauseWorkItem(p.workspaceId, p.sessionId),
+    "workItem.resume": (p) => service.resumeWorkItem(p.workspaceId, p.workItemId),
     "action.list": (p) => service.listActions(p.workspaceId),
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 

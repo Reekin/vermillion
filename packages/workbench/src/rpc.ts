@@ -98,6 +98,8 @@ export const workbenchRpc = {
   "workItem.rollback": { params: zWi.extend({ reason: z.string().trim().min(1) }), result: zWorkItem },
   "inbox.acknowledge": { params: zWi, result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
+  "workItem.pause": { params: zWs.extend({ sessionId: z.string().min(1) }), result: z.object({ paused: z.boolean(), workItem: zWorkItem.optional() }) },
+  "workItem.resume": { params: zWi, result: zWorkItem },
   "workItem.diagnose": { params: zWi, result: zDiagnosis },
   "runtime.info": { params: zEmpty, result: z.object({ buildId: z.string(), pid: z.number(), startedAt: z.string(), schedulerOnline: z.boolean() }) },
   "action.list": { params: zWs, result: z.array(zWorkflowAction) },
