@@ -9,7 +9,6 @@ const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
-
 describe("session-tree fixture preparation", () => {
   it("writes the isolated workspace and three browsable session records", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "vermillion-session-tree-fixture-"));
@@ -48,4 +47,3 @@ describe("session-tree fixture preparation", () => {
       .rejects.toThrow("without unrelated workspaces");
   });
 });
-
