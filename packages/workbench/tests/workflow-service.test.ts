@@ -92,6 +92,29 @@ it("persists 1/5/30/300 minute retry deadlines and the fifth-failure decision in
   expect((await service.listActions(workspaceId))[0]).toMatchObject({ attempts: 0, sessionId: "original", status: "pending" });
 });
 
+it("persists a user pause separately from failure decisions and resumes the same work item", async () => {
+  const { client, options, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+
+  const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
+  expect(paused).toMatchObject({ paused: true, workItem: { status: "decision", run: { sessionId: "worker", pauseReason: "user", attempts: 0 } } });
+  expect(await service.listDecisions(workspaceId)).toEqual([]);
+  expect(await service.diagnoseWorkItem(workspaceId, item.workItemId)).toMatchObject({
+    waiting: expect.arrayContaining(["用户已暂停 Worker"]),
+    availableActions: expect.arrayContaining([expect.objectContaining({ method: "workItem.resume" })])
+  });
+
+  const restarted = new WorkbenchService(options);
+  try {
+    expect(await restarted.getWorkItem(workspaceId, item.workItemId)).toMatchObject({ status: "decision", run: { pauseReason: "user" } });
+    const resumed = await restarted.resumeWorkItem(workspaceId, item.workItemId);
+    expect(resumed).toMatchObject({ status: "queued", run: { sessionId: "worker" } });
+    expect(resumed.run.pauseReason).toBeUndefined();
+    expect((await restarted.listActions(workspaceId))[0]).toMatchObject({ status: "pending", stage: "deliver" });
+  } finally { await restarted.dispose(); }
+});
+
 it("bounds verifier rejection independently of runtime failures and resumes after user retry", async () => {
   const { service, options, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });

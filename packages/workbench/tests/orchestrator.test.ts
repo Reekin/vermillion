@@ -89,6 +89,26 @@ it("interrupts a cancelled worker before sending work to the next shared-resourc
   expect((await f.service.getWorkItem(f.workspaceId, second.workItemId)).status).toBe("running");
 });
 
+it("does not retry a manually stopped worker until the work item is explicitly resumed", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+
+  const paused = await f.service.pauseWorkItem(f.workspaceId, "original");
+  expect(paused.paused).toBe(true);
+  f.complete("original", "turn-1", "interrupted");
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.pauseReason).toBe("user"));
+  const stopped = await f.service.getWorkItem(f.workspaceId, item.workItemId);
+  expect(stopped).toMatchObject({ status: "decision", run: { attempts: 0, pauseReason: "user" } });
+  expect(stopped.run.retryAt).toBeUndefined();
+  expect(f.runner.send).toHaveBeenCalledOnce();
+
+  await f.service.resumeWorkItem(f.workspaceId, item.workItemId);
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+});
+
 async function fixture(trackTurns = false) {
   const f = await setup(); fixtures.push(f);
   const active = new Set<string>();
@@ -130,7 +150,7 @@ async function fixture(trackTurns = false) {
   };
   const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner });
   orchestrators.push(orchestrator);
-  const complete = (sessionId: string, turnId = activeTurns.get(sessionId) ?? "end", finishReason: "completed" | "failed" = "completed") => {
+  const complete = (sessionId: string, turnId = activeTurns.get(sessionId) ?? "end", finishReason: "completed" | "interrupted" | "failed" = "completed") => {
     if (!activeTurns.has(sessionId) || activeTurns.get(sessionId) === turnId) {
       active.delete(sessionId);
       activeTurns.delete(sessionId);

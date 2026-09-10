@@ -27,6 +27,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   const [decisions, setDecisions] = useState<DecisionCard[]>();
   const [error, setError] = useState<string>();
   const [technicalOpen, setTechnicalOpen] = useState(false);
+  const [resuming, setResuming] = useState(false);
   useEffect(() => {
     let active = true;
     let generation = 0;
@@ -49,10 +50,17 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   const itemActions = actions.filter((action) => action.workItemId === workItemId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const sessionId = item?.run.sessionId ?? itemRuns[0]?.sessionId;
   const itemDecisions = decisions?.filter((card) => card.workItemId === workItemId || itemActions.some((action) => action.actionId === card.actionId) || item?.decisions.includes(card.decisionId));
+  const resume = async () => {
+    setResuming(true);
+    setError(undefined);
+    try { await client.request("workItem.resume", { workspaceId, workItemId }); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setResuming(false); }
+  };
   return <Modal title="工单详情" onClose={onClose} width={800}>
     {!item ? <EmptyState title="工单不存在" hint={workItemId} /> : <Card
       className="m-4"
-      header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{statusLabel[item.status]}</Badge></>}
+      header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{item.run.pauseReason === "user" ? "用户暂停" : statusLabel[item.status]}</Badge>{item.run.pauseReason === "user" && <Button className="ml-auto" variant="primary" disabled={resuming} onClick={() => void resume()}>恢复执行</Button>}</>}
       footer={<>{sessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(sessionId); }}>会话</Button>}{item.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(item.sourceSessionId!, item.sourceTurnId); }}>来源</Button>}</>}
     >
       <DetailSection title="工单">{item.title}</DetailSection>

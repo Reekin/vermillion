@@ -56,6 +56,7 @@ export type ComposerContainerProps = {
   submitBranch?: (payload: Omit<import("../../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
+  onBeforeStop?: (sessionId: string) => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
     engineId: string,
@@ -96,6 +97,7 @@ export const ComposerContainer = memo(({
   submitBranch,
   autoSendQueuedMessages,
   onResumeSession,
+  onBeforeStop,
   onRequestTranscriptBottom,
   onExecutionPreferenceChange,
   onRespondApproval,
@@ -130,6 +132,7 @@ export const ComposerContainer = memo(({
     submitBranch,
     autoSendQueuedMessages,
     onResumeSession,
+    onBeforeStop,
     onRequestTranscriptBottom,
     onExecutionPreferenceChange
   });

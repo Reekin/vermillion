@@ -374,6 +374,7 @@ type UseComposerControllerInput = {
   submitBranch?: (payload: Omit<import("../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
+  onBeforeStop?: (sessionId: string) => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
     engineId: string,
@@ -1199,12 +1200,21 @@ export const useComposerController = (
     }
     setIsDispatching(true);
     try {
+      let pauseError: unknown;
+      try {
+        await input.onBeforeStop?.(input.activeSessionId);
+      } catch (error) {
+        pauseError = error;
+      }
       await input.transport.chat.interrupt({
         sessionId: input.activeSessionId,
         turnId: interruptTurnId
       });
       input.onStatusNotice({
-        message: "Interrupt requested.",
+        message: pauseError
+          ? `Interrupt requested; Worker pause recording failed: ${pauseError instanceof Error ? pauseError.message : String(pauseError)}`
+          : "Interrupt requested.",
+        persistent: Boolean(pauseError),
         source: "send"
       });
     } catch (error) {

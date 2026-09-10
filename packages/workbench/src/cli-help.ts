@@ -13,6 +13,8 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "workItem.submit": "当前 Worker 的 running 工单；提交真实证据、review 与逐条验收结果。",
   "workItem.update": "未结束工单；调整合同并通过 note 说明具体修改。",
   "workItem.cancel": "未结束工单；取消当前工作。",
+  "workItem.pause": "正在运行的 Worker 会话；登记用户暂停，配合会话 Stop 使用。",
+  "workItem.resume": "用户已暂停的工单；清除暂停并从原会话继续。",
   "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。"
 };
 

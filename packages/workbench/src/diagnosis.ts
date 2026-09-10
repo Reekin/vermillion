@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { effectiveNeeds, actionIsOpen, zWorkflowAction, zScheduler, zWorkItem, zDecisionCard, type WorkflowAction } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, isUserPaused, zWorkflowAction, zScheduler, zWorkItem, zDecisionCard, type WorkflowAction } from "./contracts.js";
 import type { WorkbenchService } from "./workbench-service.js";
 
 export const zDiagnosis = z.object({
@@ -16,6 +16,7 @@ export const zDiagnosis = z.object({
 });
 
 const nextFor = (action: WorkflowAction): string => {
+  if (isUserPaused(action)) return "用户明确恢复后，从原会话继续执行。";
   if (action.status === "decision") return "等待用户答复决策卡。";
   if (action.status === "retry") return "等待重试时间；自动重试用尽后由用户决策。";
   return "工作台续接当前未完成阶段。";
@@ -33,7 +34,7 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
   const decisions = cards.filter((c) => !c.answer && !c.withdrawn && (c.workItemId === workItemId || actions.some((a) => a.actionId === c.actionId)));
   const dependencies = item.dependsOn.map((id) => ({ workItemId: id, status: items.find((i) => i.workItemId === id)?.status ?? "missing" }));
   const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => a.kind !== "execute" || ["retry", "decision"].includes(a.status))
-    .map((a) => ({ reason: a.failure ?? a.message, role: a.kind === "execute" ? "worker" : "workbench", sessionId: a.kind === "execute" ? a.sessionId : undefined, actionId: a.actionId, next: nextFor(a) }));
+    .map((a) => ({ reason: isUserPaused(a) ? "用户已暂停 Worker" : a.failure ?? a.message, role: a.kind === "execute" ? "worker" : "workbench", sessionId: a.kind === "execute" ? a.sessionId : undefined, actionId: a.actionId, next: nextFor(a) }));
   for (const dependency of dependencies.filter((d) => d.status !== "closed"))
     blockers.push({ reason: `前置 ${dependency.workItemId}: ${dependency.status}`, role: dependency.status === "cancelled" ? "worker" : "workbench", next: dependency.status === "cancelled" ? "用户调整依赖或取消。" : "等待前置关闭。" });
   for (const card of decisions) blockers.push({ reason: card.question, role: "user", sessionId: card.sessionId, actionId: card.actionId, next: "用户答复 decision.answer。" });
@@ -53,6 +54,7 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
   }
   const availableActions = [{ method: "workItem.diagnose", condition: "随时查询当前状态。" }];
   if (decisions.length) availableActions.push({ method: "decision.answer", condition: "获得用户实际答复后选择重试、取消或给出具体说明。" });
+  if (item.run.pauseReason === "user") availableActions.push({ method: "workItem.resume", condition: "确认继续执行时，从原会话恢复。" });
   if (!["closed", "cancelled"].includes(item.status)) availableActions.push({ method: "workItem.update", condition: "调整合同或 dependsOn；并在 note 说明修改。" }, { method: "workItem.cancel", condition: "取消当前工作。" });
   return { workItemId, phase: item.status, sessionId: item.run.sessionId, actions, blockers, dependencies, decisions,
     scheduler: { ...scheduler, online, running: items.filter((entry) => entry.status === "running").length }, resources, waiting, availableActions,

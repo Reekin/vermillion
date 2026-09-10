@@ -783,6 +783,38 @@ export class WorkbenchService {
     return cancelled;
   }
 
+  async pauseWorkItem(workspaceId: string, sessionId: string): Promise<{ paused: boolean; workItem?: WorkItem }> {
+    return this.integrate(workspaceId, async () => {
+      const item = (await this.listWorkItems(workspaceId)).find((entry) => entry.run.sessionId === sessionId && entry.status === "running");
+      if (!item) return { paused: false };
+      const paused = await this.mutateRecord(workspaceId, item.workItemId, (record) => {
+        const now = this.now();
+        return { ...record,
+          item: { ...record.item, status: "decision", updatedAt: now },
+          execution: { ...record.execution, status: "decision", pauseReason: "user", retryAt: undefined, failure: undefined,
+            history: [...record.execution.history, { at: now, event: "paused:user", message: "用户已暂停 Worker" }], updatedAt: now } };
+      });
+      return { paused: true, workItem: paused };
+    });
+  }
+
+  async resumeWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.integrate(workspaceId, async () => {
+      const current = await this.getWorkItem(workspaceId, workItemId);
+      if (current.status !== "decision" || current.run.pauseReason !== "user") throw new Error("工单不是用户暂停状态：" + workItemId);
+      return this.mutateRecord(workspaceId, workItemId, (record) => {
+        const now = this.now();
+        const sessionId = record.execution.sessionId;
+        return { ...record,
+          item: { ...record.item, status: "queued", updatedAt: now },
+          execution: { ...record.execution, status: "pending", stage: sessionId ? "deliver" : "open", pauseReason: undefined,
+            retryAt: undefined, failure: undefined, idleTurns: 0,
+            message: [record.execution.message, "用户已恢复执行。"].filter(Boolean).join("\n"),
+            history: [...record.execution.history, { at: now, event: "resumed:user", message: "用户已恢复 Worker" }], updatedAt: now } };
+      });
+    });
+  }
+
   private detachWorktree(record: WorkItemRecord, discard: boolean): WorkItemRecord {
     const { sessionId, worktreePath, branch } = record.execution;
     return { ...record,
