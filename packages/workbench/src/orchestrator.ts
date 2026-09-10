@@ -269,9 +269,12 @@ export class Orchestrator {
       this.runsBySession.set(sessionId, bound?.run.runId === run.runId ? bound : { workspaceId, actionId: action.actionId, run });
       const tracked = this.turnsBySession.get(sessionId);
       if (tracked && !tracked.settled) tracked.bound = this.runsBySession.get(sessionId);
-      if (wasActive && !this.turnsBySession.has(sessionId)) this.trackTurn(sessionId, {
-        turnId: this.runner.getActiveTurnId?.(sessionId), scheduled: false
-      });
+      if (wasActive && !this.turnsBySession.has(sessionId)) {
+        const turnId = this.runner.getActiveTurnId?.(sessionId);
+        this.trackTurn(sessionId, {
+          turnId, scheduled: !turnId || !action.scheduledTurnId || turnId === action.scheduledTurnId
+        });
+      }
       const wasQueued = item.status === "queued";
       if (item.status === "queued") item = await this.service.startWorkItem(workspaceId, item.workItemId, { sessionId, heartbeatAt: this.now() });
       if (action.stage === "execute" && !wasQueued && (wasActive || priorTurn?.scheduled === false)) return;
@@ -283,24 +286,30 @@ export class Orchestrator {
       }
       if (action.stage === "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver" }));
       const message = await this.actionMessage(workspaceId, action, cwd);
+      let scheduledTurnId: string | undefined;
       // Delivery is durable even when send throws. The same session and message are retried.
       if (wasActive) {
         const before = this.turnsBySession.get(sessionId);
         const { turnId } = await this.runner.steer(sessionId, message);
         if (item && turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, turnId);
         const turn = this.turnsBySession.get(sessionId);
-        if (!turnId && turn && turn !== before) turn.scheduled = true;
+        if (!turnId && turn && turn !== before) {
+          turn.scheduled = true;
+          scheduledTurnId = turn.turnId;
+        }
       } else {
         const before = this.turnsBySession.get(sessionId);
         const sent = await this.runner.send(sessionId, message);
         const turn = this.turnsBySession.get(sessionId);
-        const turnId = sent?.turnId ?? this.runner.getActiveTurnId?.(sessionId);
+        const turnId = sent?.turnId ?? (turn !== before ? turn?.turnId : undefined) ?? this.runner.getActiveTurnId?.(sessionId);
         if (!turn || turn === before) this.trackTurn(sessionId, { turnId, scheduled: true });
         else if (turn.turnId === turnId) turn.scheduled = true;
+        scheduledTurnId = turnId;
       }
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
       await this.service.updateAction(workspaceId, action, (latest) => ({
         ...latest,
+        ...(scheduledTurnId ? { scheduledTurnId } : {}),
         ...(latest.message === action.message && latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
           ? { status: "running" as const, stage: "execute" as const, message: "", failure: undefined, retryAt: undefined } : {}),
         deliveredAt: this.now()

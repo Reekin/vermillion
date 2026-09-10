@@ -1134,12 +1134,12 @@ export class CodexAppServerRuntimePort
           };
         }
       case "turn/steer":
-        await this.handleTurnSteer(payload, options);
         return {
           id: payload.id,
           ok: true,
           result: {
-            accepted: true
+            accepted: true,
+            ...await this.handleTurnSteer(payload, options)
           }
         };
       case "turn/interrupt":
@@ -1644,7 +1644,8 @@ export class CodexAppServerRuntimePort
 
   private async handleTurnStart(
     payload: CodexRuntimeRequest,
-    options: RuntimeOperationOptions
+    options: RuntimeOperationOptions,
+    injectContext = true
   ): Promise<{ sessionId: string; turnId: string; threadId: string }> {
     const sessionId = String(payload.params.sessionId ?? "");
     const content = String(payload.params.content ?? "");
@@ -1698,7 +1699,7 @@ export class CodexAppServerRuntimePort
     const startTurn = async (targetThreadId: string): Promise<TurnStartResponse> => {
       this.pendingTurnSessionIdByThreadId.set(targetThreadId, sessionId);
       try {
-        await this.injectWorkbenchContext(targetThreadId, payload.params, options);
+        if (injectContext) await this.injectWorkbenchContext(targetThreadId, payload.params, options);
         const params: Record<string, unknown> = {
           threadId: targetThreadId,
           input,
@@ -1776,7 +1777,7 @@ export class CodexAppServerRuntimePort
   private async handleTurnSteer(
     payload: CodexRuntimeRequest,
     options: RuntimeOperationOptions
-  ): Promise<void> {
+  ): Promise<{ sessionId: string; turnId: string; delivery: "steered" | "start_or_steer" }> {
     const sessionId = String(payload.params.sessionId ?? "");
     const expectedTurnId = String(payload.params.turnId ?? "");
     const content = String(payload.params.content ?? "");
@@ -1785,19 +1786,35 @@ export class CodexAppServerRuntimePort
       : [];
     const threadId = this.threadIdBySessionId.get(sessionId);
     if (!threadId || !expectedTurnId) {
-      return;
+      throw new Error("Cannot steer before session and active turn are attached.");
     }
     const input = buildCodexTurnInput(content, attachments);
     await this.injectWorkbenchContext(threadId, payload.params, options);
-    await this.rpc(
-      "turn/steer",
-      {
-        threadId,
-        input,
-        expectedTurnId
-      } satisfies TurnSteerParams,
-      options
-    );
+    let targetTurnId = expectedTurnId;
+    // Only a provider precondition rejection proves this input was not delivered.
+    // Retry a changed turn once; repeated handoffs must not create an unbounded loop.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const result = await this.rpc("turn/steer", {
+          threadId, input, expectedTurnId: targetTurnId
+        } satisfies TurnSteerParams, options) as { turnId: string };
+        return { sessionId, turnId: result.turnId, delivery: "steered" };
+      } catch (error) {
+        if (!(error instanceof Error) ||
+          (error as { code?: unknown }).code !== "runtime_protocol_error" ||
+          (error as { details?: { method?: unknown } }).details?.method !== "turn/steer") throw error;
+        const mismatch = /^expected active turn id `([^`]+)` but found `([^`]+)`$/.exec(error.message);
+        if (mismatch?.[1] === targetTurnId && attempt === 0) {
+          targetTurnId = mismatch[2]!;
+          continue;
+        }
+        if (error.message !== "no active turn to steer") throw error;
+        // Native turn/start is StartOrSteer: a concurrent new turn receives the
+        // input atomically. Its response does not distinguish start from steer.
+        const started = await this.handleTurnStart(payload, options, false);
+        return { sessionId, turnId: started.turnId, delivery: "start_or_steer" };
+      }
+    }
   }
 
   private async handleTurnInterrupt(

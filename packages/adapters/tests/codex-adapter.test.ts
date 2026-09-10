@@ -274,15 +274,17 @@ describe("CodexAdapter", () => {
     });
   });
 
-  it("maps steerTurn commands to the dedicated codex steer method", async () => {
+  it.each(["steered", "start_or_steer"] as const)("maps steerTurn and its actual delivery receipt: %s", async (delivery) => {
     const runtimePort = new FakeCodexRuntimePort();
+    runtimePort.requestHandler = async (payload) => ({ id: payload.id, ok: true,
+      result: { accepted: true, sessionId: "session-1", turnId: "actual-turn", delivery } });
     const adapter = new CodexAdapter({
       runtimePort,
       fallbackAgentId: "codex-agent"
     });
 
     await adapter.initialize();
-    await adapter.executeCommand({
+    const result = await adapter.executeCommand({
       commandId: "cmd-steer-1",
       command: {
         type: "steerTurn",
@@ -297,6 +299,7 @@ describe("CodexAdapter", () => {
     expect(runtimePort.requests).toHaveLength(1);
     expect(runtimePort.requests[0].method).toBe("turn/steer");
     expect(runtimePort.requests[0].params.type).toBe("steerTurn");
+    expect(result.outcome).toEqual({ type: "turn_delivered", sessionId: "session-1", turnId: "actual-turn", delivery });
   });
 
   it("maps thread goal commands to codex goal runtime methods", async () => {

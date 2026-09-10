@@ -2,20 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
-  it("starts a new turn when the engine rejects steering a finished turn", async () => {
+  it.each([
+    { delivery: "start_or_steer", expected: {} },
+    { delivery: "steered", expected: { turnId: "actual" } }
+  ])("uses confirmed shared delivery instead of the requested turn: $delivery", async ({ delivery, expected }) => {
     const shell = { getActiveTurnId: () => "ended", executeCommand: vi.fn()
-      .mockRejectedValueOnce(new Error("no active turn to steer"))
-      .mockResolvedValueOnce({ accepted: true }) };
+      .mockResolvedValueOnce({ accepted: true, turnId: "actual", delivery }) };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
-    await expect(runner.steer("worker", "update")).resolves.toEqual({});
-    expect(shell.executeCommand.mock.calls.map(([input]) => input.command.type)).toEqual(["steerTurn", "sendUserMessage"]);
-    expect(shell.executeCommand.mock.calls[1]![0].command.messageId).toBe(shell.executeCommand.mock.calls[0]![0].command.messageId);
+    await expect(runner.steer("worker", "update")).resolves.toEqual(expected);
+    expect(shell.executeCommand.mock.calls.map(([input]) => input.command.type)).toEqual(["steerTurn"]);
   });
 
-  it("does not resend an input when delivery is uncertain", async () => {
-    const shell = { getActiveTurnId: () => "running", executeCommand: vi.fn().mockRejectedValue(new Error("connection lost")) };
+  it.each(["connection lost", "no active turn to steer"])("leaves shared delivery failures to the caller without retrying: %s", async (message) => {
+    const shell = { getActiveTurnId: () => "running", executeCommand: vi.fn().mockRejectedValue(new Error(message)) };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
-    await expect(runner.steer("worker", "update")).rejects.toThrow("connection lost");
+    await expect(runner.steer("worker", "update")).rejects.toThrow(message);
     expect(shell.executeCommand).toHaveBeenCalledOnce();
   });
 
@@ -29,11 +30,11 @@ describe("AgentRunner recovery", () => {
     expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({ type: "sendUserMessage" }) }));
   });
   it("forwards attachments and selected execution with the first preparation message", async () => {
-    const shell = { executeCommand: vi.fn().mockResolvedValue({ accepted: true }), getActiveTurnId: () => "started" };
+    const shell = { executeCommand: vi.fn().mockResolvedValue({ accepted: true, turnId: "started" }), getActiveTurnId: () => undefined };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
     const options = { attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png" }],
       execution: { modelId: "selected", reasoningOptionId: "high", serviceTierId: null } };
-    await runner.send("worker", "User input\n\nPreparation prompt", options);
+    await expect(runner.send("worker", "User input\n\nPreparation prompt", options)).resolves.toEqual({ turnId: "started" });
     expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
       type: "sendUserMessage", sessionId: "worker", content: "User input\n\nPreparation prompt", ...options
     }) }));

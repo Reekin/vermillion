@@ -24,6 +24,12 @@ export type AdapterEventListener = (envelope: EventEnvelope) => void;
 
 export type AdapterCommandOutcome =
   | {
+      type: "turn_delivered";
+      sessionId: string;
+      turnId: string;
+      delivery: "steered" | "start_or_steer";
+    }
+  | {
       type: "turn_started";
       sessionId: string;
       turnId: string;
@@ -65,4 +71,3 @@ export interface AgentAdapter {
   ): () => void;
   dispose(): Promise<void>;
 }
-

@@ -64,26 +64,16 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
         attachments: options?.attachments ?? [], execution: options?.execution }
     });
     if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
-    return { turnId: shell.getActiveTurnId(sessionId) };
+    return { turnId: receipt.turnId };
   },
   steer: async (sessionId, content) => {
     const turnId = shell.getActiveTurnId(sessionId);
     const command = turnId
       ? { type: "steerTurn" as const, sessionId, turnId, messageId: createId(), content, attachments: [] }
       : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
-    try {
-      const receipt = await shell.executeCommand({ commandId: createId(), command });
-      if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
-      return { turnId };
-    } catch (error) {
-      // This provider rejection guarantees the input was not accepted by the finished turn.
-      if (!turnId || !(error instanceof Error) || !/no active turn to steer/i.test(error.message)) throw error;
-      const receipt = await shell.executeCommand({ commandId: createId(), command: {
-        type: "sendUserMessage", sessionId, messageId: command.messageId, content, attachments: []
-      } });
-      if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
-      return {};
-    }
+    const receipt = await shell.executeCommand({ commandId: createId(), command });
+    if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
+    return receipt.delivery === "steered" ? { turnId: receipt.turnId } : {};
   },
   interrupt: async (sessionId) => {
     const turn = shell

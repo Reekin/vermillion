@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapter } from "@vermillion/adapters";
 import type { RuntimeEvent } from "@vermillion/shared";
-import { readSessionExecutionProfile } from "@vermillion/shared";
+import { parseSessionRpcResponse, readSessionExecutionProfile } from "@vermillion/shared";
 import { DomainService } from "../src/domain-service.js";
 import { RuntimeOrchestrator } from "../src/runtime-orchestrator.js";
 import type { SessionAgentBinding } from "../src/runtime-types.js";
@@ -1543,6 +1543,69 @@ describe("RuntimeOrchestrator", () => {
     );
     warn.mockRestore();
   });
+
+  it.each(["steered", "start_or_steer", "rejected", "disconnected"] as const)(
+    "registers shared steering only after actual delivery, preserving handoff events: %s", async (delivery) => {
+      let listener: Parameters<AgentAdapter["subscribe"]>[0] | undefined;
+      const gate = createDeferred();
+      const emit = (event: RuntimeEvent) => listener?.({ eventId: `event-${Math.random()}`, event });
+      const adapter: AgentAdapter = {
+        id: "steer-adapter", kind: "codex", getLifecycleState: () => "ready",
+        initialize: async () => {}, dispose: async () => {},
+        subscribe: (next) => { listener = next; return () => { listener = undefined; }; },
+        executeCommand: async (envelope) => {
+          emit({ type: "turn.completed", sessionId: "worker", turnId: "old", finishReason: "completed" });
+          if (delivery === "steered" || delivery === "start_or_steer") {
+            emit({ type: "turn.started", sessionId: "worker", turnId: "actual" });
+            emit({ type: "message.started", sessionId: "worker", turnId: "actual", messageId: "native-echo", role: "user" });
+            emit({ type: "message.completed", sessionId: "worker", turnId: "actual", messageId: "native-echo", role: "user", finalText: "update" });
+          }
+          await gate.promise;
+          if (delivery === "disconnected") throw new Error("connection lost");
+          return { commandId: envelope.commandId, commandType: envelope.command.type,
+            accepted: delivery !== "rejected",
+            ...(delivery === "rejected" ? {} : { outcome: {
+              type: "turn_delivered" as const, sessionId: "worker", turnId: "actual", delivery
+            } }) };
+        }
+      };
+      const domainService = new DomainService({ now: () => "2026-09-10T00:00:00Z",
+        createSessionId: () => "worker", assertEngineRegistered: () => {},
+        resolveEngineCapabilities: () => ["chat"], publishRuntimeEvent: () => {} });
+      const orchestrator = new RuntimeOrchestrator({ domainService,
+        sessionIndexSyncService: { syncSession: async () => {}, syncRelation: async () => {}, markSessionUnreadCompleted: async () => {} } as never,
+        workspaceSelectionService: { activateSelection: async () => {} } as never,
+        publishRuntimeEvent: () => {}, agentBindings: [{
+          descriptor: { engineId: "codex", displayName: "Codex", capabilities: ["chat"] }, adapter
+        }] });
+      await orchestrator.createSession({ engineId: "codex" });
+      domainService.commitRuntimeEvent({ type: "turn.started", sessionId: "worker", turnId: "old" });
+      const command = { commandId: "update", command: { type: "steerTurn" as const,
+        sessionId: "worker", turnId: "old", messageId: "local-update", content: "update", attachments: [] } };
+      const pending = orchestrator.executeCommand(command);
+      // Attach the rejection assertion before releasing the gate.
+      const failed = delivery === "disconnected" ? expect(pending).rejects.toThrow("connection lost") : undefined;
+      await flushAsyncWork();
+      expect(domainService.getSnapshot().messageBlocks).toEqual([]);
+      await expect(orchestrator.executeCommand({ ...command, commandId: "overlap" })).resolves.toMatchObject({ accepted: false });
+      gate.resolve();
+      if (failed) await failed;
+      else if (delivery === "rejected") await expect(pending).resolves.toMatchObject({ accepted: false });
+      else {
+        const receipt = await pending;
+        expect(receipt).toMatchObject({ accepted: true, turnId: "actual", delivery });
+        expect(parseSessionRpcResponse({ id: "receipt", method: "runtime.command", ok: true, result: receipt }))
+          .toMatchObject({ result: { accepted: true, turnId: "actual", delivery } });
+      }
+      const snapshot = domainService.getSnapshot();
+      expect(snapshot.turns.find((turn) => turn.turnId === "old")).toMatchObject({ status: "completed", messageIds: [] });
+      if (delivery === "steered" || delivery === "start_or_steer") {
+        expect(snapshot.messageBlocks).toEqual([expect.objectContaining({ messageId: "local-update", turnId: "actual", text: "update" })]);
+        expect(snapshot.turns.find((turn) => turn.turnId === "actual")?.messageIds).toEqual(["local-update"]);
+      } else expect(snapshot.messageBlocks).toEqual([]);
+      await orchestrator.dispose();
+    }
+  );
 
   it("rejects mismatched canonical events and restores idle after adapter failure", async () => {
     const createHarness = (executeCommand: AgentAdapter["executeCommand"]) => {

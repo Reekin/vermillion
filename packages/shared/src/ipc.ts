@@ -1324,6 +1324,7 @@ const zRuntimeCommandResponseSchema = z.object({
     }).optional(),
     sessionId: zSessionId.optional(),
     turnId: zTurnId.optional(),
+    delivery: z.enum(["steered", "start_or_steer"]).optional(),
     providerSessionId: z.string().min(1).optional()
   })
 });
