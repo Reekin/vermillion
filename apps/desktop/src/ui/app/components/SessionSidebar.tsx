@@ -29,8 +29,8 @@ type SessionSidebarProps = {
 };
 
 export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
-  const toggleCollapsed = (sessionId: string) => setCollapsedIds((current) => {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (sessionId: string) => setExpandedIds((current) => {
     const next = new Set(current);
     if (next.has(sessionId)) next.delete(sessionId);
     else next.add(sessionId);
@@ -43,10 +43,10 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         depth={depth}
         leadingAction={session.subagents.length > 0 ? (
           <IconButton
-            icon={collapsedIds.has(session.sessionId) ? ChevronRight : ChevronDown}
-            label={`${collapsedIds.has(session.sessionId) ? "展开" : "折叠"}子会话：${session.title}`}
-            aria-expanded={!collapsedIds.has(session.sessionId)}
-            onClick={() => toggleCollapsed(session.sessionId)}
+            icon={expandedIds.has(session.sessionId) ? ChevronDown : ChevronRight}
+            label={`${expandedIds.has(session.sessionId) ? "折叠" : "展开"}子会话：${session.title}`}
+            aria-expanded={expandedIds.has(session.sessionId)}
+            onClick={() => toggleExpanded(session.sessionId)}
           />
         ) : <span aria-hidden="true" />}
         selected={selectedSessionId === session.sessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))}
@@ -67,7 +67,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         meta={!workspaceFilterId ? workspaceLabelById.get(session.workspaceId) ?? session.workspaceId : undefined}
         trailing={formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}
       />
-      {session.subagents.length > 0 && !collapsedIds.has(session.sessionId) && (
+      {session.subagents.length > 0 && expandedIds.has(session.sessionId) && (
         <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId: session.workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>
       )}
     </li>
