@@ -361,6 +361,118 @@ describe("renderer store domain replica", () => {
     });
   });
 
+  it("does not let an older window replace a newer session event", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(parseDomainSnapshot({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a"],
+        activeSessionId: "session-a",
+        createdAt: now,
+        updatedAt: now
+      }],
+      sessions: [{
+        sessionId: "session-a",
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "running",
+        createdAt: now,
+        updatedAt: now
+      }],
+      turns: [{
+        turnId: "turn-a",
+        sessionId: "session-a",
+        status: "streaming",
+        startedAt: now,
+        messageIds: ["message-a"],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      }],
+      messageBlocks: [{
+        blockId: "message-a:md",
+        messageId: "message-a",
+        sessionId: "session-a",
+        turnId: "turn-a",
+        role: "assistant",
+        kind: "markdown",
+        text: "old",
+        startedAt: now
+      }],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    }));
+    store.ingestEnvelope({
+      eventId: "event-newer",
+      cursor: "cursor-2",
+      occurredAt: now,
+      event: {
+        type: "message.delta",
+        sessionId: "session-a",
+        turnId: "turn-a",
+        messageId: "message-a",
+        delta: " new"
+      }
+    });
+
+    store.hydrateSessionWindow("session-a", parseDomainSnapshot({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a"],
+        activeSessionId: "session-a",
+        createdAt: now,
+        updatedAt: now
+      }],
+      sessions: [{
+        sessionId: "session-a",
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "running",
+        createdAt: now,
+        updatedAt: now
+      }],
+      turns: [{
+        turnId: "turn-a",
+        sessionId: "session-a",
+        status: "streaming",
+        startedAt: now,
+        messageIds: ["message-a"],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      }],
+      messageBlocks: [{
+        blockId: "message-a:md",
+        messageId: "message-a",
+        sessionId: "session-a",
+        turnId: "turn-a",
+        role: "assistant",
+        kind: "markdown",
+        text: "stale",
+        startedAt: now
+      }],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    }), "replace", "cursor-1");
+
+    expect(store.getDomainReadModel().getMessageBlock("message-a:md")?.text).toBe("old new");
+    expect(store.getState().eventStream.lastCursorBySessionId?.["session-a"]).toBe("cursor-2");
+  });
+
   it("notifies only the affected session scope for live events", () => {
     const store = createRendererStore();
     store.hydrateSnapshot(sessionSnapshot(), "cursor-0");

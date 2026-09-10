@@ -5,7 +5,7 @@ import {
   createIngestEventAction
 } from "./intake.js";
 import { recordUiOperation } from "../diagnostics/ui-performance.js";
-import { rendererMetaReducer } from "./meta-reducer.js";
+import { compareCursorPosition, isSessionWindowStale, rendererMetaReducer } from "./meta-reducer.js";
 import {
   createInitialRendererStoreState,
   normalizeRendererDomainSnapshot
@@ -68,13 +68,17 @@ export type RendererStore = {
 
 const applySnapshotActionToReplica = (
   replica: DomainReplica,
-  action: RendererStoreAction
+  action: RendererStoreAction,
+  state: RendererStoreState
 ): void => {
   switch (action.type) {
     case "store/hydrateSnapshot":
       replica.replaceSnapshot(normalizeRendererDomainSnapshot(action.snapshot));
       return;
     case "store/hydrateSessionWindow": {
+      if (action.mode !== "prepend" && isSessionWindowStale(state, action.sessionId, action.cursor)) {
+        return;
+      }
       const snapshot = normalizeRendererDomainSnapshot(action.snapshot);
       if (action.mode === "prepend") {
         replica.mergeSnapshot(snapshot, {
@@ -85,14 +89,25 @@ const applySnapshotActionToReplica = (
       replica.replaceSessionWindowSnapshot(action.sessionId, snapshot);
       return;
     }
-    case "store/hydrateSessionWindows":
-      replica.replaceSessionWindowSnapshots(
-        action.windows.map((window) => ({
+    case "store/hydrateSessionWindows": {
+      const latestCursorBySessionId = new Map(
+        Object.entries(state.eventStream.lastCursorBySessionId ?? {})
+      );
+      const freshWindows = action.windows.flatMap((window) => {
+        const currentCursor = latestCursorBySessionId.get(window.sessionId);
+        const comparison = compareCursorPosition(currentCursor, window.cursor);
+        if (currentCursor && comparison !== undefined && comparison > 0) {
+          return [];
+        }
+        if (window.cursor) latestCursorBySessionId.set(window.sessionId, window.cursor);
+        return [{
           sessionId: window.sessionId,
           snapshot: normalizeRendererDomainSnapshot(window.snapshot)
-        }))
-      );
+        }];
+      });
+      replica.replaceSessionWindowSnapshots(freshWindows);
       return;
+    }
     default:
       return;
   }
@@ -180,7 +195,7 @@ export const createRendererStore = (
       action.type === "store/hydrateSessionWindows"
     ) {
       const beforeRevision = domainReplica.getRevision();
-      applySnapshotActionToReplica(domainReplica, action);
+      applySnapshotActionToReplica(domainReplica, action, state);
       const snapshots = action.type === "store/hydrateSnapshot"
         ? [action.snapshot]
         : action.type === "store/hydrateSessionWindow"

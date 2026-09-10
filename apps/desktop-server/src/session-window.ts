@@ -230,6 +230,7 @@ export const buildSessionWindowSnapshotFromPage = (
 
   return {
     sessionId: input.sessionId,
+    revision: input.session.updatedAt,
     cursor: input.cursor,
     windowStartTurnId: windowTurns[0]?.turnId,
     windowEndTurnId: windowTurns.at(-1)?.turnId,

@@ -18,7 +18,7 @@ const splitComparableCursor = (
   };
 };
 
-const compareCursorPosition = (
+export const compareCursorPosition = (
   left: string | undefined,
   right: string | undefined
 ): number | undefined => {
@@ -40,6 +40,17 @@ const compareCursorPosition = (
     return 1;
   }
   return 0;
+};
+
+export const isSessionWindowStale = (
+  state: RendererStoreState,
+  sessionId: string,
+  cursor: string | undefined
+): boolean => {
+  if (!cursor) return false;
+  const currentCursor = state.eventStream.lastCursorBySessionId?.[sessionId];
+  const comparison = compareCursorPosition(currentCursor, cursor);
+  return comparison !== undefined && comparison > 0;
 };
 
 const isEnvelopeCoveredByCursor = (
@@ -143,6 +154,10 @@ const markSessionCursorBarrier = (
       cursorBarrierBySessionId: {
         ...(state.eventStream.cursorBarrierBySessionId ?? {}),
         [sessionId]: cursor
+      },
+      lastCursorBySessionId: {
+        ...(state.eventStream.lastCursorBySessionId ?? {}),
+        [sessionId]: cursor
       }
     }
   };
@@ -176,6 +191,15 @@ const markEnvelopesInEventStream = (
     eventStream: {
       lastEventId: lastEnvelope.eventId,
       lastCursor: lastEnvelope.cursor,
+      lastCursorBySessionId: envelopes.reduce<Record<string, string>>((acc, envelope) => {
+        const sessionId = runtimeEventSessionId(envelope.event);
+        if (!sessionId || !envelope.cursor) return acc;
+        const current = acc[sessionId] ?? state.eventStream.lastCursorBySessionId?.[sessionId];
+        const comparison = compareCursorPosition(envelope.cursor, current);
+        if (current && comparison !== undefined && comparison <= 0) return acc;
+        acc[sessionId] = envelope.cursor;
+        return acc;
+      }, { ...(state.eventStream.lastCursorBySessionId ?? {}) }),
       cursorBarrier: state.eventStream.cursorBarrier,
       cursorBarrierBySessionId: state.eventStream.cursorBarrierBySessionId,
       lastOccurredAt: lastEnvelope.occurredAt,
@@ -270,6 +294,9 @@ export const rendererMetaReducer = (
         action.cursor
       );
     case "store/hydrateSessionWindow": {
+      if (action.mode !== "prepend" && isSessionWindowStale(state, action.sessionId, action.cursor)) {
+        return state;
+      }
       const nextState =
         action.mode === "prepend"
           ? state
