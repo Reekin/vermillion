@@ -235,6 +235,8 @@ export const PanelHeader = ({ title, children, className }: { title: ReactNode; 
 type ListRowProps = {
   /** Icon, marker or badge before the title. */
   leading?: ReactNode;
+  /** Independent control before the row's main click target. */
+  leadingAction?: ReactNode;
   title: ReactNode;
   /** Second line under the title (path, timestamp, note). */
   meta?: ReactNode;
@@ -256,7 +258,7 @@ type ListRowProps = {
  * Standard row for sidebars and lists: leading | title / meta | trailing. Clickable when `onClick` is given;
  * the selection bar on the left is the same everywhere.
  */
-export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName, columns }: ListRowProps) => {
+export const ListRow = ({ leading, leadingAction, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName, columns }: ListRowProps) => {
   if (columns) return (
     <div className={cn("vm-list-columns", className)}>
       {leading}
@@ -292,8 +294,9 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
     selected && "bg-surface-selected before:absolute before:bottom-[5px] before:left-0 before:top-[5px] before:w-0.5 before:bg-accent",
     className
   );
-  const style = { paddingLeft: 16 + depth * 14 };
-  if (!hoverActions) {
+  const indent = 16 + depth * 14;
+  const style = { paddingLeft: indent + (leadingAction ? 28 : 0) };
+  if (!hoverActions && !leadingAction) {
     return onClick ? (
       <button type="button" className={shared} style={style} onClick={onClick} onContextMenu={onContextMenu}>{body}</button>
     ) : (
@@ -301,9 +304,10 @@ export const ListRow = ({ leading, title, meta, trailing, hoverActions, selected
     );
   }
   return (
-    <div className="group flex items-center">
+    <div className="group relative flex items-center">
       <button type="button" className={cn(shared, "min-w-0 flex-1")} style={style} onClick={onClick} onContextMenu={onContextMenu}>{body}</button>
-      <span className="mr-2 flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">{hoverActions}</span>
+      {leadingAction && <span className="absolute" style={{ left: indent }}>{leadingAction}</span>}
+      {hoverActions && <span className="mr-2 flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">{hoverActions}</span>}
     </div>
   );
 };

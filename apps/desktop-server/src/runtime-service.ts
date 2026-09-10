@@ -91,7 +91,7 @@ export class SessionRuntimeService {
       now: options.now,
       createId: options.createEventId,
       resolveConversationIdBySessionId: (sessionId) =>
-        this.domainService.resolveConversationIdForSession(sessionId)
+        this.resolveConversationIdForSession(sessionId)
     });
     const workspaceSelectionService = new WorkspaceSelectionService({
       workspaceRegistry: this.workspaceRegistry
@@ -194,7 +194,9 @@ export class SessionRuntimeService {
   public resolveConversationIdForSession(
     sessionId: string
   ): string | undefined {
-    return this.domainService.resolveConversationIdForSession(sessionId);
+    // History can emit status events before its snapshot has been hydrated.
+    return this.domainService.resolveConversationIdForSession(sessionId)
+      ?? this.sessionIndexStore?.getEntry(sessionId)?.conversationId;
   }
 
   private async markSessionUnreadCompleted(sessionId: string): Promise<void> {
