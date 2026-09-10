@@ -1520,7 +1520,7 @@ describe("Session discovery and reconciliation", () => {
     });
   });
 
-  it("cold-loads archived ancestors from surviving inherited histories without changing node ownership", async () => {
+  it.each([false, true])("cold-loads archived ancestors with original ownership (earlier inherited refork: %s)", async (earlierRefork) => {
     const baseDir = await createTempDir();
     const index = new SessionIndexStore({ baseDir });
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
@@ -1531,6 +1531,11 @@ describe("Session discovery and reconciliation", () => {
       root: ["r"], A: ["r", "a1", "a2", "a-tail"],
       B: ["r", "a1", "b1", "b-tail"], C: ["r", "a1", "b1", "c"], D: ["r", "a1", "a2", "d"]
     };
+    if (earlierRefork) {
+      histories.B = ["r", "a1", "a2", "b1", "b-tail"];
+      histories.C = ["r", "a1", "c"];
+      delete histories.D;
+    }
     for (const id of Object.keys(histories)) {
       await index.upsertSession({ workspaceId: "workspace-1", session: {
         ...buildHydratedWindow(id).session,
@@ -1538,7 +1543,8 @@ describe("Session discovery and reconciliation", () => {
       }, providerKind: "codex-thread", providerSessionId: `thread-${id}` });
     }
     for (const [parentSessionId, childSessionId, sourceTurnId] of [
-      ["root", "A", "r"], ["A", "B", "a1"], ["B", "C", "b1"], ["A", "D", "a2"]
+      ["root", "A", "r"], ["A", "B", earlierRefork ? "a2" : "a1"],
+      ["B", "C", earlierRefork ? "a1" : "b1"], ...(!earlierRefork ? [["A", "D", "a2"]] : [])
     ]) await index.upsertRelation({ workspaceId: "workspace-1", parentSessionId: parentSessionId!,
       childSessionId: childSessionId!, sourceTurnId, relationType: "fork" });
     const historyThread = (threadId: string): Thread => ({
@@ -1569,8 +1575,10 @@ describe("Session discovery and reconciliation", () => {
       reconciliation, fork: vi.fn() });
     try {
       const tree = await treeService.get("C");
-      expect(tree.visibleTurnIds).toEqual(["r", "a1", "b1", "c"]);
-      expect(Object.fromEntries(tree.nodes.map((node) => [node.nodeId, node.sessionId]))).toEqual({
+      expect(tree.visibleTurnIds).toEqual(earlierRefork ? ["r", "a1", "c"] : ["r", "a1", "b1", "c"]);
+      expect(Object.fromEntries(tree.nodes.map((node) => [node.nodeId, node.sessionId]))).toEqual(earlierRefork ? {
+        r: "root", a1: "A", c: "C"
+      } : {
         r: "root", a1: "A", a2: "A", b1: "B", c: "C", d: "D"
       });
       const snapshot = runtimeService.getSnapshot();
@@ -1581,8 +1589,10 @@ describe("Session discovery and reconciliation", () => {
       expect(index.getEntry("B")).toMatchObject({ archivedAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-B" });
       expect(resumeThread.mock.calls.flat()).not.toContain("thread-A");
       expect(resumeThread.mock.calls.flat()).not.toContain("thread-B");
-      await treeService.jump("C", "d");
-      expect((await treeService.get("C")).visibleTurnIds).toEqual(["r", "a1", "a2", "d"]);
+      if (!earlierRefork) {
+        await treeService.jump("C", "d");
+        expect((await treeService.get("C")).visibleTurnIds).toEqual(["r", "a1", "a2", "d"]);
+      }
     } finally {
       treeService.dispose();
     }

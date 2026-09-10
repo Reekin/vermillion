@@ -473,7 +473,7 @@ export type SessionDiscoveryProvider = {
     entry: SessionIndexEntry,
     input?: {
       isCancelled?: () => boolean;
-      historySources?: { entry: SessionIndexEntry; sourceTurnId: string }[];
+      historySources?: { entry: SessionIndexEntry; sourceTurnIds: string[] }[];
     }
   ) => Promise<HydratedSessionSnapshot | undefined>;
   hydrateSessionWindow?: (
@@ -1006,7 +1006,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     entry: SessionIndexEntry,
     input: {
       isCancelled?: () => boolean;
-      historySources?: { entry: SessionIndexEntry; sourceTurnId: string }[];
+      historySources?: { entry: SessionIndexEntry; sourceTurnIds: string[] }[];
     } = {}
   ): Promise<HydratedSessionSnapshot | undefined> {
     const threadId = entry.providerSessionId;
@@ -1020,8 +1020,8 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       for (const source of input.historySources) {
         const turns = await this.withHistory(source.entry, async (thread, restored) => {
           const history = restored ? thread : await this.codexRuntimePort.readThread(thread.id, true);
-          const end = history.turns.findIndex((turn) => turn.id === source.sourceTurnId);
-          if (end < 0) throw new Error(`Fork point ${source.sourceTurnId} is missing from ${thread.id}`);
+          const end = history.turns.findIndex((turn) => source.sourceTurnIds.includes(turn.id));
+          if (end < 0) throw new Error(`Fork points ${source.sourceTurnIds.join(", ")} are missing from ${thread.id}`);
           return history.turns.slice(0, end + 1);
         });
         // Every source contains a prefix of the same archived linear history.
@@ -1613,17 +1613,17 @@ export class SessionReconciliationService {
   ): Promise<boolean> {
     let hydrated: HydratedSessionSnapshot | undefined;
     try {
-      const historySources: { entry: SessionIndexEntry; sourceTurnId: string }[] = [];
+      const historySources: { entry: SessionIndexEntry; sourceTurnIds: string[] }[] = [];
       if (entry.archivedAt) {
         const forks = this.sessionIndexStore.listRelations(entry.workspaceId)
           .filter((relation) => relation.relationType === "fork");
-        const visit = (parentSessionId: string, sourceTurnId?: string): void => {
+        const visit = (parentSessionId: string, sourceTurnIds: string[] = []): void => {
           for (const fork of forks.filter((relation) => relation.parentSessionId === parentSessionId)) {
             const child = this.sessionIndexStore.getEntry(fork.childSessionId);
-            const boundary = sourceTurnId ?? fork.sourceTurnId;
-            if (!child || !boundary) continue;
-            if (child.archivedAt) visit(child.sessionId, boundary);
-            else historySources.push({ entry: child, sourceTurnId: boundary });
+            if (!child || !fork.sourceTurnId) continue;
+            const boundaries = [...sourceTurnIds, fork.sourceTurnId];
+            if (child.archivedAt) visit(child.sessionId, boundaries);
+            else historySources.push({ entry: child, sourceTurnIds: boundaries });
           }
         };
         visit(entry.sessionId);

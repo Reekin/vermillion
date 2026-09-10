@@ -69,8 +69,12 @@ export class WrapperChatTreeService {
       const session = snapshot.sessions.find((item) => item.sessionId === memberId)!;
       const relation = relations.find((item) => item.relationType === "fork" && item.childSessionId === memberId);
       const parentPath = relation ? paths.get(relation.parentSessionId) ?? [] : [];
+      const sourceIndex = relation?.sourceTurnId ? parentPath.indexOf(relation.sourceTurnId) : -1;
+      // Archived history can end before its original fork point after a descendant reforks earlier.
+      const prefixEnd = sourceIndex < 0 && index.getEntry(memberId)?.archivedAt
+        ? parentPath.length : sourceIndex + 1;
       const prefix = relation?.sourceTurnId
-        ? parentPath.slice(0, parentPath.indexOf(relation.sourceTurnId) + 1) : [];
+        ? parentPath.slice(0, prefixEnd) : [];
       const turns = snapshot.turns.filter((turn) => turn.sessionId === memberId)
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
       let parentNodeId = prefix.at(-1);
