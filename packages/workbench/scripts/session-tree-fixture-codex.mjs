@@ -212,6 +212,9 @@ const handle = (request) => {
     case "getAuthStatus":
       send({ id: request.id, result: { authMethod: "apikey", authToken: null, requiresOpenaiAuth: false } });
       return;
+    case "model/list":
+      send({ id: request.id, result: { data: [], nextCursor: null } });
+      return;
     default:
       send({ id: request.id, result: {} });
   }

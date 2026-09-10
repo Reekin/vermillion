@@ -99,7 +99,7 @@ export class AppLauncher {
       VERMILLION_PERSISTENCE_BASE_DIR: dataDir,
       VERMILLION_USER_DATA_DIR: userDataDir,
       VERMILLION_REMOTE_DEBUGGING_PORT: String(input.port),
-      CODEX_HOME: input.env?.CODEX_HOME ?? join(dataDir, "codex")
+      ...(fixture ? { CODEX_HOME: input.env?.CODEX_HOME ?? join(dataDir, "codex") } : {})
     };
     const pid = process.platform === "win32" ? await this.startHidden(env) : await this.startPlain(env);
     const cdpUrl = "http://127.0.0.1:" + input.port;
