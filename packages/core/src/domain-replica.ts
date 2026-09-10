@@ -226,7 +226,7 @@ export class DomainReplica {
   ): DomainSnapshot {
     const parsedSnapshot = parseDomainSnapshot(snapshot);
     const result = this.store.mergeSnapshot(parsedSnapshot, options);
-    this.commitSnapshotScopes(parsedSnapshot);
+    this.commitSnapshotScopes([parsedSnapshot]);
     return result;
   }
 
@@ -234,9 +234,27 @@ export class DomainReplica {
     sessionId: string,
     snapshot: DomainSnapshot | unknown
   ): DomainSnapshot {
-    const parsedSnapshot = parseDomainSnapshot(snapshot);
-    const result = this.store.replaceSessionWindowSnapshot(sessionId, parsedSnapshot);
-    this.commitSnapshotScopes(parsedSnapshot, sessionId);
+    return this.replaceSessionWindowSnapshots([{ sessionId, snapshot }]);
+  }
+
+  public replaceSessionWindowSnapshots(
+    windows: ReadonlyArray<{
+      sessionId: string;
+      snapshot: DomainSnapshot | unknown;
+    }>
+  ): DomainSnapshot {
+    const parsedWindows = windows.map((window) => ({
+      sessionId: window.sessionId,
+      snapshot: parseDomainSnapshot(window.snapshot)
+    }));
+    const result = this.store.replaceSessionWindowSnapshots(parsedWindows);
+    if (parsedWindows.length === 0) {
+      return result;
+    }
+    this.commitSnapshotScopes(
+      parsedWindows.map((window) => window.snapshot),
+      parsedWindows.map((window) => window.sessionId)
+    );
     return result;
   }
 
@@ -421,15 +439,21 @@ export class DomainReplica {
     return this.emptyChangeSet(true);
   }
 
-  private commitSnapshotScopes(snapshot: DomainSnapshot, forcedSessionId?: string): DomainChangeSet {
+  private commitSnapshotScopes(
+    snapshots: readonly DomainSnapshot[],
+    forcedSessionIds: readonly string[] = []
+  ): DomainChangeSet {
     const scopes = {
-      conversationIds: new Set(snapshot.conversations.map((item) => item.conversationId)),
-      sessionIds: new Set(snapshot.sessions.map((item) => item.sessionId)),
-      turnIds: new Set(snapshot.turns.map((item) => item.turnId))
+      conversationIds: new Set<string>(),
+      sessionIds: new Set<string>(),
+      turnIds: new Set<string>()
     };
-    if (forcedSessionId) {
-      scopes.sessionIds.add(forcedSessionId);
+    for (const snapshot of snapshots) {
+      for (const conversation of snapshot.conversations) scopes.conversationIds.add(conversation.conversationId);
+      for (const session of snapshot.sessions) scopes.sessionIds.add(session.sessionId);
+      for (const turn of snapshot.turns) scopes.turnIds.add(turn.turnId);
     }
+    for (const sessionId of forcedSessionIds) scopes.sessionIds.add(sessionId);
     return this.commitChangeSet(scopes, false);
   }
 

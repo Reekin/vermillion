@@ -296,6 +296,71 @@ describe("renderer store domain replica", () => {
     );
   });
 
+  it("hydrates all chat-tree windows in one store update and advances each cursor barrier", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-0");
+    store.ingestEvent({
+      type: "session.created",
+      conversationId: "conversation-a",
+      sessionId: "session-b",
+      engineId: "agent-a",
+      status: "idle"
+    });
+    const notifications = vi.fn();
+    store.subscribe(notifications);
+
+    const windowSnapshot = (sessionId: string, turnId: string) => parseDomainSnapshot({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a", "session-b"],
+        activeSessionId: sessionId,
+        createdAt: now,
+        updatedAt: "2026-04-21T00:00:01.000Z"
+      }],
+      sessions: [{
+        sessionId,
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "idle",
+        createdAt: now,
+        updatedAt: "2026-04-21T00:00:01.000Z"
+      }],
+      turns: [{
+        turnId,
+        sessionId,
+        status: "completed",
+        startedAt: "2026-04-21T00:00:01.000Z",
+        messageIds: [],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      }],
+      messageBlocks: [],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    });
+
+    store.hydrateSessionWindows([
+      { sessionId: "session-a", snapshot: windowSnapshot("session-a", "turn-a"), cursor: "cursor-1" },
+      { sessionId: "session-b", snapshot: windowSnapshot("session-b", "turn-b"), cursor: "cursor-2" }
+    ]);
+
+    expect(notifications).toHaveBeenCalledOnce();
+    expect(store.getDomainReadModel().getTurn("turn-a")).toBeDefined();
+    expect(store.getDomainReadModel().getTurn("turn-b")).toBeDefined();
+    expect(store.getState().eventStream.cursorBarrierBySessionId).toMatchObject({
+      "session-a": "cursor-1",
+      "session-b": "cursor-2"
+    });
+  });
+
   it("notifies only the affected session scope for live events", () => {
     const store = createRendererStore();
     store.hydrateSnapshot(sessionSnapshot(), "cursor-0");

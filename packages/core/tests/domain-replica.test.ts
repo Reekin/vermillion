@@ -181,6 +181,122 @@ describe("DomainReplica", () => {
     );
   });
 
+  it("replaces several session windows in one replica update", () => {
+    const replica = new DomainReplica();
+    const snapshot = (
+      turns: Array<{ turnId: string; sessionId: string }>,
+      sessionIds = ["session-a"],
+      status: "completed" | "streaming" = "completed"
+    ) => ({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a", "session-b"],
+        createdAt: now,
+        updatedAt: now
+      }],
+      sessions: sessionIds.map((sessionId) => ({
+        sessionId,
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "idle" as const,
+        createdAt: now,
+        updatedAt: now
+      })),
+      turns: turns.map(({ turnId, sessionId }) => ({
+        turnId,
+        sessionId,
+        status,
+        startedAt: now,
+        messageIds: [],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      })),
+      messageBlocks: [],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    });
+
+    replica.replaceSnapshot(snapshot([
+      { turnId: "turn-a-old", sessionId: "session-a" },
+      { turnId: "turn-b-old", sessionId: "session-b" }
+    ], ["session-a", "session-b"]));
+    const before = replica.getRevision();
+
+    replica.replaceSessionWindowSnapshots([
+      {
+        sessionId: "session-a",
+        snapshot: snapshot([{ turnId: "turn-a-old", sessionId: "session-a" }], ["session-a"], "streaming")
+      },
+      {
+        sessionId: "session-b",
+        snapshot: snapshot([{ turnId: "turn-b-old", sessionId: "session-b" }], ["session-b"], "streaming")
+      }
+    ]);
+
+    expect(replica.getRevision()).toBe(before + 1);
+    expect(replica.readModel.getTurn("turn-a-old")?.status).toBe("streaming");
+    expect(replica.readModel.getTurn("turn-b-old")?.status).toBe("streaming");
+  });
+
+  it("does not partially apply a failed multi-window replacement", () => {
+    const replica = new DomainReplica();
+    const snapshot = (status: "completed" | "streaming") => ({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a"],
+        createdAt: now,
+        updatedAt: now
+      }],
+      sessions: [{
+        sessionId: "session-a",
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "idle" as const,
+        createdAt: now,
+        updatedAt: now
+      }],
+      turns: [{
+        turnId: "turn-a",
+        sessionId: "session-a",
+        status,
+        startedAt: now,
+        messageIds: [],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      }],
+      messageBlocks: [],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    });
+
+    replica.replaceSnapshot(snapshot("completed"));
+    const before = replica.getRevision();
+
+    expect(() => replica.replaceSessionWindowSnapshots([
+      { sessionId: "session-a", snapshot: snapshot("streaming") },
+      { sessionId: "session-b", snapshot: snapshot("streaming") }
+    ])).toThrow(/outside merge scope/);
+
+    expect(replica.getRevision()).toBe(before);
+    expect(replica.readModel.getTurn("turn-a")?.status).toBe("completed");
+  });
+
   it("clears read state on dispose and rejects later mutations", () => {
     const replica = new DomainReplica();
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   ChatSession,
   Conversation,
@@ -89,6 +89,67 @@ const getStoredEntity = (
   ]?.get(id);
 
 describe("DomainStore", () => {
+  it("stages several session-window replacements from one global snapshot", () => {
+    const store = new DomainStore({
+      snapshot: {
+        conversations: [{
+          ...conversation("conversation-a"),
+          sessionIds: ["session-a", "session-b"]
+        }],
+        sessions: [session("session-a"), session("session-b")],
+        turns: [turn("turn-a"), turn("turn-b", "session-b")],
+        messageBlocks: [],
+        toolCalls: [],
+        terminalStreams: [],
+        approvalRequests: [],
+        runtimeInteractions: [],
+        participants: [],
+        threadGoals: [],
+        sessionRelations: []
+      }
+    });
+    const getSnapshot = vi.spyOn(store, "getSnapshot");
+
+    store.replaceSessionWindowSnapshots([
+      {
+        sessionId: "session-a",
+        snapshot: {
+          conversations: [{ ...conversation("conversation-a"), sessionIds: ["session-a", "session-b"] }],
+          sessions: [session("session-a")],
+          turns: [turn("turn-a")],
+          messageBlocks: [],
+          toolCalls: [],
+          terminalStreams: [],
+          approvalRequests: [],
+          runtimeInteractions: [],
+          participants: [],
+          threadGoals: [],
+          sessionRelations: []
+        }
+      },
+      {
+        sessionId: "session-b",
+        snapshot: {
+          conversations: [{ ...conversation("conversation-a"), sessionIds: ["session-a", "session-b"] }],
+          sessions: [session("session-b")],
+          turns: [turn("turn-b", "session-b")],
+          messageBlocks: [],
+          toolCalls: [],
+          terminalStreams: [],
+          approvalRequests: [],
+          runtimeInteractions: [],
+          participants: [],
+          threadGoals: [],
+          sessionRelations: []
+        }
+      }
+    ]);
+
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+    expect(store.getTurn("turn-a")).toBeDefined();
+    expect(store.getTurn("turn-b")).toBeDefined();
+  });
+
   it("materializes V1 snapshot arrays from indexes without storing them on entities", () => {
     const store = new DomainStore({
       snapshot: {

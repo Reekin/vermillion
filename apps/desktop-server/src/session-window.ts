@@ -16,6 +16,7 @@ import type {
 export type SessionWindowSnapshot = {
   snapshot: DomainSnapshot;
   sessionId: string;
+  revision?: string;
   cursor?: string;
   windowStartTurnId?: string;
   windowEndTurnId?: string;
@@ -108,6 +109,7 @@ export const buildSessionWindowSnapshot = (
   if (sortedTurns.length === 0) {
     return {
       sessionId: input.sessionId,
+      revision: input.session.updatedAt,
       cursor: input.cursor,
       snapshot: {
         conversations: [input.conversation],
@@ -172,6 +174,7 @@ export const buildSessionWindowSnapshot = (
 
   return {
     sessionId: input.sessionId,
+    revision: input.session.updatedAt,
     cursor: input.cursor,
     windowStartTurnId: windowTurns[0]?.turnId,
     windowEndTurnId: windowTurns.at(-1)?.turnId,

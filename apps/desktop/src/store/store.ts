@@ -53,6 +53,13 @@ export type RendererStore = {
     mode?: "replace" | "prepend",
     cursor?: string
   ) => RendererStoreState;
+  hydrateSessionWindows: (
+    windows: Array<{
+      sessionId: string;
+      snapshot: DomainSnapshot;
+      cursor?: string;
+    }>
+  ) => RendererStoreState;
   disposeSession: (sessionId: string) => RendererStoreState;
   ingestEvent: (event: RuntimeEvent) => RendererStoreState;
   ingestEnvelope: (envelope: EventEnvelope) => RendererStoreState;
@@ -78,6 +85,14 @@ const applySnapshotActionToReplica = (
       replica.replaceSessionWindowSnapshot(action.sessionId, snapshot);
       return;
     }
+    case "store/hydrateSessionWindows":
+      replica.replaceSessionWindowSnapshots(
+        action.windows.map((window) => ({
+          sessionId: window.sessionId,
+          snapshot: normalizeRendererDomainSnapshot(window.snapshot)
+        }))
+      );
+      return;
     default:
       return;
   }
@@ -159,15 +174,24 @@ export const createRendererStore = (
     let reducedState = rendererMetaReducer(state, action);
     let changes: DomainChangeSet | undefined;
 
-    if (action.type === "store/hydrateSnapshot" || action.type === "store/hydrateSessionWindow") {
+    if (
+      action.type === "store/hydrateSnapshot" ||
+      action.type === "store/hydrateSessionWindow" ||
+      action.type === "store/hydrateSessionWindows"
+    ) {
       const beforeRevision = domainReplica.getRevision();
       applySnapshotActionToReplica(domainReplica, action);
+      const snapshots = action.type === "store/hydrateSnapshot"
+        ? [action.snapshot]
+        : action.type === "store/hydrateSessionWindow"
+          ? [action.snapshot]
+        : action.windows.map((window) => window.snapshot);
       changes = {
         revision: domainReplica.getRevision(),
         fullReset: action.type === "store/hydrateSnapshot",
-        conversationIds: new Set(action.snapshot.conversations.map((item) => item.conversationId)),
-        sessionIds: new Set(action.snapshot.sessions.map((item) => item.sessionId)),
-        turnIds: new Set(action.snapshot.turns.map((item) => item.turnId))
+        conversationIds: new Set(snapshots.flatMap((snapshot) => snapshot.conversations.map((item) => item.conversationId))),
+        sessionIds: new Set(snapshots.flatMap((snapshot) => snapshot.sessions.map((item) => item.sessionId))),
+        turnIds: new Set(snapshots.flatMap((snapshot) => snapshot.turns.map((item) => item.turnId)))
       };
       if (domainReplica.getRevision() === beforeRevision) changes = undefined;
     } else if (action.type === "store/disposeSession") {
@@ -309,6 +333,11 @@ export const createRendererStore = (
         snapshot,
         mode,
         cursor
+      }),
+    hydrateSessionWindows: (windows) =>
+      dispatch({
+        type: "store/hydrateSessionWindows",
+        windows
       }),
     disposeSession: (sessionId) =>
       dispatch({

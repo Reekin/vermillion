@@ -288,6 +288,18 @@ export const rendererMetaReducer = (
           }
         : nextState;
     }
+    case "store/hydrateSessionWindows": {
+      let nextState = state;
+      for (const window of action.windows) {
+        nextState = rendererMetaReducer(nextState, {
+          type: "store/hydrateSessionWindow",
+          sessionId: window.sessionId,
+          snapshot: window.snapshot,
+          cursor: window.cursor
+        });
+      }
+      return nextState;
+    }
     case "store/disposeSession":
       return state.activeSessionId === action.sessionId
         ? { ...state, activeSessionId: undefined }

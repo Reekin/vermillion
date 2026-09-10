@@ -78,6 +78,14 @@ export type RendererStoreAction =
       mode?: "replace" | "prepend";
       cursor?: string;
     }
+  | {
+      type: "store/hydrateSessionWindows";
+      windows: Array<{
+        sessionId: string;
+        snapshot: DomainSnapshot;
+        cursor?: string;
+      }>;
+    }
   | { type: "store/disposeSession"; sessionId: string }
   | { type: "store/ingestEvent"; event: RuntimeEvent }
   | { type: "store/ingestEnvelope"; envelope: EventEnvelope }
