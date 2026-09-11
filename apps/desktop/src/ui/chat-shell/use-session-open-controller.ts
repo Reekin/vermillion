@@ -124,7 +124,8 @@ export const useSessionOpenController = (input: {
       page.sessionId,
       page.snapshot,
       mode,
-      page.cursor
+      page.cursor,
+      page.replaceSessionHistory
     );
     input.setSessionWindows((current) => {
       const existing = current[page.sessionId];

@@ -412,6 +412,7 @@ const zBackgroundRunSnapshotSchema = z.object({
 const zSessionWindowSchema = z.object({
   sessionId: zSessionId,
   snapshot: zDomainSnapshotSchema,
+  replaceSessionHistory: z.boolean().optional(),
   cursor: zCursor.optional(),
   revision: z.string().min(1).optional(),
   windowStartTurnId: zTurnId.optional(),

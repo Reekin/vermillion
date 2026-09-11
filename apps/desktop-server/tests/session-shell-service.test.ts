@@ -1011,7 +1011,7 @@ describe("SessionShellService", () => {
     expect(markSessionRead).toHaveBeenCalledWith("session-1");
   });
 
-  it("force-opens loaded sessions through provider window hydration", async () => {
+  it("force-opens loaded sessions through full provider hydration", async () => {
     const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
     const getChatTree = vi.fn().mockResolvedValue({
@@ -1028,23 +1028,15 @@ describe("SessionShellService", () => {
       startedAt: "2026-04-19T00:02:00.000Z",
       completedAt: "2026-04-19T00:02:02.000Z"
     };
-    const hydrateSessionWindow = vi.fn().mockResolvedValue({
-      workspaceId: "workspace-1",
-      conversation: snapshot.conversations[0],
-      session: snapshot.sessions[0],
-      turns: [branchTurn],
-      messageBlocks: [],
-      toolCalls: [],
-      terminalStreams: [],
-      sessionRelations: [],
-      hasOlder: true,
-      hasNewer: false,
-      olderCursor: "older-branch"
-    });
+    const hydratedSnapshot = {
+      ...snapshot,
+      turns: [branchTurn]
+    };
+    const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
     const service = new SessionShellService({
       runtimeService: {
         listSessions: () => snapshot.sessions,
-        getSnapshot: () => snapshot,
+        getSnapshot: () => hydratedSnapshot,
         getWorkspaceRegistry: () => ({
           setLastActiveSelection
         }),
@@ -1063,7 +1055,7 @@ describe("SessionShellService", () => {
         get: getChatTree
       } as never,
       sessionReconciliation: {
-        hydrateSessionWindow
+        ensureSessionLoaded
       } as never
     });
 
@@ -1076,16 +1068,15 @@ describe("SessionShellService", () => {
         sessionId: "session-1",
         windowStartTurnId: "turn-branch",
         windowEndTurnId: "turn-branch",
-        hasOlder: true,
-        hasNewer: false,
-        olderCursor: "older-branch"
+        replaceSessionHistory: true,
+        hasOlder: false,
+        hasNewer: false
       })
     });
-    expect(hydrateSessionWindow).toHaveBeenCalledWith(
+    expect(ensureSessionLoaded).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
-        limit: expect.any(Number),
-        anchorTurnId: "turn-branch",
+        force: true,
         isCancelled: expect.any(Function)
       })
     );

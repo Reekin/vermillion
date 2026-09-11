@@ -258,6 +258,16 @@ export class DomainReplica {
     return result;
   }
 
+  public replaceSessionHistorySnapshot(
+    sessionId: string,
+    snapshot: DomainSnapshot | unknown
+  ): DomainSnapshot {
+    const parsedSnapshot = parseDomainSnapshot(snapshot);
+    const result = this.store.replaceSessionHistorySnapshot(sessionId, parsedSnapshot);
+    this.commitSnapshotScopes([parsedSnapshot], [sessionId]);
+    return result;
+  }
+
   public deleteSessionCascade(sessionId: string): boolean {
     this.assertActive();
     const conversationId = this.store.resolveConversationIdBySessionId(sessionId);

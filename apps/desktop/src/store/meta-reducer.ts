@@ -404,7 +404,8 @@ export const rendererMetaReducer = (
           type: "store/hydrateSessionWindow",
           sessionId: window.sessionId,
           snapshot: window.snapshot,
-          cursor: window.cursor
+          cursor: window.cursor,
+          replaceSessionHistory: window.replaceSessionHistory
         });
       }
       return nextState;

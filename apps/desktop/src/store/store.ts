@@ -56,7 +56,8 @@ export type RendererStore = {
     sessionId: string,
     snapshot: DomainSnapshot,
     mode?: "replace" | "prepend",
-    cursor?: string
+    cursor?: string,
+    replaceSessionHistory?: boolean
   ) => RendererStoreState;
   hydrateSessionWindows: (
     windows: Array<{
@@ -100,7 +101,11 @@ const applySnapshotActionToReplica = (
         });
         return [snapshot];
       }
-      replica.replaceSessionWindowSnapshot(action.sessionId, snapshot);
+      if (action.replaceSessionHistory) {
+        replica.replaceSessionHistorySnapshot(action.sessionId, snapshot);
+      } else {
+        replica.replaceSessionWindowSnapshot(action.sessionId, snapshot);
+      }
       return [snapshot];
     }
     case "store/hydrateSessionWindows": {
@@ -144,10 +149,17 @@ const applySnapshotActionToReplica = (
         }
         return [{
           sessionId: window.sessionId,
-          snapshot: normalizeRendererDomainSnapshot(window.snapshot)
+          snapshot: normalizeRendererDomainSnapshot(window.snapshot),
+          replaceSessionHistory: window.replaceSessionHistory
         }];
       });
-      replica.replaceSessionWindowSnapshots(freshWindows);
+      const completeWindows = freshWindows.filter((window) => window.replaceSessionHistory);
+      for (const window of completeWindows) {
+        replica.replaceSessionHistorySnapshot(window.sessionId, window.snapshot);
+      }
+      replica.replaceSessionWindowSnapshots(
+        freshWindows.filter((window) => !window.replaceSessionHistory)
+      );
       return freshWindows.map((window) => window.snapshot);
     }
     default:
@@ -379,13 +391,20 @@ export const createRendererStore = (
       subscribeScoped(conversationListeners, conversationId, listener),
     hydrateSnapshot: (snapshot: DomainSnapshot, cursor?: string) =>
       dispatch(createHydrateSnapshotAction(snapshot, cursor)),
-    hydrateSessionWindow: (sessionId, snapshot, mode = "replace", cursor) =>
+    hydrateSessionWindow: (
+      sessionId,
+      snapshot,
+      mode = "replace",
+      cursor,
+      replaceSessionHistory
+    ) =>
       dispatch({
         type: "store/hydrateSessionWindow",
         sessionId,
         snapshot,
         mode,
-        cursor
+        cursor,
+        replaceSessionHistory
       }),
     hydrateSessionWindows: (windows) =>
       dispatch({

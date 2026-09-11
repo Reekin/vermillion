@@ -413,6 +413,21 @@ export class DomainStore {
     return this.getSnapshot();
   }
 
+  public replaceSessionHistorySnapshot(
+    sessionId: string,
+    snapshot: DomainSnapshot | unknown
+  ): DomainSnapshot {
+    const parsedSnapshot = parseDomainSnapshot(snapshot);
+    const staged = DomainStore.fromSnapshot(this.getSnapshot());
+    staged.assertSnapshotWithinMergeScope(parsedSnapshot, { sessionId });
+    staged.deleteSessionHistory(sessionId);
+    staged.applyParsedSnapshot(parsedSnapshot, {
+      merge: true
+    });
+    this.swapFrom(staged);
+    return this.getSnapshot();
+  }
+
   private applyParsedSnapshot(
     parsedSnapshot: DomainSnapshot,
     options: {
@@ -726,6 +741,27 @@ export class DomainStore {
       }
     }
     for (const turn of coveredTurns) {
+      this.deleteTurn(turn.turnId);
+    }
+  }
+
+  private deleteSessionHistory(sessionId: string): void {
+    for (const block of this.listMessageBlocks({ sessionId })) {
+      this.deleteMessageBlock(block.blockId);
+    }
+    for (const toolCall of this.listToolCalls({ sessionId })) {
+      this.deleteToolCall(toolCall.toolCallId);
+    }
+    for (const terminal of this.listTerminalStreams({ sessionId })) {
+      this.deleteTerminalStream(terminal.terminalId);
+    }
+    for (const approval of this.listApprovalRequests({ sessionId })) {
+      this.deleteApprovalRequest(approval.requestId);
+    }
+    for (const interaction of this.listRuntimeInteractions({ sessionId })) {
+      this.deleteRuntimeInteraction(interaction.requestId);
+    }
+    for (const turn of this.listTurns({ sessionId })) {
       this.deleteTurn(turn.turnId);
     }
   }

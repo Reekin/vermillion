@@ -68,6 +68,7 @@ import { DiagnosticLogService } from "./diagnostic-log-service.js";
 import { resolveEngineProgramCommand } from "./engine-program-resolution.js";
 
 const defaultSessionWindowLimit = 8;
+const completeSessionWindowLimit = Number.MAX_SAFE_INTEGER;
 
 const baseComposerSlashSuggestions: readonly ComposerSlashSuggestionRpc[] = [
   {
@@ -649,7 +650,30 @@ export class SessionShellService {
     if (isCancelled()) {
       throw new Error("Open session cancelled.");
     }
-    if (input.forceProviderHydration || !alreadyFullyLoaded) {
+    if (input.forceProviderHydration) {
+      const loadedByFullHydration =
+        (await this.sessionReconciliation?.ensureSessionLoaded(sessionId, {
+          isCancelled,
+          force: true
+        })) ?? false;
+      if (isCancelled()) {
+        throw new Error("Open session cancelled.");
+      }
+      if (isProviderSession && !loadedByFullHydration) {
+        throw new Error("This session could not be fully loaded.");
+      }
+      if (loadedByFullHydration) {
+        this.partiallyHydratedSessionIds.delete(sessionId);
+        await this.ensureOpenedSessionExecutable(sessionId, { isCancelled });
+        await this.activateOpenedSession(sessionId, { isCancelled });
+        return {
+          page: this.buildSessionWindow(sessionId, {
+            limit: completeSessionWindowLimit,
+            replaceSessionHistory: true
+          })
+        };
+      }
+    } else if (!alreadyFullyLoaded) {
       const hydratedPage = await this.hydrateSessionWindow(sessionId, {
         limit: defaultSessionWindowLimit,
         anchorTurnId,
@@ -666,7 +690,7 @@ export class SessionShellService {
         };
       }
     }
-    if (!alreadyFullyLoaded) {
+    if (!input.forceProviderHydration && !alreadyFullyLoaded) {
       const loadedByFullHydration =
         (await this.sessionReconciliation?.ensureSessionLoaded(sessionId, {
           isCancelled,
@@ -1246,6 +1270,7 @@ export class SessionShellService {
       limit: number;
       beforeTurnId?: string;
       anchorTurnId?: string;
+      replaceSessionHistory?: boolean;
     }
   ): SessionWindowSnapshot {
     const snapshotResult = this.getRuntimeSnapshotResult();
@@ -1289,7 +1314,8 @@ export class SessionShellService {
       ),
       limit: input.limit,
       beforeTurnId: input.beforeTurnId,
-      anchorTurnId: input.anchorTurnId
+      anchorTurnId: input.anchorTurnId,
+      replaceSessionHistory: input.replaceSessionHistory
     });
   }
 
