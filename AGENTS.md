@@ -24,6 +24,10 @@
 - 角色 prompt 开发以 `~/.vermillion/roles/` 为准；修改角色时先改对应全局文件，提交前同步到 `packages/workbench/roles/`。配置与覆盖规则见[角色](.vermillion/docs/Workbench/Roles/PRD.md)。
 - 修改 UI 不在页面重复定义组件样式；会话区不反向引用应用壳业务，具体边界见架构和 UI 规范。
 - 产品行为写业务 PRD，产品实现与项目工程约束写业务 Standards；角色动作、判断、交接与行为禁令写对应 role prompt。`.vermillion/docs/domains/` 只放领域定义和规范引用，不放规范正文。每条要求只在对应载体定义，其他位置链接引用。
+- 不为兼容存量数据引入额外的读取或处理逻辑。需要迁移或修复存量数据时，提供独立的一次性 bat，由用户手动执行，不接入产品运行流程。脚本执行前说明影响；需要停止或重启用户实例的操作也由用户触发，Agent 不自行执行。
+
+## git
+所有commit subject / description全部使用英文。
 
 ## 经验积累
 
