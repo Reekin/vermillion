@@ -5,7 +5,12 @@ import {
   createIngestEventAction
 } from "./intake.js";
 import { recordUiOperation } from "../diagnostics/ui-performance.js";
-import { compareCursorPosition, isSessionWindowStale, rendererMetaReducer } from "./meta-reducer.js";
+import {
+  compareCursorPosition,
+  isGlobalSnapshotStale,
+  isSessionWindowStale,
+  rendererMetaReducer
+} from "./meta-reducer.js";
 import {
   createInitialRendererStoreState,
   normalizeRendererDomainSnapshot
@@ -73,10 +78,16 @@ const applySnapshotActionToReplica = (
 ): void => {
   switch (action.type) {
     case "store/hydrateSnapshot":
+      if (isGlobalSnapshotStale(state, action.cursor)) return;
       replica.replaceSnapshot(normalizeRendererDomainSnapshot(action.snapshot));
       return;
     case "store/hydrateSessionWindow": {
-      if (action.mode !== "prepend" && isSessionWindowStale(state, action.sessionId, action.cursor)) {
+      if (action.mode !== "prepend" && isSessionWindowStale(
+        state,
+        action.sessionId,
+        action.cursor,
+        action.snapshot.conversations[0]?.conversationId
+      )) {
         return;
       }
       const snapshot = normalizeRendererDomainSnapshot(action.snapshot);
@@ -94,9 +105,17 @@ const applySnapshotActionToReplica = (
         Object.entries(state.eventStream.lastCursorBySessionId ?? {})
       );
       const freshWindows = action.windows.flatMap((window) => {
+        const conversationId = window.snapshot.conversations[0]?.conversationId;
+        if (isSessionWindowStale(state, window.sessionId, window.cursor, conversationId)) {
+          return [];
+        }
         const currentCursor = latestCursorBySessionId.get(window.sessionId);
         const comparison = compareCursorPosition(currentCursor, window.cursor);
-        if (currentCursor && comparison !== undefined && comparison > 0) {
+        if (
+          currentCursor &&
+          comparison !== undefined &&
+          comparison > 0
+        ) {
           return [];
         }
         if (window.cursor) latestCursorBySessionId.set(window.sessionId, window.cursor);

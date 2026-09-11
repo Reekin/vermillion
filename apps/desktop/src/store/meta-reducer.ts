@@ -1,4 +1,4 @@
-import type { EventEnvelope, RuntimeEvent } from "@vermillion/shared";
+import type { DomainSnapshot, EventEnvelope, RuntimeEvent } from "@vermillion/shared";
 import type { RendererStoreAction, RendererStoreState } from "./types.js";
 import { createInitialRendererStoreState } from "./state.js";
 import { advanceRendererRefreshSignals } from "./refresh-signals.js";
@@ -45,12 +45,34 @@ export const compareCursorPosition = (
 export const isSessionWindowStale = (
   state: RendererStoreState,
   sessionId: string,
+  cursor: string | undefined,
+  conversationId?: string
+): boolean => {
+  const currentCursor = state.eventStream.lastCursorBySessionId?.[sessionId];
+  const conversationCursor = conversationId
+    ? state.eventStream.lastCursorByConversationId?.[conversationId]
+    : undefined;
+  if (!cursor) return Boolean(currentCursor || conversationCursor);
+  const sessionComparison = compareCursorPosition(currentCursor, cursor);
+  if (sessionComparison !== undefined && sessionComparison > 0) return true;
+  const conversationComparison = compareCursorPosition(conversationCursor, cursor);
+  return conversationComparison !== undefined && conversationComparison > 0;
+};
+
+export const isGlobalSnapshotStale = (
+  state: RendererStoreState,
   cursor: string | undefined
 ): boolean => {
-  if (!cursor) return false;
-  const currentCursor = state.eventStream.lastCursorBySessionId?.[sessionId];
-  const comparison = compareCursorPosition(currentCursor, cursor);
-  return comparison !== undefined && comparison > 0;
+  const knownCursors = [
+    state.eventStream.lastCursor,
+    ...Object.values(state.eventStream.lastCursorBySessionId ?? {}),
+    ...Object.values(state.eventStream.lastCursorByConversationId ?? {})
+  ].filter((value): value is string => Boolean(value));
+  if (!cursor) return knownCursors.length > 0;
+  return knownCursors.some((knownCursor) => {
+    const comparison = compareCursorPosition(knownCursor, cursor);
+    return comparison !== undefined && comparison > 0;
+  });
 };
 
 const isEnvelopeCoveredByCursor = (
@@ -104,7 +126,8 @@ const markEnvelopeInEventStream = (
 
 const markGlobalCursorBarrier = (
   state: RendererStoreState,
-  cursor: string | undefined
+  cursor: string | undefined,
+  snapshot: DomainSnapshot
 ): RendererStoreState => {
   if (!cursor) {
     return state;
@@ -129,7 +152,15 @@ const markGlobalCursorBarrier = (
     eventStream: {
       ...state.eventStream,
       lastCursor,
-      cursorBarrier: cursor
+      cursorBarrier: cursor,
+      lastCursorBySessionId: {
+        ...(state.eventStream.lastCursorBySessionId ?? {}),
+        ...Object.fromEntries(snapshot.sessions.map((session) => [session.sessionId, cursor]))
+      },
+      lastCursorByConversationId: {
+        ...(state.eventStream.lastCursorByConversationId ?? {}),
+        ...Object.fromEntries(snapshot.conversations.map((conversation) => [conversation.conversationId, cursor]))
+      }
     }
   };
 };
@@ -200,6 +231,15 @@ const markEnvelopesInEventStream = (
         acc[sessionId] = envelope.cursor;
         return acc;
       }, { ...(state.eventStream.lastCursorBySessionId ?? {}) }),
+      lastCursorByConversationId: envelopes.reduce<Record<string, string>>((acc, envelope) => {
+        if (!("conversationId" in envelope.event) || !envelope.event.conversationId || !envelope.cursor) return acc;
+        const conversationId = envelope.event.conversationId;
+        const current = acc[conversationId] ?? state.eventStream.lastCursorByConversationId?.[conversationId];
+        const comparison = compareCursorPosition(envelope.cursor, current);
+        if (current && comparison !== undefined && comparison <= 0) return acc;
+        acc[conversationId] = envelope.cursor;
+        return acc;
+      }, { ...(state.eventStream.lastCursorByConversationId ?? {}) }),
       cursorBarrier: state.eventStream.cursorBarrier,
       cursorBarrierBySessionId: state.eventStream.cursorBarrierBySessionId,
       lastOccurredAt: lastEnvelope.occurredAt,
@@ -282,6 +322,7 @@ export const rendererMetaReducer = (
 ): RendererStoreState => {
   switch (action.type) {
     case "store/hydrateSnapshot":
+      if (isGlobalSnapshotStale(state, action.cursor)) return state;
       return markGlobalCursorBarrier(
         {
           ...state,
@@ -291,10 +332,16 @@ export const rendererMetaReducer = (
           activeSessionId:
             state.activeSessionId ?? action.snapshot.sessions.at(0)?.sessionId
         },
-        action.cursor
+        action.cursor,
+        action.snapshot
       );
     case "store/hydrateSessionWindow": {
-      if (action.mode !== "prepend" && isSessionWindowStale(state, action.sessionId, action.cursor)) {
+      if (action.mode !== "prepend" && isSessionWindowStale(
+        state,
+        action.sessionId,
+        action.cursor,
+        action.snapshot.conversations[0]?.conversationId
+      )) {
         return state;
       }
       const nextState =

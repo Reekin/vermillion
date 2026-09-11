@@ -467,10 +467,43 @@ describe("renderer store domain replica", () => {
       participants: [],
       threadGoals: [],
       sessionRelations: []
-    }), "replace", "cursor-1");
+    }), "replace");
 
     expect(store.getDomainReadModel().getMessageBlock("message-a:md")?.text).toBe("old new");
     expect(store.getState().eventStream.lastCursorBySessionId?.["session-a"]).toBe("cursor-2");
+  });
+
+  it("does not let an older global snapshot replace newer state", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-2");
+    const older = sessionSnapshot();
+    older.sessions[0]!.title = "stale";
+    store.hydrateSnapshot(older, "cursor-1");
+
+    expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
+  });
+
+  it("protects a window from a newer conversation-scoped event", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-1");
+    store.ingestEnvelope({
+      eventId: "participant-newer",
+      cursor: "cursor-2",
+      occurredAt: now,
+      event: {
+        type: "participant.updated",
+        conversationId: "conversation-a",
+        participantId: "conversation-a:agent-a",
+        engineId: "agent-a",
+        role: "primary",
+        capabilities: []
+      }
+    });
+    const olderWindow = sessionSnapshot();
+    olderWindow.sessions[0]!.title = "stale";
+    store.hydrateSessionWindow("session-a", olderWindow, "replace", "cursor-1");
+
+    expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
   });
 
   it("notifies only the affected session scope for live events", () => {
