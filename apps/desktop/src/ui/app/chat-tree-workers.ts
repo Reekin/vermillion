@@ -40,6 +40,7 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
   });
   for (const request of relevantRequests) {
     if (request.status === "ready") continue;
+    if (request.workerSessionId && !treeSessionIds.has(request.workerSessionId)) continue;
     if (workers.some((worker) => worker.requestId === request.requestId || (request.workerSessionId && worker.sessionId === request.workerSessionId))) continue;
     const item = items.find((entry) => entry.requestId === request.requestId);
     workers.push({ key: request.requestId, requestId: request.requestId, sessionId: request.workerSessionId, title: item?.title ?? request.scope ?? "开工准备", status: item?.status ?? requestWorkerStatus(request.status), failure: request.failure, nodeId: undefined, nodeIds: [] });

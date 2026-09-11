@@ -215,6 +215,17 @@ describe("Worker branch presentation", () => {
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
   });
 
+  it("ignores requests for archived branches removed from the tree", () => {
+    const source = tree();
+    source.memberSessionIds = ["design"];
+    source.nodes = [source.nodes[0]!];
+    source.windows = [source.windows![0]!];
+    const requests = [{ requestId: "archived", sourceSessionId: "design", workerSessionId: "worker", status: "failed" }] as WorkRequest[];
+    const result = projectChatTreeWorkers(source, [], requests);
+    expect(result.workers).toEqual([]);
+    expect(result.activeWorkers).toEqual([]);
+  });
+
   it.each(["closed", "cancelled"])("keeps the active item visible when a reused session also has a %s item", (status) => {
     const items = [
       { title: "Ended work", status, createdAt: "2026-09-10T02:00:00Z", run: { sessionId: "worker" } },
