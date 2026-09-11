@@ -11,9 +11,9 @@
 ## 运行与验证
 
 - 开发：`pnpm dev`；正常启动及最终冷启动验收：`start.bat`。
-- 提交代码前运行 `pnpm -r --workspace-concurrency=1 typecheck` 与 `pnpm -r --workspace-concurrency=1 test`；界面改动另跑 `pnpm --filter @vermillion/desktop lint:ui`。
+- 主工作区开发者提交代码前运行 `pnpm -r --workspace-concurrency=1 typecheck` 与 `pnpm -r --workspace-concurrency=1 test`；界面改动另跑 `pnpm --filter @vermillion/desktop lint:ui`。Worker 按工单实际影响运行相关检查，复用未受影响的有效证据，跨包影响时才扩大检查范围；产品验收和真实用户路径仍按工单要求执行。
 - 执行链路改动须真实跑通 工作台 → 会话 → New Chat → 发消息 → Docs 树变化 → 开工 → Worker 建单续跑；其他改动按受影响路径验收，纯文档改动检查内容、引用和链接。
-- 验收使用隔离实例。Worker / Verifier 只能通过 `app.start / app.stop` 启停；开发者最终冷启动用 `start.bat`。端口与隐藏桌面操作见[开发与验收](docs/development.md)。
+- 验收使用隔离实例。Worker / Verifier 的所有验收（包括 rebase 后验证和最终冷启动）只能通过 `app.start / app.stop` 启停；开发者最终冷启动用 `start.bat`。端口与隐藏桌面操作见[开发与验收](docs/development.md)。
 - CLI：先 `pnpm --filter @vermillion/workbench build`，再 `node packages/workbench/bin/vermillion.mjs <method> [json]`；参数使用 `<method> --help` 查询。
 - 打包：`pnpm package`，产物位于 `release/vermillion-<version>-<stamp>/`。
 

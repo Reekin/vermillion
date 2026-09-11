@@ -12,6 +12,7 @@
     "test": "pnpm -r test",
     "dev": "pnpm --filter @vermillion/desktop dev",
     "start": "pnpm --filter @vermillion/desktop start",
+    "prepare:worktree": "node scripts/prepare-worktree.mjs",
     "package": "pnpm -r --workspace-concurrency=1 build && node ./scripts/package-unpack.mjs"
   },
   "pnpm": {

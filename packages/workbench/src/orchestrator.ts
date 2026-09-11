@@ -384,8 +384,13 @@ export class Orchestrator {
 
   private async workerRole(root: string) {
     const [worker, reviewer, verifier] = await Promise.all(["worker", "reviewer", "verifier"].map((role) => this.roles.resolve(root, role)));
-    return { ...worker!, content: worker!.content + "\n\n## reviewer subagent prompt（spawn 时原样传入，并附工单与 diff）\n" + reviewer!.content +
-      "\n\n## verifier subagent prompt（spawn 时原样传入，并附 acceptance、refs 与 diff）\n" + verifier!.content };
+    const roleBlock = (role: "reviewer" | "verifier", resolved: typeof reviewer): string => [
+      `## ${role} subagent prompt（spawn 时原样传入，并附工单与 diff）`,
+      resolved.content,
+      `## ${role} subagent model configuration（JSON；单独传给 spawn_agent）`,
+      JSON.stringify(resolved.modelConfig ?? {})
+    ].join("\n");
+    return { ...worker!, content: [worker!.content, roleBlock("reviewer", reviewer), roleBlock("verifier", verifier)].join("\n\n") };
   }
 
   private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {
