@@ -10,13 +10,13 @@ type WorkspacePage = { items: SidebarSession[]; nextCursor?: string; hasMore: bo
 
 const PAGE = 20;
 
-const sortAtOf = (item: SessionBrowserItemRpc): string => item.lastCompletedTurnAt ?? item.activityAt ?? "";
+const sortAtOf = (item: SessionBrowserItemRpc): string => item.activityAt ?? item.lastCompletedTurnAt ?? "";
 
 const toSidebar = (page: SessionBrowserPageRpc): SidebarSession[] =>
   page.items.map((item) => ({ ...item, workspaceId: page.workspaceId, sortAt: sortAtOf(item) }));
 
 /**
- * Sidebar query owned by the app: one page per workspace, merged and ordered pinned-first then by last completed turn.
+ * Sidebar query owned by the app: one page per workspace, merged and ordered pinned-first then by latest activity.
  * "Load more" advances the workspace whose next page is most recent.
  */
 export const useSessionSidebar = (input: { transport: DesktopTransport; store: RendererStore; workspaceIds: string[]; kind?: "user" | "agent" }) => {

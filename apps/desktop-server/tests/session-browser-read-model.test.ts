@@ -52,6 +52,34 @@ describe("SessionBrowserReadModel", () => {
     expect(model.get("reviewer")?.parentSessionId).toBe("worker");
   });
 
+  it("uses the newest activity across members of a fork tree", () => {
+    const model = new SessionBrowserReadModel([
+      seed({
+        sessionId: "root",
+        sortAt: "2026-07-19T01:00:00Z",
+        activityAt: "2026-07-19T01:00:00Z",
+        lastCompletedTurnAt: "2026-07-19T01:00:00Z"
+      }),
+      seed({
+        sessionId: "branch",
+        sortAt: "2026-07-19T03:00:00Z",
+        activityAt: "2026-07-19T03:00:00Z",
+        lastCompletedTurnAt: "2026-07-19T01:30:00Z",
+        forkParentSessionId: "root"
+      })
+    ]);
+
+    const page = model.list({ workspaceId: "workspace-1" });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      sessionId: "root",
+      activityAt: "2026-07-19T03:00:00Z",
+      lastCompletedTurnAt: "2026-07-19T01:30:00Z",
+      memberSessionIds: ["root", "branch"]
+    });
+  });
+
   it("rejects cursors from another revision", () => {
     const original = new SessionBrowserReadModel([
       seed({ sessionId: "older", sortAt: "2026-07-18T01:00:00Z" }),

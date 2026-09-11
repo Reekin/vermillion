@@ -197,7 +197,7 @@ export const truncateSessionHeading = (value: string | undefined): string => {
   return `${normalized.slice(0, maxSessionHeadingLength)}…`;
 };
 
-export const formatRelativeCompletedTurnAge = (
+export const formatRelativeActivityAge = (
   iso: string | undefined,
   nowMs = Date.now()
 ): string | undefined => {

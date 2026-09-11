@@ -837,6 +837,9 @@ describe("RuntimeOrchestrator", () => {
       serviceTierId: null
     });
     expect(syncSession).toHaveBeenCalledWith("session-new");
+    expect(orchestrator.resolveSessionIndexRecord("session-new")).toMatchObject({
+      lastUserMessageAt: "2026-04-20T00:04:00Z"
+    });
   });
 
   it("generates a title from the first user message without blocking send", async () => {

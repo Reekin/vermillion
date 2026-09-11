@@ -34,7 +34,8 @@ export class SessionIndexSyncService {
       session: record.session,
       providerKind: record.providerKind,
       providerSessionId: record.providerSessionId,
-      lastCompletedTurnAt: record.lastCompletedTurnAt
+      lastCompletedTurnAt: record.lastCompletedTurnAt,
+      lastUserMessageAt: record.lastUserMessageAt
     });
   }
 

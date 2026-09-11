@@ -148,6 +148,7 @@ export type SessionBrowserItemRpc = {
   statusDot: z.infer<typeof zSessionStatusDotSchema>;
   isActive: boolean;
   isPinned: boolean;
+  /** Latest user message submission or turn completion represented by this tree. */
   activityAt?: string;
   lastCompletedTurnAt?: string;
   /** Workbench agent role (steward / worker / supervisor) from session metadata; absent for the user's own design sessions. */
