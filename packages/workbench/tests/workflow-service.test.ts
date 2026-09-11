@@ -57,6 +57,28 @@ it("retains the preparation session through failure backoff and exposes exhauste
   expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "preparing", attempts: 0, workerSessionId: "preparing-worker" });
 });
 
+it("delivers worker decisions that also carry a preparation request id", async () => {
+  const { client, service, workspaceId } = await fixture();
+  const request = await service.startWork(workspaceId, { sessionId: "design", turnId: "source-turn" });
+  await service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: "worker" });
+  const item = await service.createWorkItem(workspaceId, { ...contract, requestId: request.requestId, sessionId: "worker" });
+  await service.finishPreparation(workspaceId, "worker", "prep-end");
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = (await service.listActions(workspaceId))[0]!;
+  const card = await service.createDecision(workspaceId, {
+    requestId: request.requestId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker", kind: "worker",
+    question: "Continue?", context: "The worker needs a choice.", options: [{ key: "go", label: "Continue" }]
+  });
+
+  await client.request("decision.answer", { workspaceId, decisionId: card.decisionId, key: "go" });
+
+  expect((await service.listActions(workspaceId))[0]).toMatchObject({
+    actionId: action.actionId, status: "pending", stage: "deliver",
+    history: [expect.objectContaining({ event: "decision.created" }), expect.objectContaining({ event: "decision.answered", decisionId: card.decisionId })]
+  });
+  expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("queued");
+});
+
 it("enforces dependency cycles, concrete shared resource slots, and cancellation decisions", async () => {
   const { service, workspaceId } = await fixture();
   const first = await service.createWorkItem(workspaceId, { ...contract, needs: ["browser:qa"] });
