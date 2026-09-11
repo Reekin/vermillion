@@ -116,8 +116,14 @@ type UserMessageParts = {
 };
 
 const copyFeedbackDurationMs = 2_000;
+const imageAttachmentLinePattern =
+  /^!\[[^\]\r\n]*\]\((?:file:|data:image\/|blob:)[^\r\n]+\)$/u;
 const attachmentLinePattern =
   /^!?\[[^\]\r\n]*\]\((?:file:|data:image\/|blob:)[^\r\n]+\)$/u;
+const isImageAttachmentMarkdownBlock = (section: string | undefined): section is string =>
+  typeof section === "string" &&
+  section.length > 0 &&
+  section.split(/\r?\n/u).every((line) => imageAttachmentLinePattern.test(line));
 const isAttachmentMarkdownBlock = (section: string | undefined): section is string =>
   typeof section === "string" &&
   section.length > 0 &&
@@ -301,16 +307,20 @@ const resolveRenderableMarkdownText = (block: MessageBlock, text: string): Strea
 
 export const splitUserMessageText = (sourceText: string): UserMessageParts => {
   const sections = sourceText.split(/\r?\n\r?\n/u);
-  let attachmentSectionStart = sections.length;
-  while (attachmentSectionStart > 0) {
-    const section = sections[attachmentSectionStart - 1];
-    if (!isAttachmentMarkdownBlock(section)) {
-      break;
-    }
-    attachmentSectionStart -= 1;
-  }
-  if (attachmentSectionStart === sections.length) {
+  const lastSection = sections.at(-1);
+  if (!isAttachmentMarkdownBlock(lastSection)) {
     return { text: sourceText };
+  }
+
+  let attachmentSectionStart = sections.length - 1;
+  if (isImageAttachmentMarkdownBlock(lastSection)) {
+    while (attachmentSectionStart > 0) {
+      const section = sections[attachmentSectionStart - 1];
+      if (!isImageAttachmentMarkdownBlock(section)) {
+        break;
+      }
+      attachmentSectionStart -= 1;
+    }
   }
 
   return {

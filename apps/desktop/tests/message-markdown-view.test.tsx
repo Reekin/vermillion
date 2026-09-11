@@ -131,6 +131,21 @@ describe("MessageMarkdownView", () => {
     });
   });
 
+  it("keeps a literal file link before historical image attachments in user text", () => {
+    const literalLink = "[Spec](file:///C:/spec.md)";
+    const firstImage = "![first](data:image/png;base64,AAAA)";
+    const secondImage = "![second](data:image/png;base64,BBBB)";
+
+    expect(
+      splitUserMessageText(
+        `Inspect the spec.\n\n${literalLink}\n\n${firstImage}\n\n${secondImage}`
+      )
+    ).toEqual({
+      text: `Inspect the spec.\n\n${literalLink}`,
+      attachmentMarkdown: `${firstImage}\n${secondImage}`
+    });
+  });
+
   it("sanitizes unsafe html fragments in markdown source", () => {
     const html = renderToStaticMarkup(
       <MessageMarkdownView
