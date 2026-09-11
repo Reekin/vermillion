@@ -573,6 +573,30 @@ it("records the opening delivery even when the worker creates a decision before 
   expect(vi.mocked(f.runner.send).mock.calls.at(-1)).toEqual(["original", "用户决策答复：Continue? -> Continue"]);
 });
 
+it("resumes a worker decision that also carries its preparation request id", async () => {
+  const f = await fixture();
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source-turn" });
+  await f.service.putWorkRequest(f.workspaceId, { ...request, status: "preparing", workerSessionId: "original" });
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "original" });
+  await f.service.finishPreparation(f.workspaceId, "original", "prep-end");
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+
+  const action = (await f.service.listActions(f.workspaceId))[0]!;
+  const card = await f.service.createDecision(f.workspaceId, {
+    requestId: request.requestId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "original", kind: "worker",
+    question: "Continue?", context: "Choice", options: [{ key: "yes", label: "Continue" }]
+  });
+  f.complete("original");
+  await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId)).some((run) => run.status === "running")).toBe(false));
+
+  await f.service.answerDecision(f.workspaceId, card.decisionId, { key: "yes" });
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)).toEqual(["original", "用户决策答复：Continue? -> Continue"]);
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+});
+
 it("steers only the latest committed document diff and resumes without the opening message", async () => {
   const f = await fixture();
   const path = ".vermillion/docs/Task/PRD.md";

@@ -1086,7 +1086,7 @@ export class WorkbenchService {
   }
 
   private async deliverDecision(workspaceId: string, card: DecisionCard, message: string, recoveryChoice?: string): Promise<void> {
-    if (card.requestId) {
+    if (card.requestId && card.kind !== "worker" && !card.workItemId && !card.actionId) {
       if (recoveryChoice === "retry") await this.retryWork(workspaceId, card.requestId);
       if (recoveryChoice === "cancel") for (const item of await this.listWorkItems(workspaceId)) {
         if (item.requestId === card.requestId && !["closed", "cancelled"].includes(item.status)) await this.cancelWorkItem(workspaceId, item.workItemId);
