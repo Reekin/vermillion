@@ -296,6 +296,88 @@ describe("renderer store domain replica", () => {
     );
   });
 
+  it("replaces a complete session history when a forced reload marks it complete", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(
+      parseDomainSnapshot({
+        conversations: [{
+          conversationId: "conversation-a",
+          participantEngineIds: ["agent-a"],
+          activeSessionId: "session-a",
+          sessionIds: ["session-a"],
+          createdAt: now,
+          updatedAt: now
+        }],
+        sessions: [{
+          sessionId: "session-a",
+          conversationId: "conversation-a",
+          engineId: "agent-a",
+          status: "idle",
+          createdAt: now,
+          updatedAt: now
+        }],
+        turns: [{
+          turnId: "turn-old",
+          sessionId: "session-a",
+          status: "completed",
+          startedAt: now,
+          messageIds: ["message-old"],
+          toolCallIds: [],
+          terminalIds: [],
+          approvalRequestIds: [],
+          interactionRequestIds: []
+        }],
+        messageBlocks: [{
+          blockId: "message-old:block",
+          messageId: "message-old",
+          sessionId: "session-a",
+          turnId: "turn-old",
+          role: "assistant",
+          kind: "markdown",
+          text: "old",
+          startedAt: now
+        }]
+      })
+    );
+
+    store.hydrateSessionWindow(
+      "session-a",
+      parseDomainSnapshot({
+        conversations: [{
+          conversationId: "conversation-a",
+          participantEngineIds: ["agent-a"],
+          activeSessionId: "session-a",
+          sessionIds: ["session-a"],
+          createdAt: now,
+          updatedAt: "2026-04-21T00:00:03.000Z"
+        }],
+        sessions: [{
+          sessionId: "session-a",
+          conversationId: "conversation-a",
+          engineId: "agent-a",
+          status: "idle",
+          createdAt: now,
+          updatedAt: "2026-04-21T00:00:03.000Z"
+        }],
+        turns: [],
+        messageBlocks: [],
+        toolCalls: [],
+        terminalStreams: [],
+        approvalRequests: [],
+        runtimeInteractions: [],
+        participants: [],
+        threadGoals: [],
+        sessionRelations: []
+      }),
+      "replace",
+      "cursor-21",
+      true
+    );
+
+    expect(store.getDomainReadModel().getTurn("turn-old")).toBeUndefined();
+    expect(store.getDomainReadModel().getMessageBlock("message-old:block")).toBeUndefined();
+  });
+
   it("hydrates all chat-tree windows in one store update and advances each cursor barrier", () => {
     const store = createRendererStore();
     store.hydrateSnapshot(sessionSnapshot(), "cursor-0");

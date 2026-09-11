@@ -24,7 +24,8 @@ const windowHydrationKey = (window: ChatTreeWindow): string | undefined => {
     window.olderCursor ?? "",
     window.newerCursor ?? "",
     window.hasOlder ? "older" : "",
-    window.hasNewer ? "newer" : ""
+    window.hasNewer ? "newer" : "",
+    window.replaceSessionHistory ? "complete" : ""
   ].join("\u001f");
 };
 
@@ -141,7 +142,8 @@ export const useChatTreeController = (input: {
           freshWindowsToHydrate.map((window) => ({
             sessionId: window.sessionId,
             snapshot: window.snapshot,
-            cursor: window.cursor
+            cursor: window.cursor,
+            replaceSessionHistory: window.replaceSessionHistory
           }))
         );
         for (const window of freshWindowsToHydrate) {

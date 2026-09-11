@@ -148,6 +148,7 @@ export class SessionRuntimeService {
     snapshot: HydratedSessionSnapshot,
     input: {
       relatedIndexRelations?: SessionRelationIndex[];
+      replaceSessionHistory?: boolean;
     } = {}
   ): ChatSession {
     return this.runtimeOrchestrator.hydrateDiscoveredSession(snapshot, input);

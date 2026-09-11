@@ -80,6 +80,7 @@ export type RendererStoreAction =
       snapshot: DomainSnapshot;
       mode?: "replace" | "prepend";
       cursor?: string;
+      replaceSessionHistory?: boolean;
     }
   | {
       type: "store/hydrateSessionWindows";
@@ -87,6 +88,7 @@ export type RendererStoreAction =
         sessionId: string;
         snapshot: DomainSnapshot;
         cursor?: string;
+        replaceSessionHistory?: boolean;
       }>;
     }
   | { type: "store/disposeSession"; sessionId: string }

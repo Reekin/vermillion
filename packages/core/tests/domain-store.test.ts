@@ -150,6 +150,61 @@ describe("DomainStore", () => {
     expect(store.getTurn("turn-b")).toBeDefined();
   });
 
+  it("replaces complete session history and removes entities absent from the source", () => {
+    const store = new DomainStore({
+      snapshot: {
+        conversations: [{ ...conversation("conversation-a"), sessionIds: ["session-a"] }],
+        sessions: [session("session-a")],
+        turns: [{ ...turn("turn-old"), messageIds: ["message-old"] }],
+        messageBlocks: [{
+          blockId: "message-old:block",
+          messageId: "message-old",
+          sessionId: "session-a",
+          turnId: "turn-old",
+          role: "assistant",
+          kind: "markdown",
+          text: "old",
+          startedAt: now
+        }],
+        toolCalls: [],
+        terminalStreams: [],
+        approvalRequests: [],
+        runtimeInteractions: [],
+        participants: [],
+        threadGoals: [],
+        sessionRelations: []
+      }
+    });
+
+    store.replaceSessionHistorySnapshot("session-a", {
+      conversations: [{ ...conversation("conversation-a"), sessionIds: ["session-a"] }],
+      sessions: [session("session-a")],
+      turns: [{ ...turn("turn-current"), messageIds: ["message-current"] }],
+      messageBlocks: [{
+        blockId: "message-current:block",
+        messageId: "message-current",
+        sessionId: "session-a",
+        turnId: "turn-current",
+        role: "assistant",
+        kind: "markdown",
+        text: "current",
+        startedAt: now
+      }],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    });
+
+    expect(store.getTurn("turn-old")).toBeUndefined();
+    expect(store.getMessageBlock("message-old:block")).toBeUndefined();
+    expect(store.getTurn("turn-current")).toBeDefined();
+    expect(store.getMessageBlock("message-current:block")?.text).toBe("current");
+  });
+
   it("materializes V1 snapshot arrays from indexes without storing them on entities", () => {
     const store = new DomainStore({
       snapshot: {

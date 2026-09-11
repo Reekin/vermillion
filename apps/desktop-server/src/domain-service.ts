@@ -105,6 +105,7 @@ export class DomainService {
     snapshot: HydratedSessionSnapshot,
     input: {
       relatedIndexRelations?: SessionRelationIndex[];
+      replaceSessionHistory?: boolean;
       onUserMessageReplaced?: (
         replacement: HydratedUserMessageReplacement
       ) => void;
@@ -132,43 +133,48 @@ export class DomainService {
     const replacedMessageIds = new Set(
       messageReplacements.map((replacement) => replacement.replacedMessageId)
     );
-    this.domainReplica.mergeSnapshot(
-      {
-        conversations: [
-          withConversationSession(
-            parseConversation({
-              ...existingConversation,
-              ...snapshot.conversation
-            }),
-            {
-              conversationId: snapshot.conversation.conversationId,
-              sessionId: snapshot.session.sessionId,
-              engineId: snapshot.session.engineId,
-              workspaceId: snapshot.conversation.workspaceId,
-              timestamp: snapshot.session.updatedAt
-            }
-          )
-        ],
-        sessions: [snapshot.session],
-        turns: snapshot.turns.map((turn) => ({
-          ...turn,
-          messageIds: turn.messageIds.filter(
-            (messageId) => !replacedMessageIds.has(messageId)
-          )
-        })),
-        messageBlocks: snapshot.messageBlocks,
-        toolCalls: snapshot.toolCalls,
-        terminalStreams: snapshot.terminalStreams,
-        approvalRequests: [],
-        runtimeInteractions: [],
-        participants: [],
-        threadGoals: [],
-        sessionRelations: [
-          ...snapshot.sessionRelations,
-          ...relatedIndexRelations
-        ]
-      },
-      {
+    const projectedSnapshot = {
+      conversations: [
+        withConversationSession(
+          parseConversation({
+            ...existingConversation,
+            ...snapshot.conversation
+          }),
+          {
+            conversationId: snapshot.conversation.conversationId,
+            sessionId: snapshot.session.sessionId,
+            engineId: snapshot.session.engineId,
+            workspaceId: snapshot.conversation.workspaceId,
+            timestamp: snapshot.session.updatedAt
+          }
+        )
+      ],
+      sessions: [snapshot.session],
+      turns: snapshot.turns.map((turn) => ({
+        ...turn,
+        messageIds: turn.messageIds.filter(
+          (messageId) => !replacedMessageIds.has(messageId)
+        )
+      })),
+      messageBlocks: snapshot.messageBlocks,
+      toolCalls: snapshot.toolCalls,
+      terminalStreams: snapshot.terminalStreams,
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: [
+        ...snapshot.sessionRelations,
+        ...relatedIndexRelations
+      ]
+    };
+    if (input.replaceSessionHistory) {
+      this.domainReplica.replaceSessionHistorySnapshot(
+        snapshot.session.sessionId,
+        projectedSnapshot
+      );
+    } else {
+      this.domainReplica.mergeSnapshot(projectedSnapshot, {
         scope: {
           sessionId: snapshot.session.sessionId
         },
@@ -176,8 +182,8 @@ export class DomainService {
           (replacement) => replacement.replacedMessageId
         ),
         replaceMessageIdMappings: messageReplacements
-      }
-    );
+      });
+    }
 
     const session = this.requireSession(snapshot.session.sessionId);
     this.ensureParticipantForSession(session);

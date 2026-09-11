@@ -192,6 +192,7 @@ export class RuntimeOrchestrator {
     snapshot: HydratedSessionSnapshot,
     input: {
       relatedIndexRelations?: SessionRelationIndex[];
+      replaceSessionHistory?: boolean;
     } = {}
   ) {
     return this.domainService.hydrateDiscoveredSession(snapshot, {

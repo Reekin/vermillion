@@ -1746,9 +1746,16 @@ export class SessionReconciliationService {
         terminalStreams: normalizedHydrated.terminalStreams.filter(isOwn)
       };
     }
-    const committedHydrated = this.preserveLiveRuntimeState(normalizedHydrated);
+    const currentSession = this.runtimeService.getSession(entry.sessionId);
+    const replaceSessionHistory =
+      !input.partial &&
+      !isActiveSessionStatus(currentSession?.status ?? "idle");
+    const committedHydrated = replaceSessionHistory
+      ? normalizedHydrated
+      : this.preserveLiveRuntimeState(normalizedHydrated);
     this.runtimeService.hydrateDiscoveredSession(committedHydrated, {
-      relatedIndexRelations
+      relatedIndexRelations,
+      replaceSessionHistory
     });
     await this.upsertHydratedSession(entry, committedHydrated, input);
     if (!input.partial) {

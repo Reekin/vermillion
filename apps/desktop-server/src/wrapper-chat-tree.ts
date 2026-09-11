@@ -103,7 +103,8 @@ export class WrapperChatTreeService {
           item.parentSessionId === memberId || item.childSessionId === memberId),
         participants: snapshot.participants.filter((item) => item.conversationId === session.conversationId),
         cursor: runtimeService.getRevision() === "initial" ? undefined : runtimeService.getRevision(),
-        hasOlder: false, hasNewer: false
+        hasOlder: false, hasNewer: false,
+        replaceSessionHistory: true
       });
     });
     // Archived sessions supply shared history, but never a selectable/sendable path.

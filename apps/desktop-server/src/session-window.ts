@@ -16,6 +16,7 @@ import type {
 export type SessionWindowSnapshot = {
   snapshot: DomainSnapshot;
   sessionId: string;
+  replaceSessionHistory?: boolean;
   revision?: string;
   cursor?: string;
   windowStartTurnId?: string;
@@ -43,6 +44,7 @@ type BuildSessionWindowInput = {
   cursor?: string;
   beforeTurnId?: string;
   anchorTurnId?: string;
+  replaceSessionHistory?: boolean;
 };
 
 type BuildSessionWindowPageInput = Omit<
@@ -109,6 +111,7 @@ export const buildSessionWindowSnapshot = (
   if (sortedTurns.length === 0) {
     return {
       sessionId: input.sessionId,
+      replaceSessionHistory: input.replaceSessionHistory,
       revision: input.session.updatedAt,
       cursor: input.cursor,
       snapshot: {
@@ -174,6 +177,7 @@ export const buildSessionWindowSnapshot = (
 
   return {
     sessionId: input.sessionId,
+    replaceSessionHistory: input.replaceSessionHistory,
     revision: input.session.updatedAt,
     cursor: input.cursor,
     windowStartTurnId: windowTurns[0]?.turnId,
@@ -230,6 +234,7 @@ export const buildSessionWindowSnapshotFromPage = (
 
   return {
     sessionId: input.sessionId,
+    replaceSessionHistory: input.replaceSessionHistory,
     revision: input.session.updatedAt,
     cursor: input.cursor,
     windowStartTurnId: windowTurns[0]?.turnId,
