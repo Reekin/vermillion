@@ -29,7 +29,7 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
   }, [onClose, presentation]);
 
   return (
-    <div className={cn(presentation === "hidden" ? "hidden" : presentation === "page" ? "h-full" : "inset-0 z-40 flex items-start justify-center bg-black/55 px-3 pt-[10vh]", presentation === "modal" && (contained ? "absolute" : "fixed"))} onMouseDown={presentation === "modal" ? onClose : undefined} role="presentation">
+    <div className={cn(presentation === "hidden" ? "hidden" : presentation === "page" ? "h-full" : "inset-0 z-40 flex items-start justify-center bg-black/55 px-3 pt-[10vh]", presentation === "modal" && (contained ? "absolute" : "fixed"))} onClick={presentation === "modal" ? onClose : undefined} role="presentation">
       <div
         ref={dialog}
         role={presentation === "modal" ? "dialog" : undefined}
@@ -37,6 +37,7 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
         className={cn("flex flex-col overflow-hidden", presentation === "modal" ? cn(resizable ? "max-h-[90vh] max-w-full resize" : "max-h-[78vh] max-w-full", "rounded-lg border border-border-strong bg-surface-raised floating-shadow") : "h-full")}
         style={presentation === "modal" ? { width, height } : undefined}
         onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
       >
         <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
           <h2 className="min-w-0 truncate text-title font-semibold text-strong" title={title}>{title}</h2>

@@ -73,7 +73,7 @@ const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
 const SearchResultRow = ({ hit, selected, onSelect, onOpen }: { hit: SearchHit; selected: boolean; onSelect: () => void; onOpen: () => void }) => {
   const Icon = kindIcon[hit.kind];
   return (
-    <li onMouseEnter={onSelect} onFocusCapture={onSelect}>
+    <li onMouseEnter={onSelect} onFocusCapture={onSelect} onMouseDown={(event) => event.stopPropagation()}>
       <ListRow
         leading={<Icon size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
         title={<span title={hit.title}>{hit.title}</span>}
