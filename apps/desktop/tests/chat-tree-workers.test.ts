@@ -195,9 +195,12 @@ describe("Worker branch presentation", () => {
     const result = projectChatTreeWorkers(tree(), items, requests);
     expect(result.workers).toHaveLength(1);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "实际工单", status: "decision" });
-    const waitingForTree = projectChatTreeWorkers({ ...tree(), windows: [] }, items, requests);
-    expect(waitingForTree.workers).toEqual([]);
-    expect(waitingForTree.activeWorkers).toEqual([]);
+    const partialTree = { ...tree(), memberSessionIds: ["design"], nodes: [tree().nodes[0]!], windows: [tree().windows![0]!] };
+    const partialItems = [{ ...items[0], treeId: "design", sourceSessionId: "design" }] as WorkItem[];
+    const partialRequests = [{ ...requests[0], treeId: "design" }] as WorkRequest[];
+    const waitingForTree = projectChatTreeWorkers(partialTree, partialItems, partialRequests);
+    expect(waitingForTree.workers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "decision", nodeIds: [] }]);
+    expect(waitingForTree.activeWorkers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "decision" }]);
   });
 
   it.each(["closed", "cancelled"])("keeps the active item visible when a reused session also has a %s item", (status) => {
