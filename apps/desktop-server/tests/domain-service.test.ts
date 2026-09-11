@@ -218,6 +218,126 @@ describe("DomainService", () => {
     ]);
   });
 
+  it("keeps a hydrated user message in the local turn order when replacing its echo", () => {
+    const service = new DomainService({
+      now: () => "2026-04-20T00:04:00Z",
+      createSessionId: () => "session-hydrated-order",
+      assertEngineRegistered: vi.fn(),
+      resolveEngineCapabilities: () => ["chat"],
+      publishRuntimeEvent: () => {}
+    });
+    service.createSession({
+      conversationId: "conversation-hydrated-order",
+      engineId: "codex",
+      workspaceId: "workspace-hydrated-order"
+    });
+    service.commitAcceptedUserMessage(
+      {
+        type: "sendUserMessage",
+        sessionId: "session-hydrated-order",
+        messageId: "local-user-message",
+        content: "hello",
+        attachments: []
+      },
+      "turn-hydrated-order"
+    );
+    service.ingestRuntimeEvent(
+      {
+        type: "message.started",
+        sessionId: "session-hydrated-order",
+        turnId: "turn-hydrated-order",
+        messageId: "assistant-live-message",
+        role: "assistant"
+      },
+      "2026-04-20T00:04:01Z"
+    );
+    service.ingestRuntimeEvent(
+      {
+        type: "message.completed",
+        sessionId: "session-hydrated-order",
+        turnId: "turn-hydrated-order",
+        messageId: "assistant-live-message",
+        role: "assistant",
+        finalText: "answer",
+        isFinalForTurn: true
+      },
+      "2026-04-20T00:04:02Z"
+    );
+
+    service.hydrateDiscoveredSession({
+      workspaceId: "workspace-hydrated-order",
+      conversation: {
+        conversationId: "conversation-hydrated-order",
+        workspaceId: "workspace-hydrated-order",
+        participantEngineIds: ["codex"],
+        activeSessionId: "session-hydrated-order",
+        sessionIds: ["session-hydrated-order"],
+        createdAt: "2026-04-20T00:04:00Z",
+        updatedAt: "2026-04-20T00:04:03Z"
+      },
+      session: {
+        sessionId: "session-hydrated-order",
+        conversationId: "conversation-hydrated-order",
+        engineId: "codex",
+        status: "idle",
+        createdAt: "2026-04-20T00:04:00Z",
+        updatedAt: "2026-04-20T00:04:03Z",
+        metadata: {
+          providerSessionId: "thread-hydrated-order"
+        }
+      },
+      turns: [
+        {
+          turnId: "turn-hydrated-order",
+          sessionId: "session-hydrated-order",
+          status: "completed",
+          finishReason: "completed",
+          startedAt: "2026-04-20T00:04:00Z",
+          completedAt: "2026-04-20T00:04:03Z",
+          finalMessageId: "hydrated-assistant-message",
+          messageIds: ["hydrated-user-message", "hydrated-assistant-message"],
+          toolCallIds: [],
+          terminalIds: [],
+          approvalRequestIds: [],
+          interactionRequestIds: []
+        }
+      ],
+      messageBlocks: [
+        {
+          blockId: "hydrated-user-message:md",
+          messageId: "hydrated-user-message",
+          sessionId: "session-hydrated-order",
+          turnId: "turn-hydrated-order",
+          role: "user",
+          kind: "markdown",
+          text: "hello",
+          startedAt: "2026-04-20T00:04:00Z",
+          completedAt: "2026-04-20T00:04:00Z"
+        },
+        {
+          blockId: "hydrated-assistant-message:md",
+          messageId: "hydrated-assistant-message",
+          sessionId: "session-hydrated-order",
+          turnId: "turn-hydrated-order",
+          role: "assistant",
+          kind: "markdown",
+          text: "answer",
+          startedAt: "2026-04-20T00:04:02Z",
+          completedAt: "2026-04-20T00:04:02Z"
+        }
+      ],
+      toolCalls: [],
+      terminalStreams: [],
+      sessionRelations: []
+    });
+
+    expect(service.getSnapshot().turns[0]?.messageIds).toEqual([
+      "hydrated-user-message",
+      "assistant-live-message",
+      "hydrated-assistant-message"
+    ]);
+  });
+
   it("marks unread completed when a turn finishes", () => {
     const markSessionUnreadCompleted = vi.fn();
     const service = new DomainService({

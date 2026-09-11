@@ -23,6 +23,12 @@ import type { SessionListOptions } from "./runtime-types.js";
 type Clock = () => string;
 type IdFactory = () => string;
 
+export type HydratedUserMessageReplacement = {
+  turnId: string;
+  replacedMessageId: string;
+  replacementMessageId: string;
+};
+
 export type DomainServiceOptions = {
   assertEngineRegistered: (engineId: string) => void;
   resolveEngineCapabilities: (engineId: string) => readonly string[];
@@ -99,6 +105,9 @@ export class DomainService {
     snapshot: HydratedSessionSnapshot,
     input: {
       relatedIndexRelations?: SessionRelationIndex[];
+      onUserMessageReplaced?: (
+        replacement: HydratedUserMessageReplacement
+      ) => void;
     } = {}
   ): ChatSession {
     const existingConversation = this.domainReplica.getConversation(
@@ -114,8 +123,14 @@ export class DomainService {
         createdAt: relation.createdAt
       })
     );
-    const replacedLocalMessageIds = this.resolveHydratedUserMessageReplacements(
+    const messageReplacements = this.resolveHydratedUserMessageReplacements(
       snapshot
+    );
+    for (const replacement of messageReplacements) {
+      input.onUserMessageReplaced?.(replacement);
+    }
+    const replacedMessageIds = new Set(
+      messageReplacements.map((replacement) => replacement.replacedMessageId)
     );
     this.domainReplica.mergeSnapshot(
       {
@@ -135,7 +150,12 @@ export class DomainService {
           )
         ],
         sessions: [snapshot.session],
-        turns: snapshot.turns,
+        turns: snapshot.turns.map((turn) => ({
+          ...turn,
+          messageIds: turn.messageIds.filter(
+            (messageId) => !replacedMessageIds.has(messageId)
+          )
+        })),
         messageBlocks: snapshot.messageBlocks,
         toolCalls: snapshot.toolCalls,
         terminalStreams: snapshot.terminalStreams,
@@ -152,7 +172,10 @@ export class DomainService {
         scope: {
           sessionId: snapshot.session.sessionId
         },
-        replaceMessageIds: replacedLocalMessageIds
+        replaceMessageIds: messageReplacements.map(
+          (replacement) => replacement.replacedMessageId
+        ),
+        replaceMessageIdMappings: messageReplacements
       }
     );
 
@@ -480,8 +503,8 @@ export class DomainService {
 
   private resolveHydratedUserMessageReplacements(
     snapshot: HydratedSessionSnapshot
-  ): string[] {
-    const replacements = new Set<string>();
+  ): HydratedUserMessageReplacement[] {
+    const replacements = new Map<string, HydratedUserMessageReplacement>();
     for (const hydratedBlock of snapshot.messageBlocks) {
       if (
         hydratedBlock.role !== "user" ||
@@ -500,10 +523,14 @@ export class DomainService {
             normalizeMessageText(block.text) === normalizeMessageText(hydratedBlock.text)
         );
       if (duplicate) {
-        replacements.add(duplicate.messageId);
+        replacements.set(duplicate.messageId, {
+          turnId: hydratedBlock.turnId,
+          replacedMessageId: duplicate.messageId,
+          replacementMessageId: hydratedBlock.messageId
+        });
       }
     }
-    return [...replacements];
+    return [...replacements.values()];
   }
 
   private createSessionRecord(input: {
