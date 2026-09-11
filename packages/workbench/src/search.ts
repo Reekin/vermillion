@@ -456,36 +456,12 @@ export const searchWorkbench = async (input: {
     workspaces.map((workspace) => [workspace.workspaceId, workspace.label])
   );
 
-  const workspaceData = await Promise.all(workspaces.map(async (workspace) => {
-    const [workItems, docs] = await Promise.all([
-      input.listWorkItems(workspace.workspaceId),
-      input.listDocs(workspace.workspaceId)
-    ]);
-    const textDocs: Array<TextDocument | undefined> = await Promise.all(docs
-      .filter((doc) => doc.isText !== false)
-      .map(async (doc) => {
-        try {
-          return {
-            kind: "doc" as const,
-            id: doc.path,
-            workspaceId: workspace.workspaceId,
-            workspaceLabel: workspace.label,
-            title: doc.path.replace(/^\.vermillion\/docs\//, ""),
-            path: doc.path,
-            text: await input.readDoc(workspace.workspaceId, doc.path)
-          } satisfies TextDocument;
-        } catch {
-          return undefined;
-        }
-      }));
-    return {
-      workspace,
-      workItems,
-      textDocs: textDocs.filter((doc): doc is TextDocument => Boolean(doc))
-    };
-  }));
+  const workspaceData = await Promise.all(workspaces.map(async (workspace) => ({
+    workspace,
+    workItems: await input.listWorkItems(workspace.workspaceId)
+  })));
 
-  for (const { workspace, workItems, textDocs } of workspaceData) {
+  for (const { workspace, workItems } of workspaceData) {
     for (const workItem of workItems) {
       const document: TextDocument = {
         kind: "workItem",
@@ -499,7 +475,23 @@ export const searchWorkbench = async (input: {
       if (!searchTextDocument(document, query, contextLines, accumulator, stats)) break;
     }
     if (accumulator.truncated) break;
-    for (const document of textDocs) {
+    const docs = await input.listDocs(workspace.workspaceId);
+    for (const doc of docs.filter((entry) => entry.isText !== false)) {
+      let text: string;
+      try {
+        text = await input.readDoc(workspace.workspaceId, doc.path);
+      } catch {
+        continue;
+      }
+      const document: TextDocument = {
+        kind: "doc",
+        id: doc.path,
+        workspaceId: workspace.workspaceId,
+        workspaceLabel: workspace.label,
+        title: doc.path.replace(/^\.vermillion\/docs\//, ""),
+        path: doc.path,
+        text
+      };
       if (!searchTextDocument(document, query, contextLines, accumulator, stats)) break;
     }
     if (accumulator.truncated) break;

@@ -88,12 +88,13 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     setSearchWorkItemTarget({ workspaceId: hit.workspaceId, workItemId: hit.workItemId, nonce: Date.now() });
     store.getState().showTask({ workspaceId: hit.workspaceId, kind: "workItem", id: hit.workItemId });
   }, [store]);
+  const clearSearchWorkItemTarget = useCallback(() => setSearchWorkItemTarget(undefined), []);
   const openSearchDoc = useCallback((hit: SearchHit) => {
     if (!hit.path) return;
     setSearchOpen(false);
     store.getState().browseWorkspace(hit.workspaceId);
     store.setState({ panel: "workbench", overlay: undefined, workspaceSection: "docs" });
-    store.getState().openEditor({ kind: "doc", path: hit.path, line: hit.line, column: hit.column });
+    store.getState().openEditor({ kind: "doc", path: hit.path, line: hit.line, column: hit.column, nonce: Date.now() });
   }, [store]);
   const openSearchSession = useCallback((hit: SearchHit) => {
     if (!hit.sessionId) return;
@@ -265,7 +266,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             </div>
             <div className={section !== "sessions" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
               <div className="flex shrink-0 items-center border-b border-border px-4 py-2"><WorkspaceSwitcher store={store} /></div>
-              <WorkspacePages store={store} transport={transport} pickDirectory={pickDirectory} workItemTarget={searchWorkItemTarget} />
+              <WorkspacePages store={store} transport={transport} pickDirectory={pickDirectory} workItemTarget={searchWorkItemTarget} onWorkItemTargetConsumed={clearSearchWorkItemTarget} />
             </div>
           </div>
         </div>

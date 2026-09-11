@@ -7,7 +7,7 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
   const workspaceId = store((s) => s.browsingWorkspaceId);
   const target = store((s) => s.editor);
   return workspaceId && target?.kind === "doc"
-    ? <DocumentEditor key={workspaceId + ":" + target.path + ":" + target.line + ":" + target.column} store={store} workspaceId={workspaceId} path={target.path} line={target.line} column={target.column} />
+    ? <DocumentEditor key={workspaceId + ":" + target.path + ":" + target.line + ":" + target.column + ":" + target.nonce} store={store} workspaceId={workspaceId} path={target.path} line={target.line} column={target.column} />
     : null;
 };
 

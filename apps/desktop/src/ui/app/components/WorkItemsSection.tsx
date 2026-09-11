@@ -67,11 +67,12 @@ type WorkItemsSectionProps = {
   expandedWorkGroups: WorkbenchState["expandedWorkGroups"];
   setWorkGroupExpanded: WorkbenchState["setWorkGroupExpanded"];
   detailTarget?: { workspaceId: string; workItemId: string; nonce: number };
+  onDetailTargetConsumed?: () => void;
   /** Task picked from the status bar: keep it visible in the overlay and scroll to it once. */
   taskTarget?: TaskTarget;
 };
 
-export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, runs, actions, onOpenSession, compact, onExpand, taskTarget, detailTarget, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
+export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, runs, actions, onOpenSession, compact, onExpand, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
   const board = useRef<HTMLDivElement>(null);
   const located = useRef<TaskTarget | undefined>(undefined);
   useEffect(() => {
@@ -100,7 +101,8 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
       return;
     }
     setDetail({ workspaceId, workItemId: detailTarget.workItemId });
-  }, [detailTarget, expandedWorkGroups, setWorkGroupExpanded, workItems, workspaceId]);
+    onDetailTargetConsumed?.();
+  }, [detailTarget, expandedWorkGroups, onDetailTargetConsumed, setWorkGroupExpanded, workItems, workspaceId]);
   const openDetail = (workItemId: string) => setDetail({ workspaceId, workItemId });
   const perform = async (action: () => Promise<unknown>) => {
     setBusy(true);
