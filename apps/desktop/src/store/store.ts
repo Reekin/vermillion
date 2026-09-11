@@ -107,6 +107,9 @@ const applySnapshotActionToReplica = (
       const latestCursorBySessionId = new Map(
         Object.entries(state.eventStream.lastCursorBySessionId ?? {})
       );
+      const latestCursorByConversationId = new Map(
+        Object.entries(state.eventStream.lastCursorByConversationId ?? {})
+      );
       const freshWindows = action.windows.flatMap((window) => {
         const conversationId = window.snapshot.conversations[0]?.conversationId;
         if (isSessionWindowStale(state, window.sessionId, window.cursor, conversationId)) {
@@ -121,7 +124,24 @@ const applySnapshotActionToReplica = (
         ) {
           return [];
         }
+        const currentConversationCursor = conversationId
+          ? latestCursorByConversationId.get(conversationId)
+          : undefined;
+        const conversationComparison = compareCursorPosition(
+          currentConversationCursor,
+          window.cursor
+        );
+        if (
+          currentConversationCursor &&
+          conversationComparison !== undefined &&
+          conversationComparison > 0
+        ) {
+          return [];
+        }
         if (window.cursor) latestCursorBySessionId.set(window.sessionId, window.cursor);
+        if (conversationId && window.cursor) {
+          latestCursorByConversationId.set(conversationId, window.cursor);
+        }
         return [{
           sessionId: window.sessionId,
           snapshot: normalizeRendererDomainSnapshot(window.snapshot)

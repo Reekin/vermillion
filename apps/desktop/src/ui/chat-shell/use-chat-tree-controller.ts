@@ -103,6 +103,9 @@ export const useChatTreeController = (input: {
       const latestCursorBySessionId = new Map(
         Object.entries(stateBeforeHydration.eventStream.lastCursorBySessionId ?? {})
       );
+      const latestCursorByConversationId = new Map(
+        Object.entries(stateBeforeHydration.eventStream.lastCursorByConversationId ?? {})
+      );
       const freshWindowsToHydrate = windowsToHydrate.filter((window) => {
         const conversationId = window.snapshot.conversations[0]?.conversationId;
         if (isSessionWindowStale(stateBeforeHydration, window.sessionId, window.cursor, conversationId)) {
@@ -113,7 +116,24 @@ export const useChatTreeController = (input: {
         if (currentCursor && comparison !== undefined && comparison > 0) {
           return false;
         }
+        const currentConversationCursor = conversationId
+          ? latestCursorByConversationId.get(conversationId)
+          : undefined;
+        const conversationComparison = compareCursorPosition(
+          currentConversationCursor,
+          window.cursor
+        );
+        if (
+          currentConversationCursor &&
+          conversationComparison !== undefined &&
+          conversationComparison > 0
+        ) {
+          return false;
+        }
         if (window.cursor) latestCursorBySessionId.set(window.sessionId, window.cursor);
+        if (conversationId && window.cursor) {
+          latestCursorByConversationId.set(conversationId, window.cursor);
+        }
         return true;
       });
       if (freshWindowsToHydrate.length > 0) {
