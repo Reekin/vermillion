@@ -686,26 +686,55 @@ export class WorkbenchService {
 
   private async submitResult(workspaceId: string, workItemId: string, input: Parameters<WorkbenchService["submitWorkItem"]>[2]): Promise<WorkItem> {
     const now = this.now();
-    const current = await this.getWorkItem(workspaceId, workItemId);
-    if (current.status !== "running") throw new Error("Work item is not running: " + workItemId);
     if (await this.isWorkItemBlocked(workspaceId, workItemId)) throw new Error("仍有未解决的等待条件，不能提交。");
-    const currentRevision = current.contractRevision;
-    if (input.contractRevision !== currentRevision) {
-      return this.returnWorkItem(workspaceId, workItemId, "提交依据已过期：当前合同修订为 " + currentRevision + "，收到的是 " + input.contractRevision + "。请重新读取工单并仅更新受影响的结果。");
-    }
-    const submitted = await this.mutateRecord(workspaceId, workItemId, (record) => {
-      const verify = { ...input.verify, verifiedAt: now };
-      return { ...record, item: {
+    type PreparedSubmission = { stale: true; item: WorkItem } | { stale: false; item: WorkItem };
+    const prepared = await this.transactRecord<PreparedSubmission>(workspaceId, workItemId, (record) => {
+      if (!record) throw new Error("Unknown work item: " + workItemId);
+      if (record.item.status !== "running") throw new Error("Work item is not running: " + workItemId);
+      if (input.contractRevision !== record.item.contractRevision) {
+        const reason = "提交依据已过期：当前合同修订为 " + record.item.contractRevision + "，收到的是 " + input.contractRevision + "。请重新读取工单并仅更新受影响的结果。";
+        const updatedAt = this.now();
+        const updated = { ...record,
+          item: { ...record.item, status: "queued" as const, rejections: [...record.item.rejections, { reason, at: updatedAt }], updatedAt },
+          execution: { ...record.execution, idleTurns: 0, message: [record.execution.message, reason].filter(Boolean).join("\n"), updatedAt }
+        };
+        return { record: updated, result: { stale: true as const, item: projectWorkItem(updated) } };
+      }
+      const previousVerify = record.item.verify;
+      const verifyByIndex = new Map((previousVerify?.items ?? []).map((entry) => [entry.index, entry]));
+      for (const entry of input.verify.items) verifyByIndex.set(entry.index, entry);
+      const mergedItems = [...verifyByIndex.values()].sort((left, right) => left.index - right.index);
+      const complete = record.item.acceptance.every((_, index) => verifyByIndex.has(index));
+      const mergedPass = input.verify.verdict === "pass" && complete &&
+        mergedItems.length === record.item.acceptance.length && mergedItems.every((entry) => entry.status === "pass");
+      const mergeUnique = <T>(before: T[], after: T[]): T[] => [...before, ...after].filter((entry, index, all) =>
+        all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(entry)) === index);
+      const previousEvidence = record.item.evidence;
+      const evidence = {
+        summary: input.evidence.summary || previousEvidence?.summary || "",
+        ...(input.evidence.commit || previousEvidence?.commit ? { commit: input.evidence.commit ?? previousEvidence?.commit } : {}),
+        commands: mergeUnique(previousEvidence?.commands ?? [], input.evidence.commands),
+        assumptions: mergeUnique(previousEvidence?.assumptions ?? [], input.evidence.assumptions),
+        untested: mergeUnique(previousEvidence?.untested ?? [], input.evidence.untested),
+        outOfScopeFindings: mergeUnique(previousEvidence?.outOfScopeFindings ?? [], input.evidence.outOfScopeFindings),
+        attachments: mergeUnique(previousEvidence?.attachments ?? [], input.evidence.attachments),
+        submittedAt: now
+      };
+      const verify = { items: mergedItems, verdict: mergedPass ? "pass" as const : "rework" as const, verifiedAt: now };
+      const updated = { ...record, item: {
         ...record.item,
-        updatedAt: this.now(),
-        evidence: { ...input.evidence, submittedAt: now },
-        review: input.review,
+        updatedAt: now,
+        evidence,
+        review: mergeUnique(record.item.review, input.review),
         verify
       } };
+      return { record: updated, result: { stale: false as const, item: projectWorkItem(updated) } };
     });
-    const failed = input.verify.items.filter((entry) => entry.status !== "pass");
-    const missing = submitted.acceptance.some((_, index) => !input.verify.items.some((entry) => entry.index === index));
-    if (input.verify.verdict !== "pass" || failed.length || missing) {
+    if (prepared.stale) return prepared.item;
+    const submitted = prepared.item;
+    const failed = submitted.verify?.items.filter((entry) => entry.status !== "pass") ?? [];
+    const missing = submitted.acceptance.some((_, index) => !submitted.verify?.items.some((entry) => entry.index === index));
+    if (submitted.verify?.verdict !== "pass" || failed.length || missing) {
       const statusText = failed.map((entry) => ({ defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成", pass: "通过" }[entry.status] + "：" + entry.evidence)).join("\n");
       const reason = "验收未通过：" + (statusText || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
       return this.returnWorkItem(workspaceId, workItemId, reason);

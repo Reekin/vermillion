@@ -161,7 +161,7 @@ it("preserves verification outcomes and keeps incomplete validation out of user 
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   const returned = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission,
-    verify: { verdict: "rework", items: [{ index: 0, status: "blocked", evidence: "验收实例尚未就绪" }] } });
+    verify: { verdict: "pass", items: [{ index: 0, status: "blocked", evidence: "验收实例尚未就绪" }] } });
   expect(returned).toMatchObject({ status: "queued", verify: { verdict: "rework", items: [{ status: "blocked" }] } });
   expect(await service.listDecisions(workspaceId)).toEqual([]);
 
@@ -170,6 +170,28 @@ it("preserves verification outcomes and keeps incomplete validation out of user 
     verify: { verdict: "rework", items: [{ index: 0, status: "incomplete", evidence: "右侧路径尚未操作" }] } });
   expect(incomplete).toMatchObject({ status: "queued", verify: { items: [{ status: "incomplete" }] } });
   expect(await service.listDecisions(workspaceId)).toEqual([]);
+});
+
+it("merges partial verification with existing results before deciding whether to merge", async () => {
+  const { service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker",
+    acceptance: [{ text: "First result" }, { text: "Second result" }] });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const waiting = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission,
+    verify: { verdict: "rework", items: [
+      { index: 0, status: "pass", evidence: "First result checked" },
+      { index: 1, status: "blocked", evidence: "Second result needs a fixture" }
+    ] } });
+  expect(waiting).toMatchObject({ status: "queued", verify: { verdict: "rework", items: [{ index: 0, status: "pass" }, { index: 1, status: "blocked" }] } });
+
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission,
+    evidence: { ...submission.evidence, summary: "Second result completed", commands: [{ command: "check", output: "pass" }] },
+    verify: { verdict: "pass", items: [{ index: 1, status: "pass", evidence: "Second result checked" }] } });
+
+  expect(closed.status).toBe("closed");
+  expect(closed.verify).toMatchObject({ verdict: "pass", items: [{ index: 0, status: "pass" }, { index: 1, status: "pass" }] });
+  expect(closed.evidence?.commands).toContainEqual({ command: "check", output: "pass" });
 });
 
 it("rejects a submission based on an old contract revision while preserving prior evidence", async () => {
