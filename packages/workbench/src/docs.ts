@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rmdir, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { DocChange, DocFile } from "./contracts.js";
 
@@ -346,12 +346,20 @@ export class DocsService {
     }
   }
 
+  private workspacePaths(paths: string[]): string[] {
+    return paths.filter((path) => {
+      const relativePath = relative(this.rootPath, resolve(this.rootPath, path));
+      return relativePath !== ".." && !relativePath.startsWith(".." + sep) && !isAbsolute(relativePath);
+    });
+  }
+
   async rootResult(commit: string | undefined, base: string | undefined, allowedPaths: string[]): Promise<{ commit?: string; commits?: string[]; diffStat: string }> {
-    if (!allowedPaths.length) {
+    const workspacePaths = this.workspacePaths(allowedPaths);
+    if (!workspacePaths.length) {
       if (commit) throw new WorktreeNotReady("根目录代码成果需要在 scope.allowedPaths 登记归属路径。");
       return { diffStat: "" };
     }
-    const paths = [...allowedPaths, ":(exclude).vermillion"];
+    const paths = [...workspacePaths, ":(exclude).vermillion"];
     const dirty = await git(this.rootPath, ["diff", "--name-only", "HEAD", "--", ...paths]);
     const untracked = await git(this.rootPath, ["ls-files", "--others", "--exclude-standard", "--", ...paths]);
     if (dirty.trim() || untracked.trim()) throw new WorktreeNotReady("根目录范围内仍有未提交成果，请先提交再登记 evidence.commit。");
