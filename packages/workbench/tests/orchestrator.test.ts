@@ -109,6 +109,25 @@ it("does not retry a manually stopped worker until the work item is explicitly r
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
 });
 
+it("interrupts cancelled preparation and does not retry it after the turn settles", async () => {
+  const f = await fixture(true);
+  f.orchestrator.start();
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source-turn" });
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+
+  const preparationSession = (await f.service.listWorkRequests(f.workspaceId))[0]!.workerSessionId!;
+  await f.service.cancelWorkRequest(f.workspaceId, { requestId: request.requestId });
+  await vi.waitFor(() => expect(f.runner.interrupt).toHaveBeenCalledWith(preparationSession));
+  f.complete(preparationSession, "preparation-turn", "interrupted");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const cancelled = (await f.service.listWorkRequests(f.workspaceId))[0]!;
+  expect(cancelled.status).toBe("cancelled");
+  expect(cancelled.attempts).toBeUndefined();
+  expect(cancelled.retryAt).toBeUndefined();
+  expect(f.runner.send).toHaveBeenCalledOnce();
+});
+
 async function fixture(trackTurns = false) {
   const f = await setup(); fixtures.push(f);
   const active = new Set<string>();

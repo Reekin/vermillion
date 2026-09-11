@@ -145,7 +145,7 @@ export const zWorkRequest = z.object({
   requestId: z.string(), sourceSessionId: z.string(), sourceTurnId: z.string().optional(),
   message: zWorkMessage.optional(),
   scope: z.string().optional(), treeId: z.string().optional(), workerSessionId: z.string().optional(),
-  status: z.enum(["pending", "preparing", "ready", "failed"]),
+  status: z.enum(["pending", "preparing", "ready", "failed", "cancelled"]),
   attempts: z.number().int().nonnegative().optional(), retryAt: z.string().optional(),
   failure: z.string().optional(), createdAt: z.string(), updatedAt: z.string()
 });
@@ -359,6 +359,8 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workItem.updated"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string(), note: z.string() }),
   /** A work item was cancelled. sessionId when a worker held it (interrupted); dependants are queued items that listed it in dependsOn. */
   z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string().optional(), dependants: z.array(z.string()) }),
+  /** A preparation request was cancelled; sessionId identifies its preparation branch when one exists. */
+  z.object({ type: z.literal("workRequest.cancelled"), workspaceId: z.string(), requestId: z.string(), sessionId: z.string().optional() }),
   z.object({ type: z.literal("runs.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("actions.changed"), workspaceId: z.string() })
 ]);

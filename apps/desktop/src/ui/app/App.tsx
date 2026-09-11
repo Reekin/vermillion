@@ -239,10 +239,17 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   reloadSignal={reloadSignal}
                   createSession={createSession}
                   initializeDraftExecution={initializeDraftExecution}
-                  onBeforeStop={sessionWorkspaceId ? (workerSessionId) => store.getState().client.request("workItem.pause", {
-                    workspaceId: sessionWorkspaceId,
-                    sessionId: workerSessionId
-                  }).then(() => undefined) : undefined}
+                  onBeforeStop={sessionWorkspaceId ? async (workerSessionId) => {
+                    const cancelled = await store.getState().client.request("work.cancel", {
+                      workspaceId: sessionWorkspaceId,
+                      sessionId: workerSessionId
+                    });
+                    if (cancelled.cancelled) return "cancelled";
+                    await store.getState().client.request("workItem.pause", {
+                      workspaceId: sessionWorkspaceId,
+                      sessionId: workerSessionId
+                    });
+                  } : undefined}
                   onViewChange={setWorkTarget}
                   composerDraftKey="think"
                   onComposerChange={setComposerActions}

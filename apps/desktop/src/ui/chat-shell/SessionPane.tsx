@@ -107,8 +107,8 @@ export type SessionPaneProps = {
   composerExtras?: ReactNode;
   composerDraftKey?: string;
   onComposerChange?: (actions: ComposerActions | undefined) => void;
-  /** Records a Worker pause before the shared session Stop command interrupts its turn. */
-  onBeforeStop?: (sessionId: string) => Promise<void>;
+  /** Records preparation cancellation or a Worker pause before the shared session Stop command interrupts its turn. */
+  onBeforeStop?: (sessionId: string) => Promise<"cancelled" | void>;
   onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
