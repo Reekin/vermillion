@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
 import type { DomainSnapshot } from "@vermillion/shared";
@@ -123,6 +123,18 @@ describe("Codex app-server runtime port", () => {
         await dispose();
       }
     }
+  });
+
+  it("resolves the configured SQLite home instead of assuming CODEX_HOME", async () => {
+    vi.stubEnv("CODEX_SQLITE_HOME", "");
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
+    vi.spyOn(port, "start").mockResolvedValue();
+    vi.spyOn(port, "getState").mockReturnValue("ready");
+    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockResolvedValue({ config: { sqlite_home: "file:///I:/isolated/codex-state" } });
+
+    await expect(port.getCodexSqliteHome()).resolves.toBe(normalize("I:/isolated/codex-state"));
+    expect(rpc).toHaveBeenCalledWith("config/read", { includeLayers: false, cwd: null });
   });
 
   it("forwards state-db-only thread listing to the app server", async () => {

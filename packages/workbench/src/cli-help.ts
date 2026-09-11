@@ -40,6 +40,7 @@ function describe(schema: z.ZodTypeAny, sample = false, key = "value"): unknown 
 
 export function methodHelp(method: string): string | undefined {
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
+    "sessionBrowser.open": { params: "sessionId: string; forceProviderHydration?: boolean", state: "桌面在线；进入会话并按当前 rollout 刷新 Codex 历史。", example: { sessionId: "<sessionId>" } },
     "chatTree.get": { params: "sessionId: string", state: "桌面在线；读取完整会话树，节点包含所属 sessionId 与 canArchive。", example: { sessionId: "<sessionId>" } },
     "chatTree.nodeAction": { params: "sessionId: string, nodeId: string, action: copy_session_id | copy_awb_session_id | archive", state: "桌面在线；复制返回 copiedText，archive 仅归档末端 fork 分支。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", action: "copy_session_id" } },
     "chatTree.markRead": { params: "sessionId: string, nodeId: string", state: "Desktop online; marks completed turns on the displayed node's ancestor path read. Returns readNodeIds.", example: { sessionId: "<sessionId>", nodeId: "<nodeId>" } },

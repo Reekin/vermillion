@@ -9,6 +9,7 @@ export * from "./local-preload.js";
 export * from "./file-action-service.js";
 export * from "./error-log-service.js";
 export * from "./diagnostic-log-service.js";
+export * from "./codex-history-projection.js";
 export * from "./host-tools.js";
 export * from "./read-session-host-tool.js";
 export * from "./read-session-transcript.js";

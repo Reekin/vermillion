@@ -148,7 +148,113 @@ const buildProjectedProviderOpenHarness = (
   };
 };
 
+const buildHistoryRefreshOpenHarness = (input: {
+  activeTurnId?: string;
+  clearResult?: boolean;
+} = {}) => {
+  const snapshot = buildSessionSnapshot();
+  const providerSession = {
+    ...snapshot.sessions[0],
+    metadata: {
+      providerKind: "codex-thread",
+      providerSessionId: "thread-1"
+    }
+  };
+  const releaseSessionExecution = vi.fn().mockResolvedValue(undefined);
+  const clearSessionHistory = vi.fn().mockResolvedValue(input.clearResult ?? true);
+  const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
+  const ensureSessionExecutable = vi.fn().mockResolvedValue(true);
+  const invalidate = vi.fn();
+  const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
+  const markSessionRead = vi.fn().mockResolvedValue(undefined);
+  const service = new SessionShellService({
+    runtimeService: {
+      listSessions: () => [providerSession],
+      getSnapshot: () => ({ ...snapshot, sessions: [providerSession] }),
+      getWorkspaceRegistry: () => ({ setLastActiveSelection }),
+      getSessionIndexStore: () => ({
+        getEntry: () => ({
+          sessionId: "session-1",
+          workspaceId: "workspace-1",
+          providerKind: "codex-thread",
+          providerSessionId: "thread-1"
+        }),
+        getTreeMembers: () => ["session-1"]
+      })
+    } as never,
+    releaseSessionExecution,
+    clearSessionHistory,
+    getActiveTurnId: () => input.activeTurnId,
+    wrapperChatTree: { invalidate } as never,
+    sessionCatalog: { markSessionRead } as never,
+    sessionActions: {} as never,
+    chatTreeProvider: {
+      get: vi.fn().mockResolvedValue({
+        currentNodeId: "node-2",
+        nodes: [{ nodeId: "node-2", turnId: "turn-2" }]
+      })
+    } as never,
+    sessionReconciliation: {
+      ensureSessionLoaded,
+      ensureSessionExecutable
+    } as never
+  });
+  return {
+    service,
+    releaseSessionExecution,
+    clearSessionHistory,
+    ensureSessionLoaded,
+    ensureSessionExecutable,
+    invalidate
+  };
+};
+
 describe("SessionShellService", () => {
+  it("refreshes provider history before reopening a session", async () => {
+    const harness = buildHistoryRefreshOpenHarness();
+
+    await expect(harness.service.openSession("session-1")).resolves.toMatchObject({
+      page: {
+        sessionId: "session-1",
+        replaceSessionHistory: true
+      }
+    });
+
+    expect(harness.releaseSessionExecution).toHaveBeenCalledWith("session-1");
+    expect(harness.clearSessionHistory).toHaveBeenCalledWith("session-1");
+    expect(harness.ensureSessionLoaded).toHaveBeenCalledWith("session-1", {
+      force: true,
+      requireFull: true,
+      isCancelled: expect.any(Function)
+    });
+    expect(harness.invalidate).toHaveBeenCalledWith("session-1");
+    expect(harness.releaseSessionExecution.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.clearSessionHistory.mock.invocationCallOrder[0]
+    );
+    expect(harness.clearSessionHistory.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.ensureSessionLoaded.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("keeps an active provider session attached when it is opened", async () => {
+    const harness = buildHistoryRefreshOpenHarness({ activeTurnId: "turn-2" });
+
+    await expect(harness.service.openSession("session-1")).resolves.toBeDefined();
+
+    expect(harness.releaseSessionExecution).not.toHaveBeenCalled();
+    expect(harness.clearSessionHistory).not.toHaveBeenCalled();
+    expect(harness.ensureSessionLoaded).not.toHaveBeenCalled();
+  });
+
+  it("clears provider history after releasing execution", async () => {
+    const harness = buildHistoryRefreshOpenHarness();
+
+    await harness.service.releaseSessionExecution("session-1");
+
+    expect(harness.releaseSessionExecution).toHaveBeenCalledWith("session-1");
+    expect(harness.clearSessionHistory).toHaveBeenCalledWith("session-1");
+  });
+
   it("serves engine registry and surface from injected engine-control services", () => {
     const service = new SessionShellService({
       runtimeService: {} as never,

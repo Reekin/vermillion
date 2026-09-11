@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { fileURLToPath } from "node:url";
 import type {
   AdapterRuntimePort,
   CodexRuntimeEvent,
@@ -60,6 +61,7 @@ import type { Turn } from "./codex-app-server-generated/v2/Turn.js";
 import type { TurnItemsView } from "./codex-app-server-generated/v2/TurnItemsView.js";
 import type { ThreadItem } from "./codex-app-server-generated/v2/ThreadItem.js";
 import type { ResponseItem } from "./codex-app-server-generated/ResponseItem.js";
+import type { InitializeResponse } from "./codex-app-server-generated/InitializeResponse.js";
 import type { SkillsListParams } from "./codex-app-server-generated/v2/SkillsListParams.js";
 import type { SkillsListResponse } from "./codex-app-server-generated/v2/SkillsListResponse.js";
 import type { ModelListParams } from "./codex-app-server-generated/v2/ModelListParams.js";
@@ -209,6 +211,17 @@ export type CodexAppServerRuntimePortOptions = {
 
 const localRequestId = (value: string | number): string => String(value);
 const CODEX_RPC_TIMEOUT_MS = 30_000;
+
+const resolveConfiguredPath = (value: unknown): string | undefined => {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("file:")) return trimmed;
+  try {
+    return fileURLToPath(trimmed);
+  } catch {
+    return undefined;
+  }
+};
 
 const chunkText = (value: string): string[] => {
   if (!value) {
@@ -872,6 +885,7 @@ export class CodexAppServerRuntimePort
   private readonly pipelineDiagnostics: RuntimePipelineDiagnostics | undefined;
   private readonly threadIdBySessionId = new Map<string, string>();
   private readonly detachedThreadIds = new Set<string>();
+  private readonly closedThreadIds = new Set<string>();
   private readonly sessionIdByThreadId = new Map<string, string>();
   private readonly sessionIdsByThreadId = new Map<string, Set<string>>();
   private readonly pendingTurnSessionIdByThreadId = new Map<string, string>();
@@ -903,6 +917,8 @@ export class CodexAppServerRuntimePort
     ProcessActivitySummaryState
   >();
   private sequence = 0;
+  private codexHome: string | undefined;
+  private sqliteHome: string | undefined;
   private startConfig: AgentAdapterRuntimeConfig = {};
   private readonly recordTurnChanges: ((input: RecordedCodexTurnChanges) => void) | undefined;
 
@@ -992,6 +1008,38 @@ export class CodexAppServerRuntimePort
     return this.lifecycle.getState();
   }
 
+  /** Resolve the database home used by Codex, including CODEX_SQLITE_HOME/config overrides. */
+  public async getCodexSqliteHome(): Promise<string | undefined> {
+    if (this.sqliteHome) return this.sqliteHome;
+
+    const configuredByEnvironment = resolveConfiguredPath(
+      this.startConfig.env?.CODEX_SQLITE_HOME ?? process.env.CODEX_SQLITE_HOME
+    );
+    if (configuredByEnvironment) {
+      this.sqliteHome = configuredByEnvironment;
+      return this.sqliteHome;
+    }
+
+    if ((this.getState() === "stopped" || this.getState() === "failed") && this.codexHome) {
+      return this.codexHome;
+    }
+    await this.start();
+    try {
+      const response = (await this.rpc("config/read", {
+        includeLayers: false,
+        cwd: null
+      })) as Partial<ConfigReadResponse>;
+      const config = isRecord(response.config) ? response.config : undefined;
+      const configuredPath = config
+        ? resolveConfiguredPath(config.sqlite_home ?? config["sqliteHome"])
+        : undefined;
+      this.sqliteHome = configuredPath ?? this.codexHome;
+    } catch {
+      this.sqliteHome = this.codexHome;
+    }
+    return this.sqliteHome;
+  }
+
   public async start(
     config: AgentAdapterRuntimeConfig = {},
     _options: RuntimeStartOptions = {}
@@ -1032,7 +1080,7 @@ export class CodexAppServerRuntimePort
         output: child.stdin
       });
 
-      await this.rpc("initialize", {
+      const initialized = (await this.rpc("initialize", {
         clientInfo: {
           name: "vermillion",
           title: "Vermillion",
@@ -1041,7 +1089,11 @@ export class CodexAppServerRuntimePort
         capabilities: {
           experimentalApi: true
         }
-      });
+      })) as Partial<InitializeResponse>;
+      this.codexHome =
+        typeof initialized.codexHome === "string" && initialized.codexHome.trim()
+          ? initialized.codexHome
+          : undefined;
       await this.rpcClient.notify("initialized");
       this.lifecycle.setState("ready");
     } catch (error) {
@@ -1089,6 +1141,7 @@ export class CodexAppServerRuntimePort
 
   private clearRuntimeState(): void {
     this.detachedThreadIds.clear();
+    this.closedThreadIds.clear();
     this.pendingApprovalsById.clear();
     this.pendingApprovalResolutionsById.clear();
     this.threadIdBySessionId.clear();
@@ -1220,6 +1273,7 @@ export class CodexAppServerRuntimePort
   }
 
   public attachThreadToSession(sessionId: string, threadId: string, executionLoaded = true): void {
+    this.closedThreadIds.delete(threadId);
     if (executionLoaded) this.detachedThreadIds.delete(threadId);
     else if (!this.sessionIdsByThreadId.has(threadId)) this.detachedThreadIds.add(threadId);
     const previousThreadId = this.threadIdBySessionId.get(sessionId);
@@ -1404,15 +1458,8 @@ export class CodexAppServerRuntimePort
 
   /** Unsubscribe the idle execution tree without waiting for unloading or archiving its history. */
   public async releaseSessionExecution(sessionId: string): Promise<void> {
-    const threadId = this.threadIdBySessionId.get(sessionId);
-    if (!threadId) return;
-    const owned = new Set<string>();
-    const visit = (id: string): void => {
-      if (owned.has(id)) return;
-      owned.add(id);
-      for (const child of this.childThreadIdsByParentThreadId.get(id) ?? []) visit(child);
-    };
-    visit(threadId);
+    const owned = this.sessionExecutionThreadIds(sessionId);
+    if (owned.length === 0) return;
     for (const id of owned) {
       if (this.activeTurnByThreadId.has(id) || this.pendingTurnSessionIdByThreadId.has(id)) {
         throw new Error(`Cannot release thread ${id}: a turn is active.`);
@@ -1421,6 +1468,40 @@ export class CodexAppServerRuntimePort
     for (const id of [...owned].reverse()) {
       if (!this.detachedThreadIds.has(id)) await this.releaseThreadExecution(id);
     }
+  }
+
+  public async releaseSessionExecutionAndWait(sessionId: string): Promise<void> {
+    const threadIds = this.sessionExecutionThreadIds(sessionId);
+    await this.releaseSessionExecution(sessionId);
+    await Promise.all(threadIds.map((threadId) => this.waitForThreadClosed(threadId)));
+  }
+
+  private sessionExecutionThreadIds(sessionId: string): string[] {
+    const threadId = this.threadIdBySessionId.get(sessionId);
+    if (!threadId) return [];
+    const owned = new Set<string>();
+    const visit = (id: string): void => {
+      if (owned.has(id)) return;
+      owned.add(id);
+      for (const child of this.childThreadIdsByParentThreadId.get(id) ?? []) visit(child);
+    };
+    visit(threadId);
+    return [...owned];
+  }
+
+  private async waitForThreadClosed(threadId: string): Promise<boolean> {
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      if (this.closedThreadIds.has(threadId)) return true;
+      try {
+        const thread = await this.readThread(threadId, false);
+        if (thread.status.type === "notLoaded") return true;
+      } catch {
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return this.closedThreadIds.has(threadId);
   }
 
   public getActiveTurnId(sessionId: string): string | undefined {
@@ -2513,7 +2594,9 @@ export class CodexAppServerRuntimePort
   private handleNotification(method: string, params: Record<string, unknown>): void {
     switch (method) {
       case "thread/closed": {
-        this.detachedThreadIds.add(String(params.threadId));
+        const threadId = String(params.threadId);
+        this.detachedThreadIds.add(threadId);
+        this.closedThreadIds.add(threadId);
         return;
       }
       case "thread/started": {

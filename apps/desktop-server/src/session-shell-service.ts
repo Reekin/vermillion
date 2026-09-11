@@ -147,6 +147,7 @@ const resolveComposerSlashSuggestions = (
 export type SessionShellServiceOptions = {
   runtimeService: SessionRuntimeService;
   releaseSessionExecution?: (sessionId: string) => Promise<void>;
+  clearSessionHistory?: (sessionId: string) => Promise<boolean>;
   getActiveTurnId?: (sessionId: string) => string | undefined;
   wrapperChatTree?: WrapperChatTreeService;
   sessionCatalog: SessionCatalogService;
@@ -183,6 +184,7 @@ export class SessionShellService {
   private readonly wrapperChatTree: WrapperChatTreeService | undefined;
   private readonly runtimeService: SessionRuntimeService;
   private readonly releaseSessionExecutionImpl: SessionShellServiceOptions["releaseSessionExecution"];
+  private readonly clearSessionHistoryImpl: SessionShellServiceOptions["clearSessionHistory"];
   private readonly getActiveTurnIdImpl: SessionShellServiceOptions["getActiveTurnId"];
   private readonly sessionCatalog: SessionCatalogService;
   private readonly capabilities: CapabilityRegistry | undefined;
@@ -215,6 +217,7 @@ export class SessionShellService {
     this.wrapperChatTree = options.wrapperChatTree;
     this.runtimeService = options.runtimeService;
     this.releaseSessionExecutionImpl = options.releaseSessionExecution;
+    this.clearSessionHistoryImpl = options.clearSessionHistory;
     this.getActiveTurnIdImpl = options.getActiveTurnId;
     this.sessionCatalog = options.sessionCatalog;
     this.capabilities = options.capabilities;
@@ -374,12 +377,64 @@ export class SessionShellService {
     return this.runtimeService.getSnapshot();
   }
 
+  private sessionTreeMembers(sessionId: string): string[] {
+    return this.runtimeService.getSessionIndexStore?.()?.getTreeMembers(sessionId) ?? [sessionId];
+  }
+
+  private async clearSessionHistoryForTree(sessionId: string): Promise<boolean> {
+    if (!this.clearSessionHistoryImpl) return false;
+    let succeeded = true;
+    for (const memberId of this.sessionTreeMembers(sessionId)) {
+      try {
+        succeeded = (await this.clearSessionHistoryImpl(memberId)) && succeeded;
+      } catch (error) {
+        succeeded = false;
+        console.warn("[vermillion] Failed to clear Codex session history", {
+          sessionId: memberId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    return succeeded;
+  }
+
+  private async tryClearSessionHistory(sessionId: string): Promise<boolean> {
+    try {
+      return await this.clearSessionHistoryForTree(sessionId);
+    } catch (error) {
+      console.warn("[vermillion] Failed to clear Codex session history", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return false;
+    }
+  }
+
+  private async refreshSessionHistoryBeforeOpen(sessionId: string): Promise<boolean> {
+    if (!this.clearSessionHistoryImpl || this.getActiveTurnIdImpl?.(sessionId)) return false;
+    try {
+      if (this.releaseSessionExecutionImpl) {
+        await this.releaseSessionExecutionImpl(sessionId);
+      }
+      const refreshed = await this.clearSessionHistoryForTree(sessionId);
+      if (refreshed) this.wrapperChatTree?.invalidate(sessionId);
+      return refreshed;
+    } catch (error) {
+      console.warn("[vermillion] Failed to refresh Codex session history", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return false;
+    }
+  }
+
   public async releaseSessionExecution(sessionId: string): Promise<void> {
     if (this.getSnapshot().turns.some((turn) => turn.sessionId === sessionId && turn.status !== "completed")) {
       throw new Error(`Cannot release session ${sessionId}: a turn is active.`);
     }
     if (!this.releaseSessionExecutionImpl) throw new Error("Execution release is unavailable for this runtime.");
     await this.releaseSessionExecutionImpl(sessionId);
+    await this.tryClearSessionHistory(sessionId);
   }
 
   public getActiveTurnId(sessionId: string): string | undefined {
@@ -431,8 +486,20 @@ export class SessionShellService {
   }
 
   public async dispose(): Promise<void> {
+    const sessionIndex = this.runtimeService.getSessionIndexStore?.();
+    const treeIds = new Set(
+      this.runtimeService
+        .listSessions({ includeArchived: true })
+        .map((session) => sessionIndex?.getTreeId(session.sessionId) ?? session.sessionId)
+    );
     this.wrapperChatTree?.dispose();
-    await this.runtimeService.dispose();
+    try {
+      await this.runtimeService.dispose();
+    } finally {
+      await Promise.allSettled(
+        [...treeIds].map((sessionId) => this.clearSessionHistoryForTree(sessionId))
+      );
+    }
   }
 
   public async listWorkspaces(): Promise<{
@@ -625,6 +692,7 @@ export class SessionShellService {
   ): Promise<{ page: SessionWindowSnapshot }> {
     const generation = ++this.openSessionGeneration;
     const isCancelled = () => generation !== this.openSessionGeneration;
+    const refreshedHistory = await this.refreshSessionHistoryBeforeOpen(sessionId);
     const loadedSession = this.runtimeService
       .listSessions({ includeArchived: true })
       .find((session) => session.sessionId === sessionId);
@@ -645,10 +713,34 @@ export class SessionShellService {
     const isUncoveredProviderSession = isProviderSession && !hasProjectedAnchor;
     const alreadyFullyLoaded =
       alreadyLoaded &&
+      !refreshedHistory &&
       !isUncoveredProviderSession &&
       !this.partiallyHydratedSessionIds.has(sessionId);
     if (isCancelled()) {
       throw new Error("Open session cancelled.");
+    }
+    if (refreshedHistory && this.sessionReconciliation) {
+      const loadedByFullHydration =
+        (await this.sessionReconciliation.ensureSessionLoaded(sessionId, {
+          isCancelled,
+          force: true,
+          requireFull: true
+        })) ?? false;
+      if (isCancelled()) {
+        throw new Error("Open session cancelled.");
+      }
+      if (!loadedByFullHydration) {
+        throw new Error("This session could not be fully loaded.");
+      }
+      this.partiallyHydratedSessionIds.delete(sessionId);
+      await this.ensureOpenedSessionExecutable(sessionId, { isCancelled });
+      await this.activateOpenedSession(sessionId, { isCancelled });
+      return {
+        page: this.buildSessionWindow(sessionId, {
+          limit: defaultSessionWindowLimit,
+          replaceSessionHistory: true
+        })
+      };
     }
     if (input.forceProviderHydration) {
       const loadedByFullHydration =
