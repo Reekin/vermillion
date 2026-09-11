@@ -54,6 +54,7 @@ export type RendererStoreState = {
     lastCursor?: string;
     lastCursorBySessionId?: Record<string, string>;
     lastCursorByConversationId?: Record<string, string>;
+    conversationIdBySessionId?: Record<string, string>;
     cursorBarrier?: string;
     cursorBarrierBySessionId?: Record<string, string>;
     lastOccurredAt?: string;

@@ -506,6 +506,33 @@ describe("renderer store domain replica", () => {
     expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
   });
 
+  it("advances the conversation cursor for a sibling session event", () => {
+    const store = createRendererStore();
+    const initial = sessionSnapshot();
+    initial.conversations[0]!.sessionIds = ["session-a", "session-b"];
+    initial.sessions.push({
+      ...initial.sessions[0]!,
+      sessionId: "session-b"
+    });
+    store.hydrateSnapshot(initial, "cursor-1");
+    store.ingestEnvelope({
+      eventId: "sibling-turn",
+      cursor: "cursor-2",
+      occurredAt: now,
+      event: {
+        type: "turn.started",
+        sessionId: "session-b",
+        turnId: "turn-b"
+      }
+    });
+    const olderWindow = sessionSnapshot();
+    olderWindow.sessions[0]!.title = "stale";
+    store.hydrateSessionWindow("session-a", olderWindow, "replace", "cursor-1");
+
+    expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
+    expect(store.getState().eventStream.lastCursorByConversationId?.["conversation-a"]).toBe("cursor-2");
+  });
+
   it("notifies only the affected session scope for live events", () => {
     const store = createRendererStore();
     store.hydrateSnapshot(sessionSnapshot(), "cursor-0");

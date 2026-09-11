@@ -3,6 +3,7 @@ import { recordUiOperation } from "../../diagnostics/ui-performance.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
+import { compareCursorPosition, isSessionWindowStale } from "../../store/meta-reducer.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import type { ChatSendInput } from "../../transport/desktop-transport.js";
 import { projectChatTreeSends } from "./chat-tree-send-projection.js";
@@ -98,15 +99,32 @@ export const useChatTreeController = (input: {
         return key === undefined ||
           hydratedWindowKeyBySessionIdRef.current.get(window.sessionId) !== key;
       });
-      if (windowsToHydrate.length > 0) {
+      const stateBeforeHydration = store.getState();
+      const latestCursorBySessionId = new Map(
+        Object.entries(stateBeforeHydration.eventStream.lastCursorBySessionId ?? {})
+      );
+      const freshWindowsToHydrate = windowsToHydrate.filter((window) => {
+        const conversationId = window.snapshot.conversations[0]?.conversationId;
+        if (isSessionWindowStale(stateBeforeHydration, window.sessionId, window.cursor, conversationId)) {
+          return false;
+        }
+        const currentCursor = latestCursorBySessionId.get(window.sessionId);
+        const comparison = compareCursorPosition(currentCursor, window.cursor);
+        if (currentCursor && comparison !== undefined && comparison > 0) {
+          return false;
+        }
+        if (window.cursor) latestCursorBySessionId.set(window.sessionId, window.cursor);
+        return true;
+      });
+      if (freshWindowsToHydrate.length > 0) {
         store.hydrateSessionWindows(
-          windowsToHydrate.map((window) => ({
+          freshWindowsToHydrate.map((window) => ({
             sessionId: window.sessionId,
             snapshot: window.snapshot,
             cursor: window.cursor
           }))
         );
-        for (const window of windowsToHydrate) {
+        for (const window of freshWindowsToHydrate) {
           const key = windowHydrationKey(window);
           if (key !== undefined) {
             hydratedWindowKeyBySessionIdRef.current.set(window.sessionId, key);

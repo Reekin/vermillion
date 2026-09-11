@@ -160,6 +160,10 @@ const markGlobalCursorBarrier = (
       lastCursorByConversationId: {
         ...(state.eventStream.lastCursorByConversationId ?? {}),
         ...Object.fromEntries(snapshot.conversations.map((conversation) => [conversation.conversationId, cursor]))
+      },
+      conversationIdBySessionId: {
+        ...(state.eventStream.conversationIdBySessionId ?? {}),
+        ...Object.fromEntries(snapshot.sessions.map((session) => [session.sessionId, session.conversationId]))
       }
     }
   };
@@ -168,7 +172,8 @@ const markGlobalCursorBarrier = (
 const markSessionCursorBarrier = (
   state: RendererStoreState,
   sessionId: string,
-  cursor: string | undefined
+  cursor: string | undefined,
+  conversationId?: string
 ): RendererStoreState => {
   if (!cursor) {
     return state;
@@ -189,7 +194,13 @@ const markSessionCursorBarrier = (
       lastCursorBySessionId: {
         ...(state.eventStream.lastCursorBySessionId ?? {}),
         [sessionId]: cursor
-      }
+      },
+      conversationIdBySessionId: conversationId
+        ? {
+            ...(state.eventStream.conversationIdBySessionId ?? {}),
+            [sessionId]: conversationId
+          }
+        : state.eventStream.conversationIdBySessionId
     }
   };
 };
@@ -217,6 +228,17 @@ const markEnvelopesInEventStream = (
   );
 
   const lastEnvelope = envelopes[envelopes.length - 1]!;
+  const conversationIdBySessionId = envelopes.reduce<Record<string, string>>((acc, envelope) => {
+    const sessionId = runtimeEventSessionId(envelope.event);
+    if (
+      sessionId &&
+      "conversationId" in envelope.event &&
+      typeof envelope.event.conversationId === "string"
+    ) {
+      acc[sessionId] = envelope.event.conversationId;
+    }
+    return acc;
+  }, { ...(state.eventStream.conversationIdBySessionId ?? {}) });
   return {
     ...state,
     eventStream: {
@@ -232,14 +254,22 @@ const markEnvelopesInEventStream = (
         return acc;
       }, { ...(state.eventStream.lastCursorBySessionId ?? {}) }),
       lastCursorByConversationId: envelopes.reduce<Record<string, string>>((acc, envelope) => {
-        if (!("conversationId" in envelope.event) || !envelope.event.conversationId || !envelope.cursor) return acc;
-        const conversationId = envelope.event.conversationId;
+        const sessionId = runtimeEventSessionId(envelope.event);
+        const conversationId =
+          "conversationId" in envelope.event &&
+          typeof envelope.event.conversationId === "string"
+            ? envelope.event.conversationId
+            : sessionId
+              ? conversationIdBySessionId[sessionId]
+              : undefined;
+        if (!conversationId || !envelope.cursor) return acc;
         const current = acc[conversationId] ?? state.eventStream.lastCursorByConversationId?.[conversationId];
         const comparison = compareCursorPosition(envelope.cursor, current);
         if (current && comparison !== undefined && comparison <= 0) return acc;
         acc[conversationId] = envelope.cursor;
         return acc;
       }, { ...(state.eventStream.lastCursorByConversationId ?? {}) }),
+      conversationIdBySessionId,
       cursorBarrier: state.eventStream.cursorBarrier,
       cursorBarrierBySessionId: state.eventStream.cursorBarrierBySessionId,
       lastOccurredAt: lastEnvelope.occurredAt,
@@ -347,7 +377,12 @@ export const rendererMetaReducer = (
       const nextState =
         action.mode === "prepend"
           ? state
-          : markSessionCursorBarrier(state, action.sessionId, action.cursor);
+          : markSessionCursorBarrier(
+              state,
+              action.sessionId,
+              action.cursor,
+              action.snapshot.conversations[0]?.conversationId
+            );
       if (action.mode === "prepend" || state.activeSessionId !== action.sessionId) {
         return nextState;
       }
