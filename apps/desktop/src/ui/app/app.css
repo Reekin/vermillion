@@ -114,6 +114,8 @@
 .vm-tabs > button:hover { color: var(--color-foreground); }
 .vm-tabs > button[aria-current="page"] { border-bottom-color: var(--color-accent-strong); color: var(--color-strong); }
 .vm-tab-count { margin-left: 5px; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }
+.vm-scrollbar-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+.vm-scrollbar-hidden::-webkit-scrollbar { display: none; }
 .vm-list-columns { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) 76px 22px 48px; align-items: center; gap: 8px; min-height: 36px; padding-inline: 12px; }
 .vm-list-columns:hover { background: var(--color-surface-hover); }
 .vm-list-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem; font-family: var(--font-mono); font-size: var(--text-caption); color: var(--color-muted-foreground); }
