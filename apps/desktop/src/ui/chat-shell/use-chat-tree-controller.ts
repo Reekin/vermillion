@@ -54,7 +54,24 @@ export const useChatTreeController = (input: {
   const requestIdRef = useRef(0);
   const hydratedWindowKeyBySessionIdRef = useRef(new Map<string, string>());
   const activationRef = useRef<{ sessionId: string; promise: Promise<void> } | undefined>(undefined);
+  const openedSessionRef = useRef<{ sessionId: string; promise: Promise<void> } | undefined>(undefined);
   sessionIdRef.current = sessionId;
+
+  const ensureSessionOpened = useCallback((): Promise<void> => {
+    if (!sessionId) return Promise.resolve();
+    const current = openedSessionRef.current;
+    if (current?.sessionId === sessionId) return current.promise;
+
+    const entry = {
+      sessionId,
+      promise: transport.sessionBrowser.open(sessionId).then(() => undefined)
+    };
+    openedSessionRef.current = entry;
+    void entry.promise.catch(() => {
+      if (openedSessionRef.current === entry) openedSessionRef.current = undefined;
+    });
+    return entry.promise;
+  }, [sessionId, transport]);
 
   const refreshChatTree = useCallback(async (): Promise<void> => {
     if (!sessionId || sessionIdRef.current !== sessionId) return;
@@ -62,6 +79,8 @@ export const useChatTreeController = (input: {
     const startedAt = performance.now();
     const isCurrent = () => sessionIdRef.current === sessionId && requestId === requestIdRef.current;
     try {
+      await ensureSessionOpened();
+      if (!isCurrent()) return;
       const [initialTree, result] = await Promise.all([
         transport.chatTree.get(sessionId),
         transport.chatTree.operations({ sessionId })
@@ -170,9 +189,10 @@ export const useChatTreeController = (input: {
     } finally {
       recordUiOperation("chat-tree.refresh", startedAt, { sessionId }, "async");
     }
-  }, [sessionId, store, transport]);
+  }, [ensureSessionOpened, sessionId, store, transport]);
 
   useEffect(() => {
+    if (!sessionId) openedSessionRef.current = undefined;
     activationRef.current = undefined;
     setLoaded(undefined);
     setFailedSessionId(undefined);
