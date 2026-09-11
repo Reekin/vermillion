@@ -1,0 +1,108 @@
+import { DatabaseSync } from "node:sqlite";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+
+const threadHistoryDatabaseName = "thread_history_1.sqlite";
+const projectionTables = [
+  "thread_items",
+  "thread_realtime_items",
+  "thread_turns",
+  "thread_history_projection_state"
+] as const;
+
+export type CodexHistoryProjectionClearResult = {
+  status: "cleared" | "missing" | "unavailable" | "failed";
+  path?: string;
+};
+
+export type CodexHistoryProjectionOptions = {
+  resolveSqliteHome: () => string | undefined | Promise<string | undefined>;
+  onWarning?: (message: string, details: Record<string, unknown>) => void;
+};
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/** Clears only Codex's rebuildable paginated history projection for one thread. */
+export class CodexHistoryProjection {
+  private readonly resolveSqliteHome: CodexHistoryProjectionOptions["resolveSqliteHome"];
+  private readonly onWarning: NonNullable<CodexHistoryProjectionOptions["onWarning"]>;
+
+  public constructor(options: CodexHistoryProjectionOptions) {
+    this.resolveSqliteHome = options.resolveSqliteHome;
+    this.onWarning = options.onWarning ?? ((message, details) => {
+      console.warn("[vermillion] " + message, details);
+    });
+  }
+
+  public async clearThread(threadId: string): Promise<CodexHistoryProjectionClearResult> {
+    const sqliteHome = (await this.resolveSqliteHome())?.trim();
+    if (!sqliteHome || !threadId.trim()) {
+      return { status: "unavailable" };
+    }
+
+    const path = join(sqliteHome, threadHistoryDatabaseName);
+    try {
+      await stat(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { status: "missing", path };
+      }
+      this.warn(error, threadId, path);
+      return { status: "failed", path };
+    }
+
+    let database: DatabaseSync | undefined;
+    try {
+      database = new DatabaseSync(path);
+      database.exec("PRAGMA busy_timeout = 2000");
+      const existingTables = new Set(
+        (database
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?)"
+          )
+          .all(...projectionTables) as Array<{ name?: unknown }>)
+          .map((row) => row.name)
+          .filter((name): name is string => typeof name === "string")
+      );
+      if (existingTables.size === 0) {
+        return { status: "missing", path };
+      }
+
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        for (const table of projectionTables) {
+          if (existingTables.has(table)) {
+            database.prepare(`DELETE FROM ${table} WHERE thread_id = ?`).run(threadId);
+          }
+        }
+        database.exec("COMMIT");
+      } catch (error) {
+        try {
+          database.exec("ROLLBACK");
+        } catch {
+          // Preserve the original cleanup error.
+        }
+        throw error;
+      }
+      return { status: "cleared", path };
+    } catch (error) {
+      this.warn(error, threadId, path);
+      return { status: "failed", path };
+    } finally {
+      database?.close();
+    }
+  }
+
+  private warn(error: unknown, threadId: string, path: string): void {
+    try {
+      this.onWarning("Codex history projection cleanup failed.", {
+        threadId,
+        path,
+        error: errorMessage(error)
+      });
+    } catch {
+      // Cleanup diagnostics must not turn best-effort maintenance into a hard failure.
+    }
+  }
+}

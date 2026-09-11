@@ -36,6 +36,12 @@ export class WrapperChatTreeService {
 
   public dispose(): void { this.unsubscribe(); }
 
+  public invalidate(sessionId: string): void {
+    for (const memberId of this.options.sessionIndexStore.getTreeMembers(sessionId)) {
+      this.loaded.delete(memberId);
+    }
+  }
+
   private async loadMember(sessionId: string): Promise<void> {
     if (this.loaded.has(sessionId)) return;
     const existing = this.loading.get(sessionId);

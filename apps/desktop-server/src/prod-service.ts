@@ -23,6 +23,7 @@ import { CodexTurnChangesStore } from "./engine-extensions/codex/turn-changes-st
 import { FileActionService } from "./file-action-service.js";
 import { ErrorLogService } from "./error-log-service.js";
 import { DiagnosticLogService } from "./diagnostic-log-service.js";
+import { CodexHistoryProjection } from "./codex-history-projection.js";
 import { HostToolRegistry } from "./host-tools.js";
 import { createReadSessionHostTool } from "./read-session-host-tool.js";
 import {
@@ -234,10 +235,31 @@ export const createSessionRuntimeService = (
     sessionIdentity,
     capabilityRegistry: capabilities
   });
+  const codexHistoryProjection = new CodexHistoryProjection({
+    resolveSqliteHome: () => codexRuntimePort.getCodexSqliteHome(),
+    onWarning: (message, details) => {
+      void diagnosticLogService.write({
+        kind: "runtime-pipeline",
+        severity: "warning",
+        source: "codex-history-projection",
+        message,
+        context: details
+      }).catch(() => undefined);
+    }
+  });
+  const clearSessionHistory = async (sessionId: string): Promise<boolean> => {
+    await sessionIndexStore.ready();
+    const entry = sessionIndexStore.getEntry(sessionId);
+    const threadId = codexRuntimePort.getThreadIdForSession(sessionId) ?? entry?.providerSessionId;
+    if (!threadId) return false;
+    const result = await codexHistoryProjection.clearThread(threadId);
+    return result.status !== "failed" && result.status !== "unavailable";
+  };
 
   const shellService = new SessionShellService({
     runtimeService,
-    releaseSessionExecution: (sessionId) => codexRuntimePort.releaseSessionExecution(sessionId),
+    releaseSessionExecution: (sessionId) => codexRuntimePort.releaseSessionExecutionAndWait(sessionId),
+    clearSessionHistory,
     getActiveTurnId: (sessionId) => codexRuntimePort.getActiveTurnId(sessionId),
     wrapperChatTree: new WrapperChatTreeService({
       runtimeService,
