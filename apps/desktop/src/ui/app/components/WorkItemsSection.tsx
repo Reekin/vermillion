@@ -9,10 +9,8 @@ import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, Li
 
 import { roleLabel, actionRoleLabel, waitingActions, waitingReason } from "./workflow-display.js";
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
-const runningFirst = (items: WorkItem[]) => [
-  ...items.filter((item) => item.status === "running"),
-  ...items.filter((item) => item.status !== "running")
-];
+const workItemPriority = (item: WorkItem) => item.status === "running" ? 0 : isOpenWorkItem(item) ? 1 : 2;
+const prioritizeWorkItems = (items: WorkItem[]) => [0, 1, 2].flatMap((priority) => items.filter((item) => workItemPriority(item) === priority));
 
 const relativeTime = (iso: string) => {
   const date = new Date(iso);
@@ -119,11 +117,8 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
     const key = item.treeId ?? "standalone";
     groups.set(key, [...(groups.get(key) ?? []), item]);
   }
-  const groupedItems = [...groups].map(([groupId, items]) => [groupId, runningFirst(items)] as const);
-  const orderedGroups = [
-    ...groupedItems.filter(([, items]) => items.some((item) => item.status === "running")),
-    ...groupedItems.filter(([, items]) => items.every((item) => item.status !== "running"))
-  ];
+  const groupedItems = [...groups].map(([groupId, items]) => [groupId, prioritizeWorkItems(items)] as const);
+  const orderedGroups = [0, 1, 2].flatMap((priority) => groupedItems.filter(([, items]) => Math.min(...items.map(workItemPriority)) === priority));
   const renderItems = (items: WorkItem[], muted = false) => (
     <ul>{items.map((item) => <WorkItemRow key={item.workItemId} item={item} actions={actions}
       run={latestRuns.find((r) => r.workItemId === item.workItemId && (!item.run.sessionId || r.sessionId === item.run.sessionId))}
