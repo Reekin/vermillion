@@ -308,6 +308,7 @@ export const zIntegration = zProcess.extend({
   stage: z.enum(["merge", "rollback"]),
   integration: z.object({
     operation: z.enum(["merge", "rollback"]),
+    contractRevision: z.number().int().nonnegative(),
     before: z.string().optional(),
     target: z.string().optional(),
     targets: z.array(z.string()).optional(),

@@ -300,7 +300,7 @@ it("claims only one active integration under the shared record lock", async () =
   const secondService = new WorkbenchService(options);
   const integration = { kind: "integration" as const, workItemId: item.workItemId, status: "pending" as const,
     stage: "merge" as const, message: "Merge", attempts: 0, history: [], createdAt: item.createdAt, updatedAt: item.updatedAt,
-    integration: { operation: "merge" as const, diffStat: "" } };
+    integration: { operation: "merge" as const, contractRevision: item.contractRevision, diffStat: "" } };
   try {
     const results = await Promise.all([service, secondService].map((owner) => owner.createAction(
       workspaceId, integration, (current) => ({ ...current, status: "merging" }))));

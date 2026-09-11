@@ -25,6 +25,12 @@ const migrateRecord = (path, record) => {
     }
     if (entry.pass !== undefined) { delete entry.pass; changed = true; }
   }
+  if (Array.isArray(record.integrations)) for (const action of record.integrations) {
+    if (action?.integration && action.integration.contractRevision === undefined) {
+      action.integration.contractRevision = item.contractRevision;
+      changed = true;
+    }
+  }
   return { record, changed };
 };
 

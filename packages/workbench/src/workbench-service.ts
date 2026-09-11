@@ -182,7 +182,7 @@ export class WorkbenchService {
       context.watcher = docs.watch((area) => {
         if (area === "git") {
           this.emit({ type: "docs.changed", workspaceId });
-          void this.integrate(workspaceId, () => this.refreshDocRefs(workspaceId)).catch((error) => console.error("[workbench] document revision", workspaceId, error));
+          void this.refreshDocRefs(workspaceId).catch((error) => console.error("[workbench] document revision", workspaceId, error));
           return;
         }
         const type = watchedAreas[area];
@@ -229,6 +229,10 @@ export class WorkbenchService {
   }
 
   async commitDocs(workspaceId: string, input: { message: string; paths?: string[] }): Promise<DocCommit> {
+    return this.integrate(workspaceId, () => this.commitDocsRecord(workspaceId, input));
+  }
+
+  private async commitDocsRecord(workspaceId: string, input: { message: string; paths?: string[] }): Promise<DocCommit> {
     const message = input.message.trim();
     if (!message) throw new Error("Commit message is required.");
     const { docs } = await this.context(workspaceId);
@@ -240,7 +244,7 @@ export class WorkbenchService {
       if (["closed", "cancelled"].includes(item.status)) continue;
       const changed = notices.filter((notice) => item.refs.some((ref) => ref.path === notice.path));
       if (!changed.length) continue;
-      await this.updateWorkItem(workspaceId, item.workItemId, {
+      await this.updateWorkItemRecord(workspaceId, item.workItemId, {
         refs: item.refs.map((ref) => paths.includes(ref.path) ? { ...ref, commit } : ref),
         note: "引用文档已提交 " + commit + "\n" + changed.map((notice) => notice.diff).join("\n")
       });
@@ -250,6 +254,10 @@ export class WorkbenchService {
   }
 
   async refreshDocRefs(workspaceId: string): Promise<void> {
+    return this.integrate(workspaceId, () => this.refreshDocRefsRecord(workspaceId));
+  }
+
+  private async refreshDocRefsRecord(workspaceId: string): Promise<void> {
     const { docs } = await this.context(workspaceId);
     const head = await docs.head();
     if (!head) return;
@@ -260,7 +268,7 @@ export class WorkbenchService {
       })));
       const changed = changes.filter((change) => change.diff.trim());
       if (!changed.length) continue;
-      await this.updateWorkItem(workspaceId, item.workItemId, {
+      await this.updateWorkItemRecord(workspaceId, item.workItemId, {
         refs: item.refs.map((ref) => changed.some((change) => change.path === ref.path) ? { ...ref, commit: head } : ref),
         note: "引用文档已提交 " + head + "\n" + changed.map((change) => change.diff).join("\n")
       });
@@ -739,7 +747,7 @@ export class WorkbenchService {
       const reason = "验收未通过：" + (statusText || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
       return this.returnWorkItem(workspaceId, workItemId, reason);
     }
-    await this.createAction(workspaceId, { kind: "integration", workItemId: workItemId, status: "pending", stage: "merge", message: "验收通过，等待合入。", integration: { operation: "merge", diffStat: "" } },
+    await this.createAction(workspaceId, { kind: "integration", workItemId: workItemId, status: "pending", stage: "merge", message: "验收通过，等待合入。", integration: { operation: "merge", contractRevision: submitted.contractRevision, diffStat: "" } },
       (item) => ({ ...item, status: "merging", updatedAt: this.now() }));
     await this.drainIntegrations(workspaceId);
     return this.getWorkItem(workspaceId, workItemId);
@@ -759,6 +767,12 @@ export class WorkbenchService {
       let item = await this.getWorkItem(workspaceId, workItemId);
       try {
         let integration = action.integration!;
+        if (action.stage === "merge" && integration.contractRevision !== item.contractRevision) {
+          const reason = "合入作废：合同已更新为修订 " + item.contractRevision + "，成果依据为 " + integration.contractRevision + "。请按当前合同复核后重新提交。";
+          await this.finishAction(workspaceId, action.actionId, reason);
+          await this.returnWorkItem(workspaceId, workItemId, reason);
+          continue;
+        }
         if (action.stage === "merge") {
           if (item.run.worktreePath && item.run.branch) {
             if (!integration.target) {
@@ -835,7 +849,7 @@ export class WorkbenchService {
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.status !== "closed" || !item.merge?.commit) throw new Error("Work item has no merge to roll back");
     if (!(await this.listActions(workspaceId)).some((a) => a.kind === "integration" && a.workItemId === workItemId && actionIsOpen(a))) {
-      await this.createAction(workspaceId, { kind: "integration", workItemId: workItemId, status: "pending", stage: "rollback", message: "用户回滚：" + reason.trim(), integration: { operation: "rollback", target: item.merge.commit, targets: item.merge.commits, diffStat: "", reason: reason.trim() } });
+      await this.createAction(workspaceId, { kind: "integration", workItemId: workItemId, status: "pending", stage: "rollback", message: "用户回滚：" + reason.trim(), integration: { operation: "rollback", contractRevision: item.contractRevision, target: item.merge.commit, targets: item.merge.commits, diffStat: "", reason: reason.trim() } });
     }
     await this.drainIntegrations(workspaceId);
     return this.getWorkItem(workspaceId, workItemId);
@@ -979,8 +993,7 @@ export class WorkbenchService {
     workItemId: string,
     input: Partial<Pick<WorkItem, "title" | "objective" | "refs" | "scope" | "acceptance" | "risk" | "needs" | "dependsOn">> & { note: string; worktreePath?: string; branch?: string }
   ): Promise<WorkItem> {
-    return input.worktreePath ? this.integrate(workspaceId, () => this.updateWorkItemRecord(workspaceId, workItemId, input))
-      : this.updateWorkItemRecord(workspaceId, workItemId, input);
+    return this.integrate(workspaceId, () => this.updateWorkItemRecord(workspaceId, workItemId, input));
   }
 
   private async updateWorkItemRecord(workspaceId: string, workItemId: string, input: Parameters<WorkbenchService["updateWorkItem"]>[2]): Promise<WorkItem> {
