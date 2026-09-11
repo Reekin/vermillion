@@ -2,7 +2,7 @@ import { ArrowUpRight, FileText, ListTodo, MessageSquare } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type { SearchHit, SearchResult, WorkbenchClient } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
-import { Badge, EmptyState, Field, InlineNotice, ListRow, SectionLabel } from "./ui.js";
+import { Badge, Button, EmptyState, Field, InlineNotice, ListRow, SectionLabel } from "./ui.js";
 
 type SearchDialogProps = {
   client: WorkbenchClient;
@@ -58,7 +58,7 @@ const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
         <p className="truncate text-label font-medium text-strong" title={hit.title}>{hit.title}</p>
         <p className="mt-1 truncate font-mono text-caption text-muted-foreground" title={hit.path}>{hit.path ?? resultMeta(hit)}</p>
       </header>
-      <pre className="min-h-0 flex-1 overflow-auto bg-input px-4 py-3 font-mono text-caption leading-relaxed text-foreground">
+      <pre className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto bg-input px-4 py-3 font-mono text-caption leading-relaxed text-foreground">
         {hit.context.map((line) => (
           <div key={line.line} className="flex gap-3">
             <span className="w-10 shrink-0 select-none text-right text-faint-foreground">{line.line}</span>
@@ -90,6 +90,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResult>();
   const [selectedId, setSelectedId] = useState<string>();
+  const [expandedKinds, setExpandedKinds] = useState<Set<SearchHit["kind"]>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const latestQuery = useRef("");
@@ -135,6 +136,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
     changedAt.current = Date.now();
     setResult(undefined);
     setSelectedId(undefined);
+    setExpandedKinds(new Set());
     setError(undefined);
     if (!value) {
       setLoading(false);
@@ -163,8 +165,8 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
   }, [result]);
 
   return (
-    <Modal title="搜索" onClose={onClose} width={980} height="74vh">
-      <div className="flex min-h-[480px] min-w-0 flex-col">
+    <Modal title="搜索" onClose={onClose} width={980} height="74vh" contentClassName="overflow-hidden">
+      <div className="flex h-full min-h-[480px] min-w-0 flex-col">
         <div className="shrink-0 border-b border-border px-4 py-3">
           <Field
             aria-label="搜索工单、会话和文档"
@@ -175,7 +177,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
           />
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.15fr)]">
-          <div className="min-h-0 overflow-auto border-b border-border md:border-b-0 md:border-r">
+          <div className="vm-scrollbar-hidden min-h-0 overflow-y-auto border-b border-border md:border-b-0 md:border-r">
             {error && <InlineNotice tone="error" className="pt-3">{error}</InlineNotice>}
             {!query.trim() && <EmptyState title="输入关键词开始搜索" />}
             {loading && <InlineNotice className="pt-3">搜索中…</InlineNotice>}
@@ -183,7 +185,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
             {groups.map(({ kind, hits }) => (
               <section key={kind}>
                 <SectionLabel>{kindLabel[kind]} <span className="font-mono text-faint-foreground">{hits.length}</span></SectionLabel>
-                <ul>{hits.map((hit) => <SearchResultRow
+                <ul>{(expandedKinds.has(kind) ? hits : hits.slice(0, 10)).map((hit) => <SearchResultRow
                   key={hit.id}
                   hit={hit}
                   selected={hit.id === selected?.id}
@@ -194,6 +196,18 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
                     else onOpenSession(hit);
                   }}
                 />)}</ul>
+                {hits.length > 10 && !expandedKinds.has(kind) && (
+                  <div className="px-3 pb-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="w-full justify-start"
+                      onClick={() => setExpandedKinds((current) => new Set(current).add(kind))}
+                    >
+                      展开更多
+                    </Button>
+                  </div>
+                )}
               </section>
             ))}
           </div>

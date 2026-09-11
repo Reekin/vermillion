@@ -11,13 +11,14 @@ type ModalProps = {
   width?: number;
   height?: string;
   resizable?: boolean;
+  contentClassName?: string;
   children: ReactNode;
   presentation?: "modal" | "page" | "hidden";
   contained?: boolean;
 };
 
 /** Single modal frame for every overlay so they share position, backdrop and chrome. */
-export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, resizable = false, children, presentation = "modal", contained = false }: ModalProps) => {
+export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, resizable = false, contentClassName, children, presentation = "modal", contained = false }: ModalProps) => {
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (presentation !== "modal") return;
@@ -49,7 +50,7 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
             <IconButton icon={X} label="关闭" onClick={onClose} />
           </div>}
         </header>
-        <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+        <div className={cn("min-h-0 flex-1", contentClassName ?? "overflow-auto")}>{children}</div>
       </div>
     </div>
   );
