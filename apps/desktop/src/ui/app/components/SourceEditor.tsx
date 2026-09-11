@@ -38,7 +38,7 @@ export const SourceEditor = ({ path, value, onChange }: { path: string; value: s
     const editor = new EditorView({
       parent: host.current!,
       state: EditorState.create({ doc: initial.current, extensions: [
-        basicSetup, theme, syntaxHighlighting(highlighting), language.of([]),
+        basicSetup, theme, syntaxHighlighting(highlighting), EditorView.lineWrapping, language.of([]),
         EditorView.contentAttributes.of({ "aria-label": "源码", spellcheck: "false" }),
         EditorView.updateListener.of((update) => { if (update.docChanged) onChangeRef.current(update.state.doc.toString()); })
       ] })

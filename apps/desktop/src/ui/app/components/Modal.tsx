@@ -10,13 +10,14 @@ type ModalProps = {
   onExpand?: () => void;
   width?: number;
   height?: string;
+  resizable?: boolean;
   children: ReactNode;
   presentation?: "modal" | "page" | "hidden";
   contained?: boolean;
 };
 
 /** Single modal frame for every overlay so they share position, backdrop and chrome. */
-export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, children, presentation = "modal", contained = false }: ModalProps) => {
+export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, resizable = false, children, presentation = "modal", contained = false }: ModalProps) => {
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (presentation !== "modal") return;
@@ -33,7 +34,7 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
         ref={dialog}
         role={presentation === "modal" ? "dialog" : undefined}
         aria-label={title}
-        className={cn("flex flex-col overflow-hidden", presentation === "modal" ? "max-h-[78vh] max-w-full rounded-lg border border-border-strong bg-surface-raised floating-shadow" : "h-full")}
+        className={cn("flex flex-col overflow-hidden", presentation === "modal" ? cn(resizable ? "max-h-[90vh] max-w-full resize" : "max-h-[78vh] max-w-full", "rounded-lg border border-border-strong bg-surface-raised floating-shadow") : "h-full")}
         style={presentation === "modal" ? { width, height } : undefined}
         onMouseDown={(event) => event.stopPropagation()}
       >
