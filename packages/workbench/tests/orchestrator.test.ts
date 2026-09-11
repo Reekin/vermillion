@@ -27,7 +27,7 @@ it("keeps the worker session at workspace root while directing tools to its work
 it("passes resolved reviewer and verifier model configuration separately from their prompts", async () => {
   const f = await fixture();
   await f.roles.writeOverride(f.root, "reviewer", [
-    "---", "mode: override", "model: reviewer-model", "reasoningOptionId: high", "---", "# Reviewer override"
+    "---", "mode: override", "model: reviewer-model", "reasoningOptionId: high", "---", "# 审阅者", "中文交接：查看候选成果。"
   ].join("\n"));
   await f.roles.writeOverride(f.root, "verifier", [
     "---", "mode: override", "model: verifier-model", "reasoningOptionId: max", "serviceTierId: priority", "---", "# Verifier override"
@@ -38,12 +38,19 @@ it("passes resolved reviewer and verifier model configuration separately from th
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
 
   const content = vi.mocked(f.runner.resume).mock.calls[0]![1]!.developerInstructions!;
-  expect(content).toContain("# Reviewer override");
-  expect(content).toContain("## reviewer subagent model configuration（JSON；单独传给 spawn_agent）");
+  expect(content).toContain("# 审阅者");
+  expect(content).toContain("中文交接：查看候选成果。");
+  expect(content).not.toContain("mode: override");
+  expect(content).toContain("## reviewer subagent model configuration（JSON；仅用于核对）");
   expect(content).toContain(JSON.stringify({ modelId: "reviewer-model", reasoningOptionId: "high" }));
+  expect(content).toContain("## reviewer spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）");
+  expect(content).toContain(JSON.stringify({ fork_context: false, model: "reviewer-model", reasoning_effort: "high" }));
   expect(content).toContain("# Verifier override");
-  expect(content).toContain("## verifier subagent model configuration（JSON；单独传给 spawn_agent）");
+  expect(content).not.toContain("serviceTierId: priority");
+  expect(content).toContain("## verifier subagent model configuration（JSON；仅用于核对）");
   expect(content).toContain(JSON.stringify({ modelId: "verifier-model", reasoningOptionId: "max", serviceTierId: "priority" }));
+  expect(content).toContain("## verifier spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）");
+  expect(content).toContain(JSON.stringify({ fork_context: false, model: "verifier-model", reasoning_effort: "max" }));
 });
 
 it("detaches a completed worker after its turn ends without waiting for release ACK", async () => {

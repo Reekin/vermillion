@@ -36,6 +36,13 @@ export type OrchestratorOptions = {
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
 type WorkerTurn = { turnId?: string; scheduled: boolean; settled?: boolean; bound?: WorkerBinding };
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+
+/** Maps the role resolver's names to the native multi-agent tool's top-level parameters. */
+const subagentSpawnArguments = (config: RoleExecutionOverrides | undefined): Record<string, string | boolean> => ({
+  fork_context: false,
+  ...(config?.modelId ? { model: config.modelId } : {}),
+  ...(config?.reasoningOptionId ? { reasoning_effort: config.reasoningOptionId } : {})
+});
 // A replacement orchestrator takes ownership only after the previous generation's in-flight task drains.
 const workspaceQueues = new Map<string, Promise<void>>();
 
@@ -387,8 +394,10 @@ export class Orchestrator {
     const roleBlock = (role: "reviewer" | "verifier", resolved: typeof reviewer): string => [
       `## ${role} subagent prompt（spawn 时原样传入，并附工单与 diff）`,
       resolved.content,
-      `## ${role} subagent model configuration（JSON；单独传给 spawn_agent）`,
-      JSON.stringify(resolved.modelConfig ?? {})
+      `## ${role} subagent model configuration（JSON；仅用于核对）`,
+      JSON.stringify(resolved.modelConfig ?? {}),
+      `## ${role} spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）`,
+      JSON.stringify(subagentSpawnArguments(resolved.modelConfig))
     ].join("\n");
     return { ...worker!, content: [worker!.content, roleBlock("reviewer", reviewer), roleBlock("verifier", verifier)].join("\n\n") };
   }
