@@ -75,12 +75,15 @@ const applySnapshotActionToReplica = (
   replica: DomainReplica,
   action: RendererStoreAction,
   state: RendererStoreState
-): void => {
+): DomainSnapshot[] => {
   switch (action.type) {
     case "store/hydrateSnapshot":
-      if (isGlobalSnapshotStale(state, action.cursor)) return;
-      replica.replaceSnapshot(normalizeRendererDomainSnapshot(action.snapshot));
-      return;
+      if (isGlobalSnapshotStale(state, action.cursor)) return [];
+      {
+        const snapshot = normalizeRendererDomainSnapshot(action.snapshot);
+        replica.replaceSnapshot(snapshot);
+        return [snapshot];
+      }
     case "store/hydrateSessionWindow": {
       if (action.mode !== "prepend" && isSessionWindowStale(
         state,
@@ -88,17 +91,17 @@ const applySnapshotActionToReplica = (
         action.cursor,
         action.snapshot.conversations[0]?.conversationId
       )) {
-        return;
+        return [];
       }
       const snapshot = normalizeRendererDomainSnapshot(action.snapshot);
       if (action.mode === "prepend") {
         replica.mergeSnapshot(snapshot, {
           scope: { sessionId: action.sessionId }
         });
-        return;
+        return [snapshot];
       }
       replica.replaceSessionWindowSnapshot(action.sessionId, snapshot);
-      return;
+      return [snapshot];
     }
     case "store/hydrateSessionWindows": {
       const latestCursorBySessionId = new Map(
@@ -125,10 +128,10 @@ const applySnapshotActionToReplica = (
         }];
       });
       replica.replaceSessionWindowSnapshots(freshWindows);
-      return;
+      return freshWindows.map((window) => window.snapshot);
     }
     default:
-      return;
+      return [];
   }
 };
 
@@ -214,20 +217,16 @@ export const createRendererStore = (
       action.type === "store/hydrateSessionWindows"
     ) {
       const beforeRevision = domainReplica.getRevision();
-      applySnapshotActionToReplica(domainReplica, action, state);
-      const snapshots = action.type === "store/hydrateSnapshot"
-        ? [action.snapshot]
-        : action.type === "store/hydrateSessionWindow"
-          ? [action.snapshot]
-        : action.windows.map((window) => window.snapshot);
-      changes = {
-        revision: domainReplica.getRevision(),
-        fullReset: action.type === "store/hydrateSnapshot",
-        conversationIds: new Set(snapshots.flatMap((snapshot) => snapshot.conversations.map((item) => item.conversationId))),
-        sessionIds: new Set(snapshots.flatMap((snapshot) => snapshot.sessions.map((item) => item.sessionId))),
-        turnIds: new Set(snapshots.flatMap((snapshot) => snapshot.turns.map((item) => item.turnId)))
-      };
-      if (domainReplica.getRevision() === beforeRevision) changes = undefined;
+      const snapshots = applySnapshotActionToReplica(domainReplica, action, state);
+      if (snapshots.length > 0 && domainReplica.getRevision() !== beforeRevision) {
+        changes = {
+          revision: domainReplica.getRevision(),
+          fullReset: action.type === "store/hydrateSnapshot",
+          conversationIds: new Set(snapshots.flatMap((snapshot) => snapshot.conversations.map((item) => item.conversationId))),
+          sessionIds: new Set(snapshots.flatMap((snapshot) => snapshot.sessions.map((item) => item.sessionId))),
+          turnIds: new Set(snapshots.flatMap((snapshot) => snapshot.turns.map((item) => item.turnId)))
+        };
+      }
     } else if (action.type === "store/disposeSession") {
       const beforeRevision = domainReplica.getRevision();
       const conversationId = domainReplica.resolveConversationIdBySessionId(action.sessionId);
