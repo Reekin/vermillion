@@ -24,6 +24,28 @@ it("keeps the worker session at workspace root while directing tools to its work
   expect(message).toContain("显式指定工具 workdir、git -C 或 worktree 内的绝对路径");
 });
 
+it("passes resolved reviewer and verifier model configuration separately from their prompts", async () => {
+  const f = await fixture();
+  await f.roles.writeOverride(f.root, "reviewer", [
+    "---", "mode: override", "model: reviewer-model", "reasoningOptionId: high", "---", "# Reviewer override"
+  ].join("\n"));
+  await f.roles.writeOverride(f.root, "verifier", [
+    "---", "mode: override", "model: verifier-model", "reasoningOptionId: max", "serviceTierId: priority", "---", "# Verifier override"
+  ].join("\n"));
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+
+  const content = vi.mocked(f.runner.resume).mock.calls[0]![1]!.developerInstructions!;
+  expect(content).toContain("# Reviewer override");
+  expect(content).toContain("## reviewer subagent model configuration（JSON；单独传给 spawn_agent）");
+  expect(content).toContain(JSON.stringify({ modelId: "reviewer-model", reasoningOptionId: "high" }));
+  expect(content).toContain("# Verifier override");
+  expect(content).toContain("## verifier subagent model configuration（JSON；单独传给 spawn_agent）");
+  expect(content).toContain(JSON.stringify({ modelId: "verifier-model", reasoningOptionId: "max", serviceTierId: "priority" }));
+});
+
 it("detaches a completed worker after its turn ends without waiting for release ACK", async () => {
   const f = await fixture();
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });

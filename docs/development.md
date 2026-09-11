@@ -2,6 +2,8 @@
 
 启动、检查和打包命令见[AGENTS.md](../AGENTS.md#运行与验证)。`start.bat` 会在源码更新后自动构建。
 
+新 worktree 第一次运行检查前执行 `pnpm prepare:worktree -- --worktree "<worktree>"`，或执行 `prepare-worktree.bat "<worktree>"`。命令在目标目录使用 `pnpm install --frozen-lockfile`，清除上层 npm/pnpm 生命周期变量，不修改其他目录的依赖。
+
 Worker / Verifier 用 `vermillion app.start '{"dataDir":"<独立目录>","port":<可用端口>}'` 启动实例，按返回的 CDP 地址操作，用 `vermillion app.stop '{"pid":<返回的pid>}'` 结束实例。不要连接用户正在运行的验收无关实例。
 
 需要会话列表父子关系时，使用 `vermillion app.start '{"dataDir":"<独立目录>","port":<可用端口>,"fixture":"session-tree"}'`。返回结果同时给出 `dataDir`、`projectPath` 和 `workspaceId`；连接返回的 CDP 地址后即可使用固定父会话、子会话和普通会话，不再手工注册项目、生成会话或重启实例。
