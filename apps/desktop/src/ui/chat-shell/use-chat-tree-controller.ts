@@ -62,6 +62,7 @@ export const useChatTreeController = (input: {
     const current = openedSessionRef.current;
     if (current?.sessionId === sessionId) return current.promise;
 
+    hydratedWindowKeyBySessionIdRef.current.clear();
     const entry = {
       sessionId,
       promise: transport.sessionBrowser.open(sessionId).then(() => undefined)
