@@ -14,7 +14,7 @@ import type {
   WorkbenchEvent,
   Workspace
 } from "./contracts.js";
-import { effectiveNeeds, actionIsOpen, projectWorkItem, type WorkflowAction, type Execution, type Integration, type WorkItemRecord } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, projectWorkItem, type WorkflowAction, type Execution, type Integration, type VerifySubmission, type WorkItemRecord } from "./contracts.js";
 import type { SessionNavigationPort } from "./session-navigation.js";
 import { DocsService, WorktreeMergeConflict, WorktreeNotReady } from "./docs.js";
 import { RoleService } from "./roles.js";
@@ -559,8 +559,6 @@ export class WorkbenchService {
   }): Promise<{ status: "done" | "failed"; note: string } | undefined> {
     const result = await this.transactRecord(workspaceId, workItemId, (record) => {
       if (!record) throw new Error("Unknown work item: " + workItemId);
-      const contractChanged = !!input.turnId && record.execution.staleTurnId === input.turnId;
-      if (contractChanged) record = { ...record, execution: { ...record.execution, staleTurnId: undefined } };
       if (!input.ownsExecution()) return { record, result: undefined };
       const action = record.execution;
       let execution = action;
@@ -568,9 +566,9 @@ export class WorkbenchService {
       let note: string;
       let failure: string | undefined;
       if (!actionIsOpen(action) || action.status === "decision") note = action.status;
-      else if (item.status === "queued" || action.stage === "deliver" || contractChanged) {
+      else if (item.status === "queued" || action.stage === "deliver") {
         execution = { ...action, stage: "deliver", status: "pending",
-          message: contractChanged && !action.message ? "本轮已结束。重新执行 vermillion workItem.get 读取最新合同，按新合同继续。" : action.message };
+          message: action.message };
         note = "待送达后续消息";
       } else if (item.status !== "running") {
         execution = { ...action, status: "done", retryAt: undefined,
@@ -615,6 +613,7 @@ export class WorkbenchService {
     const item: WorkItemRecord["item"] = {
       workItemId: createId("wi"),
       sourceSessionId: request?.sourceSessionId ?? input.sourceSessionId, sourceTurnId: request?.sourceTurnId ?? input.sourceTurnId, treeId: request?.treeId ?? input.treeId, requestId: input.requestId,
+      contractRevision: 0,
       title: input.title.trim(),
       objective: input.objective,
       status: request ? "preparing" : "queued",
@@ -666,7 +665,7 @@ export class WorkbenchService {
     return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
       item: { ...record.item, status: "running", updatedAt: this.now() },
       execution: { ...record.execution, sessionId: run.sessionId ?? record.execution.sessionId, heartbeatAt: run.heartbeatAt ?? record.execution.heartbeatAt,
-        baseCommit, retryAt: undefined, staleTurnId: undefined, updatedAt: this.now() }
+        baseCommit, retryAt: undefined, updatedAt: this.now() }
     }));
   }
 
@@ -680,7 +679,7 @@ export class WorkbenchService {
   async submitWorkItem(
     workspaceId: string,
     workItemId: string,
-    input: { evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: Omit<NonNullable<WorkItem["verify"]>, "verifiedAt"> }
+    input: { contractRevision: number; evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: VerifySubmission }
   ): Promise<WorkItem> {
     return this.integrate(workspaceId, () => this.submitResult(workspaceId, workItemId, input));
   }
@@ -690,8 +689,9 @@ export class WorkbenchService {
     const current = await this.getWorkItem(workspaceId, workItemId);
     if (current.status !== "running") throw new Error("Work item is not running: " + workItemId);
     if (await this.isWorkItemBlocked(workspaceId, workItemId)) throw new Error("仍有未解决的等待条件，不能提交。");
-    if (current.run.staleTurnId) {
-      return this.returnWorkItem(workspaceId, workItemId, "提交作废：合同在本轮进行中被调整");
+    const currentRevision = current.contractRevision;
+    if (input.contractRevision !== currentRevision) {
+      return this.returnWorkItem(workspaceId, workItemId, "提交依据已过期：当前合同修订为 " + currentRevision + "，收到的是 " + input.contractRevision + "。请重新读取工单并仅更新受影响的结果。");
     }
     const submitted = await this.mutateRecord(workspaceId, workItemId, (record) => {
       const verify = { ...input.verify, verifiedAt: now };
@@ -703,18 +703,11 @@ export class WorkbenchService {
         verify
       } };
     });
-    const failed = input.verify.items.filter((entry) => !entry.pass);
+    const failed = input.verify.items.filter((entry) => entry.status !== "pass");
     const missing = submitted.acceptance.some((_, index) => !input.verify.items.some((entry) => entry.index === index));
     if (input.verify.verdict !== "pass" || failed.length || missing) {
-      const reason = "验收未通过：" + (failed.map((entry) => entry.evidence).join("\n") || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
-      const failures = (submitted.verificationFailures ?? 0) + 1;
-      await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record, item: { ...record.item, verificationFailures: failures, updatedAt: this.now() } }));
-      if (failures >= 2) {
-        await this.createDecision(workspaceId, { workItemId, sessionId: submitted.run.sessionId, question: "验收连续未通过，需要调整目标或继续返工吗？",
-          context: "已连续两次提交未通过验收，原会话和成果保留。", details: reason,
-          options: [{ key: "retry", label: "继续返工" }, { key: "cancel", label: "取消" }] });
-        return this.getWorkItem(workspaceId, workItemId);
-      }
+      const statusText = failed.map((entry) => ({ defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成", pass: "通过" }[entry.status] + "：" + entry.evidence)).join("\n");
+      const reason = "验收未通过：" + (statusText || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
       return this.returnWorkItem(workspaceId, workItemId, reason);
     }
     await this.createAction(workspaceId, { kind: "integration", workItemId: workItemId, status: "pending", stage: "merge", message: "验收通过，等待合入。", integration: { operation: "merge", diffStat: "" } },
@@ -791,8 +784,8 @@ export class WorkbenchService {
 
   private async returnWorkItem(workspaceId: string, workItemId: string, reason: string): Promise<WorkItem> {
     return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
-      item: { ...record.item, status: "queued", evidence: undefined, verify: undefined, rejections: [...record.item.rejections, { reason, at: this.now() }], updatedAt: this.now() },
-      execution: { ...record.execution, idleTurns: 0, staleTurnId: undefined, message: [record.execution.message, reason].filter(Boolean).join("\n"), updatedAt: this.now() }
+      item: { ...record.item, status: "queued", rejections: [...record.item.rejections, { reason, at: this.now() }], updatedAt: this.now() },
+      execution: { ...record.execution, idleTurns: 0, message: [record.execution.message, reason].filter(Boolean).join("\n"), updatedAt: this.now() }
     }));
   }
 
@@ -976,11 +969,12 @@ export class WorkbenchService {
       const conflict = item.status === "running" ? changes.needs?.find((need) => occupied.has(need)) : undefined;
       if (conflict !== undefined) throw new Error("Resource is in use: " + conflict + ". Release it before updating this running work item.");
       const status = item.status;
+      const contractChanged = Object.keys(changes).length > 0;
       // While parked the note lives on the decision card and reaches the worker inside the answer line.
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
       return {
         ...record,
-        item: { ...item, ...changes, status, decisions, updatedAt: this.now() },
+        item: { ...item, ...changes, ...(contractChanged ? { contractRevision: item.contractRevision + 1 } : {}), status, decisions, updatedAt: this.now() },
         execution: { ...execution, ...(worktreePath ? { worktreePath, branch } : {}),
           message: status === "decision" ? execution.message : [execution.message, "工单已调整：" + note].filter(Boolean).join("\n"), updatedAt: this.now() }
 
@@ -1014,12 +1008,6 @@ export class WorkbenchService {
       for (const child of children) visit(child, [...chain, id]);
     };
     visit(workItemId, []);
-  }
-
-  /** Orchestrator: marks/clears the turn during which a contract change landed mid-flight. */
-  async setWorkItemStaleTurn(workspaceId: string, workItemId: string, staleTurnId: string | undefined): Promise<WorkItem> {
-    return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
-      item: { ...record.item, updatedAt: this.now() }, execution: { ...record.execution, staleTurnId, updatedAt: this.now() } }));
   }
 
   /**
@@ -1125,8 +1113,7 @@ export class WorkbenchService {
     const cards = await this.listDecisions(workspaceId);
     const recordAnswer = (item: WorkItemRecord["item"]): WorkItemRecord["item"] => ({ ...item,
       status: item.status === "decision" && !cards.some((other) => other.workItemId === item.workItemId && !other.answer && !other.withdrawn) ? "queued" : item.status,
-      decisions: item.decisions.includes(message) ? item.decisions : [...item.decisions, message],
-      verificationFailures: recoveryChoice === "retry" ? 0 : item.verificationFailures });
+      decisions: item.decisions.includes(message) ? item.decisions : [...item.decisions, message] });
     if (!action || !actionIsOpen(action)) {
       if (card.workItemId) await this.mutateRecord(workspaceId, card.workItemId, (record) => ({ ...record, item: { ...recordAnswer(record.item), updatedAt: this.now() } }));
       return;

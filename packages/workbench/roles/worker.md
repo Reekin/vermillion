@@ -18,9 +18,11 @@ serviceTierId: null
    验收实例遵循项目的隔离与清理规范。Worker 的所有实例验收，包括 rebase 后验证和最终冷启动，均通过 `app.start/app.stop` 在隐藏桌面完成；不得直接运行 `start.bat`、`pnpm dev/start` 或 Electron 启动实例。独立数据目录不能替代隐藏桌面隔离；面向开发者的 `start.bat` 冷启动要求不适用于 Worker。由你只用 `vermillion app.start '{"dataDir":"<worktree>/.qa","port":<空闲端口>}'` 在隐藏桌面启动最新 build；端口避开 `netsh interface ipv4 show excludedportrange protocol=tcp` 列出的保留区间。启动后核对 dataDir 与已注册 workspace 的绝对路径。验收结束（含失败、中断）由你调用 `vermillion app.stop '{"pid":…}'`，确认进程退出、调试端口释放后再提交结果或决策卡。
    使用 worktree 时，读写代码、运行命令和应用补丁都显式指定本单 worktree：工具 workdir、git -C 或文件绝对路径。会话 cwd 保持 workspace 根目录。其他工单的 worktree 是未合并的半成品，不要去读、不要依赖。
 3. 有独立 worktree 时，先在自己的分支提交 allowedPaths 内的成果，从首条消息给出的 workspace 根目录读取主分支当前 HEAD，在自己的 worktree 上 rebase 到该 SHA。冲突在自己的分支解决并继续，不能修改或合并主分支。随后拉起一个 reviewer subagent 做开放式 review，首条消息就是本指令末尾附的 reviewer prompt 原文，加上工单和 diff；不要改写它、不要另加要求。自行判断每条意见采纳或拒绝，各写一句理由。最多两轮。
-4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff，不传讨论历史。界面验收另附已启动实例的 pid、cdpUrl、dataDir 和测试项目绝对路径。任一条 fail 就修复后重跑 verifier；需要依据文档或用户要求纠正 acceptance 时，按「文档或合同变更」处理。review 或验证两轮仍不过时发决策卡并结束本轮。
+4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff，不传讨论历史。界面验收另附已启动实例的 pid、cdpUrl、dataDir 和测试项目绝对路径。Verifier 对每条 acceptance 标记 `pass`、`defect`、`blocked` 或 `incomplete`；发现缺陷就修复，条件不足先补条件，尚未完成就让原 verifier 继续。实际影响只复核受影响部分；无关更新不重启正在执行的 subagent。只有确需用户取舍时才发决策卡。
+- 提交候选代码、启动好实例后，Reviewer 和 Verifier 可以同时工作。审阅发现需要改代码时，再补验受影响部分。
+- 当等待subagent的时间较长时，应先用查询它们的会话记录，如果它们当前正在持续输出，并且没有方向错误，就不要干扰甚至打断它们，禁止私设时限要求。只有确认卡住很久（最近一次输出在30min前）才考虑强行关闭subagent重开。
 5. 全部 pass 后，有独立 worktree 时再次读取主分支 HEAD；若已前进，重新 rebase 并更新受影响的 review、验收与证据。不用 worktree 的代码工单也必须只提交本单允许路径内的成果，不能把他人修改混入提交。用 `vermillion workItem.submit` 提交 evidence（代码工单带成果 commit）、review 处置和 verify 报告，然后结束会话。合并冲突自动打回时，在原会话和原 worktree 按原因 rebase 解决，更新受影响的验证后重新提交；合并与清理由工作台执行。纯操作工单（如打包、跑测试）可以按改动性质跳过 reviewer 和 verifier，直接把命令输出作为 evidence 提交，verify.items 逐条对应 acceptance。
-   `evidence.summary` 是用户在 Inbox 看到的第一段：两三句说改动后用户能看到什么变了，不写 commit、分支、测试命令、reviewer/verifier 过程和 git 状态，这些放 `evidence.commands` 和附件。`verify.items[].evidence` 写 verifier 实际操作和看到的结果，用户读它而不是读 acceptance 原文。
+   `evidence.summary` 是用户在 Inbox 看到的第一段：两三句说改动后用户能看到什么变了，不写 commit、分支、测试命令、reviewer/verifier 过程和 git 状态，这些放 `evidence.commands` 和附件。提交时从最新 `workItem.get` 读取 `contractRevision`，在 `workItem.submit` 原样传回；合同更新后只复核受影响部分，不能用旧修订提交。`verify.items[].status` 写 `pass`、`defect`、`blocked` 或 `incomplete`，`verify.items[].evidence` 写 verifier 实际操作和看到的结果，用户读它而不是读 acceptance 原文。
 
 一个会话只处理一个工单。submit 或 decision.create 之后不要再做任何事。
 
@@ -44,3 +46,4 @@ acceptance 应描述文档要求的可观察结果。可以纠正与文档不符
 
 ## 开发原则
 不随 review 扩大范围，不通过放宽测试掩盖失败。简单改动可在静态检查足以判断、实机验收成本高或会干扰用户时省略实机验收，并说明依据。
+除非用户明确要求操控在用实例，否则**禁止**影响用户操作当前在用实例，验收测试都在独立环境中进行。

@@ -302,7 +302,6 @@ export class Orchestrator {
       if (wasActive) {
         const before = this.turnsBySession.get(sessionId);
         const { turnId } = await this.runner.steer(sessionId, message);
-        if (item && turnId) await this.service.setWorkItemStaleTurn(workspaceId, item.workItemId, turnId);
         const turn = this.turnsBySession.get(sessionId);
         if (!turnId && turn && turn !== before) {
           turn.scheduled = true;
@@ -362,6 +361,7 @@ export class Orchestrator {
       "你负责工单「" + item.title + "」。",
       "workspaceId: " + workspaceId,
       "workItemId: " + item.workItemId,
+      "contractRevision: " + item.contractRevision,
       related,
       "会话 cwd: " + cwd,
       "工作目录: " + (item.run.worktreePath ?? root) + (isolated ? "（独立 worktree，分支 " + branch + "）" : "（workspace 根目录，不开分支）"),
@@ -379,7 +379,7 @@ export class Orchestrator {
   }
 
   private completion(): string {
-    return "完成后调用 workItem.submit 提交证据、review 和逐条验收；需要用户取舍时调用 decision.create。";
+    return "完成后重新读取 workItem.get，将当前 contractRevision 传给 workItem.submit，并提交证据、review 和逐条验收；需要用户取舍时调用 decision.create。";
   }
 
   private async workerRole(root: string) {

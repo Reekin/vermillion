@@ -156,20 +156,34 @@ it("persists a user pause separately from failure decisions and resumes the same
   } finally { await restarted.dispose(); }
 });
 
-it("bounds verifier rejection independently of runtime failures and resumes after user retry", async () => {
-  const { service, options, workspaceId } = await fixture();
+it("preserves verification outcomes and keeps incomplete validation out of user decisions", async () => {
+  const { service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
-  for (let index = 0; index < 2; index++) {
-    await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
-    await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, verify: { verdict: "rework", items: [{ index: 0, pass: false, evidence: "Result absent" }] } });
-  }
-  const restarted = new WorkbenchService(options);
-  try {
-    expect(await restarted.getWorkItem(workspaceId, item.workItemId)).toMatchObject({ status: "decision", verificationFailures: 2, run: { sessionId: "worker" } });
-    const card = (await restarted.listDecisions(workspaceId))[0]!;
-    await restarted.answerDecision(workspaceId, card.decisionId, { key: "retry" });
-    expect(await restarted.getWorkItem(workspaceId, item.workItemId)).toMatchObject({ status: "queued", verificationFailures: 0 });
-  } finally { await restarted.dispose(); }
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const returned = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission,
+    verify: { verdict: "rework", items: [{ index: 0, status: "blocked", evidence: "验收实例尚未就绪" }] } });
+  expect(returned).toMatchObject({ status: "queued", verify: { verdict: "rework", items: [{ status: "blocked" }] } });
+  expect(await service.listDecisions(workspaceId)).toEqual([]);
+
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const incomplete = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission,
+    verify: { verdict: "rework", items: [{ index: 0, status: "incomplete", evidence: "右侧路径尚未操作" }] } });
+  expect(incomplete).toMatchObject({ status: "queued", verify: { items: [{ status: "incomplete" }] } });
+  expect(await service.listDecisions(workspaceId)).toEqual([]);
+});
+
+it("rejects a submission based on an old contract revision while preserving prior evidence", async () => {
+  const { service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  await service.updateWorkItem(workspaceId, item.workItemId, { objective: "Updated result", note: "Updated contract" });
+
+  const returned = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+
+  expect(returned).toMatchObject({ status: "queued", contractRevision: 1 });
+  expect(returned.evidence).toBeUndefined();
+  expect(returned.verify).toBeUndefined();
+  expect(returned.rejections.at(-1)?.reason).toContain("提交依据已过期");
 });
 
 it("rejects unsupported historical state before dispatch and leaves every historical file unchanged", async () => {

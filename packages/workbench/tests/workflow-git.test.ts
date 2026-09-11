@@ -27,8 +27,9 @@ it("commits selected docs without touching another staged file, advances refs an
   expect(updated.refs).toEqual([{ path, commit: committed.commit }]);
   expect(updated.run.resumeMessage).toContain("-Before");
   expect(updated.run.resumeMessage).toContain("+After");
-  await service.setWorkItemStaleTurn(workspaceId, item.workItemId, "old-turn");
-  expect(await service.submitWorkItem(workspaceId, item.workItemId, submission)).toMatchObject({ status: "queued", evidence: undefined });
+  const returned = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+  expect(returned).toMatchObject({ status: "queued" });
+  expect(returned.evidence).toBeUndefined();
   expect((await service.getWorkItem(workspaceId, item.workItemId)).run.resumeMessage).toContain("+After");
 });
 

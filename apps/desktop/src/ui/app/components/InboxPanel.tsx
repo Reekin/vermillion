@@ -134,13 +134,15 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
 
 const technicalDetails = (item: WorkItem): string => {
   const { merge, evidence, verify } = item;
+  const verificationStatus = (entry: { status: string }) => entry.status;
+  const verificationLabel = (status: string) => ({ pass: "通过", defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成" }[status] ?? "未通过");
   return [
     merge && ["合入", "commit: " + (merge.commit ?? "无代码改动"), "时间: " + merge.mergedAt, "Diff 概况", merge.diffStat || "无文件变更"].join("\n"),
     evidence && ["命令输出", ...evidence.commands.map((entry) => "$ " + entry.command + "\n" + entry.output)].join("\n\n"),
     ["Review 处置", ...item.review.map((entry) => (entry.decision === "accepted" ? "采纳：" : "拒绝：") + entry.comment + "\n理由：" + entry.reason)].join("\n\n"),
     verify && ["验收过程 · " + verify.verifiedAt, ...verify.items.map((entry) => [
       (entry.index + 1) + ". " + (item.acceptance[entry.index]?.text ?? "验收项"),
-      (entry.pass ? "通过：" : "未通过：") + entry.evidence
+      verificationLabel(verificationStatus(entry)) + "：" + entry.evidence
     ].join("\n"))].join("\n\n"),
     evidence?.assumptions.length && "假设\n" + evidence.assumptions.join("\n"),
     evidence?.untested.length && "未测\n" + evidence.untested.join("\n"),
@@ -156,6 +158,8 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
   const [rollingBack, setRollingBack] = useState(false);
   const [reason, setReason] = useState("");
   const { workItem } = item;
+  const verificationStatus = (entry: { status: string }) => entry.status;
+  const verificationLabel = (status: string) => ({ pass: "通过", defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成" }[status] ?? "未通过");
   const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + workItem.workItemId] ?? false);
   const toggleDetails = store((s) => s.toggleInboxDetails);
   const showAgentSession = store((s) => s.showAgentSession);
@@ -211,7 +215,7 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
         <ul className="mt-3 space-y-1">
           {workItem.verify.items.map((v) => (
             <li key={v.index} className="flex gap-2 text-label">
-              <Badge>{v.pass ? "通过" : "未通过"}</Badge>
+              <Badge>{verificationLabel(verificationStatus(v))}</Badge>
               <span className="min-w-0 whitespace-pre-wrap break-words text-muted-foreground">{v.evidence}</span>
             </li>
           ))}
