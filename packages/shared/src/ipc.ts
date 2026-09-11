@@ -413,6 +413,7 @@ const zSessionWindowSchema = z.object({
   sessionId: zSessionId,
   snapshot: zDomainSnapshotSchema,
   cursor: zCursor.optional(),
+  revision: z.string().min(1).optional(),
   windowStartTurnId: zTurnId.optional(),
   windowEndTurnId: zTurnId.optional(),
   olderCursor: z.string().min(1).optional(),

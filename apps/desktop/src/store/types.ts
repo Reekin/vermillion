@@ -52,6 +52,9 @@ export type RendererStoreState = {
   eventStream: {
     lastEventId?: string;
     lastCursor?: string;
+    lastCursorBySessionId?: Record<string, string>;
+    lastCursorByConversationId?: Record<string, string>;
+    conversationIdBySessionId?: Record<string, string>;
     cursorBarrier?: string;
     cursorBarrierBySessionId?: Record<string, string>;
     lastOccurredAt?: string;
@@ -77,6 +80,14 @@ export type RendererStoreAction =
       snapshot: DomainSnapshot;
       mode?: "replace" | "prepend";
       cursor?: string;
+    }
+  | {
+      type: "store/hydrateSessionWindows";
+      windows: Array<{
+        sessionId: string;
+        snapshot: DomainSnapshot;
+        cursor?: string;
+      }>;
     }
   | { type: "store/disposeSession"; sessionId: string }
   | { type: "store/ingestEvent"; event: RuntimeEvent }

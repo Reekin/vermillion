@@ -3,6 +3,7 @@ import { recordUiOperation } from "../../diagnostics/ui-performance.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
+import { compareCursorPosition, isSessionWindowStale } from "../../store/meta-reducer.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import type { ChatSendInput } from "../../transport/desktop-transport.js";
 import { projectChatTreeSends } from "./chat-tree-send-projection.js";
@@ -12,6 +13,20 @@ import {
 } from "./composer-status.js";
 
 const emptyOperations: ChatTreeSendOperation[] = [];
+type ChatTreeWindow = NonNullable<ChatTreeSnapshotRpc["windows"]>[number];
+
+const windowHydrationKey = (window: ChatTreeWindow): string | undefined => {
+  if (!window.revision) return undefined;
+  return [
+    window.revision,
+    window.windowStartTurnId ?? "",
+    window.windowEndTurnId ?? "",
+    window.olderCursor ?? "",
+    window.newerCursor ?? "",
+    window.hasOlder ? "older" : "",
+    window.hasNewer ? "newer" : ""
+  ].join("\u001f");
+};
 
 export const useChatTreeController = (input: {
   store: RendererStore;
@@ -36,6 +51,7 @@ export const useChatTreeController = (input: {
   };
   const sessionIdRef = useRef(sessionId);
   const requestIdRef = useRef(0);
+  const hydratedWindowKeyBySessionIdRef = useRef(new Map<string, string>());
   const activationRef = useRef<{ sessionId: string; promise: Promise<void> } | undefined>(undefined);
   sessionIdRef.current = sessionId;
 
@@ -78,8 +94,62 @@ export const useChatTreeController = (input: {
       }
       await activationRef.current.promise;
       if (!isCurrent()) return;
-      for (const window of tree.windows ?? []) {
-        store.hydrateSessionWindow(window.sessionId, window.snapshot, "replace", window.cursor);
+      const windowsToHydrate = (tree.windows ?? []).filter((window) => {
+        const key = windowHydrationKey(window);
+        return key === undefined ||
+          hydratedWindowKeyBySessionIdRef.current.get(window.sessionId) !== key;
+      });
+      const stateBeforeHydration = store.getState();
+      const latestCursorBySessionId = new Map(
+        Object.entries(stateBeforeHydration.eventStream.lastCursorBySessionId ?? {})
+      );
+      const latestCursorByConversationId = new Map(
+        Object.entries(stateBeforeHydration.eventStream.lastCursorByConversationId ?? {})
+      );
+      const freshWindowsToHydrate = windowsToHydrate.filter((window) => {
+        const conversationId = window.snapshot.conversations[0]?.conversationId;
+        if (isSessionWindowStale(stateBeforeHydration, window.sessionId, window.cursor, conversationId)) {
+          return false;
+        }
+        const currentCursor = latestCursorBySessionId.get(window.sessionId);
+        const comparison = compareCursorPosition(currentCursor, window.cursor);
+        if (currentCursor && comparison !== undefined && comparison > 0) {
+          return false;
+        }
+        const currentConversationCursor = conversationId
+          ? latestCursorByConversationId.get(conversationId)
+          : undefined;
+        const conversationComparison = compareCursorPosition(
+          currentConversationCursor,
+          window.cursor
+        );
+        if (
+          currentConversationCursor &&
+          conversationComparison !== undefined &&
+          conversationComparison > 0
+        ) {
+          return false;
+        }
+        if (window.cursor) latestCursorBySessionId.set(window.sessionId, window.cursor);
+        if (conversationId && window.cursor) {
+          latestCursorByConversationId.set(conversationId, window.cursor);
+        }
+        return true;
+      });
+      if (freshWindowsToHydrate.length > 0) {
+        store.hydrateSessionWindows(
+          freshWindowsToHydrate.map((window) => ({
+            sessionId: window.sessionId,
+            snapshot: window.snapshot,
+            cursor: window.cursor
+          }))
+        );
+        for (const window of freshWindowsToHydrate) {
+          const key = windowHydrationKey(window);
+          if (key !== undefined) {
+            hydratedWindowKeyBySessionIdRef.current.set(window.sessionId, key);
+          }
+        }
       }
       // The shell keeps selecting the tree entry; only this pane changes its viewed member.
       const entry = store.getDomainReadModel().getSession(sessionId);

@@ -67,6 +67,7 @@ describe("buildSessionWindowSnapshot", () => {
 
     expect(page.windowStartTurnId).toBe("turn-1");
     expect(page.windowEndTurnId).toBe("turn-2");
+    expect(page.revision).toBe(session.updatedAt);
     expect(page.snapshot.turns.map((turn) => turn.turnId)).toEqual(["turn-1", "turn-2"]);
     expect(page.hasOlder).toBe(false);
     expect(page.hasNewer).toBe(true);

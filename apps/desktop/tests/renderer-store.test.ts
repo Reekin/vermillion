@@ -296,6 +296,243 @@ describe("renderer store domain replica", () => {
     );
   });
 
+  it("hydrates all chat-tree windows in one store update and advances each cursor barrier", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-0");
+    store.ingestEvent({
+      type: "session.created",
+      conversationId: "conversation-a",
+      sessionId: "session-b",
+      engineId: "agent-a",
+      status: "idle"
+    });
+    const notifications = vi.fn();
+    store.subscribe(notifications);
+
+    const windowSnapshot = (sessionId: string, turnId: string) => parseDomainSnapshot({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a", "session-b"],
+        activeSessionId: sessionId,
+        createdAt: now,
+        updatedAt: "2026-04-21T00:00:01.000Z"
+      }],
+      sessions: [{
+        sessionId,
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "idle",
+        createdAt: now,
+        updatedAt: "2026-04-21T00:00:01.000Z"
+      }],
+      turns: [{
+        turnId,
+        sessionId,
+        status: "completed",
+        startedAt: "2026-04-21T00:00:01.000Z",
+        messageIds: [],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      }],
+      messageBlocks: [],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    });
+
+    store.hydrateSessionWindows([
+      { sessionId: "session-a", snapshot: windowSnapshot("session-a", "turn-a"), cursor: "cursor-1" },
+      { sessionId: "session-b", snapshot: windowSnapshot("session-b", "turn-b"), cursor: "cursor-2" }
+    ]);
+
+    expect(notifications).toHaveBeenCalledOnce();
+    expect(store.getDomainReadModel().getTurn("turn-a")).toBeDefined();
+    expect(store.getDomainReadModel().getTurn("turn-b")).toBeDefined();
+    expect(store.getState().eventStream.cursorBarrierBySessionId).toMatchObject({
+      "session-a": "cursor-1",
+      "session-b": "cursor-2"
+    });
+  });
+
+  it("does not let an older window replace a newer session event", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(parseDomainSnapshot({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a"],
+        activeSessionId: "session-a",
+        createdAt: now,
+        updatedAt: now
+      }],
+      sessions: [{
+        sessionId: "session-a",
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "running",
+        createdAt: now,
+        updatedAt: now
+      }],
+      turns: [{
+        turnId: "turn-a",
+        sessionId: "session-a",
+        status: "streaming",
+        startedAt: now,
+        messageIds: ["message-a"],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      }],
+      messageBlocks: [{
+        blockId: "message-a:md",
+        messageId: "message-a",
+        sessionId: "session-a",
+        turnId: "turn-a",
+        role: "assistant",
+        kind: "markdown",
+        text: "old",
+        startedAt: now
+      }],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    }));
+    store.ingestEnvelope({
+      eventId: "event-newer",
+      cursor: "cursor-2",
+      occurredAt: now,
+      event: {
+        type: "message.delta",
+        sessionId: "session-a",
+        turnId: "turn-a",
+        messageId: "message-a",
+        delta: " new"
+      }
+    });
+
+    store.hydrateSessionWindow("session-a", parseDomainSnapshot({
+      conversations: [{
+        conversationId: "conversation-a",
+        participantEngineIds: ["agent-a"],
+        sessionIds: ["session-a"],
+        activeSessionId: "session-a",
+        createdAt: now,
+        updatedAt: now
+      }],
+      sessions: [{
+        sessionId: "session-a",
+        conversationId: "conversation-a",
+        engineId: "agent-a",
+        status: "running",
+        createdAt: now,
+        updatedAt: now
+      }],
+      turns: [{
+        turnId: "turn-a",
+        sessionId: "session-a",
+        status: "streaming",
+        startedAt: now,
+        messageIds: ["message-a"],
+        toolCallIds: [],
+        terminalIds: [],
+        approvalRequestIds: [],
+        interactionRequestIds: []
+      }],
+      messageBlocks: [{
+        blockId: "message-a:md",
+        messageId: "message-a",
+        sessionId: "session-a",
+        turnId: "turn-a",
+        role: "assistant",
+        kind: "markdown",
+        text: "stale",
+        startedAt: now
+      }],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    }), "replace");
+
+    expect(store.getDomainReadModel().getMessageBlock("message-a:md")?.text).toBe("old new");
+    expect(store.getState().eventStream.lastCursorBySessionId?.["session-a"]).toBe("cursor-2");
+  });
+
+  it("does not let an older global snapshot replace newer state", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-2");
+    const older = sessionSnapshot();
+    older.sessions[0]!.title = "stale";
+    store.hydrateSnapshot(older, "cursor-1");
+
+    expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
+  });
+
+  it("protects a window from a newer conversation-scoped event", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-1");
+    store.ingestEnvelope({
+      eventId: "participant-newer",
+      cursor: "cursor-2",
+      occurredAt: now,
+      event: {
+        type: "participant.updated",
+        conversationId: "conversation-a",
+        participantId: "conversation-a:agent-a",
+        engineId: "agent-a",
+        role: "primary",
+        capabilities: []
+      }
+    });
+    const olderWindow = sessionSnapshot();
+    olderWindow.sessions[0]!.title = "stale";
+    store.hydrateSessionWindow("session-a", olderWindow, "replace", "cursor-1");
+
+    expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
+  });
+
+  it("advances the conversation cursor for a sibling session event", () => {
+    const store = createRendererStore();
+    const initial = sessionSnapshot();
+    initial.conversations[0]!.sessionIds = ["session-a", "session-b"];
+    initial.sessions.push({
+      ...initial.sessions[0]!,
+      sessionId: "session-b"
+    });
+    store.hydrateSnapshot(initial, "cursor-1");
+    store.ingestEnvelope({
+      eventId: "sibling-turn",
+      cursor: "cursor-2",
+      occurredAt: now,
+      event: {
+        type: "turn.started",
+        sessionId: "session-b",
+        turnId: "turn-b"
+      }
+    });
+    const olderWindow = sessionSnapshot();
+    olderWindow.sessions[0]!.title = "stale";
+    store.hydrateSessionWindow("session-a", olderWindow, "replace", "cursor-1");
+
+    expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
+    expect(store.getState().eventStream.lastCursorByConversationId?.["conversation-a"]).toBe("cursor-2");
+  });
+
   it("notifies only the affected session scope for live events", () => {
     const store = createRendererStore();
     store.hydrateSnapshot(sessionSnapshot(), "cursor-0");

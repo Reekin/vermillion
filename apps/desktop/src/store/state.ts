@@ -94,7 +94,10 @@ export const createInitialRendererStoreState = (): RendererStoreState => ({
   indexes: createEmptyIndexes(),
   eventStream: {
     recentEventIds: [],
-    seenEventIds: {}
+    seenEventIds: {},
+    lastCursorBySessionId: {},
+    lastCursorByConversationId: {},
+    conversationIdBySessionId: {}
   },
   refreshSignals: createInitialRendererRefreshSignals()
 });

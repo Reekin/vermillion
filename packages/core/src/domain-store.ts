@@ -379,13 +379,28 @@ export class DomainStore {
     sessionId: string,
     snapshot: DomainSnapshot | unknown
   ): DomainSnapshot {
-    const parsedSnapshot = parseDomainSnapshot(snapshot);
+    return this.replaceSessionWindowSnapshots([{ sessionId, snapshot }]);
+  }
+
+  public replaceSessionWindowSnapshots(
+    windows: ReadonlyArray<{
+      sessionId: string;
+      snapshot: DomainSnapshot | unknown;
+    }>
+  ): DomainSnapshot {
+    const parsedWindows = windows.map((window) => ({
+      sessionId: window.sessionId,
+      snapshot: parseDomainSnapshot(window.snapshot)
+    }));
+    if (parsedWindows.length === 0) {
+      return this.getSnapshot();
+    }
     const staged = DomainStore.fromSnapshot(this.getSnapshot());
-    staged.assertSnapshotWithinMergeScope(parsedSnapshot, { sessionId });
-    staged.deleteSessionWindowCoverage(sessionId, parsedSnapshot);
-    staged.applyParsedSnapshot(parsedSnapshot, {
-      merge: true
-    });
+    for (const { sessionId, snapshot: parsedSnapshot } of parsedWindows) {
+      staged.assertSnapshotWithinMergeScope(parsedSnapshot, { sessionId });
+      staged.deleteSessionWindowCoverage(sessionId, parsedSnapshot);
+      staged.applyParsedSnapshot(parsedSnapshot, { merge: true });
+    }
     this.swapFrom(staged);
     return this.getSnapshot();
   }

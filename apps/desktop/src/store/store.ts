@@ -5,7 +5,12 @@ import {
   createIngestEventAction
 } from "./intake.js";
 import { recordUiOperation } from "../diagnostics/ui-performance.js";
-import { rendererMetaReducer } from "./meta-reducer.js";
+import {
+  compareCursorPosition,
+  isGlobalSnapshotStale,
+  isSessionWindowStale,
+  rendererMetaReducer
+} from "./meta-reducer.js";
 import {
   createInitialRendererStoreState,
   normalizeRendererDomainSnapshot
@@ -53,6 +58,13 @@ export type RendererStore = {
     mode?: "replace" | "prepend",
     cursor?: string
   ) => RendererStoreState;
+  hydrateSessionWindows: (
+    windows: Array<{
+      sessionId: string;
+      snapshot: DomainSnapshot;
+      cursor?: string;
+    }>
+  ) => RendererStoreState;
   disposeSession: (sessionId: string) => RendererStoreState;
   ingestEvent: (event: RuntimeEvent) => RendererStoreState;
   ingestEnvelope: (envelope: EventEnvelope) => RendererStoreState;
@@ -61,25 +73,85 @@ export type RendererStore = {
 
 const applySnapshotActionToReplica = (
   replica: DomainReplica,
-  action: RendererStoreAction
-): void => {
+  action: RendererStoreAction,
+  state: RendererStoreState
+): DomainSnapshot[] => {
   switch (action.type) {
     case "store/hydrateSnapshot":
-      replica.replaceSnapshot(normalizeRendererDomainSnapshot(action.snapshot));
-      return;
+      if (isGlobalSnapshotStale(state, action.cursor)) return [];
+      {
+        const snapshot = normalizeRendererDomainSnapshot(action.snapshot);
+        replica.replaceSnapshot(snapshot);
+        return [snapshot];
+      }
     case "store/hydrateSessionWindow": {
+      if (action.mode !== "prepend" && isSessionWindowStale(
+        state,
+        action.sessionId,
+        action.cursor,
+        action.snapshot.conversations[0]?.conversationId
+      )) {
+        return [];
+      }
       const snapshot = normalizeRendererDomainSnapshot(action.snapshot);
       if (action.mode === "prepend") {
         replica.mergeSnapshot(snapshot, {
           scope: { sessionId: action.sessionId }
         });
-        return;
+        return [snapshot];
       }
       replica.replaceSessionWindowSnapshot(action.sessionId, snapshot);
-      return;
+      return [snapshot];
+    }
+    case "store/hydrateSessionWindows": {
+      const latestCursorBySessionId = new Map(
+        Object.entries(state.eventStream.lastCursorBySessionId ?? {})
+      );
+      const latestCursorByConversationId = new Map(
+        Object.entries(state.eventStream.lastCursorByConversationId ?? {})
+      );
+      const freshWindows = action.windows.flatMap((window) => {
+        const conversationId = window.snapshot.conversations[0]?.conversationId;
+        if (isSessionWindowStale(state, window.sessionId, window.cursor, conversationId)) {
+          return [];
+        }
+        const currentCursor = latestCursorBySessionId.get(window.sessionId);
+        const comparison = compareCursorPosition(currentCursor, window.cursor);
+        if (
+          currentCursor &&
+          comparison !== undefined &&
+          comparison > 0
+        ) {
+          return [];
+        }
+        const currentConversationCursor = conversationId
+          ? latestCursorByConversationId.get(conversationId)
+          : undefined;
+        const conversationComparison = compareCursorPosition(
+          currentConversationCursor,
+          window.cursor
+        );
+        if (
+          currentConversationCursor &&
+          conversationComparison !== undefined &&
+          conversationComparison > 0
+        ) {
+          return [];
+        }
+        if (window.cursor) latestCursorBySessionId.set(window.sessionId, window.cursor);
+        if (conversationId && window.cursor) {
+          latestCursorByConversationId.set(conversationId, window.cursor);
+        }
+        return [{
+          sessionId: window.sessionId,
+          snapshot: normalizeRendererDomainSnapshot(window.snapshot)
+        }];
+      });
+      replica.replaceSessionWindowSnapshots(freshWindows);
+      return freshWindows.map((window) => window.snapshot);
     }
     default:
-      return;
+      return [];
   }
 };
 
@@ -159,17 +231,22 @@ export const createRendererStore = (
     let reducedState = rendererMetaReducer(state, action);
     let changes: DomainChangeSet | undefined;
 
-    if (action.type === "store/hydrateSnapshot" || action.type === "store/hydrateSessionWindow") {
+    if (
+      action.type === "store/hydrateSnapshot" ||
+      action.type === "store/hydrateSessionWindow" ||
+      action.type === "store/hydrateSessionWindows"
+    ) {
       const beforeRevision = domainReplica.getRevision();
-      applySnapshotActionToReplica(domainReplica, action);
-      changes = {
-        revision: domainReplica.getRevision(),
-        fullReset: action.type === "store/hydrateSnapshot",
-        conversationIds: new Set(action.snapshot.conversations.map((item) => item.conversationId)),
-        sessionIds: new Set(action.snapshot.sessions.map((item) => item.sessionId)),
-        turnIds: new Set(action.snapshot.turns.map((item) => item.turnId))
-      };
-      if (domainReplica.getRevision() === beforeRevision) changes = undefined;
+      const snapshots = applySnapshotActionToReplica(domainReplica, action, state);
+      if (snapshots.length > 0 && domainReplica.getRevision() !== beforeRevision) {
+        changes = {
+          revision: domainReplica.getRevision(),
+          fullReset: action.type === "store/hydrateSnapshot",
+          conversationIds: new Set(snapshots.flatMap((snapshot) => snapshot.conversations.map((item) => item.conversationId))),
+          sessionIds: new Set(snapshots.flatMap((snapshot) => snapshot.sessions.map((item) => item.sessionId))),
+          turnIds: new Set(snapshots.flatMap((snapshot) => snapshot.turns.map((item) => item.turnId)))
+        };
+      }
     } else if (action.type === "store/disposeSession") {
       const beforeRevision = domainReplica.getRevision();
       const conversationId = domainReplica.resolveConversationIdBySessionId(action.sessionId);
@@ -309,6 +386,11 @@ export const createRendererStore = (
         snapshot,
         mode,
         cursor
+      }),
+    hydrateSessionWindows: (windows) =>
+      dispatch({
+        type: "store/hydrateSessionWindows",
+        windows
       }),
     disposeSession: (sessionId) =>
       dispatch({
