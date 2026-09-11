@@ -9,6 +9,10 @@ import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, Li
 
 import { roleLabel, actionRoleLabel, waitingActions, waitingReason } from "./workflow-display.js";
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
+const runningFirst = (items: WorkItem[]) => [
+  ...items.filter((item) => item.status === "running"),
+  ...items.filter((item) => item.status !== "running")
+];
 
 const relativeTime = (iso: string) => {
   const date = new Date(iso);
@@ -102,6 +106,11 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
     const key = item.treeId ?? "standalone";
     groups.set(key, [...(groups.get(key) ?? []), item]);
   }
+  const groupedItems = [...groups].map(([groupId, items]) => [groupId, runningFirst(items)] as const);
+  const orderedGroups = [
+    ...groupedItems.filter(([, items]) => items.some((item) => item.status === "running")),
+    ...groupedItems.filter(([, items]) => items.every((item) => item.status !== "running"))
+  ];
   const renderItems = (items: WorkItem[], muted = false) => (
     <ul>{items.map((item) => <WorkItemRow key={item.workItemId} item={item} actions={actions}
       run={latestRuns.find((r) => r.workItemId === item.workItemId && (!item.run.sessionId || r.sessionId === item.run.sessionId))}
@@ -128,7 +137,7 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
       {error && <InlineNotice tone="error" className="pt-2">{error}</InlineNotice>}
       {visible.length === 0 ? <EmptyState title={hidden ? "没有进行中的工单" : "还没有工单"} hint="在会话中点击开工，或创建一张工单。" /> : (
         <div className="max-w-6xl space-y-3 p-4">
-          {[...groups].map(([groupId, items]) => <DisclosureCard key={groupId}
+          {orderedGroups.map(([groupId, items]) => <DisclosureCard key={groupId}
             title={groupId === "standalone" ? "独立工单" : sourceTitles[groupId] ?? "来源会话"}
             open={expandedWorkGroups[workspaceId + "/" + groupId] !== false}
             onToggle={() => setWorkGroupExpanded(workspaceId, groupId, expandedWorkGroups[workspaceId + "/" + groupId] === false)}
