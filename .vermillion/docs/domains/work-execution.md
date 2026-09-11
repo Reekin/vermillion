@@ -7,7 +7,7 @@ standards:
 
 覆盖开工、工单的调度、执行资源声明、依赖、文档变更通知、决策答复、验收提交、主分支合入、后台 worktree 回收，以及运行中断后的恢复。
 
-也覆盖 worktree 开发依赖准备、按影响选择检查范围，以及 Worker 向 Reviewer、Verifier 交接成果和角色模型配置。
+也覆盖 [worktree 开发依赖准备](../Foundation/Development/PRD.md)、按影响选择检查范围，以及 Worker 向 Reviewer、Verifier 交接成果和角色模型配置。
 
 也覆盖[隔离实例准备](../Foundation/Acceptance/PRD.md)的 CLI/RPC、测试项目与夹具准备、就绪返回和实例生命周期。
 
