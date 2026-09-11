@@ -76,6 +76,10 @@ export const workbenchRpc = {
   "work.start": { params: zWs.extend({ sessionId: z.string().min(1), turnId: z.string().min(1).optional(), scope: z.string().optional(), message: zWorkMessage.optional() }), result: zWorkRequest },
   "work.list": { params: zWs, result: z.array(zWorkRequest) },
   "work.retry": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
+  "work.cancel": { params: z.union([
+    zWs.extend({ requestId: z.string().min(1) }),
+    zWs.extend({ sessionId: z.string().min(1) })
+  ]), result: z.object({ cancelled: z.boolean(), request: zWorkRequest.optional() }) },
   "workItem.list": { params: zWs, result: z.array(zWorkItem) },
   "workItem.get": { params: zWi, result: zWorkItem },
   "workItem.create": {

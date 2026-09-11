@@ -350,7 +350,10 @@ export class WorkbenchService {
   }
 
   async putWorkRequest(workspaceId: string, request: WorkRequest): Promise<WorkRequest> {
-    const saved = await (await this.context(workspaceId)).store.workRequests.put({ ...request, updatedAt: this.now() });
+    const store = (await this.context(workspaceId)).store;
+    const current = await store.workRequests.get(request.requestId);
+    if (current?.status === "cancelled" && request.status !== "cancelled") return current;
+    const saved = await store.workRequests.put({ ...request, updatedAt: this.now() });
     this.emit({ type: "workRequests.changed", workspaceId });
     return saved;
   }
@@ -362,9 +365,30 @@ export class WorkbenchService {
     return this.putWorkRequest(workspaceId, { ...request, status: request.workerSessionId ? "preparing" : "pending", attempts: 0, retryAt: undefined });
   }
 
+  async cancelWorkRequest(workspaceId: string, input: { requestId?: string; sessionId?: string }): Promise<{ cancelled: boolean; request?: WorkRequest }> {
+    return this.integrate(workspaceId, async () => {
+      const request = (await this.listWorkRequests(workspaceId)).find((entry) => input.requestId
+        ? entry.requestId === input.requestId
+        : entry.workerSessionId === input.sessionId);
+      if (!request) return { cancelled: false };
+      if (request.status === "cancelled") return { cancelled: true, request };
+      if (request.status !== "pending" && request.status !== "preparing") return { cancelled: false, request };
+      for (const item of await this.listWorkItems(workspaceId)) {
+        if (item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status))
+          await this.cancelResult(workspaceId, item.workItemId, false);
+      }
+      const saved = await this.putWorkRequest(workspaceId, {
+        ...request, status: "cancelled", failure: undefined, retryAt: undefined
+      });
+      this.emit({ type: "workRequest.cancelled", workspaceId, requestId: request.requestId, sessionId: request.workerSessionId });
+      return { cancelled: true, request: saved };
+    });
+  }
+
   async failWorkRequest(workspaceId: string, requestId: string, failure: string): Promise<WorkRequest> {
     const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
     if (!request) throw new Error("Unknown work request: " + requestId);
+    if (request.status === "cancelled") return request;
     const attempts = (request.attempts ?? 0) + 1;
     const minutes = RETRY_MINUTES[attempts - 1];
     const saved = await this.putWorkRequest(workspaceId, { ...request, attempts, failure,
@@ -378,6 +402,10 @@ export class WorkbenchService {
   }
 
   async finishPreparation(workspaceId: string, sessionId: string, turnId?: string): Promise<void> {
+    return this.integrate(workspaceId, () => this.finishPreparationRecord(workspaceId, sessionId, turnId));
+  }
+
+  private async finishPreparationRecord(workspaceId: string, sessionId: string, turnId?: string): Promise<void> {
     const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === sessionId && entry.status === "preparing");
     if (!request) return;
     const forkTurnId = turnId ?? await this.sourceTurnResolver?.(sessionId);
@@ -795,7 +823,7 @@ export class WorkbenchService {
     return this.integrate(workspaceId, () => this.cancelResult(workspaceId, workItemId));
   }
 
-  private async cancelResult(workspaceId: string, workItemId: string): Promise<WorkItem> {
+  private async cancelResult(workspaceId: string, workItemId: string, notify = true): Promise<WorkItem> {
     const item = await this.getWorkItem(workspaceId, workItemId);
     if (item.status === "cancelled") return item;
     if (item.status === "closed") throw new Error("已合入工单请使用回滚入口，不能取消已完成成果。");
@@ -805,7 +833,7 @@ export class WorkbenchService {
       return { ...detached, item: { ...record.item, status: "cancelled", updatedAt: this.now() },
         execution: { ...detached.execution, status: "cancelled", updatedAt: this.now() },
         integrations: record.integrations.map((action) => actionIsOpen(action) ? { ...action, status: "cancelled", updatedAt: this.now() } : action) };
-    }, [{ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants }]);
+    }, notify ? [{ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants }] : []);
     return cancelled;
   }
 
@@ -1150,7 +1178,7 @@ const describeAnswer = (card: DecisionCard, answer: { key?: string; note?: strin
   return card.question + " -> " + chosen + adjustments;
 };
 
-const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { sessionId: string } | { workItemId: string }>["type"] | undefined> = {
+const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { sessionId: string } | { workItemId: string } | { requestId: string }>["type"] | undefined> = {
   docs: "docs.changed",
   roles: "roles.changed",
   "work-requests": "workRequests.changed",

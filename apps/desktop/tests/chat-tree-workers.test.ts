@@ -180,6 +180,15 @@ describe("Worker branch presentation", () => {
     ]);
   });
 
+  it("keeps cancelled kickoff records out of the active worker list", () => {
+    const result = projectChatTreeWorkers(tree(), [], [
+      { requestId: "cancelled", sourceSessionId: "design", status: "cancelled", scope: "Cancelled preparation" }
+    ] as WorkRequest[]);
+
+    expect(result.workers).toEqual([]);
+    expect(result.activeWorkers).toEqual([]);
+  });
+
   it("replaces preparation with the bound work item's title and state without duplication", () => {
     const requests = [{ requestId: "one", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     const items = [{ requestId: "one", title: "实际工单", status: "decision", run: { sessionId: "worker" } }] as WorkItem[];

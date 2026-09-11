@@ -31,6 +31,25 @@ it("keeps requests and every prepared item durable without dispatch until the pr
   } finally { await restarted.dispose(); }
 });
 
+it("cancels a preparation request and its unfinished items through the CLI/RPC contract", async () => {
+  const { client, service, workspaceId } = await fixture();
+  const request = await service.startWork(workspaceId, { sessionId: "design", turnId: "design-turn" });
+  await service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: "prep" });
+  const first = await service.createWorkItem(workspaceId, { ...contract, requestId: request.requestId, sessionId: "prep" });
+  const sibling = await service.createWorkItem(workspaceId, { ...contract, requestId: request.requestId });
+
+  const result = await client.request("work.cancel", { workspaceId, requestId: request.requestId });
+
+  expect(result).toMatchObject({ cancelled: true, request: { requestId: request.requestId, status: "cancelled" } });
+  expect((await service.getWorkItem(workspaceId, first.workItemId)).status).toBe("cancelled");
+  expect((await service.getWorkItem(workspaceId, sibling.workItemId)).status).toBe("cancelled");
+  expect(await service.listDecisions(workspaceId)).toEqual([]);
+  expect(await client.request("work.cancel", { workspaceId, sessionId: "prep" })).toMatchObject({ cancelled: true, request: { status: "cancelled" } });
+  await service.finishPreparation(workspaceId, "prep", "prep-end");
+  expect((await service.listWorkRequests(workspaceId))[0]?.status).toBe("cancelled");
+  expect((await service.getWorkItem(workspaceId, first.workItemId)).status).toBe("cancelled");
+});
+
 it("registers optional isolation separately from allowedPaths and rejects generic resource pools", async () => {
   const { service, client, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, scope: { ...contract.scope, allowedPaths: ["src/"] } });

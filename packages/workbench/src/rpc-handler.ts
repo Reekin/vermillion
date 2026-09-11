@@ -47,6 +47,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "work.start": (p) => service.startWork(p.workspaceId, p),
     "work.list": (p) => service.listWorkRequests(p.workspaceId),
     "work.retry": (p) => service.retryWork(p.workspaceId, p.requestId),
+    "work.cancel": (p) => service.cancelWorkRequest(p.workspaceId, p),
     "workItem.list": (p) => service.listWorkItems(p.workspaceId),
     "workItem.get": (p) => service.getWorkItem(p.workspaceId, p.workItemId),
     "workItem.diagnose": (p) => service.diagnoseWorkItem(p.workspaceId, p.workItemId),

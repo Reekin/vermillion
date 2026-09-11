@@ -88,6 +88,17 @@ export class Orchestrator {
         void this.enqueue(event.workspaceId, () => this.deliverUpdate(event.workspaceId, event.workItemId, event.sessionId, event.note));
       } else if (["actions.changed", "workItems.changed", "workRequests.changed", "decisions.changed", "scheduler.changed"].includes(event.type)) {
         void this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
+      } else if (event.type === "workRequest.cancelled") {
+        const sessionId = event.sessionId;
+        void this.enqueue(event.workspaceId, async () => {
+          if (sessionId) {
+            const wasPreparing = this.preparing.get(sessionId) === event.workspaceId;
+            this.preparing.delete(sessionId);
+            if (wasPreparing || this.runner.isActive?.(sessionId)) await this.runner.interrupt(sessionId);
+          }
+          await this.service.releaseIdleWorkers(event.workspaceId);
+          await this.reconcile(event.workspaceId);
+        });
       } else if (event.type === "workItem.cancelled" && event.sessionId) {
         const sessionId = event.sessionId;
         void this.enqueue(event.workspaceId, async () => { await this.runner.interrupt(sessionId); await this.service.releaseIdleWorkers(event.workspaceId); await this.reconcile(event.workspaceId); });
@@ -387,12 +398,15 @@ export class Orchestrator {
 
   private async prepareRequests(workspaceId: string): Promise<void> {
     for (let request of await this.service.listWorkRequests(workspaceId)) {
-      if (request.status === "ready" || request.status === "failed") continue;
+      if (["ready", "failed", "cancelled"].includes(request.status)) continue;
       if (request.retryAt && request.retryAt > this.now()) continue;
       if (!request.workerSessionId && this.runner.isActive?.(request.sourceSessionId)) continue;
       try {
         const root = await this.service.workspaceRoot(workspaceId);
         const preparation = await this.roles.resolve(root, "work-preparation");
+        const latest = (await this.service.listWorkRequests(workspaceId)).find((entry) => entry.requestId === request.requestId);
+        if (!latest || latest.status === "cancelled") continue;
+        request = latest;
         if (!request.workerSessionId) {
           const fork = request.sourceTurnId ? await this.runner.fork({ workspaceId, sourceSessionId: request.sourceSessionId,
             sourceTurnId: request.sourceTurnId, modelConfig: preparation.modelConfig,
@@ -400,6 +414,7 @@ export class Orchestrator {
               sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId } })
             : { sessionId: request.sourceSessionId, treeId: request.sourceSessionId };
           request = await this.service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: fork.sessionId, treeId: fork.treeId });
+          if (request.status === "cancelled") continue;
         }
         const sessionId = request.workerSessionId!;
         if (this.preparing.has(sessionId)) continue;

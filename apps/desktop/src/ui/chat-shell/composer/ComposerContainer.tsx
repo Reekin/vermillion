@@ -56,7 +56,7 @@ export type ComposerContainerProps = {
   submitBranch?: (payload: Omit<import("../../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
-  onBeforeStop?: (sessionId: string) => Promise<void>;
+  onBeforeStop?: (sessionId: string) => Promise<"cancelled" | void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
     engineId: string,
