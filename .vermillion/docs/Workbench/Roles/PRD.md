@@ -6,7 +6,7 @@
 
 会话 metadata 保存 `developerInstructions`。runtime 在启动、fork 或恢复会话时，通过 Codex `config/read` 读取用户的 `developer_instructions`，再追加解析后的角色文本作为 developer 指令，不修改用户 `config.toml`。设计伙伴会话使用 `design-partner` 角色。
 
-角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在 New Chat 草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent，模型由会话引擎的 subagent 设置决定。
+角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在 New Chat 草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent，创建时使用各自角色解析后的模型配置，未指定的字段沿用引擎的 subagent 默认值；正文与配置均遵循全局和项目的覆盖、追加规则。引擎不支持的显式配置应明确反馈，不能静默忽略。
 
 - **设计伙伴**与用户讨论需求并处理项目工作，cwd 为 workspace 根，具体职责由角色 prompt 定义。开工通过 `work.start` 交给 Worker 分支。
 - **Worker**执行一张工单，负责开发、邀请 reviewer 和空白验证者，并提交成果。分支准备与建单见 [工作台 · 开工](../Think/PRD.md)；执行、审阅、验证与恢复规则见 [工单](../Missions/PRD.md)。
