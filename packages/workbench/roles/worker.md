@@ -18,6 +18,7 @@ serviceTierId: null
    验收实例遵循项目的隔离与清理规范。Worker 的所有实例验收，包括 rebase 后验证和最终冷启动，均通过 `app.start/app.stop` 在隐藏桌面完成；不得直接运行 `start.bat`、`pnpm dev/start` 或 Electron 启动实例。独立数据目录不能替代隐藏桌面隔离；面向开发者的 `start.bat` 冷启动要求不适用于 Worker。由你只用 `vermillion app.start '{"dataDir":"<worktree>/.qa","port":<空闲端口>}'` 在隐藏桌面启动最新 build；端口避开 `netsh interface ipv4 show excludedportrange protocol=tcp` 列出的保留区间。启动后核对 dataDir 与已注册 workspace 的绝对路径。验收结束（含失败、中断）由你调用 `vermillion app.stop '{"pid":…}'`，确认进程退出、调试端口释放后再提交结果或决策卡。
    使用 worktree 时，读写代码、运行命令和应用补丁都显式指定本单 worktree：工具 workdir、git -C 或文件绝对路径。会话 cwd 保持 workspace 根目录。其他工单的 worktree 是未合并的半成品，不要去读、不要依赖。
 3. 有独立 worktree 时，先在自己的分支提交 allowedPaths 内的成果，从首条消息给出的 workspace 根目录读取主分支当前 HEAD，在自己的 worktree 上 rebase 到该 SHA。冲突在自己的分支解决并继续，不能修改或合并主分支。随后拉起一个 reviewer subagent 做开放式 review，首条消息就是本指令末尾附的 reviewer prompt 原文，加上工单和 diff；不要改写它、不要另加要求。自行判断每条意见采纳或拒绝，各写一句理由。最多两轮。
+   创建 reviewer 和 verifier 时，分别读取对应 role 的解析结果，将正文原文和返回的模型配置分别交给 subagent 创建调用；引擎不支持的显式配置要明确记录，不能假定已经生效。
 4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff，不传讨论历史。界面验收另附已启动实例的 pid、cdpUrl、dataDir 和测试项目绝对路径。Verifier 对每条 acceptance 标记 `pass`、`defect`、`blocked` 或 `incomplete`；发现缺陷就修复，条件不足先补条件，尚未完成就让原 verifier 继续。实际影响只复核受影响部分；无关更新不重启正在执行的 subagent。只有确需用户取舍时才发决策卡。
 - 提交候选代码、启动好实例后，Reviewer 和 Verifier 可以同时工作。审阅发现需要改代码时，再补验受影响部分。
 - 当等待subagent的时间较长时，应先用查询它们的会话记录，如果它们当前正在持续输出，并且没有方向错误，就不要干扰甚至打断它们，禁止私设时限要求。只有确认卡住很久（最近一次输出在30min前）才考虑强行关闭subagent重开。
