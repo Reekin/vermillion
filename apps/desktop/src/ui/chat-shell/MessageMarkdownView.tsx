@@ -116,6 +116,12 @@ type UserMessageParts = {
 };
 
 const copyFeedbackDurationMs = 2_000;
+const attachmentLinePattern =
+  /^!?\[[^\]\r\n]*\]\((?:file:|data:image\/|blob:)[^\r\n]+\)$/u;
+const isAttachmentMarkdownBlock = (section: string | undefined): section is string =>
+  typeof section === "string" &&
+  section.length > 0 &&
+  section.split(/\r?\n/u).every((line) => attachmentLinePattern.test(line));
 const codeCommentLinePattern = /^::code-comment\{(?<attributes>.*)\}$/;
 const directiveAttributeKeys = new Set<keyof CodeCommentDirective>([
   "title",
@@ -295,17 +301,23 @@ const resolveRenderableMarkdownText = (block: MessageBlock, text: string): Strea
 
 export const splitUserMessageText = (sourceText: string): UserMessageParts => {
   const sections = sourceText.split(/\r?\n\r?\n/u);
-  const attachmentMarkdown = sections.at(-1) ?? "";
-  const isAttachmentBlock = attachmentMarkdown
-    .split(/\r?\n/u)
-    .every((line) => /^!?\[[^\]\r\n]*\]\((?:file:|data:image\/|blob:)[^\r\n]+\)$/u.test(line));
-  if (!attachmentMarkdown || !isAttachmentBlock) {
+  let attachmentSectionStart = sections.length;
+  while (attachmentSectionStart > 0) {
+    const section = sections[attachmentSectionStart - 1];
+    if (!isAttachmentMarkdownBlock(section)) {
+      break;
+    }
+    attachmentSectionStart -= 1;
+  }
+  if (attachmentSectionStart === sections.length) {
     return { text: sourceText };
   }
 
   return {
-    text: sections.length > 1 ? sections.slice(0, -1).join("\n\n") : "",
-    attachmentMarkdown
+    text: attachmentSectionStart > 0
+      ? sections.slice(0, attachmentSectionStart).join("\n\n")
+      : "",
+    attachmentMarkdown: sections.slice(attachmentSectionStart).join("\n")
   };
 };
 

@@ -119,6 +119,18 @@ describe("MessageMarkdownView", () => {
     });
   });
 
+  it("keeps every historical image section in the attachment block", () => {
+    const firstImage = "![first](data:image/png;base64,AAAA)";
+    const secondImage = "![second](data:image/png;base64,BBBB)";
+
+    expect(
+      splitUserMessageText(`Inspect both.\n\n${firstImage}\n\n${secondImage}`)
+    ).toEqual({
+      text: "Inspect both.",
+      attachmentMarkdown: `${firstImage}\n${secondImage}`
+    });
+  });
+
   it("sanitizes unsafe html fragments in markdown source", () => {
     const html = renderToStaticMarkup(
       <MessageMarkdownView
