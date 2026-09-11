@@ -195,9 +195,35 @@ describe("Worker branch presentation", () => {
     const result = projectChatTreeWorkers(tree(), items, requests);
     expect(result.workers).toHaveLength(1);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "实际工单", status: "decision" });
-    const waitingForTree = projectChatTreeWorkers({ ...tree(), windows: [] }, items, requests);
-    expect(waitingForTree.workers).toEqual([]);
-    expect(waitingForTree.activeWorkers).toEqual([]);
+    const partialTree = { ...tree(), memberSessionIds: ["design", "worker"], nodes: [tree().nodes[0]!], windows: [tree().windows![0]!] };
+    const partialItems = [{ ...items[0], treeId: "design", sourceSessionId: "design" }] as WorkItem[];
+    const partialRequests = [{ ...requests[0], treeId: "design" }] as WorkRequest[];
+    const waitingForTree = projectChatTreeWorkers(partialTree, partialItems, partialRequests);
+    expect(waitingForTree.workers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "decision", nodeIds: [] }]);
+    expect(waitingForTree.activeWorkers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "decision" }]);
+  });
+
+  it("ignores work records for archived branches removed from the tree", () => {
+    const source = tree();
+    source.memberSessionIds = ["design"];
+    source.nodes = [source.nodes[0]!];
+    source.windows = [source.windows![0]!];
+    const items = [{ ...boundItems[0], treeId: "design", sourceSessionId: "design" }] as WorkItem[];
+    const result = projectChatTreeWorkers(source, items);
+    expect(result.workers).toEqual([]);
+    expect(result.activeWorkers).toEqual([]);
+    expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
+  });
+
+  it("ignores requests for archived branches removed from the tree", () => {
+    const source = tree();
+    source.memberSessionIds = ["design"];
+    source.nodes = [source.nodes[0]!];
+    source.windows = [source.windows![0]!];
+    const requests = [{ requestId: "archived", sourceSessionId: "design", workerSessionId: "worker", status: "failed" }] as WorkRequest[];
+    const result = projectChatTreeWorkers(source, [], requests);
+    expect(result.workers).toEqual([]);
+    expect(result.activeWorkers).toEqual([]);
   });
 
   it.each(["closed", "cancelled"])("keeps the active item visible when a reused session also has a %s item", (status) => {

@@ -5,25 +5,42 @@ const requestWorkerStatus = (status: WorkRequest["status"]): "preparing" | "fail
   status === "ready" ? "closed" : status === "failed" ? "failed" : status === "cancelled" ? "cancelled" : "preparing";
 
 export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, items: WorkItem[], requests: WorkRequest[] = [], showAll = false) => {
+  if (!tree) return { workers: [], activeWorkers: [], tree: undefined };
   const newestItems = [...items].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  const treeSessionIds = new Set([tree.sessionId, ...(tree.memberSessionIds ?? [])]);
   const relevantRequests = requests.filter((request) =>
     !(request.status === "cancelled" && !request.workerSessionId) &&
-    tree && ((request.treeId && request.treeId === tree.treeId) || request.sourceSessionId === tree.sessionId || tree.memberSessionIds?.includes(request.sourceSessionId))
+    ((request.treeId && request.treeId === tree.treeId) || treeSessionIds.has(request.sourceSessionId))
   );
-  const workers = (tree?.windows ?? []).flatMap((window) => {
-    const session = window.snapshot.sessions.find((entry) => entry.sessionId === window.sessionId);
-    if (!session) return [];
-    const request = relevantRequests.find((entry) => entry.workerSessionId === session.sessionId);
-    const item = newestItems.find((entry) => entry.run.sessionId === session.sessionId && !["closed", "cancelled"].includes(entry.status))
-      ?? newestItems.find((entry) => entry.run.sessionId === session.sessionId);
-    if (!request && !item) return [];
-    const turnIds = new Set(window.snapshot.turns.filter((turn) => turn.sessionId === session.sessionId).map((turn) => turn.turnId));
-    const nodes = tree!.nodes.filter((node) => node.turnId && turnIds.has(node.turnId)).sort((a, b) => a.order - b.order);
-    return [{ key: session.sessionId, requestId: request?.requestId, sessionId: session.sessionId as string | undefined, title: item?.title ?? request?.scope ?? session.title ?? "Worker", status: item?.status ?? (request ? requestWorkerStatus(request.status) : "preparing"), failure: request?.failure,
-      nodeId: nodes.at(-1)?.nodeId, nodeIds: nodes.map((node) => node.nodeId) }];
+  const relevantRequestIds = new Set(relevantRequests.map((request) => request.requestId));
+  const relevantItems = newestItems.filter((item) => {
+    if (!item.run.sessionId || !treeSessionIds.has(item.run.sessionId)) return false;
+    if (!item.treeId && !item.sourceSessionId && !item.requestId) return true;
+    return (item.treeId && item.treeId === tree.treeId) ||
+      (item.sourceSessionId && treeSessionIds.has(item.sourceSessionId)) ||
+      (item.requestId && relevantRequestIds.has(item.requestId));
+  });
+  const workerSessionIds = new Set<string>();
+  for (const request of relevantRequests) {
+    if (request.workerSessionId && treeSessionIds.has(request.workerSessionId)) workerSessionIds.add(request.workerSessionId);
+  }
+  for (const item of relevantItems) {
+    if (item.run.sessionId) workerSessionIds.add(item.run.sessionId);
+  }
+  const workers = [...workerSessionIds].map((sessionId) => {
+    const window = tree.windows?.find((entry) => entry.sessionId === sessionId);
+    const session = window?.snapshot.sessions.find((entry) => entry.sessionId === sessionId);
+    const request = relevantRequests.find((entry) => entry.workerSessionId === sessionId);
+    const item = relevantItems.find((entry) => entry.run.sessionId === sessionId && !["closed", "cancelled"].includes(entry.status))
+      ?? relevantItems.find((entry) => entry.run.sessionId === sessionId);
+    const turnIds = new Set(window?.snapshot.turns.filter((turn) => turn.sessionId === sessionId).map((turn) => turn.turnId));
+    const nodes = tree.nodes.filter((node) => node.turnId && turnIds.has(node.turnId)).sort((a, b) => a.order - b.order);
+    return { key: sessionId, requestId: request?.requestId ?? item?.requestId, sessionId: sessionId as string | undefined, title: item?.title ?? request?.scope ?? session?.title ?? "Worker", status: item?.status ?? (request ? requestWorkerStatus(request.status) : "preparing"), failure: request?.failure,
+      nodeId: nodes.at(-1)?.nodeId, nodeIds: nodes.map((node) => node.nodeId) };
   });
   for (const request of relevantRequests) {
     if (request.status === "ready") continue;
+    if (request.workerSessionId && !treeSessionIds.has(request.workerSessionId)) continue;
     if (workers.some((worker) => worker.requestId === request.requestId || (request.workerSessionId && worker.sessionId === request.workerSessionId))) continue;
     const item = items.find((entry) => entry.requestId === request.requestId);
     workers.push({ key: request.requestId, requestId: request.requestId, sessionId: request.workerSessionId, title: item?.title ?? request.scope ?? "开工准备", status: item?.status ?? requestWorkerStatus(request.status), failure: request.failure, nodeId: undefined, nodeIds: [] });

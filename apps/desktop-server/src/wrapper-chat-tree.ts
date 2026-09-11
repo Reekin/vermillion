@@ -65,7 +65,8 @@ export class WrapperChatTreeService {
   private project(sessionId: string) {
     const { runtimeService, sessionIndexStore: index } = this.options;
     const treeId = index.getTreeId(sessionId);
-    const members = index.getTreeMembers(sessionId).filter((id) => this.loaded.has(id));
+    const treeMembers = index.getTreeMembers(sessionId);
+    const members = treeMembers.filter((id) => this.loaded.has(id));
     const snapshot = runtimeService.getSnapshot();
     const relations = index.listRelations();
     const paths = new Map<string, string[]>();
@@ -122,7 +123,7 @@ export class WrapperChatTreeService {
     const parentIds = new Set(visibleNodes.map((node) => node.parentNodeId));
     const forkIds = new Set(relations.filter((relation) => relation.relationType === "fork")
       .map((relation) => relation.childSessionId));
-    const complete = index.getTreeMembers(sessionId).every((id) => this.loaded.has(id));
+    const complete = treeMembers.every((id) => this.loaded.has(id));
     for (const node of visibleNodes) {
       const owner = turnsById.get(node.nodeId)!.sessionId;
       Object.assign(node, { sessionId: owner, canArchive: complete && !parentIds.has(node.nodeId) &&
@@ -142,7 +143,7 @@ export class WrapperChatTreeService {
     const currentPath = paths.get(currentSessionId) ?? [];
     const visibleTurnIds = currentNodeId ? currentPath.slice(0, currentPath.indexOf(currentNodeId) + 1) : [];
     const tree: ChatTreeSnapshot = {
-      sessionId, treeId, currentSessionId, memberSessionIds: members,
+      sessionId, treeId, currentSessionId, memberSessionIds: treeMembers,
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
       supportsJump: true, currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
       nodes: visibleNodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
