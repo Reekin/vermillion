@@ -37,7 +37,7 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 会话历史与执行环境的生命周期分开。读取历史先检查引擎是否已加载会话；未加载时在 workspace 根恢复，读完退订临时加载的执行环境，不发送模型消息。已有活动执行保持运行。历史阅读不依赖工单 worktree 是否存在；已加载会话树内的节点跳转只保存查看位置，树模型见[思考](../Workbench/Think/PRD.md#会话树)。
 
-`Orchestrator` 由工作台事件和 turn 完成通知驱动。合同更新通过 `runner.steer` 送达；若送达时存在活动 turn，其 id 写入 execution 的 `staleTurnId`，该 turn 结束后清除。标记未清时的提交按旧合同作废。Worker 不自行维护合同版本号。业务上的等待、重试和提交规则见[执行循环规范](../Workbench/Missions/Standards.md)。
+`Orchestrator` 由工作台事件和 turn 完成通知驱动。合同更新送达原执行会话；提交依据是否有效由当前合同决定，与消息送达所在轮次无关。业务上的等待、重试和提交规则见[执行循环规范](../Workbench/Missions/Standards.md)。
 
 ## 桌面与 CLI
 
