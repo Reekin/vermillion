@@ -3,7 +3,8 @@ import type { InboxItem, WorkItem } from "@vermillion/workbench/client";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { useWorkflowContext } from "../use-workflow-context.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { actionStatusLabel, dispositionSummary, actionRoleLabel } from "./workflow-display.js";
+import { actionStatusText, dispositionSummary, actionRoleLabel } from "./workflow-display.js";
+import { IntegrationControls } from "./IntegrationControls.js";
 import { statusLabel } from "./task-labels.js";
 import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotice, DetailSection, ListRow } from "./ui.js";
 
@@ -22,7 +23,7 @@ export const InboxPanel = ({ store, includeProcessed = false }: InboxPanelProps)
     <ul className="mx-auto w-full max-w-4xl space-y-3 p-4">
       {inbox.map((item) => (
         <li key={item.workspaceId + "/" + (item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId)}>
-          {item.kind === "decision" ? <DecisionCard store={store} item={item} /> : <MergedCard store={store} item={item} />}
+          {item.kind === "decision" ? <DecisionCard store={store} item={item} /> : item.kind === "integration" ? <IntegrationCard store={store} item={item} /> : <MergedCard store={store} item={item} />}
         </li>
       ))}
     </ul>
@@ -113,7 +114,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
         <p>{card.kind === "attempts" ? (card.deliveryPending ? "操作已保存，等待处理" : "操作已处理") : (card.deliveryPending ? "答复已保存，等待送达 Worker" : "答复已送达 Worker")}</p>
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
-        <p>{actionRoleLabel(action)} · {actionStatusLabel[action.status]}</p>
+        <p>{actionRoleLabel(action)} · {actionStatusText(action)}</p>
         {dispositions.length ? dispositions.slice(-5).map((summary, index) => <p key={index}>{summary}</p>) : <p>尚无已执行的自动处置。</p>}
       </DetailSection>}
       {relatedIds.length > 0 && <DetailSection title="相关工单">{relatedIds.map((id) => {
@@ -130,6 +131,31 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
     {detailId && data && <WorkItemDialog client={client} workspaceId={item.workspaceId} workItemId={detailId} workItems={data.workItems} runs={data.runs} actions={data.actions} onClose={() => setDetailId(undefined)} onOpenSession={(id, turnId) => showAgentSession(item.workspaceId, id, turnId)} />}
     </>
   );
+};
+
+const IntegrationCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "integration" }> }) => {
+  const client = store((s) => s.client);
+  const showAgentSession = store((s) => s.showAgentSession);
+  const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + item.workItem.workItemId] ?? false);
+  const toggleDetails = store((s) => s.toggleInboxDetails);
+  const { data, error: contextError } = useWorkflowContext(client, item.workspaceId);
+  const [detailId, setDetailId] = useState<string>();
+  const workItem = data?.workItems.find((entry) => entry.workItemId === item.workItem.workItemId) ?? item.workItem;
+  const action = data?.actions.find((entry) => entry.actionId === item.action.actionId);
+  const currentAction = action?.kind === "integration" ? action : item.action;
+  const sessionId = workItem.run.sessionId;
+  return <>
+    <Card header={<><Badge tone="accent">合入受阻</Badge>{sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>进入会话</Button>}</>}>
+      <p className="break-words text-label font-medium text-strong">{workItem.title}</p>
+      <IntegrationControls client={client} workspaceId={item.workspaceId} workItemId={workItem.workItemId} action={currentAction} />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" variant="ghost" outlined onClick={() => setDetailId(workItem.workItemId)}>查看工单</Button>
+      </div>
+      <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, item.workItem.workItemId)}>{currentAction.history.map((entry) => entry.at + " " + entry.message).join("\n")}</CollapsibleDetails>
+      {contextError && <InlineNotice tone="error">{contextError}</InlineNotice>}
+    </Card>
+    {detailId && data && <WorkItemDialog client={client} workspaceId={item.workspaceId} workItemId={detailId} workItems={data.workItems} runs={data.runs} actions={data.actions} onClose={() => setDetailId(undefined)} onOpenSession={(id, turnId) => showAgentSession(item.workspaceId, id, turnId)} />}
+  </>;
 };
 
 const technicalDetails = (item: WorkItem): string => {

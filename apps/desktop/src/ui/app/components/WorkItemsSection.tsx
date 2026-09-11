@@ -7,7 +7,7 @@ import { WorkItemDialog } from "./WorkItemDialog.js";
 import { statusLabel } from "./task-labels.js";
 import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, Stepper, Toggle } from "./ui.js";
 
-import { roleLabel, actionRoleLabel, waitingActions, waitingReason } from "./workflow-display.js";
+import { roleLabel, actionRoleLabel, actionStatusText, integrationShortStatus, waitingActions, waitingReason } from "./workflow-display.js";
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
 const workItemPriority = (item: WorkItem) => item.status === "running" ? 0 : isOpenWorkItem(item) ? 1 : 2;
 const prioritizeWorkItems = (items: WorkItem[]) => [0, 1, 2].flatMap((priority) => items.filter((item) => workItemPriority(item) === priority));
@@ -34,12 +34,14 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
   onOpenSession: (sessionId: string, turnId?: string) => void; onCancel: () => void; onOpen: () => void;
 }) => {
   const blockers = waitingActions(actions, item);
+  const integration = actions.filter((action): action is Extract<WorkflowAction, { kind: "integration" }> =>
+    action.kind === "integration" && action.workItemId === item.workItemId && action.stage === "merge" && action.status !== "done" && action.status !== "cancelled")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   const userPaused = item.run.pauseReason === "user";
   const sessionId = item.run.sessionId ?? run?.sessionId;
   const at = run?.endedAt ?? item.run.heartbeatAt ?? run?.startedAt ?? item.updatedAt;
-  const info = run
-    ? [!compact && roleLabel[run.role], run.turns + " turn", compact ? relativeTime(at) : new Date(at).toLocaleString("zh-CN")].filter(Boolean).join(" · ")
-    : item.run.lastFailure ?? "";
+  const info = [run && [!compact && roleLabel[run.role], run.turns + " turn", compact ? relativeTime(at) : new Date(at).toLocaleString("zh-CN")].filter(Boolean).join(" · "),
+    integration && (integration.status === "retry" ? `自动重试 ${Math.min(integration.attempts, 4)}/4` : integration.status === "decision" ? "自动重试已用尽" : undefined)].filter(Boolean).join(" · ");
   return (
     <li data-task-id={item.workItemId} className="border-t border-border first:border-t-0">
       <ListRow
@@ -50,7 +52,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
         titleClassName={muted || !isOpenWorkItem(item) ? "text-faint-foreground" : undefined}
         columns={{
           info: info && <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
-          status: <Badge status={item.status} muted={muted}>{userPaused ? "用户暂停" : statusLabel[item.status]}</Badge>,
+          status: <Badge status={item.status} muted={muted}>{userPaused ? "用户暂停" : integration ? integrationShortStatus(integration) : statusLabel[item.status]}</Badge>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
           action: sessionId && <SessionLink sessionId={sessionId} onOpenSession={onOpenSession} />
         }}

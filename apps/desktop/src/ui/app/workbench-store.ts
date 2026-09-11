@@ -211,6 +211,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
             case "scheduler.changed":
             case "runs.changed":
             case "actions.changed":
+              void loadInbox();
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               return;
             case "workItems.changed":

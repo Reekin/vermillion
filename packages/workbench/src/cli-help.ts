@@ -16,6 +16,9 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "workItem.cancel": "未结束工单；取消当前工作。",
   "workItem.pause": "正在运行的 Worker 会话；登记用户暂停，配合会话 Stop 使用。",
   "workItem.resume": "用户已暂停的工单；清除暂停并从原会话继续。",
+  "workItem.integration.retry": "合入失败且尚未交给 Agent 的工单；立即重试当前合入，不等待自动重试时间。",
+  "workItem.integration.takeover": "合入失败且尚未交给 Agent 的工单；停止自动合入重试，附说明交给原 Worker 处理。",
+  "workItem.integration.complete": "已接管合入的原 Worker；处理 worktree/rebase 后请求工作台在串行边界执行最终合入。",
   "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。",
   "search.query": "只读查询；搜索已登记的 workspace 工单和 Vermillion rollout 文件，返回命中上下文。"
 };

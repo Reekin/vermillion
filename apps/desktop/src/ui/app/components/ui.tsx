@@ -18,7 +18,8 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes
 } from "react";
-import { ChevronDown, ChevronRight, Minus, Plus, type LucideIcon } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronRight, Minus, MoreHorizontal, Plus, type LucideIcon } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
@@ -154,6 +155,29 @@ const omit = <T extends FieldBase & { kind?: string }>(props: T): Omit<T, keyof 
 
 /** Floating list surface shared by the status bar panel and hover cards. */
 const floatingPanelClass = "flex max-h-[60vh] w-96 max-w-[94vw] flex-col overflow-auto rounded-md border border-border-strong bg-surface-raised py-1 floating-shadow";
+
+export type OverflowMenuItem = { label: string; onSelect: () => void; disabled?: boolean };
+
+/** Compact menu for card-level actions that should not occupy the primary action row. */
+export const OverflowMenu = ({ label, items }: { label: string; items: OverflowMenuItem[] }) => {
+  const [open, setOpen] = useState(false);
+  return <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Trigger render={<IconButton icon={MoreHorizontal} label={label} />} />
+    <Popover.Portal>
+      <Popover.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
+        <Popover.Popup className={floatingPanelClass + " w-auto min-w-44"}>
+          <ul role="menu">
+            {items.map((item) => <li key={item.label}>
+              <button type="button" role="menuitem" disabled={item.disabled} className="block w-full px-3 py-1.5 text-left text-label text-foreground hover:bg-surface-hover hover:text-strong disabled:text-faint-foreground" onClick={() => { setOpen(false); item.onSelect(); }}>
+                {item.label}
+              </button>
+            </li>)}
+          </ul>
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
+};
 
 /** Window-wide status feedback with an anchored, keyboard-accessible summary panel. */
 export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenChange }: {

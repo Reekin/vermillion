@@ -63,6 +63,9 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workItem.cancel": (p) => service.cancelWorkItem(p.workspaceId, p.workItemId),
     "workItem.pause": (p) => service.pauseWorkItem(p.workspaceId, p.sessionId),
     "workItem.resume": (p) => service.resumeWorkItem(p.workspaceId, p.workItemId),
+    "workItem.integration.retry": (p) => service.retryIntegration(p.workspaceId, p.workItemId),
+    "workItem.integration.takeover": (p) => service.takeoverIntegration(p.workspaceId, p.workItemId, p.note),
+    "workItem.integration.complete": (p) => service.completeIntegration(p.workspaceId, p.workItemId, p.actionId, p.sessionId),
     "action.list": (p) => service.listActions(p.workspaceId),
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
