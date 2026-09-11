@@ -14,7 +14,10 @@ import {
   writeSessionExecutionProfile
 } from "@vermillion/shared";
 import type { HydratedSessionSnapshot } from "./session-discovery.js";
-import { DomainService } from "./domain-service.js";
+import {
+  DomainService,
+  type HydratedUserMessageReplacement
+} from "./domain-service.js";
 import { SessionIndexSyncService } from "./session-index-sync-service.js";
 import type { SessionRelationIndex } from "./session-index.js";
 import {
@@ -191,7 +194,22 @@ export class RuntimeOrchestrator {
       relatedIndexRelations?: SessionRelationIndex[];
     } = {}
   ) {
-    return this.domainService.hydrateDiscoveredSession(snapshot, input);
+    return this.domainService.hydrateDiscoveredSession(snapshot, {
+      ...input,
+      onUserMessageReplaced: (
+        replacement: HydratedUserMessageReplacement
+      ) => {
+        if (
+          this.localUserMessageIdByTurn.get(replacement.turnId) ===
+          replacement.replacedMessageId
+        ) {
+          this.localUserMessageIdByTurn.set(
+            replacement.turnId,
+            replacement.replacementMessageId
+          );
+        }
+      }
+    });
   }
 
   public async executeCommand(input: CommandEnvelope): Promise<CommandReceipt> {

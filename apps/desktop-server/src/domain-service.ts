@@ -23,7 +23,8 @@ import type { SessionListOptions } from "./runtime-types.js";
 type Clock = () => string;
 type IdFactory = () => string;
 
-type HydratedUserMessageReplacement = {
+export type HydratedUserMessageReplacement = {
+  turnId: string;
   replacedMessageId: string;
   replacementMessageId: string;
 };
@@ -104,6 +105,9 @@ export class DomainService {
     snapshot: HydratedSessionSnapshot,
     input: {
       relatedIndexRelations?: SessionRelationIndex[];
+      onUserMessageReplaced?: (
+        replacement: HydratedUserMessageReplacement
+      ) => void;
     } = {}
   ): ChatSession {
     const existingConversation = this.domainReplica.getConversation(
@@ -122,6 +126,9 @@ export class DomainService {
     const messageReplacements = this.resolveHydratedUserMessageReplacements(
       snapshot
     );
+    for (const replacement of messageReplacements) {
+      input.onUserMessageReplaced?.(replacement);
+    }
     this.domainReplica.mergeSnapshot(
       {
         conversations: [
@@ -509,6 +516,7 @@ export class DomainService {
         );
       if (duplicate) {
         replacements.set(duplicate.messageId, {
+          turnId: hydratedBlock.turnId,
           replacedMessageId: duplicate.messageId,
           replacementMessageId: hydratedBlock.messageId
         });

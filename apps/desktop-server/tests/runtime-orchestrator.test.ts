@@ -2095,4 +2095,188 @@ describe("RuntimeOrchestrator", () => {
     }
   });
 
+  it("retargets late user lifecycle events after hydration replaces its echo", async () => {
+    let listener: Parameters<AgentAdapter["subscribe"]>[0] | undefined;
+    let lifecycleState: ReturnType<AgentAdapter["getLifecycleState"]> = "idle";
+    const adapter: AgentAdapter = {
+      id: "adapter-hydrated-order",
+      kind: "codex",
+      getLifecycleState: () => lifecycleState,
+      initialize: async () => {
+        lifecycleState = "ready";
+      },
+      executeCommand: async (envelope) => ({
+        commandId: envelope.commandId,
+        commandType: envelope.command.type,
+        accepted: true,
+        ...(envelope.command.type === "sendUserMessage"
+          ? {
+              outcome: {
+                type: "turn_started" as const,
+                sessionId: "session-hydrated-order",
+                turnId: "turn-hydrated-order"
+              }
+            }
+          : {})
+      }),
+      subscribe: (next) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      },
+      dispose: async () => {}
+    };
+    let orchestrator: RuntimeOrchestrator | undefined;
+    const domainService = new DomainService({
+      now: () => "2026-04-20T00:04:00Z",
+      createSessionId: () => "session-hydrated-order",
+      assertEngineRegistered: (engineId) =>
+        orchestrator?.assertEngineRegistered(engineId),
+      resolveEngineCapabilities: (engineId) =>
+        orchestrator?.getEngineCapabilities(engineId) ?? [],
+      publishRuntimeEvent: () => {}
+    });
+    orchestrator = new RuntimeOrchestrator({
+      domainService,
+      sessionIndexSyncService: {
+        syncSession: vi.fn().mockResolvedValue(undefined),
+        syncRelation: vi.fn().mockResolvedValue(undefined),
+        markSessionUnreadCompleted: vi.fn().mockResolvedValue(undefined)
+      } as never,
+      workspaceSelectionService: {
+        activateSelection: vi.fn().mockResolvedValue(undefined),
+        selectWorkspace: vi.fn().mockResolvedValue({ workspaceId: "workspace-1" })
+      } as never,
+      publishRuntimeEvent: () => {},
+      agentBindings: [{
+        descriptor: {
+          engineId: "codex",
+          displayName: "Codex",
+          capabilities: ["chat"]
+        },
+        adapter
+      }]
+    });
+
+    await orchestrator.createSession({
+      engineId: "codex",
+      workspaceId: "workspace-1"
+    });
+    await orchestrator.executeCommand({
+      commandId: "send-hydrated-order",
+      command: {
+        type: "sendUserMessage",
+        sessionId: "session-hydrated-order",
+        messageId: "local-user-message",
+        content: "hello",
+        attachments: []
+      }
+    });
+    domainService.ingestRuntimeEvent(
+      {
+        type: "message.started",
+        sessionId: "session-hydrated-order",
+        turnId: "turn-hydrated-order",
+        messageId: "assistant-live-message",
+        role: "assistant"
+      },
+      "2026-04-20T00:04:01Z"
+    );
+    domainService.ingestRuntimeEvent(
+      {
+        type: "message.completed",
+        sessionId: "session-hydrated-order",
+        turnId: "turn-hydrated-order",
+        messageId: "assistant-live-message",
+        role: "assistant",
+        finalText: "answer",
+        isFinalForTurn: true
+      },
+      "2026-04-20T00:04:02Z"
+    );
+
+    orchestrator.hydrateDiscoveredSession({
+      workspaceId: "workspace-1",
+      conversation: {
+        conversationId: "conversation-hydrated-order",
+        workspaceId: "workspace-1",
+        participantEngineIds: ["codex"],
+        activeSessionId: "session-hydrated-order",
+        sessionIds: ["session-hydrated-order"],
+        createdAt: "2026-04-20T00:04:00Z",
+        updatedAt: "2026-04-20T00:04:03Z"
+      },
+      session: {
+        sessionId: "session-hydrated-order",
+        conversationId: "conversation-hydrated-order",
+        engineId: "codex",
+        status: "idle",
+        createdAt: "2026-04-20T00:04:00Z",
+        updatedAt: "2026-04-20T00:04:03Z",
+        metadata: {
+          providerSessionId: "thread-hydrated-order"
+        }
+      },
+      turns: [
+        {
+          turnId: "turn-hydrated-order",
+          sessionId: "session-hydrated-order",
+          status: "completed",
+          finishReason: "completed",
+          startedAt: "2026-04-20T00:04:00Z",
+          completedAt: "2026-04-20T00:04:03Z",
+          finalMessageId: "assistant-live-message",
+          messageIds: ["hydrated-user-message"],
+          toolCallIds: [],
+          terminalIds: [],
+          approvalRequestIds: [],
+          interactionRequestIds: []
+        }
+      ],
+      messageBlocks: [
+        {
+          blockId: "hydrated-user-message:md",
+          messageId: "hydrated-user-message",
+          sessionId: "session-hydrated-order",
+          turnId: "turn-hydrated-order",
+          role: "user",
+          kind: "markdown",
+          text: "hello",
+          startedAt: "2026-04-20T00:04:00Z",
+          completedAt: "2026-04-20T00:04:00Z"
+        }
+      ],
+      toolCalls: [],
+      terminalStreams: [],
+      sessionRelations: []
+    });
+    listener?.({
+      eventId: "late-user-message",
+      occurredAt: "2026-04-20T00:04:04Z",
+      event: {
+        type: "message.completed",
+        sessionId: "session-hydrated-order",
+        turnId: "turn-hydrated-order",
+        messageId: "provider-user-message",
+        role: "user",
+        finalText: "hello",
+        engineId: "codex"
+      }
+    });
+
+    const snapshot = domainService.getSnapshot();
+    expect(snapshot.turns[0]?.messageIds).toEqual([
+      "hydrated-user-message",
+      "assistant-live-message"
+    ]);
+    expect(snapshot.messageBlocks.filter((block) => block.role === "user")).toEqual([
+      expect.objectContaining({
+        messageId: "hydrated-user-message",
+        text: "hello"
+      })
+    ]);
+    await orchestrator.dispose();
+  });
+
 });
