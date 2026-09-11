@@ -392,6 +392,9 @@ export const invalidatesSessionBrowser = (event: RuntimeEvent): boolean => {
     case "approval.requested":
     case "interaction.requested":
       return true;
+    case "message.started":
+    case "message.completed":
+      return event.role === "user";
     case "runtime.error":
       return !event.recoverable && Boolean(event.sessionId);
     default:

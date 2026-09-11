@@ -317,9 +317,7 @@ export class RuntimeOrchestrator {
               envelope.command,
               outcome.turnId
             );
-            if (nextMetadata !== session.metadata) {
-              await this.sessionIndexSyncService.syncSession(session.sessionId);
-            }
+            await this.sessionIndexSyncService.syncSession(session.sessionId);
             this.drainPendingSendEvents(pendingStart);
             receipt = this.accept(envelope, true, {
               sessionId: outcome.sessionId,
@@ -371,6 +369,7 @@ export class RuntimeOrchestrator {
           } else {
             this.domainService.commitSteerUserMessage({ ...envelope.command, turnId: outcome.turnId });
           }
+          await this.sessionIndexSyncService.syncSession(session.sessionId);
           return this.accept(envelope, true, {
             sessionId: outcome.sessionId, turnId: outcome.turnId, delivery: outcome.delivery
           });
@@ -539,12 +538,14 @@ export class RuntimeOrchestrator {
     const engineId = this.resolveSessionEngineId(session);
     const binding = this.bindings.get(engineId);
     const lastCompletedTurnAt = this.resolveLastCompletedTurnAt(sessionId);
+    const lastUserMessageAt = this.resolveLastUserMessageAt(sessionId);
     return {
       workspaceId: conversation?.workspaceId,
       session,
       providerKind: binding?.providerKind,
       providerSessionId: binding?.resolveProviderSessionId?.(session.sessionId),
-      lastCompletedTurnAt
+      lastCompletedTurnAt,
+      lastUserMessageAt
     };
   }
 
@@ -563,6 +564,19 @@ export class RuntimeOrchestrator {
       }
     }
     return latestCompletedAt;
+  }
+
+  private resolveLastUserMessageAt(sessionId: string): string | undefined {
+    let latestUserMessageAt: string | undefined;
+    for (const messageBlock of this.domainService.getSnapshot().messageBlocks) {
+      if (messageBlock.sessionId !== sessionId || messageBlock.role !== "user") {
+        continue;
+      }
+      if (!latestUserMessageAt || messageBlock.startedAt > latestUserMessageAt) {
+        latestUserMessageAt = messageBlock.startedAt;
+      }
+    }
+    return latestUserMessageAt;
   }
 
   public resolveProviderSessionHandle(

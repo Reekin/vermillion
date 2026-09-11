@@ -526,6 +526,21 @@ const resolveHydratedLastCompletedTurnAt = (
   return latestCompletedAt;
 };
 
+const resolveHydratedLastUserMessageAt = (
+  messageBlocks: readonly MessageBlock[]
+): string | undefined => {
+  let latestUserMessageAt: string | undefined;
+  for (const messageBlock of messageBlocks) {
+    if (messageBlock.role !== "user") {
+      continue;
+    }
+    if (!latestUserMessageAt || messageBlock.startedAt > latestUserMessageAt) {
+      latestUserMessageAt = messageBlock.startedAt;
+    }
+  }
+  return latestUserMessageAt;
+};
+
 const isActiveSessionStatus = (status: SessionStatus): boolean =>
   status === "running" || status === "awaiting_approval";
 
@@ -1885,6 +1900,7 @@ export class SessionReconciliationService {
     } = {}
   ): Promise<void> {
     const hydratedLastCompletedTurnAt = resolveHydratedLastCompletedTurnAt(hydrated.turns);
+    const hydratedLastUserMessageAt = resolveHydratedLastUserMessageAt(hydrated.messageBlocks);
     await this.sessionIndexStore.upsertSession({
       workspaceId: hydrated.workspaceId,
       session: hydrated.session,
@@ -1895,6 +1911,7 @@ export class SessionReconciliationService {
       lastCompletedTurnAt: input.partial
         ? latestIso(entry.lastCompletedTurnAt, hydratedLastCompletedTurnAt)
         : hydratedLastCompletedTurnAt,
+      lastUserMessageAt: latestIso(entry.lastUserMessageAt, hydratedLastUserMessageAt),
       unreadState: entry.unreadState,
       source: entry.source
     });

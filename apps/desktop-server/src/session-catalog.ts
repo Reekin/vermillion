@@ -32,14 +32,22 @@ type SessionCatalogSeed = {
   createdAt: string;
   updatedAt: string;
   lastCompletedTurnAt?: string;
+  lastUserMessageAt?: string;
   archivedAt?: string;
   runtimeStatus?: ChatSession["status"];
   unreadState?: SessionIndexEntry["unreadState"];
   metadata?: Record<string, unknown>;
 };
 
+const latest = (values: readonly (string | undefined)[]): string | undefined =>
+  values.reduce<string | undefined>(
+    (result, value) => value && (!result || value > result) ? value : result,
+    undefined
+  );
+
 const resolveSeedActivityAt = (seed: SessionCatalogSeed): string =>
-  seed.lastCompletedTurnAt ?? seed.createdAt;
+  latest([seed.lastCompletedTurnAt, seed.lastUserMessageAt, seed.createdAt]) ??
+  seed.createdAt;
 
 const collectLastCompletedTurnAtBySessionId = (
   turns: DomainSnapshot["turns"]
@@ -57,10 +65,27 @@ const collectLastCompletedTurnAtBySessionId = (
   return lastCompletedTurnAtBySessionId;
 };
 
+const collectLastUserMessageAtBySessionId = (
+  messageBlocks: DomainSnapshot["messageBlocks"]
+): Map<string, string> => {
+  const lastUserMessageAtBySessionId = new Map<string, string>();
+  for (const messageBlock of messageBlocks) {
+    if (messageBlock.role !== "user") {
+      continue;
+    }
+    const existing = lastUserMessageAtBySessionId.get(messageBlock.sessionId);
+    if (!existing || messageBlock.startedAt > existing) {
+      lastUserMessageAtBySessionId.set(messageBlock.sessionId, messageBlock.startedAt);
+    }
+  }
+  return lastUserMessageAtBySessionId;
+};
+
 const toSeedFromRuntime = (
   snapshot: DomainSnapshot,
   session: ChatSession,
-  lastCompletedTurnAtBySessionId: ReadonlyMap<string, string>
+  lastCompletedTurnAtBySessionId: ReadonlyMap<string, string>,
+  lastUserMessageAtBySessionId: ReadonlyMap<string, string>
 ): SessionCatalogSeed | undefined => {
   const conversation = snapshot.conversations.find(
     (item) => item.conversationId === session.conversationId
@@ -77,6 +102,7 @@ const toSeedFromRuntime = (
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     lastCompletedTurnAt: lastCompletedTurnAtBySessionId.get(session.sessionId),
+    lastUserMessageAt: lastUserMessageAtBySessionId.get(session.sessionId),
     archivedAt: session.archivedAt,
     runtimeStatus: session.status,
     metadata: session.metadata
@@ -180,6 +206,7 @@ export class SessionCatalogService {
     const registryState = this.workspaceRegistry.getState();
     const runtimeSessionIds = new Set(snapshot.sessions.map((session) => session.sessionId));
     const lastCompletedTurnAtBySessionId = collectLastCompletedTurnAtBySessionId(snapshot.turns);
+    const lastUserMessageAtBySessionId = collectLastUserMessageAtBySessionId(snapshot.messageBlocks);
     const bySessionId = new Map<string, SessionCatalogSeed>();
 
     for (const entry of this.sessionIndexStore.listEntries()) {
@@ -195,13 +222,19 @@ export class SessionCatalogService {
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
         lastCompletedTurnAt: entry.lastCompletedTurnAt,
+        lastUserMessageAt: entry.lastUserMessageAt,
         archivedAt: entry.archivedAt,
         unreadState: entry.unreadState,
         metadata: entry.metadata
       });
     }
     for (const session of snapshot.sessions) {
-      const runtimeSeed = toSeedFromRuntime(snapshot, session, lastCompletedTurnAtBySessionId);
+      const runtimeSeed = toSeedFromRuntime(
+        snapshot,
+        session,
+        lastCompletedTurnAtBySessionId,
+        lastUserMessageAtBySessionId
+      );
       if (!runtimeSeed) {
         continue;
       }
@@ -211,6 +244,10 @@ export class SessionCatalogService {
         ...runtimeSeed,
         archivedAt: runtimeSeed.archivedAt ?? existing?.archivedAt,
         lastCompletedTurnAt: runtimeSeed.lastCompletedTurnAt ?? existing?.lastCompletedTurnAt,
+        lastUserMessageAt: latest([
+          runtimeSeed.lastUserMessageAt,
+          existing?.lastUserMessageAt
+        ]),
         summaryText: existing?.summaryText,
         unreadState: existing?.unreadState,
         metadata: runtimeSeed.metadata ?? existing?.metadata

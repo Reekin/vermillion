@@ -67,7 +67,8 @@ describe("SessionIndexSyncService", () => {
       },
       providerKind: "codex-thread",
       providerSessionId: "thread-123",
-      lastCompletedTurnAt: "2026-04-18T00:00:01.500Z"
+      lastCompletedTurnAt: "2026-04-18T00:00:01.500Z",
+      lastUserMessageAt: "2026-04-18T00:00:01.250Z"
     });
     await service.syncSession("session-1");
 
@@ -75,6 +76,7 @@ describe("SessionIndexSyncService", () => {
       providerKind: "codex-thread",
       providerSessionId: "thread-123",
       lastCompletedTurnAt: "2026-04-18T00:00:01.500Z",
+      lastUserMessageAt: "2026-04-18T00:00:01.250Z",
       updatedAt: "2026-04-18T00:00:02.000Z"
     });
 

@@ -160,12 +160,13 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         sessionProfile: execution,
         metadata: { cwd: workspace.rootPath, developerInstructions: role.content + "\n\n当前 workspaceId: " + workspace.workspaceId + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n" }
       });
+      sessionStore.dispatch({ type: "store/sessionBrowserChanged" });
       setSessionId(created.sessionId);
       setNavigationTarget({ sessionId: created.sessionId, workspaceId: workspace.workspaceId });
       if (workspaceFilterId && workspaceFilterId !== workspace.workspaceId) setWorkspaceFilterId(workspace.workspaceId);
       return created.sessionId;
     },
-    [draftWorkspaceId, workspaceById, transport, store, workspaceFilterId]
+    [draftWorkspaceId, workspaceById, transport, store, workspaceFilterId, sessionStore]
   );
 
   const onSelect = useCallback(

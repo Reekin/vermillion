@@ -410,6 +410,123 @@ describe("SessionCatalogService", () => {
     expect(page.items[1]?.lastCompletedTurnAt).toBe("2026-04-18T00:05:00Z");
   });
 
+  it("uses the latest user message for activity and ordering before turn completion", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const indexStore = new SessionIndexStore({ baseDir });
+    await workspaceRegistry.registerWorkspace({
+      workspaceId: "workspace-1",
+      absolutePath: "I:/workspace-alpha"
+    });
+    await indexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-old",
+        conversationId: "conversation-old",
+        engineId: "codex",
+        createdAt: "2026-04-18T00:00:00Z",
+        updatedAt: "2026-04-18T00:30:00Z"
+      },
+      lastCompletedTurnAt: "2026-04-18T00:05:00Z"
+    });
+    await indexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-new",
+        conversationId: "conversation-new",
+        engineId: "codex",
+        createdAt: "2026-04-18T00:10:00Z",
+        updatedAt: "2026-04-18T00:15:00Z"
+      },
+      lastCompletedTurnAt: "2026-04-18T00:15:00Z"
+    });
+
+    const runtimeService = {
+      getSnapshot: () => ({
+        ...emptySnapshot(),
+        conversations: [
+          {
+            conversationId: "conversation-old",
+            workspaceId: "workspace-1",
+            participantEngineIds: ["codex"],
+            activeSessionId: "session-old",
+            sessionIds: ["session-old"],
+            createdAt: "2026-04-18T00:00:00Z",
+            updatedAt: "2026-04-18T00:30:00Z"
+          },
+          {
+            conversationId: "conversation-new",
+            workspaceId: "workspace-1",
+            participantEngineIds: ["codex"],
+            activeSessionId: "session-new",
+            sessionIds: ["session-new"],
+            createdAt: "2026-04-18T00:10:00Z",
+            updatedAt: "2026-04-18T00:15:00Z"
+          }
+        ],
+        sessions: [
+          {
+            sessionId: "session-old",
+            conversationId: "conversation-old",
+            engineId: "codex",
+            status: "running",
+            createdAt: "2026-04-18T00:00:00Z",
+            updatedAt: "2026-04-18T00:30:00Z"
+          },
+          {
+            sessionId: "session-new",
+            conversationId: "conversation-new",
+            engineId: "codex",
+            status: "idle",
+            createdAt: "2026-04-18T00:10:00Z",
+            updatedAt: "2026-04-18T00:15:00Z"
+          }
+        ],
+        messageBlocks: [
+          {
+            blockId: "user-message:md",
+            messageId: "user-message",
+            sessionId: "session-old",
+            turnId: "turn-running",
+            role: "user",
+            kind: "markdown",
+            text: "still running",
+            startedAt: "2026-04-18T00:20:00Z",
+            completedAt: "2026-04-18T00:20:00Z"
+          },
+          {
+            blockId: "assistant-message:md",
+            messageId: "assistant-message",
+            sessionId: "session-old",
+            turnId: "turn-running",
+            role: "assistant",
+            kind: "markdown",
+            text: "still working",
+            startedAt: "2026-04-18T00:30:00Z",
+            completedAt: "2026-04-18T00:30:00Z"
+          }
+        ]
+      }),
+      getSessionBrowserRevision: () => 1
+    } as unknown as SessionRuntimeService;
+    const service = new SessionCatalogService({
+      runtimeService,
+      workspaceRegistry,
+      sessionIndexStore: indexStore
+    });
+
+    const page = await service.list({ workspaceId: "workspace-1" });
+
+    expect(page.items.map((item) => item.sessionId)).toEqual([
+      "session-old",
+      "session-new"
+    ]);
+    expect(page.items[0]).toMatchObject({
+      activityAt: "2026-04-18T00:20:00Z",
+      lastCompletedTurnAt: "2026-04-18T00:05:00Z"
+    });
+  });
+
   it("falls back to created time when completed turn time is unknown", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({

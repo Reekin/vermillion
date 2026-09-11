@@ -15,7 +15,7 @@ vi.mock("xterm", () => ({
 
 import {
   SessionPane,
-  formatRelativeCompletedTurnAge,
+  formatRelativeActivityAge,
   truncateSessionHeading
 } from "../src/ui/chat-shell/SessionPane.js";
 
@@ -175,10 +175,10 @@ describe("SessionPane", () => {
   it("formats completed-turn age using minute, hour, and day units", () => {
     const now = new Date("2026-05-04T12:00:00.000Z").getTime();
 
-    expect(formatRelativeCompletedTurnAge("2026-05-04T11:55:00.000Z", now)).toBe("5m");
-    expect(formatRelativeCompletedTurnAge("2026-05-04T09:30:00.000Z", now)).toBe("2h");
-    expect(formatRelativeCompletedTurnAge("2026-05-01T08:00:00.000Z", now)).toBe("3d");
-    expect(formatRelativeCompletedTurnAge(undefined, now)).toBeUndefined();
-    expect(formatRelativeCompletedTurnAge("not-a-date", now)).toBeUndefined();
+    expect(formatRelativeActivityAge("2026-05-04T11:55:00.000Z", now)).toBe("5m");
+    expect(formatRelativeActivityAge("2026-05-04T09:30:00.000Z", now)).toBe("2h");
+    expect(formatRelativeActivityAge("2026-05-01T08:00:00.000Z", now)).toBe("3d");
+    expect(formatRelativeActivityAge(undefined, now)).toBeUndefined();
+    expect(formatRelativeActivityAge("not-a-date", now)).toBeUndefined();
   });
 });

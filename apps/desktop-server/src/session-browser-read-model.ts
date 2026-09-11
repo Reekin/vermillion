@@ -22,7 +22,7 @@ export class SessionBrowserCursorStaleError extends Error {
   }
 }
 
-/** Pinned first, then most recently completed turn first. */
+/** Pinned first, then most recent activity first. */
 const compareSeeds = (
   left: SessionBrowserReadModelSeed,
   right: SessionBrowserReadModelSeed
@@ -89,7 +89,10 @@ const collectForkTrees = (seeds: readonly SessionBrowserReadModelSeed[]): Sessio
     const visibleMembers = members.filter((member) => member.isVisible !== false && !member.archivedAt);
     const isActive = visibleMembers.some((member) => member.isActive);
     const lastCompletedTurnAt = latest(visibleMembers.map((member) => member.lastCompletedTurnAt));
-    const activityAt = lastCompletedTurnAt ?? latest(visibleMembers.map((member) => member.activityAt ?? member.sortAt));
+    const activityAt = latest([
+      lastCompletedTurnAt,
+      ...visibleMembers.map((member) => member.activityAt ?? member.sortAt)
+    ]);
     const parent = root.parentSessionId ? bySessionId.get(root.parentSessionId) : undefined;
     return {
       ...root,

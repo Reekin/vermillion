@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, CornerDownRight, Pin, Plus, Search } from "lucide-react";
 import { useState, type MouseEvent } from "react";
-import { formatRelativeCompletedTurnAge } from "../../chat-shell/index.js";
+import { formatRelativeActivityAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
@@ -66,7 +66,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           </>
         }
         meta={!workspaceFilterId ? workspaceLabelById.get(session.workspaceId) ?? session.workspaceId : undefined}
-        trailing={formatRelativeCompletedTurnAge(session.lastCompletedTurnAt ?? session.activityAt)}
+        trailing={formatRelativeActivityAge(session.activityAt ?? session.lastCompletedTurnAt)}
       />
       {session.subagents.length > 0 && expandedIds.has(session.sessionId) && (
         <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId: session.workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>

@@ -499,7 +499,8 @@ describe("SessionIndexStore", () => {
           source: "gui"
         }
       },
-      summaryText: "Initial summary"
+      summaryText: "Initial summary",
+      lastUserMessageAt: "2026-04-18T00:00:01.500Z"
     });
 
     await store.upsertSession({
@@ -535,7 +536,8 @@ describe("SessionIndexStore", () => {
       }),
       expect.objectContaining({
         sessionId: "session-1",
-        summaryText: "Initial summary"
+        summaryText: "Initial summary",
+        lastUserMessageAt: "2026-04-18T00:00:01.500Z"
       })
     ]);
     expect(reloaded.listRelations("workspace-1")).toEqual([
