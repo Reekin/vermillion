@@ -40,6 +40,10 @@ export type DomainSnapshotMergeScope = {
 export type DomainSnapshotMergeOptions = {
   scope?: DomainSnapshotMergeScope;
   replaceMessageIds?: readonly string[];
+  replaceMessageIdMappings?: readonly {
+    replacedMessageId: string;
+    replacementMessageId: string;
+  }[];
 };
 
 export type ListSessionsOptions = {
@@ -365,12 +369,16 @@ export class DomainStore {
     const parsedSnapshot = parseDomainSnapshot(snapshot);
     const staged = DomainStore.fromSnapshot(this.getSnapshot());
     staged.assertSnapshotWithinMergeScope(parsedSnapshot, options.scope);
+    const replacementSlots = staged.captureMessageReplacementSlots(
+      options.replaceMessageIdMappings ?? []
+    );
     for (const messageId of new Set(options.replaceMessageIds ?? [])) {
       staged.deleteMessage(messageId);
     }
     staged.applyParsedSnapshot(parsedSnapshot, {
       merge: true
     });
+    staged.restoreMessageReplacementSlots(replacementSlots);
     this.swapFrom(staged);
     return this.getSnapshot();
   }
@@ -1173,6 +1181,69 @@ export class DomainStore {
   private deleteMessage(messageId: string): void {
     for (const block of this.listMessageBlocks({ messageId })) {
       this.deleteMessageBlock(block.blockId);
+    }
+  }
+
+  private captureMessageReplacementSlots(
+    replacements: readonly {
+      replacedMessageId: string;
+      replacementMessageId: string;
+    }[]
+  ): Array<{
+    turnId: string;
+    index: number;
+    replacementMessageId: string;
+  }> {
+    const replacementsByMessageId = new Map(
+      replacements.map((replacement) => [
+        replacement.replacedMessageId,
+        replacement.replacementMessageId
+      ])
+    );
+    const slots: Array<{
+      turnId: string;
+      index: number;
+      replacementMessageId: string;
+    }> = [];
+    for (const turn of this.listTurns()) {
+      turn.messageIds.forEach((messageId, index) => {
+        const replacementMessageId = replacementsByMessageId.get(messageId);
+        if (replacementMessageId) {
+          slots.push({
+            turnId: turn.turnId,
+            index,
+            replacementMessageId
+          });
+        }
+      });
+    }
+    return slots.sort((left, right) => left.index - right.index);
+  }
+
+  private restoreMessageReplacementSlots(
+    slots: readonly {
+      turnId: string;
+      index: number;
+      replacementMessageId: string;
+    }[]
+  ): void {
+    for (const slot of slots) {
+      const turn = this.getTurn(slot.turnId);
+      if (!turn || !turn.messageIds.includes(slot.replacementMessageId)) {
+        continue;
+      }
+      const messageIds = turn.messageIds.filter(
+        (messageId) => messageId !== slot.replacementMessageId
+      );
+      messageIds.splice(
+        Math.min(slot.index, messageIds.length),
+        0,
+        slot.replacementMessageId
+      );
+      this.upsertTurn({
+        ...turn,
+        messageIds
+      });
     }
   }
 
