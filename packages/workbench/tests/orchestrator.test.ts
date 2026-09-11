@@ -201,6 +201,86 @@ async function fixture(trackTurns = false) {
   return { ...f, runner, active, orchestrator, complete, startTurn };
 }
 
+it("delivers a merge takeover once to the original worker and suppresses automatic integration", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { title: "Merge takeover", objective: "merge", risk: "R1",
+    scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "merged" }], sessionId: "worker" });
+  await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = await f.service.createAction(f.workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
+    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  await f.service.failAction(f.workspaceId, action.actionId, "主工作区有未提交修改");
+  f.orchestrator.start();
+
+  await f.service.takeoverIntegration(f.workspaceId, item.workItemId, "保留主目录修改");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(1));
+  const [sessionId, message] = vi.mocked(f.runner.send).mock.calls[0]!;
+  expect(sessionId).toBe("worker");
+  expect(message).toContain("workItem.integration.complete");
+  expect(message).toContain(action.actionId);
+  expect(message).toContain("保留主目录修改");
+  expect(vi.mocked(f.runner.resume)).toHaveBeenCalledWith("worker", expect.objectContaining({ title: "Worker · Merge takeover" }));
+  expect((await f.service.listActions(f.workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({
+    status: "running", agent: { sessionId: "worker", deliveredAt: expect.any(String) }
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.send).toHaveBeenCalledTimes(1);
+});
+
+it("resumes an unfinished delegated merge once after orchestrator restart", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { title: "Merge recovery", objective: "recover", risk: "R1",
+    scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "merged" }], sessionId: "worker" });
+  await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = await f.service.createAction(f.workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
+    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  await f.service.failAction(f.workspaceId, action.actionId, "主工作区阻塞");
+  f.orchestrator.start();
+  await f.service.takeoverIntegration(f.workspaceId, item.workItemId);
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(1));
+
+  await f.orchestrator.dispose();
+  f.active.clear();
+  const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
+  orchestrators.push(restarted);
+  restarted.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(f.runner.send).mock.calls[1]?.[1]).toContain("继续接管合入");
+});
+
+it("returns a failed restart delivery to the explicit takeover entry", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { title: "Merge delivery retry", objective: "recover", risk: "R1",
+    scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "merged" }], sessionId: "worker" });
+  await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = await f.service.createAction(f.workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
+    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  await f.service.failAction(f.workspaceId, action.actionId, "主工作区阻塞");
+  f.orchestrator.start();
+  await f.service.takeoverIntegration(f.workspaceId, item.workItemId);
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(1));
+
+  await f.orchestrator.dispose();
+  f.active.clear();
+  vi.mocked(f.runner.resume).mockRejectedValueOnce(new Error("provider unavailable"));
+  const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
+  orchestrators.push(restarted);
+  restarted.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({
+    agent: { deliveryAttemptedAt: expect.any(String) }
+  }));
+  expect((await f.service.listActions(f.workspaceId)).find((entry) => entry.actionId === action.actionId)?.agent?.deliveredAt).toBeUndefined();
+
+  await f.service.takeoverIntegration(f.workspaceId, item.workItemId, "重新发送");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+});
+
 it("sends composed input and configured preparation together after the selected source finishes", async () => {
   const f = await fixture();
   f.active.add("design");

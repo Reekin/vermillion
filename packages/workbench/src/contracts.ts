@@ -243,12 +243,6 @@ export const zDocCommit = z.object({
 });
 export type DocCommit = z.infer<typeof zDocCommit>;
 
-export const zInboxItem = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("decision"), workspaceId: z.string(), card: zDecisionCard }),
-  z.object({ kind: z.literal("merged"), workspaceId: z.string(), workItem: zWorkItem })
-]);
-export type InboxItem = z.infer<typeof zInboxItem>;
-
 /** Per-workspace execution scheduler settings. */
 export const zScheduler = z.object({
   enabled: z.boolean(),
@@ -306,6 +300,16 @@ export type Execution = z.infer<typeof zExecution>;
 export const zIntegration = zProcess.extend({
   kind: z.literal("integration"),
   stage: z.enum(["merge", "rollback"]),
+  /** Present while the original Worker owns a failed or explicitly delegated merge. */
+  agent: z.object({
+    sessionId: z.string().min(1),
+    note: z.string().optional(),
+    requestedAt: z.string(),
+    deliveryAttemptedAt: z.string().optional(),
+    deliveredAt: z.string().optional(),
+    turnId: z.string().optional(),
+    pausedAt: z.string().optional()
+  }).optional(),
   integration: z.object({
     operation: z.enum(["merge", "rollback"]),
     contractRevision: z.number().int().nonnegative(),
@@ -323,6 +327,13 @@ export const zWorkflowAction = z.discriminatedUnion("kind", [zExecution, zIntegr
 export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
 export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.pauseReason === "user";
+
+export const zInboxItem = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("decision"), workspaceId: z.string(), card: zDecisionCard }),
+  z.object({ kind: z.literal("integration"), workspaceId: z.string(), workItem: zWorkItem, action: zIntegration }),
+  z.object({ kind: z.literal("merged"), workspaceId: z.string(), workItem: zWorkItem })
+]);
+export type InboxItem = z.infer<typeof zInboxItem>;
 
 export const zWorktreeCleanup = z.object({
   sessionId: z.string().optional(),

@@ -3,7 +3,8 @@ import type { AgentRun, DecisionCard, WorkbenchClient, WorkItem, WorkflowAction 
 import { Modal } from "./Modal.js";
 import { Badge, Button, Card, CollapsibleDetails, DetailSection, EmptyState, InlineNotice, ListRow } from "./ui.js";
 import { WorkflowDetails } from "./WorkflowDetails.js";
-import { roleLabel } from "./workflow-display.js";
+import { actionStatusText, roleLabel } from "./workflow-display.js";
+import { IntegrationControls } from "./IntegrationControls.js";
 import { statusLabel } from "./task-labels.js";
 
 type WorkItemDialogProps = {
@@ -50,6 +51,8 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   }, [client, workspaceId]);
   const itemRuns = runs.filter((run) => run.workItemId === workItemId).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   const itemActions = actions.filter((action) => action.workItemId === workItemId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const integration = itemActions.find((action): action is Extract<WorkflowAction, { kind: "integration" }> =>
+    action.kind === "integration" && action.stage === "merge" && action.status !== "done" && action.status !== "cancelled");
   const sessionId = item?.run.sessionId ?? itemRuns[0]?.sessionId;
   const itemDecisions = decisions?.filter((card) => card.workItemId === workItemId || itemActions.some((action) => action.actionId === card.actionId) || item?.decisions.includes(card.decisionId));
   const resume = async () => {
@@ -62,12 +65,13 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   return <Modal title="工单详情" onClose={onClose} width={800}>
     {!item ? <EmptyState title="工单不存在" hint={workItemId} /> : <Card
       className="m-4"
-      header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{item.run.pauseReason === "user" ? "用户暂停" : statusLabel[item.status]}</Badge>{item.run.pauseReason === "user" && <Button className="ml-auto" variant="primary" disabled={resuming} onClick={() => void resume()}>恢复执行</Button>}</>}
+      header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{item.run.pauseReason === "user" ? "用户暂停" : integration ? actionStatusText(integration) : statusLabel[item.status]}</Badge>{item.run.pauseReason === "user" && <Button className="ml-auto" variant="primary" disabled={resuming} onClick={() => void resume()}>恢复执行</Button>}</>}
       footer={<>{sessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(sessionId); }}>会话</Button>}{item.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(item.sourceSessionId!, item.sourceTurnId); }}>来源</Button>}</>}
     >
       <DetailSection title="工单">{item.title}</DetailSection>
       <DetailSection title="目标">{item.objective || "未填写"}</DetailSection>
       <WorkflowDetails actions={itemActions} onOpenSession={(id) => { onClose(); onOpenSession(id); }} />
+      <IntegrationControls client={client} workspaceId={workspaceId} workItemId={workItemId} action={integration} showStatus={false} />
       <DetailSection title="范围">{lines(item.scope.inScope)}</DetailSection>
       <DetailSection title="不在范围内">{lines(item.scope.outOfScope)}</DetailSection>
       <DetailSection title="允许路径">{lines(item.scope.allowedPaths)}</DetailSection>

@@ -551,6 +551,7 @@ export class WorkbenchService {
   }
 
   private async ensureFailureDecision(workspaceId: string, failed: WorkflowAction): Promise<void> {
+    if (failed.kind === "integration" && failed.stage === "merge") return;
     const action = failed;
     const actionId = action.actionId;
     if (failed.status === "decision" && !(await this.listDecisions(workspaceId)).some((card) => card.actionId === actionId && !card.answer && !card.withdrawn)) {
@@ -758,14 +759,77 @@ export class WorkbenchService {
     await this.integrate(workspaceId, () => this.drainIntegrations(workspaceId));
   }
 
-  private async drainIntegrations(workspaceId: string): Promise<void> {
+  async retryIntegration(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.integrate(workspaceId, async () => {
+      const action = (await this.listActions(workspaceId)).find((entry): entry is Integration =>
+        entry.kind === "integration" && entry.workItemId === workItemId && entry.stage === "merge" && actionIsOpen(entry));
+      if (!action || action.agent || !["retry", "decision"].includes(action.status)) throw new Error("当前合入没有可立即重试的失败动作：" + workItemId);
+      const retried = await this.updateAction(workspaceId, action, (current) => ({ ...current,
+        status: "pending", attempts: 0, retryAt: undefined, failure: undefined,
+        history: [...current.history, { at: this.now(), event: "retry:merge", message: "用户立即重试合入" }] }));
+      await this.drainIntegrations(workspaceId);
+      return this.getWorkItem(workspaceId, retried.workItemId);
+    });
+  }
+
+  async takeoverIntegration(workspaceId: string, workItemId: string, note?: string): Promise<WorkItem> {
+    return this.integrate(workspaceId, async () => {
+      const item = await this.getWorkItem(workspaceId, workItemId);
+      const action = (await this.listActions(workspaceId)).find((entry): entry is Integration =>
+        entry.kind === "integration" && entry.workItemId === workItemId && entry.stage === "merge" && actionIsOpen(entry));
+      if (!action) throw new Error("当前工单没有可接管的合入动作：" + workItemId);
+      if (action.agent) {
+        if (!action.agent.deliveredAt) await this.updateAction(workspaceId, action, (current) => ({ ...current,
+          failure: undefined, agent: { ...current.agent!, ...(note?.trim() ? { note: note.trim() } : {}), deliveryAttemptedAt: undefined },
+          history: [...current.history, { at: this.now(), event: "takeover:retry", message: "重新发送合入接管给原 Worker" }] }));
+        return this.getWorkItem(workspaceId, workItemId);
+      }
+      if (!item.run.sessionId) throw new Error("当前工单没有可接管的 Worker 会话：" + workItemId);
+      if (!["retry", "decision"].includes(action.status)) throw new Error("合入尚未失败，暂不能交给 Agent：" + workItemId);
+      await this.updateAction(workspaceId, action, (current) => ({ ...current,
+        status: "pending", retryAt: undefined,
+        agent: { sessionId: item.run.sessionId!, ...(note?.trim() ? { note: note.trim() } : {}), requestedAt: this.now() },
+        history: [...current.history, { at: this.now(), event: "takeover:merge", message: "用户交给原 Worker 处理合入" + (note?.trim() ? "：" + note.trim() : "") }] }));
+      return this.getWorkItem(workspaceId, workItemId);
+    });
+  }
+
+  async completeIntegration(workspaceId: string, workItemId: string, actionId: string, sessionId: string): Promise<WorkItem> {
+    return this.integrate(workspaceId, async () => {
+      const item = await this.getWorkItem(workspaceId, workItemId);
+      let action = await this.getAction(workspaceId, actionId);
+      if (action.kind !== "integration" || action.workItemId !== workItemId || action.stage !== "merge" || !action.agent || action.agent.sessionId !== sessionId || !actionIsOpen(action))
+        throw new Error("当前合入动作不属于该 Agent：" + actionId);
+      if (action.agent.pausedAt || item.run.pauseReason === "user") throw new Error("用户已暂停合入，请先恢复工单：" + workItemId);
+      const { docs } = await this.context(workspaceId);
+      const recoveredMerge = action.integration.before && action.integration.target
+        ? await docs.getMergeCommit(action.integration.target, action.integration.before) : undefined;
+      if (!recoveredMerge && item.run.branch) {
+        const snapshot = await docs.integrationSnapshot(item.run.branch);
+        action = await this.updateAction(workspaceId, action, (current) => ({ ...current,
+          integration: { ...current.integration, before: snapshot.head, target: snapshot.target, diffStat: snapshot.diffStat } }));
+      }
+      await this.updateAction(workspaceId, action, (current) => ({ ...current,
+        status: "pending", retryAt: undefined, failure: undefined,
+        history: [...current.history, { at: this.now(), event: "agent:merge", message: "Agent 请求执行最终合入" }] }));
+      await this.drainIntegrations(workspaceId, actionId);
+      const latest = await this.getAction(workspaceId, actionId);
+      if (latest.status !== "done") throw new Error(latest.failure ?? "Agent 合入未完成，请读取 action.list 后继续处理。");
+      return this.getWorkItem(workspaceId, workItemId);
+    });
+  }
+
+  private async drainIntegrations(workspaceId: string, requestedActionId?: string): Promise<void> {
     const actions = await this.listActions(workspaceId);
     const { docs } = await this.context(workspaceId);
-    const pending = actions.filter((a): a is Integration => a.kind === "integration" && actionIsOpen(a) && a.status !== "decision" && (!a.retryAt || a.retryAt <= this.now()));
+    const pending = actions.filter((a): a is Integration => a.kind === "integration" && actionIsOpen(a) && a.status !== "decision" &&
+      (requestedActionId ? a.actionId === requestedActionId && !!a.agent : !a.agent && (!a.retryAt || a.retryAt <= this.now())));
     for (let action of pending) {
       const workItemId = action.workItemId;
       let item = await this.getWorkItem(workspaceId, workItemId);
       try {
+        action = await this.updateAction(workspaceId, action, (current) => ({ ...current, status: "running", retryAt: undefined, failure: undefined,
+          history: [...current.history, { at: this.now(), event: "started:" + current.stage, message: (current.agent ? "Agent" : "工作台") + " 开始合入" }] }));
         let integration = action.integration!;
         if (action.stage === "merge" && integration.contractRevision !== item.contractRevision) {
           const reason = "合入作废：合同已更新为修订 " + item.contractRevision + "，成果依据为 " + integration.contractRevision + "。请按当前合同复核后重新提交。";
@@ -814,7 +878,10 @@ export class WorkbenchService {
         });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        if (error instanceof WorktreeMergeConflict || error instanceof WorktreeNotReady) {
+        if (action.agent) {
+          await this.updateAction(workspaceId, action, (current) => ({ ...current, status: "running", retryAt: undefined, failure: reason,
+            history: [...current.history, { at: this.now(), event: "failed:merge:agent", message: reason }] }));
+        } else if (error instanceof WorktreeMergeConflict || error instanceof WorktreeNotReady) {
           await this.finishAction(workspaceId, action.actionId, "转回原 Worker：" + reason);
           await this.returnWorkItem(workspaceId, workItemId, reason + "\n在原 worktree rebase 并更新受影响验证后重新提交。");
         } else {
@@ -875,14 +942,20 @@ export class WorkbenchService {
 
   async pauseWorkItem(workspaceId: string, sessionId: string): Promise<{ paused: boolean; workItem?: WorkItem }> {
     return this.integrate(workspaceId, async () => {
-      const item = (await this.listWorkItems(workspaceId)).find((entry) => entry.run.sessionId === sessionId && entry.status === "running");
+      const items = await this.listWorkItems(workspaceId);
+      const actions = await this.listActions(workspaceId);
+      const item = items.find((entry) => entry.run.sessionId === sessionId &&
+        (entry.status === "running" || (entry.status === "merging" && actions.some((action) =>
+          action.kind === "integration" && action.workItemId === entry.workItemId && actionIsOpen(action) && action.agent?.sessionId === sessionId))));
       if (!item) return { paused: false };
       const paused = await this.mutateRecord(workspaceId, item.workItemId, (record) => {
         const now = this.now();
         return { ...record,
           item: { ...record.item, status: "decision", updatedAt: now },
           execution: { ...record.execution, status: "decision", pauseReason: "user", retryAt: undefined, failure: undefined,
-            history: [...record.execution.history, { at: now, event: "paused:user", message: "用户已暂停 Worker" }], updatedAt: now } };
+            history: [...record.execution.history, { at: now, event: "paused:user", message: "用户已暂停 Worker" }], updatedAt: now },
+          integrations: record.integrations.map((action) => action.kind === "integration" && actionIsOpen(action) && action.agent?.sessionId === sessionId
+            ? { ...action, agent: { ...action.agent, pausedAt: now, deliveredAt: undefined, deliveryAttemptedAt: undefined }, updatedAt: now } : action) };
       });
       return { paused: true, workItem: paused };
     });
@@ -895,6 +968,13 @@ export class WorkbenchService {
       return this.mutateRecord(workspaceId, workItemId, (record) => {
         const now = this.now();
         const sessionId = record.execution.sessionId;
+        const integration = record.integrations.find((action): action is Integration => action.kind === "integration" && actionIsOpen(action) && !!action.agent && action.agent.sessionId === sessionId);
+        if (integration) return { ...record,
+          item: { ...record.item, status: "merging", updatedAt: now },
+          execution: { ...record.execution, status: "done", pauseReason: undefined, retryAt: undefined, failure: undefined, updatedAt: now },
+          integrations: record.integrations.map((action) => action.actionId === integration.actionId ? { ...action, status: "pending", failure: undefined,
+            agent: { ...action.agent!, pausedAt: undefined, deliveredAt: undefined, deliveryAttemptedAt: undefined, turnId: undefined },
+            history: [...action.history, { at: now, event: "resumed:user", message: "用户已恢复 Agent 合入" }], updatedAt: now } : action) };
         return { ...record,
           item: { ...record.item, status: "queued", updatedAt: now },
           execution: { ...record.execution, status: "pending", stage: sessionId ? "deliver" : "open", pauseReason: undefined,
@@ -1189,7 +1269,12 @@ export class WorkbenchService {
       for (const card of await store.decisions.list()) {
         if (card.answer ? includeProcessed : !card.withdrawn) items.push({ kind: "decision", workspaceId: workspace.workspaceId, card });
       }
+      const actions = await this.listActions(workspace.workspaceId);
       for (const workItem of await this.listWorkItems(workspace.workspaceId)) {
+        const integration = actions.find((action): action is Integration => action.kind === "integration" && action.workItemId === workItem.workItemId &&
+          action.stage === "merge" && actionIsOpen(action) &&
+          ((!action.agent && ["retry", "decision"].includes(action.status)) || (!!action.agent && !action.agent.deliveredAt && !!action.agent.deliveryAttemptedAt)));
+        if (integration) items.push({ kind: "integration", workspaceId: workspace.workspaceId, workItem, action: integration });
         if (!workItem.merge || (workItem.merge.acknowledgedAt ? !includeProcessed : workItem.status !== "closed")) continue;
         items.push({ kind: "merged", workspaceId: workspace.workspaceId, workItem });
       }

@@ -4,7 +4,7 @@ import { afterEach, expect, it } from "vitest";
 import { WorkspaceStore } from "../src/workspace-store.js";
 import { WorkbenchService } from "../src/workbench-service.js";
 import { workbenchRpc } from "../src/rpc.js";
-import { contract, setup, submission } from "./workflow-fixture.js";
+import { contract, git, setup, submission } from "./workflow-fixture.js";
 
 const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
 const fixture = async (now?: () => string) => { const f = await setup(now); fixtures.push(f); return f; };
@@ -308,6 +308,120 @@ it("claims only one active integration under the shared record lock", async () =
     expect((await service.listActions(workspaceId)).filter((action) => action.kind === "integration")).toHaveLength(1);
     expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("merging");
   } finally { await secondService.dispose(); }
+});
+
+it("surfaces a failed merge in Inbox, supports immediate retry, and closes it without waiting for backoff", async () => {
+  const { client, root, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker",
+    scope: { ...contract.scope, allowedPaths: [join(root, "..", "external-artifact")] } });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = await service.createAction(workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
+    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  await service.failAction(workspaceId, action.actionId, "主工作区有未提交修改");
+
+  expect(await service.listInbox()).toMatchObject([{
+    kind: "integration", workItem: { workItemId: item.workItemId, status: "merging" },
+    action: { actionId: action.actionId, status: "retry", attempts: 1 }
+  }]);
+  const closed = await client.request("workItem.integration.retry", { workspaceId, workItemId: item.workItemId });
+  expect(closed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
+  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done", attempts: 0 });
+});
+
+it("transfers a failed merge to the original worker and completes it through the controlled integration entry", async () => {
+  const { client, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = await service.createAction(workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
+    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  for (let attempt = 0; attempt < 5; attempt++) await service.failAction(workspaceId, action.actionId, "主工作区阻塞");
+
+  const delegated = await client.request("workItem.integration.takeover", { workspaceId, workItemId: item.workItemId, note: "请保留主目录修改，处理分支后合入" });
+  const owned = (await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)!;
+  expect(delegated.status).toBe("merging");
+  expect(owned).toMatchObject({ status: "pending", agent: { sessionId: "worker", note: "请保留主目录修改，处理分支后合入" } });
+  expect(owned?.retryAt).toBeUndefined();
+  expect((await service.listInbox()).some((entry) => entry.kind === "integration")).toBe(false);
+
+  const completed = await client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
+  expect(completed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
+  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done" });
+});
+
+it("pauses and resumes a delegated merge without returning it to automatic execution", async () => {
+  const { client, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = await service.createAction(workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
+    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  await service.failAction(workspaceId, action.actionId, "主工作区阻塞");
+  await service.takeoverIntegration(workspaceId, item.workItemId, "先暂停");
+
+  const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
+  expect(paused).toMatchObject({ paused: true, workItem: { status: "decision", run: { pauseReason: "user" } } });
+  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ agent: { pausedAt: expect.any(String) } });
+  await expect(client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" })).rejects.toThrow("先恢复工单");
+
+  const resumed = await client.request("workItem.resume", { workspaceId, workItemId: item.workItemId });
+  expect(resumed).toMatchObject({ status: "merging" });
+  expect(resumed.run.pauseReason).toBeUndefined();
+  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "pending", agent: { sessionId: "worker" } });
+  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)?.agent?.pausedAt).toBeUndefined();
+});
+
+it("keeps exhausted merge failures in the integration Inbox instead of creating a duplicate generic decision card", async () => {
+  const { service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = await service.createAction(workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
+    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  for (let attempt = 0; attempt < 5; attempt++) await service.failAction(workspaceId, action.actionId, "持续阻塞");
+
+  expect(await service.listDecisions(workspaceId)).toEqual([]);
+  expect(await service.listInbox()).toMatchObject([{ kind: "integration", action: { status: "decision", attempts: 5 } }]);
+});
+
+it("handles a real dirty-workspace merge through Worker takeover without losing the worker branch", async () => {
+  const { client, root, service, workspaceId } = await fixture();
+  await writeFile(join(root, "result.txt"), "base\n");
+  await git(root, "add", "result.txt");
+  await git(root, "commit", "-qm", "base result");
+  const worktreePath = join(root, "merge-worker");
+  const branch = "work/merge-takeover";
+  await git(root, "worktree", "add", "-b", branch, worktreePath);
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker", worktreePath, branch,
+    scope: { ...contract.scope, allowedPaths: ["result.txt"] } });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  await writeFile(join(worktreePath, "result.txt"), "worker result\n");
+  await git(worktreePath, "add", "result.txt");
+  await git(worktreePath, "commit", "-qm", "worker result");
+  await writeFile(join(root, "result.txt"), "user edit\n");
+
+  const blocked = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+  const action = (await service.listActions(workspaceId)).find((entry) => entry.workItemId === item.workItemId && entry.kind === "integration")!;
+  expect(blocked.status).toBe("merging");
+  expect(action).toMatchObject({ status: "retry", attempts: 1 });
+  expect(action.failure).toContain("Your local changes");
+  expect(await service.listInbox()).toMatchObject([{ kind: "integration", workItem: { workItemId: item.workItemId }, action: { status: "retry" } }]);
+
+  await client.request("workItem.integration.takeover", { workspaceId, workItemId: item.workItemId, note: "保留用户改动并合入 Worker 成果" });
+  await writeFile(join(worktreePath, "result.txt"), "worker rebased\n");
+  await git(worktreePath, "add", "result.txt");
+  await git(worktreePath, "commit", "-qm", "worker rebase result");
+  await writeFile(join(root, "result.txt"), "base\n");
+  const completed = await client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
+  expect(completed).toMatchObject({ status: "closed", merge: { commit: expect.any(String) } });
+  expect(completed.run.worktreePath).toBeUndefined();
+  expect(completed.run.branch).toBeUndefined();
+  expect((await readFile(join(root, "result.txt"), "utf8")).replaceAll("\r\n", "\n")).toBe("worker rebased\n");
 });
 
 it("publishes coherent execution and business states for failure, decision, answer and cancellation", async () => {
