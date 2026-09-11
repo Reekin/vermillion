@@ -46,7 +46,7 @@ const DocumentEditor = ({ store, workspaceId, path }: { store: WorkbenchStore; w
   };
 
   return (
-    <Modal title={path} onClose={close} width={markdown ? 1280 : 960} height="78vh">
+    <Modal title={path} onClose={close} width={markdown ? 1280 : 960} height="78vh" resizable>
       <div className="flex h-full flex-col" onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); }
       }}>
