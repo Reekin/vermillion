@@ -12,6 +12,7 @@ import { InboxPanel } from "./components/InboxPanel.js";
 import { Modal } from "./components/Modal.js";
 import { Rail } from "./components/Rail.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
+import { SearchDialog } from "./components/SearchDialog.js";
 import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
@@ -25,6 +26,7 @@ import { createRendererWorkbenchClient } from "./workbench-client.js";
 import "./app.css";
 import { SessionNavigationContext, renderSessionNavigation } from "./session-navigation.js";
 import type { SessionNavigation } from "@vermillion/workbench/client";
+import type { SearchHit } from "@vermillion/workbench/client";
 
 type AppProps = {
   sessionStore: RendererStore;
@@ -65,6 +67,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [composerActions, setComposerActions] = useState<ComposerActions>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
   const [navigationError, setNavigationError] = useState<string>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchWorkItemTarget, setSearchWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
     const tree = await transport.chatTree.get(targetSessionId);
     const rootId = tree.treeId ?? targetSessionId;
@@ -78,6 +82,27 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     store.getState().browseWorkspace(workspaceId);
     store.setState({ workspaceSection: "sessions", panel: "workbench", overlay: undefined });
   }, [store, sessionStore, transport, workspaceFilterId]);
+  const openSearchWorkItem = useCallback((hit: SearchHit) => {
+    if (!hit.workItemId) return;
+    setSearchOpen(false);
+    setSearchWorkItemTarget({ workspaceId: hit.workspaceId, workItemId: hit.workItemId, nonce: Date.now() });
+    store.getState().showTask({ workspaceId: hit.workspaceId, kind: "workItem", id: hit.workItemId });
+  }, [store]);
+  const clearSearchWorkItemTarget = useCallback(() => setSearchWorkItemTarget(undefined), []);
+  const openSearchDoc = useCallback((hit: SearchHit) => {
+    if (!hit.path) return;
+    setSearchOpen(false);
+    store.getState().browseWorkspace(hit.workspaceId);
+    store.setState({ panel: "workbench", overlay: undefined, workspaceSection: "docs" });
+    store.getState().openEditor({ kind: "doc", path: hit.path, line: hit.line, column: hit.column, nonce: Date.now() });
+  }, [store]);
+  const openSearchSession = useCallback((hit: SearchHit) => {
+    if (!hit.sessionId) return;
+    setSearchOpen(false);
+    setNavigationError(undefined);
+    void openSessionTarget(hit.workspaceId, hit.sessionId, hit.turnId)
+      .catch((error: unknown) => setNavigationError(error instanceof Error ? error.message : String(error)));
+  }, [openSessionTarget]);
   useEffect(() => {
     store.setState({ navigateSession: (workspaceId, id, turnId) => {
       setNavigationError(undefined);
@@ -194,6 +219,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               store.getState().setWorkspaceSection("sessions");
               setDraftRevision((n) => n + 1);
             }}
+            onSearch={() => setSearchOpen(true)}
             menu={sessionActions.menu}
             onOpenMenu={(event, id) => void sessionActions.openMenu(event, id)}
             onCloseMenu={sessionActions.closeMenu}
@@ -240,7 +266,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             </div>
             <div className={section !== "sessions" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
               <div className="flex shrink-0 items-center border-b border-border px-4 py-2"><WorkspaceSwitcher store={store} /></div>
-              <WorkspacePages store={store} transport={transport} pickDirectory={pickDirectory} />
+              <WorkspacePages store={store} transport={transport} pickDirectory={pickDirectory} workItemTarget={searchWorkItemTarget} onWorkItemTargetConsumed={clearSearchWorkItemTarget} />
             </div>
           </div>
         </div>
@@ -258,6 +284,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       <TaskStatusBar store={store} />
       <TextEditor store={store} />
       <RoleEditor store={store} transport={transport} />
+      {searchOpen && <SearchDialog client={store.getState().client} onClose={() => setSearchOpen(false)} onOpenWorkItem={openSearchWorkItem} onOpenDoc={openSearchDoc} onOpenSession={openSearchSession} />}
     </div>
     </SessionNavigationContext.Provider>
   );

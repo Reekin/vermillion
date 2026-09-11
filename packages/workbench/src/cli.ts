@@ -10,6 +10,7 @@ import { RoleService } from "./roles.js";
 import { WorkbenchService } from "./workbench-service.js";
 import { AppLauncher, resolveAppCommand } from "./app-launcher.js";
 import { methodHelp } from "./cli-help.js";
+import { createFileSessionSearchSource, defaultCodexRolloutsDir } from "./search.js";
 
 const desktopSessionMethods = ["chatTree.get", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"];
 
@@ -66,6 +67,8 @@ const executeCli = async (argv: string[]): Promise<number> => {
   const packageRoot = fileURLToPath(new URL("..", import.meta.url));
   const service = remote ? undefined : new WorkbenchService({
     workspaces: createFileWorkspaceSource(join(baseDir, "workspace-registry.json")), roles,
+    sessionSearch: createFileSessionSearchSource(baseDir),
+    rolloutsDir: defaultCodexRolloutsDir(),
     launcher: localAppMethod ? new AppLauncher({ command: resolveAppCommand(packageRoot), packageRoot }) : undefined
   });
   try {

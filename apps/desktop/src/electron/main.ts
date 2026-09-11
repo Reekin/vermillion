@@ -25,7 +25,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, resolveAppCommand, startLocalEndpoint, type InboxItem } from "@vermillion/workbench";
+import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, defaultCodexRolloutsDir, resolveAppCommand, startLocalEndpoint, type InboxItem } from "@vermillion/workbench";
 import { createAgentRunner } from "./agent-runner.js";
 import { createSessionNavigation } from "./session-navigation.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
@@ -748,6 +748,8 @@ const boot = async (): Promise<void> => {
   await roleService.ensureGlobal();
   const workbenchService = new WorkbenchService({
     roles: roleService,
+    sessionSearch: () => service.listSessionSearchEntries(),
+    rolloutsDir: defaultCodexRolloutsDir(),
     sessionNavigation: createSessionNavigation(service, persistenceBaseDir),
     launcher: new AppLauncher({ command: resolveAppCommand(appRoot), packageRoot: launcherPackageRoot }),
     workspaces: {

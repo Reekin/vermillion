@@ -10,6 +10,8 @@ type WorkspacePagesProps = {
   store: WorkbenchStore;
   transport: DesktopTransport;
   pickDirectory: () => Promise<string | undefined>;
+  workItemTarget?: { workspaceId: string; workItemId: string; nonce: number };
+  onWorkItemTargetConsumed?: () => void;
 };
 
 const DOMAINS_DIR = ".vermillion/docs/domains/";
@@ -68,7 +70,7 @@ export const loadSourceTreeTitles = async (
   return titles;
 };
 
-export const WorkspacePages = ({ store, transport, pickDirectory }: WorkspacePagesProps) => {
+export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget, onWorkItemTargetConsumed }: WorkspacePagesProps) => {
   const client = store((s) => s.client);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
   const section = store((s) => s.workspaceSection);
@@ -114,7 +116,7 @@ export const WorkspacePages = ({ store, transport, pickDirectory }: WorkspacePag
     ) : <div className="min-h-0 flex-1 overflow-auto">
       {section === "workItems" && <div>
         {viewError ? <EmptyState title="工单加载失败" hint={viewError} /> : view && (
-          <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={false} onExpand={showTaskBoard} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} />
+          <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={false} onExpand={showTaskBoard} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} detailTarget={workItemTarget?.workspaceId === activeWorkspaceId ? workItemTarget : undefined} onDetailTargetConsumed={onWorkItemTargetConsumed} />
         )}
       </div>}
       <div hidden={section !== "docs"}>

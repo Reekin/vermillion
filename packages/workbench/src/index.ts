@@ -12,3 +12,5 @@ export * from "./orchestrator.js";
 export * from "./app-launcher.js";
 export * from "./cli.js";
 export * from "./local-endpoint.js";
+export * from "./search.js";
+export * from "./search-contract.js";
