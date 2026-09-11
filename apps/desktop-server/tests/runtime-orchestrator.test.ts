@@ -2149,6 +2149,7 @@ describe("RuntimeOrchestrator", () => {
         selectWorkspace: vi.fn().mockResolvedValue({ workspaceId: "workspace-1" })
       } as never,
       publishRuntimeEvent: () => {},
+      createConversationId: () => "conversation-hydrated-order",
       agentBindings: [{
         descriptor: {
           engineId: "codex",
@@ -2227,7 +2228,11 @@ describe("RuntimeOrchestrator", () => {
           startedAt: "2026-04-20T00:04:00Z",
           completedAt: "2026-04-20T00:04:03Z",
           finalMessageId: "assistant-live-message",
-          messageIds: ["hydrated-user-message"],
+          messageIds: [
+            "hydrated-user-message",
+            "local-user-message",
+            "assistant-live-message"
+          ],
           toolCallIds: [],
           terminalIds: [],
           approvalRequestIds: [],

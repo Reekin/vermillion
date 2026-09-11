@@ -129,6 +129,9 @@ export class DomainService {
     for (const replacement of messageReplacements) {
       input.onUserMessageReplaced?.(replacement);
     }
+    const replacedMessageIds = new Set(
+      messageReplacements.map((replacement) => replacement.replacedMessageId)
+    );
     this.domainReplica.mergeSnapshot(
       {
         conversations: [
@@ -147,7 +150,12 @@ export class DomainService {
           )
         ],
         sessions: [snapshot.session],
-        turns: snapshot.turns,
+        turns: snapshot.turns.map((turn) => ({
+          ...turn,
+          messageIds: turn.messageIds.filter(
+            (messageId) => !replacedMessageIds.has(messageId)
+          )
+        })),
         messageBlocks: snapshot.messageBlocks,
         toolCalls: snapshot.toolCalls,
         terminalStreams: snapshot.terminalStreams,
