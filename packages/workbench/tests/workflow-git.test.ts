@@ -130,6 +130,41 @@ it("records and rolls back a root execution commit rather than treating code wor
   await expect(access(join(root, "result.txt"))).rejects.toThrow();
 });
 
+it("closes a root work item whose allowed paths contain only an external artifact", async () => {
+  const { service, workspaceId, root } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "artifact-worker",
+    scope: { ...contract.scope, allowedPaths: [join(root, "..", "external-artifact")] } });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "artifact-worker" });
+
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+
+  expect(closed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
+  expect((await service.listActions(workspaceId)).find((action) => action.workItemId === item.workItemId && action.kind === "integration")).toMatchObject({ status: "done" });
+});
+
+it("checks repository paths in a mixed root scope while ignoring external artifacts", async () => {
+  const { service, workspaceId, root } = await fixture();
+  const external = join(root, "..", "external-artifact");
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "mixed-worker",
+    scope: { ...contract.scope, allowedPaths: ["owned.txt", external] } });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "mixed-worker" });
+  await writeFile(join(root, "owned.txt"), "owned\n");
+
+  const pending = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+  expect(pending).toMatchObject({ status: "queued" });
+  expect(pending.rejections[0]?.reason).toContain("未提交");
+  expect(pending.rejections[0]?.reason).not.toContain("outside repository");
+
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "mixed-worker" });
+  await git(root, "add", "owned.txt");
+  await git(root, "commit", "-qm", "owned result");
+  const commit = await git(root, "rev-parse", "HEAD");
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, evidence: { ...submission.evidence, commit } });
+
+  expect(closed).toMatchObject({ status: "closed", merge: { commit } });
+  expect(closed.merge?.diffStat).toContain("owned.txt");
+});
+
 it("releases a cancelled root worker after its active turn ends", async () => {
   const { service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "root-worker" });
