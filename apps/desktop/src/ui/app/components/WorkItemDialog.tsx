@@ -20,6 +20,8 @@ type WorkItemDialogProps = {
 const lines = (values: string[]) => values.length ? values.map((value) => "• " + value).join("\n") : "无";
 const time = (value: string) => new Date(value).toLocaleString("zh-CN");
 const runStatus = { running: "进行中", done: "已结束", failed: "失败" };
+const verificationStatus = (entry: { status: string }) => entry.status;
+const verificationLabel = (status: string) => ({ pass: "通过", defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成" }[status] ?? "未通过");
 
 
 export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, runs, actions = [], onClose, onOpenSession }: WorkItemDialogProps) => {
@@ -92,7 +94,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
       <DetailSection title="Review 处置">{item.review.length ? item.review.map((entry) => `${entry.decision === "accepted" ? "采纳" : "拒绝"}：${entry.comment}\n理由：${entry.reason}`).join("\n\n") : "暂无 Review 记录"}</DetailSection>
       <DetailSection title="验收结果">{item.verify ? [
         (item.verify.verdict === "pass" ? "通过" : "需返工") + " · " + time(item.verify.verifiedAt),
-        ...item.verify.items.map((entry) => `${entry.index + 1}. ${item.acceptance[entry.index]?.text ?? "验收项"}\n${entry.pass ? "通过" : "未通过"}：${entry.evidence}`)
+        ...item.verify.items.map((entry) => `${entry.index + 1}. ${item.acceptance[entry.index]?.text ?? "验收项"}\n${verificationLabel(verificationStatus(entry))}：${entry.evidence}`)
       ].join("\n\n") : "尚未验收"}</DetailSection>
       <DetailSection title="决策">
         {error ? <InlineNotice tone="error">{error}</InlineNotice> : !itemDecisions ? "加载中…" : itemDecisions.length ? itemDecisions.map((card) => <DetailSection key={card.decisionId} title={card.withdrawn ? "已撤回" : card.answer ? "已答复" : "待答复"}>{[

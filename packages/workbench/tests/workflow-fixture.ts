@@ -13,8 +13,8 @@ const exec = promisify(execFile);
 export const git = async (root: string, ...args: string[]) => (await exec("git", args, { cwd: root })).stdout.trim();
 export const contract = { title: "Deliver result", objective: "A visible result", risk: "R1" as const,
   scope: { inScope: [], outOfScope: [], allowedPaths: [] as string[] }, acceptance: [{ text: "Result is available" }] };
-export const submission = { evidence: { summary: "Result available", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] },
-  review: [], verify: { verdict: "pass" as const, items: [{ index: 0, pass: true, evidence: "Checked result" }] } };
+export const submission = { contractRevision: 0, evidence: { summary: "Result available", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] },
+  review: [], verify: { verdict: "pass" as const, items: [{ index: 0, status: "pass" as const, evidence: "Checked result" }] } };
 
 export async function setup(now?: () => string) {
   const root = await mkdtemp(join(tmpdir(), "verm-workflow-"));

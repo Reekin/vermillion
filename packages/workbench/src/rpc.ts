@@ -21,7 +21,7 @@ import {
   zRoleFile,
   zResolvedRole,
   zScope,
-  zVerifyResult,
+  zVerifySubmission,
   zWorkItem,
   zWorktreeCleanup,
   zWorkbenchEvent,
@@ -99,7 +99,7 @@ export const workbenchRpc = {
   "workItem.start": { params: zWi.extend({ run: z.object({ sessionId: z.string().optional(), heartbeatAt: z.string().optional() }).strict() }), result: zWorkItem },
   "workItem.heartbeat": { params: zWi.extend({ lastTurnId: z.string().optional() }), result: zWorkItem },
   "workItem.submit": {
-    params: zWi.extend({ evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifyResult.omit({ verifiedAt: true }) }),
+    params: zWi.extend({ contractRevision: z.number().int().nonnegative(), evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifySubmission }),
     result: zWorkItem
   },
   "workItem.rollback": { params: zWi.extend({ reason: z.string().trim().min(1) }), result: zWorkItem },

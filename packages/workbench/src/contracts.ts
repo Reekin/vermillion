@@ -53,11 +53,26 @@ export const zReviewDisposition = z.object({
   reason: z.string()
 });
 
+export const verificationStatuses = ["pass", "defect", "blocked", "incomplete"] as const;
+export const zVerificationStatus = z.enum(verificationStatuses);
+export type VerificationStatus = z.infer<typeof zVerificationStatus>;
+
+const zStoredVerifyItem = z.object({
+  index: z.number().int().nonnegative(),
+  status: zVerificationStatus,
+  evidence: z.string()
+});
 export const zVerifyResult = z.object({
-  items: z.array(z.object({ index: z.number().int().nonnegative(), pass: z.boolean(), evidence: z.string() })),
+  items: z.array(zStoredVerifyItem),
   verdict: z.enum(["pass", "rework"]),
   verifiedAt: z.string()
 });
+
+export const zVerifySubmission = z.object({
+  items: z.array(z.object({ index: z.number().int().nonnegative(), status: zVerificationStatus, evidence: z.string() })),
+  verdict: z.enum(["pass", "rework"])
+});
+export type VerifySubmission = z.infer<typeof zVerifySubmission>;
 
 export const zRejection = z.object({ reason: z.string().min(1), at: z.string() });
 
@@ -80,8 +95,6 @@ export const zRun = z.object({
   retryAt: z.string().datetime().optional(),
   /** Set when the user stopped a Worker turn; only an explicit work-item resume clears it. */
   pauseReason: z.literal("user").optional(),
-  /** Set when a contract change was steered into a turn already in progress; a submit from that same turn is void. Cleared when the turn ends. */
-  staleTurnId: z.string().optional()
 });
 
 export const zWorkItem = z.object({
@@ -91,7 +104,8 @@ export const zWorkItem = z.object({
   sourceTurnId: z.string().optional(),
   treeId: z.string().optional(),
   requestId: z.string().optional(),
-  verificationFailures: z.number().int().nonnegative().optional(),
+  /** Increments whenever the work item contract changes; submissions identify the revision they used. */
+  contractRevision: z.number().int().nonnegative(),
   title: z.string().min(1),
   objective: z.string(),
   status: zWorkItemStatus,
@@ -294,6 +308,7 @@ export const zIntegration = zProcess.extend({
   stage: z.enum(["merge", "rollback"]),
   integration: z.object({
     operation: z.enum(["merge", "rollback"]),
+    contractRevision: z.number().int().nonnegative(),
     before: z.string().optional(),
     target: z.string().optional(),
     targets: z.array(z.string()).optional(),
