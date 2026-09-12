@@ -229,7 +229,7 @@ it("delivers a merge takeover once to the original worker and suppresses automat
   expect(message).toContain("保留主目录修改");
   expect(vi.mocked(f.runner.resume)).toHaveBeenCalledWith("worker", expect.objectContaining({ title: "Worker · Merge takeover" }));
   expect((await f.service.listActions(f.workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({
-    status: "running", agent: { sessionId: "worker", deliveredAt: expect.any(String) }
+    status: "pending", agent: { sessionId: "worker" }
   });
 
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -256,36 +256,71 @@ it("resumes an unfinished delegated merge once after orchestrator restart", asyn
   orchestrators.push(restarted);
   restarted.start();
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
-  expect(vi.mocked(f.runner.send).mock.calls[1]?.[1]).toContain("继续接管合入");
+  expect(vi.mocked(f.runner.send).mock.calls[1]?.[1]).toContain("workItem.integration.complete");
 });
 
-it("returns a failed restart delivery to the explicit takeover entry", async () => {
-  const f = await fixture();
-  const item = await f.service.createWorkItem(f.workspaceId, { title: "Merge delivery retry", objective: "recover", risk: "R1",
-    scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "merged" }], sessionId: "worker" });
-  await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
-  const action = await f.service.createAction(f.workspaceId, {
-    kind: "integration", workItemId: item.workItemId, status: "pending", stage: "merge", message: "等待合入",
-    integration: { operation: "merge", contractRevision: item.contractRevision, diffStat: "" }
-  }, (current) => ({ ...current, status: "merging" }));
-  await f.service.failAction(f.workspaceId, action.actionId, "主工作区阻塞");
-  f.orchestrator.start();
-  await f.service.takeoverIntegration(f.workspaceId, item.workItemId);
-  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(1));
 
+it.each([false, true])("retries a failed takeover turn through execution (user turn: %s)", async (userTurn) => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
+  const integration = await f.service.createAction(f.workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "retry", stage: "merge", message: "Git blocked",
+    integration: { operation: "merge", contractRevision: 0, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  await f.service.takeoverIntegration(f.workspaceId, item.workItemId, "keep evidence");
+  let now = Date.now();
+  const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner, now: () => new Date(now).toISOString() });
+  orchestrators.push(orchestrator);
+  orchestrator.start();
+  if (userTurn) f.startTurn("worker", "user-turn");
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", integrationActionId: integration.actionId }));
+  f.complete("worker", userTurn ? "user-turn" : "turn-1", "failed");
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run).toMatchObject({ attempts: 1, lastFailure: "turn failed: Runtime failed", retryAt: expect.any(String) }));
+  expect((await f.service.diagnoseWorkItem(f.workspaceId, item.workItemId)).nextRetryAt).toBeDefined();
+  expect(await f.service.listInbox()).toMatchObject([{ kind: "integration", workItem: { run: { attempts: 1 } } }]);
+  now += 120_000;
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(userTurn ? 1 : 2));
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).toContain("workItem.integration.complete");
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).not.toContain("workItem.submit");
+  await expect(f.service.submitWorkItem(f.workspaceId, item.workItemId, submission)).rejects.toThrow("integration.complete");
+  await f.service.completeIntegration(f.workspaceId, item.workItemId, integration.actionId, "worker");
+  f.complete("worker");
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("closed"));
+  expect((await f.service.listInbox()).filter((entry) => entry.kind === "merged")).toHaveLength(1);
+});
+
+it("admits takeover through the scheduler and retains user pause across restart", async () => {
+  const f = await fixture(true);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
+  await f.service.createAction(f.workspaceId, {
+    kind: "integration", workItemId: item.workItemId, status: "retry", stage: "merge", message: "blocked",
+    integration: { operation: "merge", contractRevision: 0, diffStat: "" }
+  }, (current) => ({ ...current, status: "merging" }));
+  await f.service.setScheduler(f.workspaceId, { enabled: false, maxWorkers: 1 });
+  await f.service.takeoverIntegration(f.workspaceId, item.workItemId);
+  f.orchestrator.start();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.send).not.toHaveBeenCalled();
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  await f.service.pauseWorkItem(f.workspaceId, "worker");
+  f.complete("worker", "turn-1", "interrupted");
   await f.orchestrator.dispose();
-  f.active.clear();
-  vi.mocked(f.runner.resume).mockRejectedValueOnce(new Error("provider unavailable"));
   const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
   orchestrators.push(restarted);
   restarted.start();
-  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({
-    agent: { deliveryAttemptedAt: expect.any(String) }
-  }));
-  expect((await f.service.listActions(f.workspaceId)).find((entry) => entry.actionId === action.actionId)?.agent?.deliveredAt).toBeUndefined();
-
-  await f.service.takeoverIntegration(f.workspaceId, item.workItemId, "重新发送");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run).toMatchObject({ pauseReason: "user", attempts: 0 });
+  await f.service.resumeWorkItem(f.workspaceId, item.workItemId);
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  await f.service.cancelWorkItem(f.workspaceId, item.workItemId);
+  f.complete("worker", "turn-2", "interrupted");
+  await vi.waitFor(() => expect(f.runner.interrupt).toHaveBeenCalledWith("worker"));
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("cancelled");
 });
 
 it("sends composed input and configured preparation together after the selected source finishes", async () => {

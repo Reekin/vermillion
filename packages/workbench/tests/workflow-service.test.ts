@@ -412,11 +412,12 @@ it("transfers a failed merge to the original worker and completes it through the
 
   const delegated = await client.request("workItem.integration.takeover", { workspaceId, workItemId: item.workItemId, note: "请保留主目录修改，处理分支后合入" });
   const owned = (await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)!;
-  expect(delegated.status).toBe("merging");
+  expect(delegated.status).toBe("queued");
   expect(owned).toMatchObject({ status: "pending", agent: { sessionId: "worker", note: "请保留主目录修改，处理分支后合入" } });
   expect(owned?.retryAt).toBeUndefined();
   expect((await service.listInbox()).some((entry) => entry.kind === "integration")).toBe(false);
 
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   const completed = await client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
   expect(completed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
   expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done" });
@@ -432,17 +433,16 @@ it("pauses and resumes a delegated merge without returning it to automatic execu
   }, (current) => ({ ...current, status: "merging" }));
   await service.failAction(workspaceId, action.actionId, "主工作区阻塞");
   await service.takeoverIntegration(workspaceId, item.workItemId, "先暂停");
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
 
   const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
   expect(paused).toMatchObject({ paused: true, workItem: { status: "decision", run: { pauseReason: "user" } } });
-  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ agent: { pausedAt: expect.any(String) } });
   await expect(client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" })).rejects.toThrow("先恢复工单");
 
   const resumed = await client.request("workItem.resume", { workspaceId, workItemId: item.workItemId });
-  expect(resumed).toMatchObject({ status: "merging" });
+  expect(resumed).toMatchObject({ status: "queued" });
   expect(resumed.run.pauseReason).toBeUndefined();
   expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "pending", agent: { sessionId: "worker" } });
-  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)?.agent?.pausedAt).toBeUndefined();
 });
 
 it("keeps exhausted merge failures in the integration Inbox instead of creating a duplicate generic decision card", async () => {
@@ -487,6 +487,7 @@ it("handles a real dirty-workspace merge through Worker takeover without losing 
   await git(worktreePath, "add", "result.txt");
   await git(worktreePath, "commit", "-qm", "worker rebase result");
   await writeFile(join(root, "result.txt"), "base\n");
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   const completed = await client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
   expect(completed).toMatchObject({ status: "closed", merge: { commit: expect.any(String) } });
   expect(completed.run.worktreePath).toBeUndefined();

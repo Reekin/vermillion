@@ -288,6 +288,8 @@ export const zExecution = zProcess.extend({
   ...zRun.omit({ resumeMessage: true, lastFailure: true, attempts: true, retryAt: true }).shape,
   kind: z.literal("execute"),
   stage: z.enum(["open", "deliver", "execute"]),
+  /** Git checkpoint being handled by this Worker execution. */
+  integrationActionId: z.string().optional(),
   runId: z.string().optional(),
   deliveredAt: z.string().optional(),
   /** Most recent turn started by scheduler delivery, used to recover its origin. */
@@ -304,12 +306,8 @@ export const zIntegration = zProcess.extend({
   agent: z.object({
     sessionId: z.string().min(1),
     note: z.string().optional(),
-    requestedAt: z.string(),
-    deliveryAttemptedAt: z.string().optional(),
-    deliveredAt: z.string().optional(),
-    turnId: z.string().optional(),
-    pausedAt: z.string().optional()
-  }).optional(),
+    requestedAt: z.string()
+  }).strict().optional(),
   integration: z.object({
     operation: z.enum(["merge", "rollback"]),
     contractRevision: z.number().int().nonnegative(),

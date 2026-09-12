@@ -52,7 +52,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
         titleClassName={muted || !isOpenWorkItem(item) ? "text-faint-foreground" : undefined}
         columns={{
           info: info && <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
-          status: <Badge status={item.status} muted={muted}>{userPaused ? "用户暂停" : integration ? integrationShortStatus(integration) : statusLabel[item.status]}</Badge>,
+          status: <Badge status={item.status} muted={muted}>{userPaused ? "用户暂停" : integration ? integrationShortStatus(integration, item) : statusLabel[item.status]}</Badge>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
           action: sessionId && <SessionLink sessionId={sessionId} onOpenSession={onOpenSession} />
         }}

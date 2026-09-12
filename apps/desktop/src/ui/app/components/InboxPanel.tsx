@@ -147,7 +147,7 @@ const IntegrationCard = ({ store, item }: { store: WorkbenchStore; item: Extract
   return <>
     <Card header={<><Badge tone="accent">合入受阻</Badge>{sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>进入会话</Button>}</>}>
       <p className="break-words text-label font-medium text-strong">{workItem.title}</p>
-      <IntegrationControls client={client} workspaceId={item.workspaceId} workItemId={workItem.workItemId} action={currentAction} />
+      <IntegrationControls client={client} workspaceId={item.workspaceId} workItemId={workItem.workItemId} action={currentAction} item={workItem} />
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" variant="ghost" outlined onClick={() => setDetailId(workItem.workItemId)}>查看工单</Button>
       </div>
