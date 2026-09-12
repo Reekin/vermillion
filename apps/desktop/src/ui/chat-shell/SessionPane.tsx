@@ -1,4 +1,7 @@
-import type { SessionExecutionProfileInput } from "@vermillion/shared";
+import type {
+  SessionExecutionProfileInput,
+  TurnExecutionOptions
+} from "@vermillion/shared";
 import {
   memo,
   useCallback,
@@ -171,6 +174,17 @@ const toComposerExecution = (
         modelId: profile.modelId,
         reasoningOptionId: profile.reasoningOptionId,
         serviceTierId: profile.serviceTierId
+      }
+    : undefined;
+
+const toComposerExecutionSelection = (
+  execution: TurnExecutionOptions | undefined
+): ComposerExecutionSelection | undefined =>
+  execution?.modelId
+    ? {
+        modelId: execution.modelId,
+        reasoningOptionId: execution.reasoningOptionId,
+        serviceTierId: execution.serviceTierId
       }
     : undefined;
 
@@ -914,10 +928,6 @@ export const SessionPane = ({
   );
   const executionDraftKey =
     pendingSend?.operationId ??
-    operations.find((operation) =>
-      operation.targetSessionId === activeSessionId &&
-      operation.turnId === viewTurnId
-    )?.operationId ??
     (activeSessionId ? `${activeSessionId}:${viewTurnId ?? "tip"}` : undefined);
   const renderedTranscriptRows = isOpeningSelectedSession ? [] : visibleTranscriptRows;
   const { approvals: activeSessionApprovals, interactions: activeSessionInteractions } = useRendererSessionSelection(
@@ -1204,6 +1214,7 @@ export const SessionPane = ({
           }
           lastExecution={lastExecution}
           activeTurnExecutionProfile={currentTurn?.executionProfile}
+          pendingExecution={toComposerExecutionSelection(pendingSend?.execution)}
           skillsCwd={skillsCwd}
           turns={composerTurns}
           interruptTurns={composerTurns}

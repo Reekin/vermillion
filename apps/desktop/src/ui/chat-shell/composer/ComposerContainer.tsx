@@ -42,6 +42,7 @@ export type ComposerContainerProps = {
   modelExecutionPreferences?: ComposerModelExecutionPreferences;
   lastExecution?: ComposerExecutionSelection;
   activeTurnExecutionProfile?: TurnExecutionProfile;
+  pendingExecution?: ComposerExecutionSelection;
   skillsCwd?: string;
   turns: Turn[];
   interruptTurns: Turn[];
@@ -84,6 +85,7 @@ export const ComposerContainer = memo(({
   modelExecutionPreferences,
   lastExecution,
   activeTurnExecutionProfile,
+  pendingExecution,
   skillsCwd,
   turns,
   interruptTurns,
@@ -122,6 +124,7 @@ export const ComposerContainer = memo(({
     modelExecutionPreferences,
     lastExecution,
     activeTurnExecutionProfile,
+    pendingExecution,
     skillsCwd,
     turns,
     interruptTurns,

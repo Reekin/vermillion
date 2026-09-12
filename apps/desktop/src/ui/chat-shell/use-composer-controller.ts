@@ -364,6 +364,8 @@ type UseComposerControllerInput = {
   lastExecution?: ComposerExecutionSelection;
   /** Execution profile recorded for the node currently shown in the composer. */
   activeTurnExecutionProfile?: TurnExecutionProfile;
+  /** Configuration captured when an asynchronous branch send was submitted. */
+  pendingExecution?: ComposerExecutionSelection;
   /** Working directory used to resolve project-scoped skills. */
   skillsCwd?: string;
   turns: Turn[];
@@ -436,9 +438,9 @@ export const useComposerController = (
   const [queueBySessionId, setQueueBySessionId] = useState<
     Record<string, QueuedComposerMessage[]>
   >({});
-  const [modelIdByExecutionKey, setModelIdByExecutionKey] = useState<
-    Record<string, string | undefined>
-  >({});
+  const [modelSelection, setModelSelection] = useState<
+    { key: string; modelId: string } | undefined
+  >();
   const [draftProfile, setDraftProfile] = useState<SessionExecutionProfileInput>();
   const [draftProfileReady, setDraftProfileReady] = useState(!input.initializeDraftExecution);
   const [detachedModelId, setDetachedModelId] = useState<string>();
@@ -463,7 +465,16 @@ export const useComposerController = (
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
   const previousContentDraftKeyRef = useRef(contentDraftKey);
+  const previousExecutionKeyRef = useRef(draftKey);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (previousExecutionKeyRef.current === draftKey) {
+      return;
+    }
+    previousExecutionKeyRef.current = draftKey;
+    setModelSelection(undefined);
+  }, [draftKey]);
 
   useEffect(() => {
     if (input.activeSessionId) return;
@@ -516,7 +527,7 @@ export const useComposerController = (
     ? (queueBySessionId[input.activeSessionId] ?? [])
     : [];
   const currentModelId = draftKey
-    ? modelIdByExecutionKey[draftKey]
+    ? modelSelection?.key === draftKey ? modelSelection.modelId : undefined
     : detachedModelId;
   const supportsTurnConfiguration = Boolean(
     input.engineSurface?.sharedCapabilities.includes("turnConfiguration")
@@ -545,7 +556,12 @@ export const useComposerController = (
         models,
         currentModelId,
         persistedProfile: input.activeSessionId
-          ? input.activeTurnExecutionProfile
+          ? input.pendingExecution
+            ? {
+                engineId: input.selectedEngineId,
+                ...input.pendingExecution
+              }
+            : input.activeTurnExecutionProfile
             ? {
                 engineId: input.selectedEngineId,
                 ...input.activeTurnExecutionProfile
@@ -560,6 +576,7 @@ export const useComposerController = (
       input.activeSession?.metadata,
       input.activeSessionId,
       input.activeTurnExecutionProfile,
+      input.pendingExecution,
       input.selectedEngineId,
       draftProfile,
       input.lastExecution,
@@ -1551,10 +1568,9 @@ export const useComposerController = (
       input.onExecutionPreferenceChange?.(input.selectedEngineId, nextExecution);
     }
     if (input.activeSessionId) {
-      setModelIdByExecutionKey((current) => ({
-        ...current,
-        [draftKey!]: nextExecution.modelId
-      }));
+      if (draftKey) {
+        setModelSelection({ key: draftKey, modelId: nextExecution.modelId });
+      }
       return;
     }
     setDetachedModelId(nextExecution.modelId);
