@@ -310,6 +310,11 @@ export class Orchestrator {
         const before = this.turnsBySession.get(sessionId);
         const { turnId } = await this.runner.steer(sessionId, message);
         const turn = this.turnsBySession.get(sessionId);
+        // Accepting the takeover gives this turn execution responsibility, even if the user opened it.
+        if (action.integrationActionId && !action.deliveredAt && turn) {
+          turn.scheduled = true;
+          scheduledTurnId = turnId ?? turn.turnId;
+        }
         if (!turnId && turn && turn !== before) {
           turn.scheduled = true;
           scheduledTurnId = turn.turnId;

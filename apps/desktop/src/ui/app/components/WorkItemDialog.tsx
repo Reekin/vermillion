@@ -70,7 +70,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     >
       <DetailSection title="工单">{item.title}</DetailSection>
       <DetailSection title="目标">{item.objective || "未填写"}</DetailSection>
-      <WorkflowDetails actions={itemActions} onOpenSession={(id) => { onClose(); onOpenSession(id); }} />
+      <WorkflowDetails actions={itemActions} item={item} onOpenSession={(id) => { onClose(); onOpenSession(id); }} />
       <IntegrationControls client={client} workspaceId={workspaceId} workItemId={workItemId} action={integration} item={item} showStatus={false} />
       <DetailSection title="范围">{lines(item.scope.inScope)}</DetailSection>
       <DetailSection title="不在范围内">{lines(item.scope.outOfScope)}</DetailSection>

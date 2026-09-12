@@ -260,7 +260,7 @@ it("resumes an unfinished delegated merge once after orchestrator restart", asyn
 });
 
 
-it("retries a failed takeover turn through execution and completes without restarting the orchestrator", async () => {
+it.each([false, true])("retries a failed takeover turn through execution (user turn: %s)", async (userTurn) => {
   const f = await fixture(true);
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
   await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
@@ -273,19 +273,20 @@ it("retries a failed takeover turn through execution and completes without resta
   const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner, now: () => new Date(now).toISOString() });
   orchestrators.push(orchestrator);
   orchestrator.start();
+  if (userTurn) f.startTurn("worker", "user-turn");
   await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", integrationActionId: integration.actionId }));
-  f.complete("worker", "turn-1", "failed");
+  f.complete("worker", userTurn ? "user-turn" : "turn-1", "failed");
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run).toMatchObject({ attempts: 1, lastFailure: "turn failed: Runtime failed", retryAt: expect.any(String) }));
   expect((await f.service.diagnoseWorkItem(f.workspaceId, item.workItemId)).nextRetryAt).toBeDefined();
   expect(await f.service.listInbox()).toMatchObject([{ kind: "integration", workItem: { run: { attempts: 1 } } }]);
   now += 120_000;
   await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
-  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
-  expect(vi.mocked(f.runner.send).mock.calls[1]![1]).toContain("workItem.integration.complete");
-  expect(vi.mocked(f.runner.send).mock.calls[1]![1]).not.toContain("workItem.submit");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(userTurn ? 1 : 2));
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).toContain("workItem.integration.complete");
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).not.toContain("workItem.submit");
   await expect(f.service.submitWorkItem(f.workspaceId, item.workItemId, submission)).rejects.toThrow("integration.complete");
   await f.service.completeIntegration(f.workspaceId, item.workItemId, integration.actionId, "worker");
-  f.complete("worker", "turn-2");
+  f.complete("worker");
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("closed"));
   expect((await f.service.listInbox()).filter((entry) => entry.kind === "merged")).toHaveLength(1);
 });

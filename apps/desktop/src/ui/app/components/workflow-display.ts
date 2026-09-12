@@ -8,6 +8,7 @@ export const actionRoleLabel = (action: WorkflowAction) => roleLabel[action.kind
 
 export const integrationProgress = (action: WorkflowAction, item?: WorkItem): string | undefined => {
   if (action.kind !== "integration") return undefined;
+  if (!actionIsOpen(action)) return actionStatusLabel[action.status];
   if (action.agent) {
     if (item?.run.pauseReason === "user") return "用户暂停";
     if (item?.status === "decision") return "Agent 合入等待答复";
