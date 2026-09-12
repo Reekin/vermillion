@@ -10,6 +10,7 @@ type SendOperationState = {
   operation: ChatTreeSendOperation;
   cancelRequested: boolean;
   completion?: Promise<void>;
+  cleanup?: Promise<ChatTreeSendOperation>;
 };
 
 /** Fork membership and the viewing cursor belong to the wrapper, independently of running turns. */
@@ -375,8 +376,9 @@ export class WrapperChatTreeService {
   public async cancel(operationId: string, action: "cancel" | "remove", cleanup: TreeCancelCleanup): Promise<ChatTreeSendOperation> {
     const state = this.operations.get(operationId);
     if (!state) throw new Error(`Unknown send operation: ${operationId}`);
+    if (state.cleanup) return state.cleanup;
     const operation = state.operation;
-    if (action === "cancel" && operation.status !== "creating" && operation.status !== "sending") {
+    if (action === "cancel" && operation.status !== "creating" && operation.status !== "sending" && operation.status !== "sent") {
       throw new Error("Only a send in progress can be cancelled.");
     }
     if (action === "remove" && operation.status !== "failed") {
@@ -385,23 +387,32 @@ export class WrapperChatTreeService {
     const recovered = structuredClone(operation);
     state.cancelRequested = true;
     this.changed(operation.sessionId);
-    await state.completion;
-    try {
-      if (operation.turnId && operation.targetSessionId) {
-        await cleanup.interrupt(operation.targetSessionId, operation.turnId);
-      } else if (operation.targetSessionId) {
-        await cleanup.archive(operation.targetSessionId);
+    const task = (async () => {
+      await state.completion;
+      try {
+        if (operation.turnId && operation.targetSessionId) {
+          await cleanup.interrupt(operation.targetSessionId, operation.turnId);
+        } else if (operation.targetSessionId) {
+          await cleanup.archive(operation.targetSessionId);
+        }
+        this.operations.delete(operationId);
+      } catch (error) {
+        operation.status = "failed";
+        operation.cleanupPending = true;
+        operation.error = `Branch cleanup failed: ${error instanceof Error ? error.message : String(error)}`;
+        this.changed(operation.sessionId);
+        throw error;
       }
-      this.operations.delete(operationId);
-    } catch (error) {
-      operation.status = "failed";
-      operation.cleanupPending = true;
-      operation.error = `Branch cleanup failed: ${error instanceof Error ? error.message : String(error)}`;
       this.changed(operation.sessionId);
+      return recovered;
+    })();
+    state.cleanup = task;
+    try {
+      return await task;
+    } catch (error) {
+      state.cleanup = undefined;
       throw error;
     }
-    this.changed(operation.sessionId);
-    return recovered;
   }
 
   private start(state: SendOperationState, send: TreeSend): ChatTreeSendOperation {
