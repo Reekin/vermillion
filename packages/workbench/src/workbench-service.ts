@@ -1084,8 +1084,10 @@ export class WorkbenchService {
       const requirementRef = fixedRefs.find((ref) => ref.path === issue.requirement!.path && ref.commit.toLowerCase() === issue.requirement!.commit!.toLowerCase());
       if (!requirementRef) throw new Error("工单 refs 必须包含已验证的固定要求引用。");
       const requirement = { ...issue.requirement, commit: requirementRef.commit };
+      const { patrolRunId: _patrolRunId, sessionId: _callerSessionId, issueId: _issueId,
+        authorizationReason: _authorizationReason, expectedBehavior: _expectedBehavior, ...workInput } = input;
       const item = await this.createWorkItemIntegrated(workspaceId, {
-        ...input, refs: fixedRefs, issueId: issue.issueId, sourceSessionId: run.sessionId, sourceTurnId: run.turnId,
+        ...workInput, refs: fixedRefs, issueId: issue.issueId, sourceSessionId: run.sessionId, sourceTurnId: run.turnId,
         owner: { domainId: run.domainId, patrolRunId: run.patrolRunId,
           authorizationScope: config.authorizationScope, authorizationReason: input.authorizationReason.trim(),
           expectedBehavior: input.expectedBehavior.trim(), requirement, evidence: issue.evidence }

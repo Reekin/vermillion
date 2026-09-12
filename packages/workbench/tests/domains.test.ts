@@ -107,8 +107,9 @@ describe("domain owner patrols", () => {
     await expect(fixture.client.request("domain.issue.workItem.create", { ...work, issueId: moving.issueId,
       refs: [{ path: issue.requirement!.path!, commit: "HEAD" }] })).rejects.toThrow("不可漂移");
     const item = await fixture.client.request("domain.issue.workItem.create", work);
-    expect(item).toMatchObject({ issueId: issue.issueId, status: "queued", owner: { domainId: domain.domainId, patrolRunId: run.patrolRunId,
+    expect(item).toMatchObject({ issueId: issue.issueId, sourceSessionId: "maintainer-session", status: "queued", owner: { domainId: domain.domainId, patrolRunId: run.patrolRunId,
       expectedBehavior: "Draft remains after switching tabs" } });
+    expect(item.run.sessionId).toBeUndefined();
     expect(await fixture.client.request("issue.get", { workspaceId: fixture.workspaceId, issueId: issue.issueId }))
       .toMatchObject({ status: "started", workItemIds: [item.workItemId] });
     expect(await fixture.client.request("domain.patrol.get", { workspaceId: fixture.workspaceId, patrolRunId: run.patrolRunId }))
