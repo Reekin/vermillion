@@ -103,6 +103,12 @@ const waitForEndpoint = async (path: string, pid: number, abort: () => Promise<v
 
 type LocalEndpoint = { port?: unknown; pid?: unknown };
 type WorkspaceInfo = { workspaceId: string; rootPath: string };
+type EngineModelCatalogResult = {
+  catalog?: {
+    engineId?: unknown;
+    models?: unknown[];
+  };
+};
 type LocalRpcResponse = { ok?: boolean; result?: unknown; error?: string };
 const launchRecordFile = "app-start.json";
 
@@ -198,6 +204,16 @@ export class AppLauncher {
     try {
       await waitForEndpoint(join(dataDir, "endpoint.json"), pid, async () => { await this.stop(pid); });
       const workspaceId = fixture ? await prepareFixtureWorkspace(dataDir, pid, fixture) : undefined;
+      if (input.fixture === "real-session") {
+        const catalog = await callLocalEndpoint<EngineModelCatalogResult>(dataDir, pid, "engine.listModels", { engineId: "codex" });
+        if (
+          catalog.catalog?.engineId !== "codex" ||
+          !Array.isArray(catalog.catalog.models) ||
+          catalog.catalog.models.length === 0
+        ) {
+          throw new Error("The real-session Codex engine did not return a usable model catalog");
+        }
+      }
       await writeFile(join(dataDir, launchRecordFile), JSON.stringify({
         kind: "vermillion-acceptance", pid, desktop: process.platform === "win32" ? this.desktop : "", token: launchToken
       } satisfies AcceptanceLaunchRecord) + "\n", "utf8");
