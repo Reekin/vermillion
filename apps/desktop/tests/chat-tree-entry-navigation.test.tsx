@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
 import { createRendererStore } from "../src/store/store.js";
 import type { DesktopTransport } from "../src/transport/desktop-transport.js";
-import { useChatTreeController, type ChatTreeNavigationEntry } from "../src/ui/chat-shell/use-chat-tree-controller.js";
+import {
+  canDisplayCachedChatTree,
+  hasExplicitChatTreeNavigation,
+  useChatTreeController,
+  type ChatTreeNavigationEntry
+} from "../src/ui/chat-shell/use-chat-tree-controller.js";
 
 const setup = (navigationEntry?: ChatTreeNavigationEntry) => {
   const calls: string[] = [];
@@ -68,5 +73,22 @@ describe("chat tree entry navigation", () => {
     await test.controller.refreshChatTree();
     expect(test.open).toHaveBeenCalledTimes(2);
     expect(test.activate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("cached chat tree display", () => {
+  const tree = {
+    currentSessionId: "worker",
+    currentNodeId: "turn-current",
+    nodes: [{ nodeId: "turn-current", turnId: "turn-current" }]
+  } as unknown as ChatTreeSnapshotRpc;
+
+  it("accepts the cached position only when it matches an explicit target", () => {
+    expect(hasExplicitChatTreeNavigation({})).toBe(false);
+    expect(canDisplayCachedChatTree(tree, "worker", undefined)).toBe(true);
+    expect(canDisplayCachedChatTree(tree, "worker", { focusTree: true })).toBe(true);
+    expect(canDisplayCachedChatTree(tree, "other", { focusTree: true })).toBe(false);
+    expect(canDisplayCachedChatTree(tree, "worker", { turnId: "turn-current" })).toBe(true);
+    expect(canDisplayCachedChatTree(tree, "worker", { turnId: "turn-other" })).toBe(false);
   });
 });

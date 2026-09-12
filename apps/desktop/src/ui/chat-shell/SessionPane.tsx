@@ -66,7 +66,11 @@ import {
   useRendererStoreState
 } from "./use-renderer-store-state.js";
 import { useTranscriptViewportController } from "./use-transcript-viewport-controller.js";
-import { useChatTreeController, type ChatTreeNavigationEntry } from "./use-chat-tree-controller.js";
+import {
+  hasExplicitChatTreeNavigation,
+  useChatTreeController,
+  type ChatTreeNavigationEntry
+} from "./use-chat-tree-controller.js";
 import { ChatTreePanel, type ChatTreePanelProps } from "./ChatTreePanel.js";
 import { GitBranch } from "lucide-react";
 import { useRendererDiagnostics } from "./use-renderer-diagnostics.js";
@@ -100,6 +104,7 @@ export type SessionPaneProps = {
   transport: DesktopTransport;
   /** Tree entry to display; undefined renders the draft state (no session yet). */
   sessionId: string | undefined;
+  /** Explicit branch or turn navigation to apply after the cached view is available. */
   navigationEntry?: ChatTreeNavigationEntry;
   isVisible?: boolean;
   /** Incrementing this re-hydrates the displayed session from the provider (after resume). */
@@ -821,7 +826,9 @@ export const SessionPane = ({
   );
   // Most session switches resolve within a frame; only surface the loading state when a switch is genuinely slow.
   const delayedOpeningIndicator = useDelayedFlag(isOpeningSelectedSession, 300);
-  const showOpeningIndicator = navigationEntry ? isOpeningSelectedSession : delayedOpeningIndicator;
+  const showOpeningIndicator = hasExplicitChatTreeNavigation(navigationEntry)
+    ? isOpeningSelectedSession
+    : delayedOpeningIndicator;
   const turns = useMemo(
     () => activeChatTree
       ? visibleTurnIds.map((id) => domain.getTurn(id)).filter((turn): turn is Turn => Boolean(turn))

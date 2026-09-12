@@ -206,7 +206,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               if (!sessionId && id && section === "sessions") store.getState().setDraftWorkspace(id);
             }}
             onOpen={(id) => {
-              setSessionEntry({});
+              setSessionEntry(undefined);
               const selected = sidebar.findSession(id);
               if (selected) setNavigationTarget({ sessionId: id, workspaceId: selected.workspaceId });
               setSessionId(id);
