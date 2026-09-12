@@ -1154,12 +1154,32 @@ export class WorkbenchService {
       if (conflict !== undefined) throw new Error("Resource is in use: " + conflict + ". Release it before updating this running work item.");
       const status = item.status;
       const contractChanged = Object.keys(changes).length > 0;
+      const acceptanceChanged = changes.acceptance && JSON.stringify(changes.acceptance) !== JSON.stringify(item.acceptance);
+      let verify = item.verify;
+      let history = execution.history;
+      if (acceptanceChanged && verify) {
+        // An index locates a result only within its original acceptance list.
+        const key = (entry: WorkItem["acceptance"][number]) => JSON.stringify([entry.text, entry.source ?? null]);
+        const previousKeys = item.acceptance.map(key);
+        const nextKeys = changes.acceptance!.map(key);
+        const previousResults = new Map(verify.items.map((entry) => [entry.index, entry]));
+        const items = nextKeys.map((value, index) => {
+          const previousIndex = previousKeys.indexOf(value);
+          const unambiguous = previousIndex >= 0 && previousKeys.lastIndexOf(value) === previousIndex &&
+            nextKeys.indexOf(value) === nextKeys.lastIndexOf(value);
+          const previous = unambiguous ? previousResults.get(previousIndex) : undefined;
+          return previous ? { ...previous, index } : { index, status: "incomplete" as const, evidence: "当前验收条目尚未验证。" };
+        });
+        history = [...history, { at: this.now(), event: "acceptance.updated",
+          message: "合同修订 " + item.contractRevision + " 的验收记录：\n" + JSON.stringify({ acceptance: item.acceptance, verify }) }];
+        verify = { ...verify, items, verdict: verify.verdict === "pass" && items.every((entry) => entry.status === "pass") ? "pass" : "rework" };
+      }
       // While parked the note lives on the decision card and reaches the worker inside the answer line.
       const decisions = status === "decision" ? item.decisions : [...item.decisions, "工单调整：" + note];
       return {
         ...record,
-        item: { ...item, ...changes, ...(contractChanged ? { contractRevision: item.contractRevision + 1 } : {}), status, decisions, updatedAt: this.now() },
-        execution: { ...execution, ...(worktreePath ? { worktreePath, branch } : {}),
+        item: { ...item, ...changes, verify, ...(contractChanged ? { contractRevision: item.contractRevision + 1 } : {}), status, decisions, updatedAt: this.now() },
+        execution: { ...execution, history, ...(worktreePath ? { worktreePath, branch } : {}),
           message: status === "decision" ? execution.message : [execution.message, "工单已调整：" + note].filter(Boolean).join("\n"), updatedAt: this.now() }
 
       };
