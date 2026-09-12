@@ -52,6 +52,7 @@ export const zDomainConfig = z.object({
   autoWorkEnabled: z.boolean(),
   authorizationScope: z.array(z.string().min(1)),
   lastCommit: z.string().min(1).optional(),
+  retryAt: z.string().datetime().optional(),
   nextRunAt: z.string().datetime(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()

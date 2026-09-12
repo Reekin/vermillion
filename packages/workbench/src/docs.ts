@@ -354,6 +354,10 @@ export class DocsService {
       .split("\0").filter(Boolean).map((path) => path.replace(/\\/g, "/"));
   }
 
+  async resolveRevision(value: string): Promise<string> {
+    return this.resolveCommit(value);
+  }
+
   private workspacePaths(paths: string[]): string[] {
     return paths.filter((path) => {
       const relativePath = relative(this.rootPath, resolve(this.rootPath, path));

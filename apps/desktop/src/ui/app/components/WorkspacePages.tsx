@@ -224,6 +224,7 @@ const DomainsSection = ({ client, workspaceId, domains, patrolRuns, onOpenDoc, o
         <span><span className="text-muted-foreground">变更触发　</span>{selected.config.changeTrigger ? selected.config.triggerPaths.length ? "目录变更后" : "等待配置目录" : "关闭"}</span>
         <span><span className="text-muted-foreground">定时巡检　</span>每 {selected.config.intervalHours} 小时</span>
         <span><span className="text-muted-foreground">下次检查　</span>{selected.config.enabled ? new Date(selected.config.nextRunAt).toLocaleString("zh-CN") : "—"}</span>
+        {selected.config.retryAt && <span><span className="text-muted-foreground">失败重试　</span>{new Date(selected.config.retryAt).toLocaleString("zh-CN")}</span>}
         <span><span className="text-muted-foreground">自动开单　</span>{selected.config.autoWorkEnabled ? selected.config.authorizationScope.length ? `已授权 ${selected.config.authorizationScope.length} 项` : "等待授权范围" : "关闭"}</span>
       </div>
     </div>

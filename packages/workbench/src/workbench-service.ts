@@ -494,7 +494,7 @@ export class WorkbenchService {
     await (await this.context(workspaceId)).store.transactDomainConfig(run.domainId, (current) => {
       if (!current) throw new Error("Unknown domain config: " + run.domainId);
       const config: DomainConfig = { ...current, ...(run.targetCommit ? { lastCommit: run.targetCommit } : {}),
-        nextRunAt: nextRunAt(now, current.intervalHours), updatedAt: now };
+        retryAt: undefined, nextRunAt: nextRunAt(now, current.intervalHours), updatedAt: now };
       return { record: config, result: undefined };
     });
   }
@@ -512,10 +512,16 @@ export class WorkbenchService {
     for (const domain of domains) {
       const config = await this.ensureDomainConfig(workspaceId, domain.domainId);
       if (!config.enabled || (await store.patrolRuns.list()).some((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status))) continue;
+      if (config.retryAt && Date.parse(config.retryAt) > Date.parse(this.now())) continue;
       let changedPaths: string[] = [];
       try { changedPaths = await docs.changedPaths(config.lastCommit, head); }
       catch { changedPaths = []; }
       const relevant = changedPaths.filter((path) => pathMatches(path, config.triggerPaths));
+      if (config.retryAt) {
+        const failed = (await store.patrolRuns.list()).find((run) => run.domainId === domain.domainId && run.status === "failed");
+        created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, failed?.trigger ?? "scheduled", relevant.length ? relevant : failed?.changedPaths ?? [], head));
+        continue;
+      }
       if (config.changeTrigger && relevant.length) {
         created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, "change", relevant, head));
         continue;
@@ -588,7 +594,11 @@ export class WorkbenchService {
       const run: PatrolRun = { ...current, status: "failed", summary: reason, updatedAt: now, endedAt: now };
       return { record: run, result: run };
     });
-    await this.advanceDomainAfterPatrol(workspaceId, saved);
+    await (await this.context(workspaceId)).store.transactDomainConfig(saved.domainId, (current) => {
+      if (!current) throw new Error("Unknown domain config: " + saved.domainId);
+      const config: DomainConfig = { ...current, retryAt: new Date(Date.parse(now) + 60_000).toISOString(), updatedAt: now };
+      return { record: config, result: undefined };
+    });
     this.emit({ type: "domains.changed", workspaceId });
     return saved;
   }
@@ -1063,11 +1073,22 @@ export class WorkbenchService {
       if (!issue.evidence.some((entry) => entry.kind === "static" || entry.kind === "reproduced")) throw new Error("自动开单需要静态证据或实际复现证据。");
       if (!input.refs?.some((ref) => ref.path === issue.requirement!.path && ref.commit === issue.requirement!.commit)) throw new Error("工单 refs 必须包含 Issue 的固定要求引用。");
       if (!input.scope.allowedPaths.length || !input.acceptance.length) throw new Error("自动修复工单需要允许路径和可观察验收结果。");
+      const { docs } = await this.context(workspaceId);
+      const fixedRefs = await Promise.all(input.refs.map(async (ref) => {
+        if (!/^[0-9a-f]{40}$/i.test(ref.commit)) throw new Error("自动修复工单的 refs 必须使用完整、不可漂移的 commit：" + ref.path);
+        const commit = await docs.resolveRevision(ref.commit);
+        if (commit.toLowerCase() !== ref.commit.toLowerCase()) throw new Error("自动修复工单的 ref 未解析为完整 commit：" + ref.path);
+        await docs.read(ref.path, commit);
+        return { ...ref, commit };
+      }));
+      const requirementRef = fixedRefs.find((ref) => ref.path === issue.requirement!.path && ref.commit.toLowerCase() === issue.requirement!.commit!.toLowerCase());
+      if (!requirementRef) throw new Error("工单 refs 必须包含已验证的固定要求引用。");
+      const requirement = { ...issue.requirement, commit: requirementRef.commit };
       const item = await this.createWorkItemIntegrated(workspaceId, {
-        ...input, issueId: issue.issueId, sourceSessionId: run.sessionId, sourceTurnId: run.turnId,
+        ...input, refs: fixedRefs, issueId: issue.issueId, sourceSessionId: run.sessionId, sourceTurnId: run.turnId,
         owner: { domainId: run.domainId, patrolRunId: run.patrolRunId,
           authorizationScope: config.authorizationScope, authorizationReason: input.authorizationReason.trim(),
-          expectedBehavior: input.expectedBehavior.trim(), requirement: issue.requirement, evidence: issue.evidence }
+          expectedBehavior: input.expectedBehavior.trim(), requirement, evidence: issue.evidence }
       });
       await (await this.context(workspaceId)).store.transactPatrolRun(run.patrolRunId, (current) => {
         if (!current) throw new Error("Unknown patrol run: " + run.patrolRunId);

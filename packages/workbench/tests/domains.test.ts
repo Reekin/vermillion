@@ -62,8 +62,18 @@ describe("domain owner patrols", () => {
     const [change] = await fixture.client.request("domain.patrol.scan", { workspaceId: fixture.workspaceId });
     expect(change).toMatchObject({ domainId: domain.domainId, trigger: "change", status: "queued", changedPaths: ["src/change.ts"] });
     await fixture.service.startPatrolRun(fixture.workspaceId, change!.patrolRunId, "maintainer-session");
-    await fixture.client.request("domain.patrol.complete", { workspaceId: fixture.workspaceId, patrolRunId: change!.patrolRunId,
-      sessionId: "maintainer-session", issueIds: [], summary: "No issues" });
+    await fixture.service.failPatrolRun(fixture.workspaceId, change!.patrolRunId, "Engine unavailable");
+    const failedConfig = await fixture.client.request("domain.config.get", { workspaceId: fixture.workspaceId, domainId: domain.domainId });
+    expect(failedConfig.lastCommit).toBe(domain.config.lastCommit);
+    expect(failedConfig.retryAt).toBe("2026-09-12T00:01:00.000Z");
+    expect(await fixture.client.request("domain.patrol.scan", { workspaceId: fixture.workspaceId })).toEqual([]);
+
+    clock = "2026-09-12T00:02:00.000Z";
+    const [retry] = await fixture.client.request("domain.patrol.scan", { workspaceId: fixture.workspaceId });
+    expect(retry).toMatchObject({ trigger: "change", status: "queued", changedPaths: ["src/change.ts"] });
+    await fixture.service.startPatrolRun(fixture.workspaceId, retry!.patrolRunId, "maintainer-session-2");
+    await fixture.client.request("domain.patrol.complete", { workspaceId: fixture.workspaceId, patrolRunId: retry!.patrolRunId,
+      sessionId: "maintainer-session-2", issueIds: [], summary: "No issues" });
 
     clock = "2026-09-12T07:00:00.000Z";
     const [skipped] = await fixture.client.request("domain.patrol.scan", { workspaceId: fixture.workspaceId });
@@ -91,6 +101,11 @@ describe("domain owner patrols", () => {
     await fixture.client.request("domain.config.set", { workspaceId: fixture.workspaceId, domainId: domain.domainId, value: {
       ...domain.config, autoWorkEnabled: true, authorizationScope: ["恢复规范已明确的草稿保留行为"]
     } });
+    const moving = await fixture.client.request("issue.create", { workspaceId: fixture.workspaceId, title: "Moving requirement", summary: "Bad ref",
+      domainId: domain.domainId, source: "maintainer", requirement: { text: "Keep the draft", path: issue.requirement!.path, commit: "HEAD" },
+      evidence: [{ kind: "static", text: "Known mismatch" }] });
+    await expect(fixture.client.request("domain.issue.workItem.create", { ...work, issueId: moving.issueId,
+      refs: [{ path: issue.requirement!.path!, commit: "HEAD" }] })).rejects.toThrow("不可漂移");
     const item = await fixture.client.request("domain.issue.workItem.create", work);
     expect(item).toMatchObject({ issueId: issue.issueId, status: "queued", owner: { domainId: domain.domainId, patrolRunId: run.patrolRunId,
       expectedBehavior: "Draft remains after switching tabs" } });
