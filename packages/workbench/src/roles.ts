@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { zRoleExecutionOverrides, type ResolvedRole, type RoleExecutionOverrides, type RoleFile } from "./contracts.js";
 import { STATE_DIR } from "./docs.js";
+import { assertDomainId } from "./domains.js";
 
 export const ROLES_DIR = STATE_DIR + "/roles";
 
@@ -144,5 +145,24 @@ export class RoleService {
   async removeOverride(workspaceRoot: string, roleId: string): Promise<void> {
     assertRoleId(roleId);
     await rm(roleFile(join(workspaceRoot, ROLES_DIR), roleId), { force: true });
+  }
+
+  async readMaintainerInstruction(workspaceRoot: string, domainId: string): Promise<string> {
+    assertDomainId(domainId);
+    const path = join(workspaceRoot, ROLES_DIR, "maintainer", domainId + ".md");
+    return await exists(path) ? readFile(path, "utf8") : "";
+  }
+
+  async writeMaintainerInstruction(workspaceRoot: string, domainId: string, content: string): Promise<void> {
+    assertDomainId(domainId);
+    const dir = join(workspaceRoot, ROLES_DIR, "maintainer");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, domainId + ".md"), content, "utf8");
+  }
+
+  async resolveMaintainer(workspaceRoot: string, domainId: string): Promise<ResolvedRole> {
+    const base = await this.resolve(workspaceRoot, "maintainer");
+    const domain = (await this.readMaintainerInstruction(workspaceRoot, domainId)).trim();
+    return { ...base, content: [base.content.trim(), domain].filter(Boolean).join("\n\n") };
   }
 }

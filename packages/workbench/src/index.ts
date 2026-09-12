@@ -8,6 +8,7 @@ export * from "./session-navigation.js";
 export * from "./file-workspace-source.js";
 export * from "./memory-workspace-source.js";
 export * from "./roles.js";
+export * from "./domains.js";
 export * from "./orchestrator.js";
 export * from "./app-launcher.js";
 export * from "./cli.js";

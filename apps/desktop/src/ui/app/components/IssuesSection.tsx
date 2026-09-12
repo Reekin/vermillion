@@ -26,12 +26,13 @@ type IssuesSectionProps = {
   workItems: WorkItem[];
   domainIds: string[];
   targetIssueId?: string;
+  targetDomainId?: string;
   onTargetConsumed?: () => void;
   onOpenSession: (sessionId: string, turnId?: string) => void;
   onOpenWorkItem: (workItemId: string) => void;
 };
 
-export const IssuesSection = ({ client, workspaceId, issues, workItems, domainIds, targetIssueId, onTargetConsumed, onOpenSession, onOpenWorkItem }: IssuesSectionProps) => {
+export const IssuesSection = ({ client, workspaceId, issues, workItems, domainIds, targetIssueId, targetDomainId, onTargetConsumed, onOpenSession, onOpenWorkItem }: IssuesSectionProps) => {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("decision");
   const [domainId, setDomainId] = useState("");
@@ -46,6 +47,7 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
     setSelectedId(targetIssueId);
     onTargetConsumed?.();
   }, [issues, onTargetConsumed, targetIssueId]);
+  useEffect(() => { if (targetDomainId) setDomainId(targetDomainId); }, [targetDomainId]);
   const visible = useMemo(() => issues.filter((issue) =>
     (!search || [issue.title, issue.summary].some((value) => value.toLocaleLowerCase().includes(search.toLocaleLowerCase()))) &&
     (!domainId || issue.domainId === domainId) &&

@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import type { WorkbenchStore } from "../workbench-store.js";
+import type { EditorTarget, WorkbenchStore } from "../workbench-store.js";
 import { Modal } from "./Modal.js";
 import { Button, InlineNotice, MarkdownPreview, PanelHeader, SourceEditor } from "./ui.js";
 
 export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
   const workspaceId = store((s) => s.browsingWorkspaceId);
   const target = store((s) => s.editor);
-  return workspaceId && target?.kind === "doc"
-    ? <DocumentEditor key={workspaceId + ":" + target.path + ":" + target.line + ":" + target.column + ":" + target.nonce} store={store} workspaceId={workspaceId} path={target.path} line={target.line} column={target.column} />
+  return workspaceId && (target?.kind === "doc" || target?.kind === "maintainer")
+    ? <DocumentEditor key={workspaceId + ":" + target.path + ":" + (target.kind === "doc" ? target.line + ":" + target.column : "") + ":" + target.nonce} store={store} workspaceId={workspaceId} target={target} />
     : null;
 };
 
-const DocumentEditor = ({ store, workspaceId, path, line, column }: { store: WorkbenchStore; workspaceId: string; path: string; line?: number; column?: number }) => {
+const DocumentEditor = ({ store, workspaceId, target }: { store: WorkbenchStore; workspaceId: string; target: Extract<EditorTarget, { kind: "doc" | "maintainer" }> }) => {
+  const path = target.path;
+  const line = target.kind === "doc" ? target.line : undefined;
+  const column = target.kind === "doc" ? target.column : undefined;
   const client = store((s) => s.client);
   const rootPath = store((s) => s.workspaces.find((w) => w.workspaceId === workspaceId)?.rootPath ?? "");
   const openEditor = store((s) => s.openEditor);
@@ -27,18 +30,22 @@ const DocumentEditor = ({ store, workspaceId, path, line, column }: { store: Wor
 
   useEffect(() => {
     let active = true;
-    void client.request("docs.read", { workspaceId, path }).then((result) => {
+    const request = target.kind === "doc"
+      ? client.request("docs.read", { workspaceId, path })
+      : client.request("domain.instruction.read", { workspaceId, domainId: target.domainId });
+    void request.then((result) => {
       if (active) { setContent(result.content); setSaved(result.content); }
     }).catch((cause: unknown) => { if (active) setError(String(cause)); });
     return () => { active = false; };
-  }, [client, workspaceId, path]);
+  }, [client, workspaceId, path, target.kind, target.kind === "maintainer" ? target.domainId : undefined]);
 
   const save = async () => {
     if (content === undefined || saving || !dirty) return;
     setSaving(true);
     setError(undefined);
     try {
-      await client.request("docs.write", { workspaceId, path, content });
+      if (target.kind === "doc") await client.request("docs.write", { workspaceId, path, content });
+      else await client.request("domain.instruction.write", { workspaceId, domainId: target.domainId, content });
       setSaved(content);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

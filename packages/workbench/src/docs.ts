@@ -346,6 +346,18 @@ export class DocsService {
     }
   }
 
+  async changedPaths(from: string | undefined, to: string | undefined): Promise<string[]> {
+    if (!from || !to || from === to) return [];
+    const start = await this.resolveCommit(from);
+    const end = await this.resolveCommit(to);
+    return (await git(this.rootPath, ["diff", "--name-only", "-z", start, end]))
+      .split("\0").filter(Boolean).map((path) => path.replace(/\\/g, "/"));
+  }
+
+  async resolveRevision(value: string): Promise<string> {
+    return this.resolveCommit(value);
+  }
+
   private workspacePaths(paths: string[]): string[] {
     return paths.filter((path) => {
       const relativePath = relative(this.rootPath, resolve(this.rootPath, path));

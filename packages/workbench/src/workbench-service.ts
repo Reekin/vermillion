@@ -7,8 +7,11 @@ import type {
   DocChange,
   DocCommit,
   DocFile,
+  DomainConfig,
+  DomainDefinition,
   InboxItem,
   Issue,
+  PatrolRun,
   WorkRequest,
   RoleFile,
   WorkItem,
@@ -24,6 +27,7 @@ import { WorkspaceStore } from "./workspace-store.js";
 import { diagnose } from "./diagnosis.js";
 import { runtimeInfo } from "./runtime-info.js";
 import { searchWorkbench, type SearchQuery, type SearchResult, type SessionSearchSource } from "./search.js";
+import { defaultDomainConfig, domainIdFromPath, nextRunAt, parseDomainDefinition, pathMatches } from "./domains.js";
 
 const RETRY_MINUTES = [1, 5, 30, 300];
 
@@ -77,6 +81,12 @@ export type IssueDiscussionStarter = (input: {
 type IssueUpdateInput = Partial<Pick<Issue, "title" | "summary" | "domainId" | "type" | "status" | "requirement" | "suggestion" | "decisionQuestion" | "resolutionReason" | "duplicateOf">> & {
   appendEvidence?: Issue["evidence"];
   unread?: boolean;
+};
+
+type DomainConfigInput = Pick<DomainConfig, "enabled" | "changeTrigger" | "intervalHours" | "triggerPaths" | "autoWorkEnabled" | "authorizationScope">;
+type WorkItemCreateInput = Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & {
+  sessionId?: string; sourceSessionId?: string; sourceTurnId?: string; treeId?: string; requestId?: string; issueId?: string;
+  worktreePath?: string; branch?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[]; owner?: WorkItem["owner"];
 };
 
 export type WorkbenchServiceOptions = {
@@ -377,6 +387,239 @@ export class WorkbenchService {
   async resetRoleOverride(workspaceId: string, roleId: string): Promise<void> {
     await this.roles.removeOverride((await this.context(workspaceId)).rootPath, roleId);
     this.emit({ type: "roles.changed", workspaceId });
+  }
+
+  // ---- domains and owner patrols ----
+
+  private async ensureDomainConfig(workspaceId: string, domainId: string): Promise<DomainConfig> {
+    const { store, docs } = await this.context(workspaceId);
+    const existing = await store.domainConfigs.get(domainId);
+    if (existing) return existing;
+    const config = defaultDomainConfig(domainId, this.now(), await docs.head());
+    return store.transactDomainConfig(domainId, (current) => ({ record: current ?? config, result: current ?? config }));
+  }
+
+  async listDomains(workspaceId: string): Promise<DomainDefinition[]> {
+    const { docs } = await this.context(workspaceId);
+    const files = (await docs.list()).filter((file) => !!domainIdFromPath(file.path));
+    const domains = await Promise.all(files.map(async (file) => {
+      const domainId = domainIdFromPath(file.path)!;
+      return parseDomainDefinition(file.path, await docs.read(file.path), await this.ensureDomainConfig(workspaceId, domainId));
+    }));
+    return domains.sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  async getDomainConfig(workspaceId: string, domainId: string): Promise<DomainConfig> {
+    if (!(await this.listDomains(workspaceId)).some((domain) => domain.domainId === domainId)) throw new Error("Unknown domain: " + domainId);
+    return this.ensureDomainConfig(workspaceId, domainId);
+  }
+
+  async setDomainConfig(workspaceId: string, domainId: string, input: DomainConfigInput): Promise<DomainConfig> {
+    const current = await this.getDomainConfig(workspaceId, domainId);
+    const now = this.now();
+    const saved = await (await this.context(workspaceId)).store.transactDomainConfig(domainId, (record) => {
+      if (!record) throw new Error("Unknown domain config: " + domainId);
+      const config: DomainConfig = { ...record, ...input,
+        triggerPaths: [...new Set(input.triggerPaths.map((path) => path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "")).filter(Boolean))],
+        authorizationScope: [...new Set(input.authorizationScope.map((entry) => entry.trim()).filter(Boolean))],
+        nextRunAt: input.intervalHours === current.intervalHours ? record.nextRunAt : nextRunAt(now, input.intervalHours),
+        updatedAt: now };
+      return { record: config, result: config };
+    });
+    this.emit({ type: "domains.changed", workspaceId });
+    return saved;
+  }
+
+  async readMaintainerInstruction(workspaceId: string, domainId: string): Promise<string> {
+    await this.getDomainConfig(workspaceId, domainId);
+    return this.roles.readMaintainerInstruction((await this.context(workspaceId)).rootPath, domainId);
+  }
+
+  async writeMaintainerInstruction(workspaceId: string, domainId: string, content: string): Promise<void> {
+    await this.getDomainConfig(workspaceId, domainId);
+    await this.roles.writeMaintainerInstruction((await this.context(workspaceId)).rootPath, domainId, content);
+    this.emit({ type: "domains.changed", workspaceId });
+  }
+
+  async resolveMaintainer(workspaceId: string, domainId: string) {
+    await this.getDomainConfig(workspaceId, domainId);
+    return this.roles.resolveMaintainer((await this.context(workspaceId)).rootPath, domainId);
+  }
+
+  async listPatrolRuns(workspaceId: string): Promise<PatrolRun[]> {
+    return (await this.context(workspaceId)).store.patrolRuns.list().then((runs) => runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt)));
+  }
+
+  async getPatrolRun(workspaceId: string, patrolRunId: string): Promise<PatrolRun> {
+    const run = await (await this.context(workspaceId)).store.patrolRuns.get(patrolRunId);
+    if (!run) throw new Error("Unknown patrol run: " + patrolRunId);
+    return run;
+  }
+
+  private async createPatrolRun(workspaceId: string, domain: DomainDefinition, trigger: PatrolRun["trigger"], changedPaths: string[], targetCommit: string): Promise<PatrolRun> {
+    const { store, docs } = await this.context(workspaceId);
+    const active = (await store.patrolRuns.list()).find((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status));
+    if (active) throw new Error(`领域 ${domain.title} 已有巡检等待或运行中：${active.patrolRunId}`);
+    await Promise.all([domain.path, ...domain.standards].map((path) => docs.read(path, targetCommit)));
+    const now = this.now();
+    const run: PatrolRun = {
+      patrolRunId: createId("patrol"), domainId: domain.domainId, trigger, status: "queued", changedPaths,
+      requirementRefs: [domain.path, ...domain.standards].map((path) => ({ path, commit: targetCommit })),
+      targetCommit, issueIds: [], workItemIds: [], startedAt: now, updatedAt: now
+    };
+    const saved = await store.transactPatrolRun(run.patrolRunId, (current) => {
+      if (current) throw new Error("Patrol run already exists: " + run.patrolRunId);
+      return { record: run, result: run };
+    });
+    this.emit({ type: "domains.changed", workspaceId });
+    return saved;
+  }
+
+  async queuePatrol(workspaceId: string, domainId: string): Promise<PatrolRun> {
+    return this.integrate(workspaceId, () => this.queuePatrolRecord(workspaceId, domainId));
+  }
+
+  private async queuePatrolRecord(workspaceId: string, domainId: string): Promise<PatrolRun> {
+    const domain = (await this.listDomains(workspaceId)).find((entry) => entry.domainId === domainId);
+    if (!domain) throw new Error("Unknown domain: " + domainId);
+    const { docs } = await this.context(workspaceId);
+    const head = await docs.head();
+    if (!head) throw new Error("领域巡检需要已提交的领域定义和检查依据。");
+    const changed = await docs.changedPaths(domain.config.lastCommit, head);
+    return this.createPatrolRun(workspaceId, domain, "manual", changed, head);
+  }
+
+  private async advanceDomainAfterPatrol(workspaceId: string, run: PatrolRun): Promise<void> {
+    const now = this.now();
+    await (await this.context(workspaceId)).store.transactDomainConfig(run.domainId, (current) => {
+      if (!current) throw new Error("Unknown domain config: " + run.domainId);
+      const config: DomainConfig = { ...current, ...(run.targetCommit ? { lastCommit: run.targetCommit } : {}),
+        retryAt: undefined, nextRunAt: nextRunAt(now, current.intervalHours), updatedAt: now };
+      return { record: config, result: undefined };
+    });
+  }
+
+  async scanPatrols(workspaceId: string): Promise<PatrolRun[]> {
+    return this.integrate(workspaceId, () => this.scanPatrolRecords(workspaceId));
+  }
+
+  private async scanPatrolRecords(workspaceId: string): Promise<PatrolRun[]> {
+    const domains = await this.listDomains(workspaceId);
+    const { docs, store } = await this.context(workspaceId);
+    const head = await docs.head();
+    if (!head) return [];
+    const created: PatrolRun[] = [];
+    for (const domain of domains) {
+      const config = await this.ensureDomainConfig(workspaceId, domain.domainId);
+      if (!config.enabled || (await store.patrolRuns.list()).some((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status))) continue;
+      if (config.retryAt && Date.parse(config.retryAt) > Date.parse(this.now())) continue;
+      let changedPaths: string[] = [];
+      try { changedPaths = await docs.changedPaths(config.lastCommit, head); }
+      catch { changedPaths = []; }
+      const relevant = changedPaths.filter((path) => pathMatches(path, config.triggerPaths));
+      if (config.retryAt) {
+        const failed = (await store.patrolRuns.list()).filter((run) => run.domainId === domain.domainId && run.status === "failed")
+          .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+        created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, failed?.trigger ?? "scheduled", relevant.length ? relevant : failed?.changedPaths ?? [], head));
+        continue;
+      }
+      if (config.changeTrigger && relevant.length) {
+        created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, "change", relevant, head));
+        continue;
+      }
+      if (Date.parse(config.nextRunAt) > Date.parse(this.now())) continue;
+      const investigating = (await store.issues.list()).some((issue) => issue.domainId === domain.domainId && issue.status === "investigating");
+      if (relevant.length || investigating) {
+        created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, "scheduled", relevant, head));
+        continue;
+      }
+      const now = this.now();
+      const skipped: PatrolRun = { patrolRunId: createId("patrol"), domainId: domain.domainId, trigger: "scheduled", status: "skipped",
+        changedPaths: [], requirementRefs: [domain.path, ...domain.standards].map((path) => ({ path, commit: head ?? "HEAD" })), targetCommit: head,
+        issueIds: [], workItemIds: [], summary: "无新变更或待复查问题，跳过。", startedAt: now, updatedAt: now, endedAt: now };
+      await store.patrolRuns.put(skipped);
+      await this.advanceDomainAfterPatrol(workspaceId, skipped);
+      created.push(skipped);
+      this.emit({ type: "domains.changed", workspaceId });
+    }
+    return created;
+  }
+
+  async startPatrolRun(workspaceId: string, patrolRunId: string, sessionId: string): Promise<PatrolRun> {
+    const now = this.now();
+    const saved = await (await this.context(workspaceId)).store.transactPatrolRun(patrolRunId, (current) => {
+      if (!current || !["queued", "running"].includes(current.status)) throw new Error("Patrol run cannot start: " + patrolRunId);
+      if (current.sessionId && current.sessionId !== sessionId) throw new Error("Patrol run belongs to another session: " + current.sessionId);
+      const run: PatrolRun = { ...current, status: "running", sessionId, updatedAt: now };
+      return { record: run, result: run };
+    });
+    this.emit({ type: "domains.changed", workspaceId });
+    return saved;
+  }
+
+  async setPatrolTurn(workspaceId: string, patrolRunId: string, turnId: string | undefined): Promise<PatrolRun> {
+    if (!turnId) return this.getPatrolRun(workspaceId, patrolRunId);
+    return (await this.context(workspaceId)).store.transactPatrolRun(patrolRunId, (current) => {
+      if (!current) throw new Error("Unknown patrol run: " + patrolRunId);
+      const run = { ...current, turnId, updatedAt: this.now() };
+      return { record: run, result: run };
+    });
+  }
+
+  async completePatrolRun(workspaceId: string, patrolRunId: string, sessionId: string, issueIds: string[], summary: string): Promise<PatrolRun> {
+    const current = await this.getPatrolRun(workspaceId, patrolRunId);
+    if (current.status !== "running" || current.sessionId !== sessionId) throw new Error("只有当前巡检会话能完成该记录。");
+    const issues = await Promise.all([...new Set(issueIds)].map((issueId) => this.getIssue(workspaceId, issueId)));
+    if (issues.some((issue) => issue.domainId !== current.domainId)) throw new Error("巡检只能关联当前领域的 Issue。");
+    const now = this.now();
+    for (const issue of issues) await (await this.context(workspaceId)).store.transactIssue(issue.issueId, (record) => {
+      if (!record) throw new Error("Unknown issue: " + issue.issueId);
+      return { record: { ...record, activities: [...record.activities, { at: now, kind: "updated", message: "关联领域巡检", sessionId }], updatedAt: now }, result: undefined };
+    });
+    const saved = await (await this.context(workspaceId)).store.transactPatrolRun(patrolRunId, (record) => {
+      if (!record) throw new Error("Unknown patrol run: " + patrolRunId);
+      const run: PatrolRun = { ...record, status: "completed", issueIds: issues.map((issue) => issue.issueId), summary: summary.trim(), updatedAt: now, endedAt: now };
+      return { record: run, result: run };
+    });
+    await this.advanceDomainAfterPatrol(workspaceId, saved);
+    this.emit({ type: "issues.changed", workspaceId });
+    this.emit({ type: "domains.changed", workspaceId });
+    return saved;
+  }
+
+  async failPatrolRun(workspaceId: string, patrolRunId: string, reason: string): Promise<PatrolRun> {
+    const now = this.now();
+    const saved = await (await this.context(workspaceId)).store.transactPatrolRun(patrolRunId, (current) => {
+      if (!current) throw new Error("Unknown patrol run: " + patrolRunId);
+      if (!["queued", "running"].includes(current.status)) return { record: current, result: current };
+      const run: PatrolRun = { ...current, status: "failed", summary: reason, updatedAt: now, endedAt: now };
+      return { record: run, result: run };
+    });
+    await (await this.context(workspaceId)).store.transactDomainConfig(saved.domainId, (current) => {
+      if (!current) throw new Error("Unknown domain config: " + saved.domainId);
+      const config: DomainConfig = { ...current, retryAt: new Date(Date.parse(now) + 60_000).toISOString(), updatedAt: now };
+      return { record: config, result: undefined };
+    });
+    this.emit({ type: "domains.changed", workspaceId });
+    return saved;
+  }
+
+  async patrolMessage(workspaceId: string, patrolRunId: string): Promise<string> {
+    const run = await this.getPatrolRun(workspaceId, patrolRunId);
+    const domain = (await this.listDomains(workspaceId)).find((entry) => entry.domainId === run.domainId);
+    if (!domain) throw new Error("Unknown domain: " + run.domainId);
+    const issues = (await this.listIssues(workspaceId)).filter((issue) => issue.domainId === run.domainId);
+    return [
+      `执行 ${domain.title} 领域巡检。`,
+      `workspaceId: ${workspaceId}\npatrolRunId: ${run.patrolRunId}\nsessionId: ${run.sessionId ?? "<由运行时填写>"}\n触发: ${run.trigger}`,
+      `本轮变化:\n${run.changedPaths.length ? run.changedPaths.map((path) => "- " + path).join("\n") : "- 无新增路径，复查调查中的 Issue。"}`,
+      `检查依据:\n${run.requirementRefs.map((ref) => `- ${ref.path} @ ${ref.commit}`).join("\n")}`,
+      `当前自动开单: ${domain.config.autoWorkEnabled ? "启用" : "关闭"}\n授权范围:\n${domain.config.authorizationScope.length ? domain.config.authorizationScope.map((entry) => "- " + entry).join("\n") : "- 未授权"}`,
+      `已有 Issue 摘要:\n${issues.length ? issues.map((issue) => `- ${issue.issueId} [${issue.status}] ${issue.title}`).join("\n") : "- 无"}`,
+      `先通过 docs.read、issue.list / issue.get 核对材料。新问题用 issue.create，并传 source=maintainer、sourceSessionId=${run.sessionId ?? "<sessionId>"}；重复发现用 issue.update 补充证据。证据不足标为 investigating，需要取舍标为 decision 并提供 decisionQuestion，优化想法使用 suggestion 类型。`,
+      "只有满足领域授权时才调用 domain.issue.workItem.create；该入口会再次核对巡检会话、授权、固定要求引用和证据。不要直接修改代码、文档或规范。",
+      `完成后必须调用：vermillion domain.patrol.complete '${JSON.stringify({ workspaceId, patrolRunId: run.patrolRunId, sessionId: run.sessionId ?? "<sessionId>", issueIds: ["<issueId>"], summary: "<本轮结果>" })}'。没有 Issue 时传空数组。`
+    ].join("\n\n");
   }
 
   // ---- issues ----
@@ -791,30 +1034,76 @@ export class WorkbenchService {
   /** Dependencies and agent actions share one durable queue; facts, not delivery receipts, release waiting work. */
   async createWorkItem(
     workspaceId: string,
-    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { sessionId?: string; sourceSessionId?: string; sourceTurnId?: string; treeId?: string; requestId?: string; issueId?: string; worktreePath?: string; branch?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[] }
+    input: WorkItemCreateInput
   ): Promise<WorkItem> {
+    return this.integrate(workspaceId, () => this.createWorkItemIntegrated(workspaceId, input));
+  }
+
+  private async createWorkItemIntegrated(workspaceId: string, input: WorkItemCreateInput): Promise<WorkItem> {
+    const explicitIssue = input.issueId ? await this.getIssue(workspaceId, input.issueId) : undefined;
+    const request = input.requestId ? await (await this.context(workspaceId)).store.workRequests.get(input.requestId) : undefined;
+    const sourceSessionId = request?.sourceSessionId ?? input.sourceSessionId;
+    const linkedIssue = explicitIssue ?? (sourceSessionId ? (await this.listIssues(workspaceId)).find((issue) => issue.discussionSessionId === sourceSessionId) : undefined);
+    if (linkedIssue && ["closed", "duplicate"].includes(linkedIssue.status)) throw new Error("已关闭或重复的 Issue 不能创建关联工单。");
+    const item = await this.createWorkItemRecord(workspaceId, { ...input, issueId: linkedIssue?.issueId });
+    if (!linkedIssue) return item;
+    const now = this.now();
+    await (await this.context(workspaceId)).store.transactIssue(linkedIssue.issueId, (current) => {
+      if (!current) throw new Error("Unknown issue: " + linkedIssue.issueId);
+      const issue: Issue = { ...current, status: "started", unread: true,
+        workItemIds: [...new Set([...current.workItemIds, item.workItemId])],
+        activities: [...current.activities, { at: now, kind: "workItem", message: input.owner ? "Owner 根据领域授权创建工单" : "关联工单", workItemId: item.workItemId }], updatedAt: now };
+      return { record: issue, result: issue };
+    });
+    this.emit({ type: "issues.changed", workspaceId });
+    return item;
+  }
+
+  async createAuthorizedIssueWorkItem(workspaceId: string, input: Pick<WorkItemCreateInput, "title" | "objective" | "risk" | "scope" | "acceptance" | "refs" | "needs" | "dependsOn"> & {
+    patrolRunId: string; sessionId: string; issueId: string; authorizationReason: string; expectedBehavior: string;
+  }): Promise<WorkItem> {
     return this.integrate(workspaceId, async () => {
-      const explicitIssue = input.issueId ? await this.getIssue(workspaceId, input.issueId) : undefined;
-      const request = input.requestId ? await (await this.context(workspaceId)).store.workRequests.get(input.requestId) : undefined;
-      const sourceSessionId = request?.sourceSessionId ?? input.sourceSessionId;
-      const linkedIssue = explicitIssue ?? (sourceSessionId ? (await this.listIssues(workspaceId)).find((issue) => issue.discussionSessionId === sourceSessionId) : undefined);
-      if (linkedIssue && ["closed", "duplicate"].includes(linkedIssue.status)) throw new Error("已关闭或重复的 Issue 不能创建关联工单。");
-      const item = await this.createWorkItemRecord(workspaceId, { ...input, issueId: linkedIssue?.issueId });
-      if (!linkedIssue) return item;
-      const now = this.now();
-      await (await this.context(workspaceId)).store.transactIssue(linkedIssue.issueId, (current) => {
-        if (!current) throw new Error("Unknown issue: " + linkedIssue.issueId);
-        const issue: Issue = { ...current, status: "started", unread: true,
-          workItemIds: [...new Set([...current.workItemIds, item.workItemId])],
-          activities: [...current.activities, { at: now, kind: "workItem", message: "关联工单", workItemId: item.workItemId }], updatedAt: now };
-        return { record: issue, result: issue };
+      const run = await this.getPatrolRun(workspaceId, input.patrolRunId);
+      if (run.status !== "running" || run.sessionId !== input.sessionId) throw new Error("只有当前领域巡检会话能自动开单。");
+      const issue = await this.getIssue(workspaceId, input.issueId);
+      if (issue.domainId !== run.domainId) throw new Error("Issue 不属于当前巡检领域。");
+      if (issue.type !== "problem" || ["decision", "closed", "duplicate", "started"].includes(issue.status)) throw new Error("当前 Issue 状态不允许 Owner 自动开单。");
+      const config = await this.getDomainConfig(workspaceId, run.domainId);
+      if (!config.autoWorkEnabled || !config.authorizationScope.length) throw new Error("当前领域未启用自动开单或授权范围为空。");
+      if (!issue.requirement?.path || !issue.requirement.commit) throw new Error("自动开单需要固定版本的要求路径与 commit。");
+      if (!issue.evidence.some((entry) => entry.kind === "static" || entry.kind === "reproduced")) throw new Error("自动开单需要静态证据或实际复现证据。");
+      if (!input.refs?.some((ref) => ref.path === issue.requirement!.path && ref.commit === issue.requirement!.commit)) throw new Error("工单 refs 必须包含 Issue 的固定要求引用。");
+      if (!input.scope.allowedPaths.length || !input.acceptance.length) throw new Error("自动修复工单需要允许路径和可观察验收结果。");
+      const { docs } = await this.context(workspaceId);
+      const fixedRefs = await Promise.all(input.refs.map(async (ref) => {
+        if (!/^[0-9a-f]{40}$/i.test(ref.commit)) throw new Error("自动修复工单的 refs 必须使用完整、不可漂移的 commit：" + ref.path);
+        const commit = await docs.resolveRevision(ref.commit);
+        if (commit.toLowerCase() !== ref.commit.toLowerCase()) throw new Error("自动修复工单的 ref 未解析为完整 commit：" + ref.path);
+        await docs.read(ref.path, commit);
+        return { ...ref, commit };
+      }));
+      const requirementRef = fixedRefs.find((ref) => ref.path === issue.requirement!.path && ref.commit.toLowerCase() === issue.requirement!.commit!.toLowerCase());
+      if (!requirementRef) throw new Error("工单 refs 必须包含已验证的固定要求引用。");
+      const requirement = { ...issue.requirement, commit: requirementRef.commit };
+      const { patrolRunId: _patrolRunId, sessionId: _callerSessionId, issueId: _issueId,
+        authorizationReason: _authorizationReason, expectedBehavior: _expectedBehavior, ...workInput } = input;
+      const item = await this.createWorkItemIntegrated(workspaceId, {
+        ...workInput, refs: fixedRefs, issueId: issue.issueId, sourceSessionId: run.sessionId, sourceTurnId: run.turnId,
+        owner: { domainId: run.domainId, patrolRunId: run.patrolRunId,
+          authorizationScope: config.authorizationScope, authorizationReason: input.authorizationReason.trim(),
+          expectedBehavior: input.expectedBehavior.trim(), requirement, evidence: issue.evidence }
       });
-      this.emit({ type: "issues.changed", workspaceId });
+      await (await this.context(workspaceId)).store.transactPatrolRun(run.patrolRunId, (current) => {
+        if (!current) throw new Error("Unknown patrol run: " + run.patrolRunId);
+        const updated = { ...current, workItemIds: [...new Set([...current.workItemIds, item.workItemId])], updatedAt: this.now() };
+        return { record: updated, result: updated };
+      });
+      this.emit({ type: "domains.changed", workspaceId });
       return item;
     });
   }
 
-  private async createWorkItemRecord(workspaceId: string, input: Parameters<WorkbenchService["createWorkItem"]>[1]): Promise<WorkItem> {
+  private async createWorkItemRecord(workspaceId: string, input: WorkItemCreateInput): Promise<WorkItem> {
     const now = this.now();
     const { store } = await this.context(workspaceId);
     if (!!input.worktreePath !== !!input.branch) throw new Error("worktreePath 与 branch 必须同时提供。");
@@ -826,6 +1115,7 @@ export class WorkbenchService {
     const item: WorkItemRecord["item"] = {
       workItemId: createId("wi"),
       issueId: input.issueId,
+      owner: input.owner,
       sourceSessionId: request?.sourceSessionId ?? input.sourceSessionId, sourceTurnId: request?.sourceTurnId ?? input.sourceTurnId, treeId: request?.treeId ?? input.treeId, requestId: input.requestId,
       contractRevision: 0,
       title: input.title.trim(),
@@ -1520,6 +1810,8 @@ const describeAnswer = (card: DecisionCard, answer: { key?: string; note?: strin
 const watchedAreas: Record<string, Exclude<Extract<WorkbenchEvent, { workspaceId: string }>, { sessionId: string } | { workItemId: string } | { requestId: string }>["type"] | undefined> = {
   docs: "docs.changed",
   roles: "roles.changed",
+  domains: "domains.changed",
+  patrols: "domains.changed",
   "work-requests": "workRequests.changed",
   workitems: "workItems.changed",
   decisions: "decisions.changed",
