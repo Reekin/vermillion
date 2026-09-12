@@ -31,6 +31,14 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 ## 会话与执行环境
 
+### 节点执行配置
+
+节点执行配置的产品行为见[工作台 · 输入器](../Workbench/Think/PRD.md#输入器)。Codex 适配层接收 `thread/settings/updated` 的 `model`、`effort`、`serviceTier`，按所属 thread 的轮次生命周期关联 `turnId`；`model/rerouted` 按其携带的 `turnId` 更新该轮模型。配置关联和引擎字段映射留在适配层，不能把发送请求参数冒充引擎已确认的生效配置。
+
+Vermillion 将逐轮生效配置作为节点执行记录持久化，并通过已有会话、turn 和 ChatTree 查询链路提供给界面及 CLI。历史重新加载与投影重建保留这些记录；共享节点通过原 turn 身份读取同一份配置，不复制当前分支配置覆盖它。输入器的可编辑发送配置与历史执行记录分开，提交时固定本次发送配置，异步 fork 与节点身份转换继续使用该配置。此链路只消费引擎协议和应用自己的记录，不读取 Codex rollout。
+
+### 会话生命周期
+
 渲染订阅按可见 turn 路径限定，树成员关系不作为正文的订阅范围。后台内容仍由会话引擎保存，事件按批次接收；后台文本、终端输出和工具进度不触发当前 transcript 或 Composer 更新。运行、完成、失败、中断、审批和交互请求保持状态通知。切换路径时从最新投影读取内容，再订阅该路径的后续变化。输入草稿由输入器本地管理，与内容流的更新边界分开。
 
 会话 cwd 保持 workspace 根目录。使用 worktree 时，Worker 在具体工具调用中显式指定 workdir、`git -C` 或文件绝对路径；工单流转与目录回收见[工单](../Workbench/Missions/PRD.md)。
