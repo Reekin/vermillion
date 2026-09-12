@@ -6,11 +6,20 @@ import type { SessionRuntimeService } from "./runtime-service.js";
 import type { SessionReconciliationService } from "./session-discovery.js";
 import { buildSessionWindowSnapshotFromPage } from "./session-window.js";
 
+type SendOperationState = {
+  operation: ChatTreeSendOperation;
+  cancelRequested: boolean;
+  completion?: Promise<void>;
+};
+
 /** Fork membership and the viewing cursor belong to the wrapper, independently of running turns. */
 export class WrapperChatTreeService {
   private readonly loaded = new Set<string>();
   private readonly loading = new Map<string, Promise<void>>();
-  private readonly operations = new Map<string, ChatTreeSendOperation>();
+  private readonly publishedTrees = new Set<string>();
+  private readonly treeVersions = new Map<string, number>();
+  private readonly treeLoading = new Map<string, { version: number; promise: Promise<void> }>();
+  private readonly operations = new Map<string, SendOperationState>();
   private readonly unsubscribe: () => void;
 
   public constructor(private readonly options: {
@@ -37,29 +46,94 @@ export class WrapperChatTreeService {
   public dispose(): void { this.unsubscribe(); }
 
   public invalidate(sessionId: string): void {
-    for (const memberId of this.options.sessionIndexStore.getTreeMembers(sessionId)) {
+    const index = this.options.sessionIndexStore;
+    const treeId = index.getTreeId(sessionId);
+    this.publishedTrees.delete(treeId);
+    this.treeVersions.set(treeId, (this.treeVersions.get(treeId) ?? 0) + 1);
+    for (const memberId of index.getTreeMembers(sessionId)) {
       this.loaded.delete(memberId);
     }
   }
 
   private async loadMember(sessionId: string): Promise<void> {
-    if (this.loaded.has(sessionId)) return;
-    const existing = this.loading.get(sessionId);
-    if (existing) return existing;
-    const task = (async () => {
-      const session = this.options.runtimeService.getSession(sessionId);
-      const entry = this.options.sessionIndexStore.getEntry(sessionId);
-      const force = Boolean(session && entry?.providerSessionId &&
-        session.status !== "running" && session.status !== "awaiting_approval");
-      const loaded = await this.options.reconciliation.ensureSessionLoaded(sessionId, { force });
-      if (!loaded) {
-        if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt) return;
-        throw new Error(`Unable to load tree member: ${sessionId}`);
+    while (!this.loaded.has(sessionId)) {
+      const existing = this.loading.get(sessionId);
+      if (existing) {
+        await existing;
+        continue;
       }
-      this.loaded.add(sessionId);
-    })().finally(() => this.loading.delete(sessionId));
-    this.loading.set(sessionId, task);
-    return task;
+      const treeId = this.options.sessionIndexStore.getTreeId(sessionId);
+      const version = this.treeVersions.get(treeId) ?? 0;
+      const task = (async () => {
+        const session = this.options.runtimeService.getSession(sessionId);
+        const entry = this.options.sessionIndexStore.getEntry(sessionId);
+        const force = Boolean(session && entry?.providerSessionId &&
+          session.status !== "running" && session.status !== "awaiting_approval");
+        const loaded = await this.options.reconciliation.ensureSessionLoaded(sessionId, { force });
+        if (!loaded) {
+          if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt) return;
+          throw new Error(`Unable to load tree member: ${sessionId}`);
+        }
+        if ((this.treeVersions.get(treeId) ?? 0) === version) this.loaded.add(sessionId);
+      })();
+      this.loading.set(sessionId, task);
+      try {
+        await task;
+      } finally {
+        if (this.loading.get(sessionId) === task) this.loading.delete(sessionId);
+      }
+      if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt && !this.loaded.has(sessionId) &&
+        (this.treeVersions.get(treeId) ?? 0) === version) return;
+    }
+  }
+
+  private async loadTree(sessionId: string): Promise<void> {
+    const index = this.options.sessionIndexStore;
+    while (true) {
+      const members = index.getTreeMembers(sessionId);
+      if (members.some((id) => index.getEntry(id)?.archivedAt)) {
+        // Ancestors borrow surviving histories before those members load themselves.
+        for (const id of members) await this.loadMember(id);
+      } else {
+        await Promise.all(members.map((id) => this.loadMember(id)));
+      }
+      const current = index.getTreeMembers(sessionId);
+      if (current.every((id) => this.loaded.has(id) || index.getEntry(id)?.archivedAt)) return;
+    }
+  }
+
+  private async ensureTreePublished(sessionId: string): Promise<void> {
+    const treeId = this.options.sessionIndexStore.getTreeId(sessionId);
+    while (!this.publishedTrees.has(treeId)) {
+      const version = this.treeVersions.get(treeId) ?? 0;
+      let loading = this.treeLoading.get(treeId);
+      if (!loading || loading.version !== version) {
+        const promise = this.loadTree(sessionId);
+        loading = { version, promise };
+        this.treeLoading.set(treeId, loading);
+      }
+      try {
+        await loading.promise;
+      } finally {
+        if (this.treeLoading.get(treeId) === loading) this.treeLoading.delete(treeId);
+      }
+      if ((this.treeVersions.get(treeId) ?? 0) === version) this.publishedTrees.add(treeId);
+    }
+  }
+
+  private async loadPublishedTreeChanges(sessionId: string): Promise<void> {
+    const index = this.options.sessionIndexStore;
+    while (true) {
+      const pendingTargets = new Set([...this.operations.values()]
+        .map((state) => state.operation)
+        .filter((operation) => operation.status !== "sent" && operation.targetSessionId)
+        .map((operation) => operation.targetSessionId!));
+      const members = index.getTreeMembers(sessionId);
+      const missing = members.filter((id) =>
+        !this.loaded.has(id) && !pendingTargets.has(id) && !index.getEntry(id)?.archivedAt);
+      if (missing.length === 0) return;
+      await Promise.all(missing.map((id) => this.loadMember(id)));
+    }
   }
 
   private project(sessionId: string) {
@@ -154,20 +228,21 @@ export class WrapperChatTreeService {
 
   public async get(sessionId: string): Promise<ChatTreeSnapshot> {
     await this.options.sessionIndexStore.ready();
-    const members = this.options.sessionIndexStore.getTreeMembers(sessionId);
-    if (!members.some((id) => this.loaded.has(id))) {
-      if (members.some((id) => this.options.sessionIndexStore.getEntry(id)?.archivedAt)) {
-        // Ancestors borrow surviving histories before those members load themselves.
-        for (const id of members) await this.loadMember(id);
-      } else {
-        await Promise.all(members.map((id) => this.loadMember(id)));
-      }
-    } else {
+    const index = this.options.sessionIndexStore;
+    const treeId = index.getTreeId(sessionId);
+    let tree: ChatTreeSnapshot;
+    while (true) {
+      await this.ensureTreePublished(sessionId);
+      const version = this.treeVersions.get(treeId) ?? 0;
+      await this.loadPublishedTreeChanges(sessionId);
+      if ((this.treeVersions.get(treeId) ?? 0) !== version || !this.publishedTrees.has(treeId)) continue;
+      const members = index.getTreeMembers(sessionId);
       for (const id of members.filter((id) => !this.loaded.has(id) && !this.loading.has(id))) {
         void this.loadMember(id).then(() => this.changed(sessionId)).catch(() => {});
       }
+      tree = this.project(sessionId).tree;
+      break;
     }
-    const { tree } = this.project(sessionId);
     if (!this.options.sessionIndexStore.getTreeView(sessionId)) {
       await this.options.sessionIndexStore.setTreeView(sessionId, {
         sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true
@@ -201,6 +276,9 @@ export class WrapperChatTreeService {
     const target = await this.getNodeTarget(sessionId, nodeId);
     if (!target.canArchive) throw new Error("Only a terminal fork node can be archived.");
     await archive(target.sessionId);
+    for (const [operationId, state] of this.operations) {
+      if (state.operation.targetSessionId === target.sessionId) this.operations.delete(operationId);
+    }
     const index = this.options.sessionIndexStore;
     if (index.getTreeView(sessionId)?.sessionId === target.sessionId) {
       const { tree } = this.project(sessionId);
@@ -269,36 +347,77 @@ export class WrapperChatTreeService {
 
   public listOperations(sessionId: string): ChatTreeSendOperation[] {
     const index = this.options.sessionIndexStore;
-    return structuredClone([...this.operations.values()].filter((operation) =>
-      index.getTreeId(operation.sessionId) === index.getTreeId(sessionId)));
+    return structuredClone([...this.operations.values()]
+      .filter((state) => !state.cancelRequested || state.operation.cleanupPending)
+      .map((state) => state.operation)
+      .filter((operation) => index.getTreeId(operation.sessionId) === index.getTreeId(sessionId)));
   }
 
   public submit(input: ChatTreeSendInput, send: TreeSend): ChatTreeSendOperation {
     const operation: ChatTreeSendOperation = { ...structuredClone(input), operationId: randomUUID(), status: "creating" };
-    this.operations.set(operation.operationId, operation);
-    return this.start(operation, send);
+    const state: SendOperationState = { operation, cancelRequested: false };
+    this.operations.set(operation.operationId, state);
+    return this.start(state, send);
   }
 
   public retry(operationId: string, send: TreeSend): ChatTreeSendOperation {
-    const operation = this.operations.get(operationId);
-    if (!operation) throw new Error(`Unknown send operation: ${operationId}`);
+    const state = this.operations.get(operationId);
+    if (!state) throw new Error(`Unknown send operation: ${operationId}`);
+    const operation = state.operation;
     if (operation.status !== "failed") return structuredClone(operation);
+    if (operation.cleanupPending) throw new Error("Finish removing this cancelled send before retrying.");
+    state.cancelRequested = false;
     operation.status = "creating";
     delete operation.error;
-    return this.start(operation, send);
+    return this.start(state, send);
   }
 
-  private start(operation: ChatTreeSendOperation, send: TreeSend): ChatTreeSendOperation {
+  public async cancel(operationId: string, action: "cancel" | "remove", cleanup: TreeCancelCleanup): Promise<ChatTreeSendOperation> {
+    const state = this.operations.get(operationId);
+    if (!state) throw new Error(`Unknown send operation: ${operationId}`);
+    const operation = state.operation;
+    if (action === "cancel" && operation.status !== "creating" && operation.status !== "sending") {
+      throw new Error("Only a send in progress can be cancelled.");
+    }
+    if (action === "remove" && operation.status !== "failed") {
+      throw new Error("Only a failed send can be removed.");
+    }
+    const recovered = structuredClone(operation);
+    state.cancelRequested = true;
+    this.changed(operation.sessionId);
+    await state.completion;
+    try {
+      if (operation.turnId && operation.targetSessionId) {
+        await cleanup.interrupt(operation.targetSessionId, operation.turnId);
+      } else if (operation.targetSessionId) {
+        await cleanup.archive(operation.targetSessionId);
+      }
+      this.operations.delete(operationId);
+    } catch (error) {
+      operation.status = "failed";
+      operation.cleanupPending = true;
+      operation.error = `Branch cleanup failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.changed(operation.sessionId);
+      throw error;
+    }
+    this.changed(operation.sessionId);
+    return recovered;
+  }
+
+  private start(state: SendOperationState, send: TreeSend): ChatTreeSendOperation {
+    const operation = state.operation;
     const snapshot = structuredClone(operation);
     this.changed(operation.sessionId);
-    void this.run(operation, send);
+    state.completion = this.run(state, send);
     return snapshot;
   }
 
-  private async run(operation: ChatTreeSendOperation, send: TreeSend): Promise<void> {
+  private async run(state: SendOperationState, send: TreeSend): Promise<void> {
+    const operation = state.operation;
     try {
       if (!operation.targetSessionId) {
         await this.get(operation.sessionId);
+        if (state.cancelRequested) return;
         const { paths, turnsById } = this.project(operation.sessionId);
         if (turnsById.get(operation.nodeId)?.status !== "completed") {
           throw new Error("Wait for this turn to finish before branching.");
@@ -307,7 +426,9 @@ export class WrapperChatTreeService {
         operation.targetSessionId = await this.options.fork(source, operation.nodeId);
         this.changed(operation.sessionId);
       }
+      if (state.cancelRequested) return;
       await this.loadMember(operation.targetSessionId);
+      if (state.cancelRequested) return;
       operation.status = "sending";
       this.changed(operation.sessionId);
       const receipt = await send({ commandId: randomUUID(), command: {
@@ -317,13 +438,20 @@ export class WrapperChatTreeService {
       } });
       if (!receipt.accepted || !receipt.turnId) throw new Error(receipt.error?.message || "Branch message was not accepted.");
       operation.turnId = receipt.turnId;
+      if (state.cancelRequested) return;
       operation.status = "sent";
     } catch (error) {
-      operation.status = "failed";
-      operation.error = error instanceof Error ? error.message : String(error);
+      if (!state.cancelRequested) {
+        operation.status = "failed";
+        operation.error = error instanceof Error ? error.message : String(error);
+      }
     }
     this.changed(operation.sessionId);
   }
 }
 
 type TreeSend = (command: CommandEnvelope) => Promise<Pick<import("./runtime-types.js").CommandReceipt, "accepted" | "turnId" | "error">>;
+type TreeCancelCleanup = {
+  archive: (sessionId: string) => Promise<unknown>;
+  interrupt: (sessionId: string, turnId: string) => Promise<unknown>;
+};

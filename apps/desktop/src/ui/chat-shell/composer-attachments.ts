@@ -180,6 +180,23 @@ export const formatComposerAttachmentSize = (size: number): string => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+export const restoreComposerAttachment = (attachment: Attachment): ComposerAttachment => {
+  const isImage = isImageMimeType(attachment.mimeType);
+  return {
+    attachment,
+    dedupeKey: attachment.uri,
+    displayName: attachment.name ?? "附件",
+    isImage,
+    mimeType: attachment.mimeType,
+    previewUrl: isImage
+      ? buildLocalImagePreviewSrc(attachment.displayUri ?? attachment.uri, attachment.attachmentId)
+      : undefined,
+    releasePreviewUrl: false,
+    size: 0,
+    sizeLabel: "未知大小"
+  };
+};
+
 export const createComposerAttachment = async (
   file: File,
   origin: ComposerAttachmentOrigin,

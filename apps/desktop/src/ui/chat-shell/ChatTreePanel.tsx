@@ -12,6 +12,7 @@ export type ChatTreePanelProps = {
   error?: string;
   onJump?: (nodeId: string) => void;
   onNodeContextMenu?: (event: MouseEvent, nodeId: string) => void;
+  onOperationContextMenu?: (event: MouseEvent, operationId: string) => void;
   nodeMarkers?: Readonly<Record<string, string>>;
   header?: ReactNode;
   footer?: ReactNode;
@@ -30,6 +31,7 @@ export const ChatTreePanel = ({
   operations = [],
   onJump,
   onNodeContextMenu,
+  onOperationContextMenu,
   nodeMarkers = {},
   header,
   footer,
@@ -108,9 +110,10 @@ export const ChatTreePanel = ({
               );
             })}
           </svg>
-          {graph.nodes.map((entry) => {
-            const operation = operations.find((op) => op.operationId === entry.node.nodeId || (op.turnId && op.turnId === entry.node.turnId));
-            const virtual = operation && !entry.node.turnId;
+            {graph.nodes.map((entry) => {
+              const operation = operations.find((op) => op.operationId === entry.node.nodeId || (op.turnId && op.turnId === entry.node.turnId));
+              const virtual = operation && !entry.node.turnId;
+              const operationAction = operation && (virtual || operation.cleanupPending) ? operation : undefined;
             const status = virtual ? operation.status === "failed" ? "发送失败"
               : operation.status === "creating" ? "正在创建分支" : "正在发送" : undefined;
             return (
@@ -124,7 +127,9 @@ export const ChatTreePanel = ({
                 top: `${entry.y}px`
               }}
               onDoubleClick={() => onJump?.(entry.node.nodeId)}
-              onContextMenu={virtual ? undefined : (event) => onNodeContextMenu?.(event, entry.node.nodeId)}
+              onContextMenu={(event) => operationAction
+                ? onOperationContextMenu?.(event, operationAction.operationId)
+                : onNodeContextMenu?.(event, entry.node.nodeId)}
               title={`${shortLabel(entry.node)}${status ? `\n${status}` : ""}${
                 entry.isCurrent ? "\nCurrent position." : "\nDouble-click to switch."
               }${entry.node.status === "pending" ? "\nRunning." : ""}`}

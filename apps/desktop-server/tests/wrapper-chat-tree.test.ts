@@ -149,6 +149,73 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
+  it("waits for every member before publishing concurrent tree reads", async () => {
+    const f = await fixture();
+    let releaseBranch!: () => void;
+    const branchGate = new Promise<void>((resolve) => { releaseBranch = resolve; });
+    f.load.mockImplementation(async (sessionId) => {
+      if (sessionId === "branch") await branchGate;
+      return true;
+    });
+    const first = f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith("branch", { force: false }));
+    let secondResolved = false;
+    const second = f.service.get("root").then((tree) => {
+      secondResolved = true;
+      return tree;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(secondResolved).toBe(false);
+    releaseBranch();
+    for (const tree of await Promise.all([first, second])) {
+      expect(tree.nodes.map((node) => [node.nodeId, node.parentNodeId])).toEqual([
+        ["a", undefined], ["b", "a"], ["c", "a"]
+      ]);
+    }
+    expect(f.load).toHaveBeenCalledTimes(2);
+    f.service.dispose();
+  });
+
+  it("does not publish loads completed after the tree was invalidated", async () => {
+    const f = await fixture();
+    let releaseInitial!: () => void;
+    const initialGate = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    f.load.mockImplementation(async () => {
+      if (f.load.mock.calls.length <= 2) await initialGate;
+      return true;
+    });
+    const tree = f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledTimes(2));
+    f.service.invalidate("root");
+    releaseInitial();
+    await expect(tree).resolves.toMatchObject({ memberSessionIds: ["root", "branch"] });
+    expect(f.load).toHaveBeenCalledTimes(4);
+    f.service.dispose();
+  });
+
+  it("retries when the tree is invalidated immediately before projection", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    const internals = f.service as unknown as {
+      loadPublishedTreeChanges: (sessionId: string) => Promise<void>;
+    };
+    const loadChanges = internals.loadPublishedTreeChanges.bind(f.service);
+    let invalidateBeforeProjection = true;
+    internals.loadPublishedTreeChanges = async (sessionId) => {
+      await loadChanges(sessionId);
+      if (invalidateBeforeProjection) {
+        invalidateBeforeProjection = false;
+        f.service.invalidate(sessionId);
+      }
+    };
+    const tree = await f.service.get("root");
+    expect(tree.nodes.map((node) => [node.nodeId, node.parentNodeId])).toEqual([
+      ["a", undefined], ["b", "a"], ["c", "a"]
+    ]);
+    expect(f.load).toHaveBeenCalledTimes(4);
+    f.service.dispose();
+  });
+
   it("persists a separate viewing position per tree", async () => {
     const f = await fixture();
     await f.service.get("root");

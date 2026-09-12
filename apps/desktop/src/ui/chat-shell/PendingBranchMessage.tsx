@@ -20,7 +20,7 @@ export const PendingBranchMessage = ({ operation, onRetry, onPreviewImage }: {
     }} onPreviewImage={onPreviewImage} />
     {operation.status === "failed" && <>
       <p role="alert" className="awb-pending-message-error">{operation.error}</p>
-      <Button onClick={() => void onRetry(operation.operationId)}>重试发送</Button>
+      {!operation.cleanupPending && <Button onClick={() => void onRetry(operation.operationId)}>重试发送</Button>}
     </>}
   </article>
 );

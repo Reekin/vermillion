@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { HostToolRegistry } from "./host-tools.js";
 import type { WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import type {
@@ -978,6 +979,19 @@ export class SessionShellService {
   public retryChatTreeSend(input: { operationId: string }) {
     if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
     return this.wrapperChatTree.retry(input.operationId, (command) => this.executeCommand(command));
+  }
+
+  public async cancelChatTreeSend(operationId: string, action: "cancel" | "remove") {
+    if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
+    return this.wrapperChatTree.cancel(operationId, action, {
+      archive: (sessionId) => this.runSessionAction({ sessionId, action: "archive" }),
+      interrupt: async (sessionId, turnId) => {
+        const receipt = await this.executeCommand({ commandId: randomUUID(), command: {
+          type: "interruptTurn", sessionId, turnId
+        } });
+        if (!receipt.accepted) throw new Error(receipt.error?.message ?? "Branch turn interrupt was not accepted.");
+      }
+    });
   }
 
   public getChatTreeOperations(input: { sessionId: string }) {

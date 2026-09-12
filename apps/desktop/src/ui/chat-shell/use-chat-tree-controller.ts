@@ -84,6 +84,8 @@ export const useChatTreeController = (input: {
   entryRef.current = entry;
   const [, setCacheRevision] = useState(0);
   const [failedEntry, setFailedEntry] = useState<ChatTreeEntry | undefined>();
+  const [treeFailure, setTreeFailure] = useState<{ entry: ChatTreeEntry; message: string }>();
+  const [recoveredSends, setRecoveredSends] = useState<ChatTreeSendOperation[]>([]);
   const [selectedSend, setSelectedSend] = useState<string>();
   const selectedSendRef = useRef<string | undefined>(undefined);
   const navigationRef = useRef(0);
@@ -299,6 +301,7 @@ export const useChatTreeController = (input: {
         selectSend(undefined);
       }
       setFailedEntry(undefined);
+      setTreeFailure(undefined);
     } catch (error) {
       if (!isCurrent()) return;
       throw error;
@@ -315,6 +318,7 @@ export const useChatTreeController = (input: {
     }
     navigationRequestRef.current = undefined;
     setFailedEntry(undefined);
+    setTreeFailure(undefined);
     selectSend(undefined);
     navigationRef.current += 1;
     return () => { requestIdRef.current += 1; };
@@ -326,6 +330,7 @@ export const useChatTreeController = (input: {
     void refresh.catch((error) => {
       if (entryRef.current !== entry || requestId !== requestIdRef.current) return;
       setFailedEntry(entry);
+      setTreeFailure({ entry: entry!, message: `Chat tree refresh failed: ${(error as Error).message}` });
       onStatusNotice({
         message: `Chat tree refresh failed: ${(error as Error).message}`,
         source: "chat-tree",
@@ -368,9 +373,12 @@ export const useChatTreeController = (input: {
     sessionId && failedEntry !== entry && !hasCachedTargetTree &&
     (hasExplicitChatTreeNavigation(navigationEntry) || !store.getDomainReadModel().getSession(sessionId))
   );
+  const isChatTreeLoading = Boolean(sessionId && entry && failedEntry !== entry && !chatTree);
 
   return {
     chatTree,
+    chatTreeError: treeFailure && treeFailure.entry === entry ? treeFailure.message : undefined,
+    isChatTreeLoading,
     operations,
     pendingSend,
     isOpening,
@@ -429,6 +437,22 @@ export const useChatTreeController = (input: {
         }
       }
     },
+    cancelSend: async (operationId: string, action: "cancel" | "remove"): Promise<void> => {
+      if (!entry || !sessionId) return;
+      const operation = await transport.chatTree[action]({ operationId });
+      const selected = selectedSendRef.current === operationId;
+      entry.operations = entry.operations.filter((item) => item.operationId !== operationId);
+      setRecoveredSends((current) => current.some((item) => item.operationId === operation.operationId)
+        ? current : [...current, operation]);
+      if (selected) {
+        selectSend(undefined);
+        await transport.chatTree.jump({ sessionId, nodeId: operation.nodeId });
+        await refreshChatTree();
+      } else {
+        setCacheRevision((revision) => revision + 1);
+      }
+    },
+    recoveredSends,
     prepareSend: async (): Promise<string> => {
       if (!sessionId) throw new Error("Select a session before sending.");
       const result = await transport.chatTree.prepareSend({

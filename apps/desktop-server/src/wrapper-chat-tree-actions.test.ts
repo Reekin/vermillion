@@ -39,11 +39,18 @@ it("archives an entire fork but retains its shared prefix, early descendants and
   const tree = create(index);
   await tree.get("root");
   await tree.jump("root", "branch-2");
+  const operations = (tree as unknown as { operations: Map<string, unknown> }).operations;
+  operations.set("archive-op", { cancelRequested: false, operation: {
+    operationId: "archive-op", sessionId: "root", targetSessionId: "branch",
+    nodeId: "root-1", content: "archived branch", attachments: [], status: "sent"
+  } });
+  expect(tree.listOperations("root")).toHaveLength(1);
   expect(await tree.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canArchive: false });
   expect(await tree.getNodeTarget("root", "root-2")).toEqual({ sessionId: "root", canArchive: false });
   const archive = vi.fn(async (id: string) => index.archiveSessions([id]));
   expect(await tree.archiveBranch("root", "branch-2", archive)).toEqual({ archived: true });
   expect(archive).toHaveBeenCalledExactlyOnceWith("branch");
+  expect(tree.listOperations("root")).toEqual([]);
   tree.dispose();
   const reloaded = new SessionIndexStore({ baseDir });
   await reloaded.ready();

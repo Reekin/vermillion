@@ -101,7 +101,8 @@ export const zChatTreeSendOperationSchema = zChatTreeSendInputSchema.extend({
   status: z.enum(["creating", "sending", "sent", "failed"]),
   targetSessionId: zSessionId.optional(),
   turnId: zTurnId.optional(),
-  error: z.string().optional()
+  error: z.string().optional(),
+  cleanupPending: z.boolean().optional()
 });
 
 export type ChatTreeSendInput = z.infer<typeof zChatTreeSendInputSchema>;
