@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
@@ -24,8 +24,17 @@ it.each([false, true])("converts legacy takeover without losing ownership or pau
     record.integrations[0].agent.deliveredAt = "before";
     if (paused) record.integrations[0].agent.pausedAt = "before";
     await writeFile(path, JSON.stringify(record));
-    const migrate = () => promisify(execFile)(process.execPath, [resolve("../../scripts/migrate-integration-execution.mjs"), f.root, "--owner-stopped"]);
-    await migrate();
+    const secondDir = join(f.root, "second-workspace", ".vermillion", "workitems");
+    await mkdir(secondDir, { recursive: true });
+    await writeFile(join(secondDir, item.workItemId + ".json"), JSON.stringify(record));
+    await writeFile(join(f.root, "workspace-registry.json"), JSON.stringify({ workspaces: [
+      { absolutePath: f.root }, { absolutePath: join(f.root, "second-workspace") }, { absolutePath: join(f.root, "empty-workspace") }
+    ] }));
+    const migrate = () => promisify(execFile)(process.execPath, [resolve("../../scripts/migrate-integration-execution.mjs"), "--owner-stopped"], {
+      env: { ...process.env, VERMILLION_PERSISTENCE_BASE_DIR: f.root }
+    });
+    expect((await migrate()).stdout).toContain("Migrated 2 records");
+    expect(JSON.parse(await readFile(join(secondDir, item.workItemId + ".json"), "utf8")).execution.integrationActionId).toBe(action.actionId);
     expect((await migrate()).stdout).toContain("Migrated 0 records");
     restarted = new WorkbenchService(f.options);
     expect(await restarted.getWorkItem(f.workspaceId, item.workItemId)).toMatchObject({ status: paused ? "decision" : "queued", run: { sessionId: "worker" } });
