@@ -70,6 +70,8 @@ Agent 完成后通过 CLI/RPC 交回合入结果，工作台核对成果确已�
 
 ### CLI
 
+Worker 可通过 `asksource` 询问开单来源；会话消息读取和通用 `steer` 的行为见[会话读取与通信](../Roles/PRD.md#会话)。来源位置使用工单记录的设计会话与开单 turn。
+
 所有动作都有 CLI/RPC 入口，与自动调度共用状态判断：`work.start`、`workItem.create / update / submit / cancel / diagnose`、`decision.create / answer`，以及合入立即重试、附说明转交 Agent 和完成结果登记。命令返回实际结果、当前等待原因和合法下一步；桌面调度器不在线时明确说明记录已保存、尚未派发。`workItem.diagnose` 汇总当前阶段、等待原因、执行会话、依赖、调度开关、资源占用、合入处理者、失败与重试次数、最近失败和下次重试。CLI 帮助可查询单个方法的参数、适用状态和示例。
 
 ## 规划能力
