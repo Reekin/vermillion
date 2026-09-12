@@ -78,6 +78,7 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
   const view = store((s) => s.view);
   const viewError = store((s) => s.viewError);
   const taskTarget = store((s) => s.taskTarget);
+  const issueTarget = store((s) => s.issueTarget);
   const expandedWorkGroups = store((s) => s.expandedWorkGroups);
   const setWorkGroupExpanded = store((s) => s.setWorkGroupExpanded);
   const showAgentSession = store((s) => s.showAgentSession);
@@ -86,7 +87,6 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
   const openEditor = store((s) => s.openEditor);
   const [error, setError] = useState<string>();
   const [sourceTitles, setSourceTitles] = useState<Record<string, string>>({});
-  const [issueTarget, setIssueTarget] = useState<string>();
   const [linkedWorkItemTarget, setLinkedWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const sourceIdsKey = JSON.stringify(view?.workItems.map(({ treeId, sourceSessionId }) => [treeId, sourceSessionId]) ?? []);
   useEffect(() => {
@@ -119,7 +119,7 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
     ) : <div className="min-h-0 flex-1 overflow-auto">
       {section === "workItems" && <div>
         {viewError ? <EmptyState title="工单加载失败" hint={viewError} /> : view && (
-          <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={false} onExpand={showTaskBoard} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} detailTarget={(linkedWorkItemTarget ?? workItemTarget)?.workspaceId === activeWorkspaceId ? linkedWorkItemTarget ?? workItemTarget : undefined} onDetailTargetConsumed={() => { setLinkedWorkItemTarget(undefined); onWorkItemTargetConsumed?.(); }} onOpenIssue={(issueId) => { setIssueTarget(issueId); store.getState().setWorkspaceSection("issues"); }} />
+          <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={false} onExpand={showTaskBoard} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} detailTarget={(linkedWorkItemTarget ?? workItemTarget)?.workspaceId === activeWorkspaceId ? linkedWorkItemTarget ?? workItemTarget : undefined} onDetailTargetConsumed={() => { setLinkedWorkItemTarget(undefined); onWorkItemTargetConsumed?.(); }} onOpenIssue={(issueId) => store.getState().showIssue({ workspaceId: activeWorkspaceId, issueId })} />
         )}
       </div>}
       <div hidden={section !== "docs"}>
@@ -133,7 +133,7 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
       </div>
       {section === "issues" && <IssuesSection client={client} workspaceId={activeWorkspaceId} issues={view?.issues ?? []} workItems={view?.workItems ?? []}
         domainIds={(view?.docs ?? []).map((doc) => doc.path).filter((path) => path.startsWith(DOMAINS_DIR) && !path.slice(DOMAINS_DIR.length).includes("/") && path.endsWith(".md")).map((path) => path.slice(DOMAINS_DIR.length, -3))}
-        targetIssueId={issueTarget} onTargetConsumed={() => setIssueTarget(undefined)} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)}
+        targetIssueId={issueTarget?.workspaceId === activeWorkspaceId ? issueTarget.issueId : undefined} onTargetConsumed={() => store.setState({ issueTarget: undefined })} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)}
         onOpenWorkItem={(workItemId) => { setLinkedWorkItemTarget({ workspaceId: activeWorkspaceId, workItemId, nonce: Date.now() }); store.getState().setWorkspaceSection("workItems"); }} />}
       {section === "automation" && <EmptyState title="Automation 暂未提供" />}
     </div>}

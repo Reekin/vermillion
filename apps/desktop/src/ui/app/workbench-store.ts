@@ -8,6 +8,7 @@ export type CommitOutcome =
   | { kind: "commit"; commit: string; message: string }
   | { kind: "work"; title: string };
 export type TaskTarget = { workspaceId: string; kind: "workItem"; id: string };
+export type IssueTarget = { workspaceId: string; issueId: string };
 export type TaskSummary = TaskTarget & { title: string; status: WorkItem["status"]; sessionId?: string };
 
 /** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
@@ -51,7 +52,9 @@ export type WorkbenchState = {
   tasks: TaskSummary[];
   tasksError: string | undefined;
   taskTarget: TaskTarget | undefined;
+  issueTarget: IssueTarget | undefined;
   showTask: (target: TaskTarget) => void;
+  showIssue: (target: IssueTarget) => void;
   editor: EditorTarget | undefined;
   /** Open the workbench work-items tab. */
   showTaskBoard: () => void;
@@ -166,9 +169,14 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       tasks: [],
       tasksError: undefined,
       taskTarget: undefined,
+      issueTarget: undefined,
       showTask: (target) => {
         get().browseWorkspace(target.workspaceId);
         set({ taskTarget: { ...target }, workspaceSection: "workItems", panel: "workbench", overlay: undefined });
+      },
+      showIssue: (target) => {
+        get().browseWorkspace(target.workspaceId);
+        set({ issueTarget: target, workspaceSection: "issues", panel: "workbench", overlay: undefined });
       },
       editor: undefined,
       showTaskBoard: () => set({ workspaceSection: "workItems", panel: "workbench", overlay: undefined }),
@@ -190,7 +198,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
       browseWorkspace: (workspaceId) => {
         if (workspaceId === get().browsingWorkspaceId) return;
-        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined, viewError: undefined });
+        set({ browsingWorkspaceId: workspaceId, editor: undefined, issueTarget: undefined, view: undefined, viewError: undefined });
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),

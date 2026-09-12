@@ -48,6 +48,16 @@ it("reuses an issue discussion and links work created from that session", async 
   } finally { await service.dispose(); }
 });
 
+it("does not infer an issue without a real source session or allow a fake started state", async () => {
+  const f = await fixture();
+  const issue = await f.service.createIssue(f.workspaceId, { title: "Unrelated", summary: "Open issue", domainId: "ui-ux" });
+  await expect(f.service.updateIssue(f.workspaceId, issue.issueId, { status: "started" })).rejects.toThrow("实际工单");
+  await expect(f.service.createIssue(f.workspaceId, { title: "Fake start", summary: "No work", domainId: "ui-ux", status: "started" })).rejects.toThrow("实际工单");
+  const item = await f.service.createWorkItem(f.workspaceId, contract);
+  expect(item.issueId).toBeUndefined();
+  expect(await f.service.getIssue(f.workspaceId, issue.issueId)).toMatchObject({ status: "open", workItemIds: [] });
+});
+
 it("requires a real duplicate target and records the original issue", async () => {
   const f = await fixture();
   const original = await f.service.createIssue(f.workspaceId, { title: "Original", summary: "First", domainId: "ui-ux" });

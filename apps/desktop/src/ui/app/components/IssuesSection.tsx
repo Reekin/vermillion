@@ -66,7 +66,7 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
         <ListRow title={<span title={issue.title}>{issue.unread && <span aria-label="未读">• </span>}{issue.title}</span>}
           meta={<span className="font-mono text-micro">{issue.issueId} · {issue.evidence[0] ? evidenceLabel[issue.evidence[0].kind] : "暂无证据"}</span>}
           onClick={() => setSelectedId(issue.issueId)}
-          columns={{ info: <span>{issue.domainId} · {sourceLabel[issue.source]}</span>, status: <Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{issue.type === "suggestion" ? "建议" : statusLabel[issue.status]}</Badge>, action: <span>{relativeTime(issue.updatedAt)}</span> }} />
+          columns={{ info: <span>{issue.domainId} · {sourceLabel[issue.source]}</span>, status: <span className="flex items-center gap-1">{issue.type === "suggestion" && <Badge>建议</Badge>}<Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{statusLabel[issue.status]}</Badge></span>, action: <span>{relativeTime(issue.updatedAt)}</span> }} />
       </li>)}
     </ul> : <EmptyState title={filter === "decision" ? "没有待决策的 Issue" : "没有符合条件的 Issue"} hint="调整筛选，或新建一条议题。" />}
     {creating && <CreateIssueDialog client={client} workspaceId={workspaceId} domainIds={domainIds} onCreated={(issue) => { setCreating(false); setSelectedId(issue.issueId); }} onClose={() => setCreating(false)} />}
@@ -107,7 +107,7 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); } finally { setBusy(false); } };
   const linked = issue.workItemIds.map((id) => workItems.find((item) => item.workItemId === id)).filter(Boolean) as WorkItem[];
   return <><Modal title={"Issue · " + issue.issueId} onClose={onClose} width={760}>
-    <Card className="m-4" header={<><Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{issue.type === "suggestion" ? "建议" : statusLabel[issue.status]}</Badge><span className="text-caption text-muted-foreground">{issue.domainId} · {sourceLabel[issue.source]}</span></>}
+    <Card className="m-4" header={<>{issue.type === "suggestion" && <Badge>建议</Badge>}<Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{statusLabel[issue.status]}</Badge><span className="text-caption text-muted-foreground">{issue.domainId} · {sourceLabel[issue.source]}</span></>}
       footer={<>{issue.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(issue.sourceSessionId!, issue.sourceTurnId); }}>来源</Button>}{issue.duplicateOf && <Button variant="ghost" outlined onClick={() => onOpenIssue(issue.duplicateOf!)}>原议题</Button>}{linked.map((item) => <Button key={item.workItemId} variant="ghost" outlined onClick={() => { onClose(); onOpenWorkItem(item.workItemId); }}>工单</Button>)}
         {issue.discussionSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(issue.discussionSessionId!, issue.discussionTurnId); }}>讨论</Button>}
         {!handling && !["closed", "duplicate"].includes(issue.status) && <Button className="ml-auto" onClick={() => setHandling(true)}>处理</Button>}

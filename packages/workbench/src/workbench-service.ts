@@ -447,8 +447,9 @@ export class WorkbenchService {
         content: [
           `请围绕 Issue ${current.issueId} 与用户讨论，明确预期和处理范围。`,
           `标题：${current.title}`, `问题与影响：${current.summary}`,
-          current.requirement && `要求依据：${current.requirement.text}`,
-          current.evidence.length && `证据：\n${current.evidence.map((entry) => `- ${entry.kind}：${entry.text}`).join("\n")}`,
+          current.decisionQuestion && `需要用户决定：${current.decisionQuestion}`,
+          current.requirement && `要求依据：${[current.requirement.text, current.requirement.path, current.requirement.section, current.requirement.commit && "commit: " + current.requirement.commit].filter(Boolean).join("\n")}`,
+          current.evidence.length && `证据：\n${current.evidence.map((entry) => `- ${entry.kind}：${entry.text}${entry.path ? "\n  " + entry.path : ""}`).join("\n")}`,
           current.suggestion && `建议方向：${current.suggestion}`,
           "如果用户决定开工，沿正常 work.start 流程创建工单；工作台会按本讨论会话自动关联此 Issue。"
         ].filter(Boolean).join("\n\n") });
@@ -465,6 +466,7 @@ export class WorkbenchService {
   }
 
   private validateIssue(issue: Issue): void {
+    if (issue.status === "started" && !issue.workItemIds.length) throw new Error("已开工 Issue 必须关联实际工单。");
     if (issue.status === "decision" && !issue.decisionQuestion) throw new Error("待决策 Issue 必须提供具体决策问题。");
     if (issue.status === "closed" && !issue.resolutionReason) throw new Error("关闭 Issue 必须提供处理原因。");
     if (issue.status === "duplicate" && (!issue.duplicateOf || !issue.resolutionReason)) throw new Error("重复 Issue 必须提供原议题和处理原因。");
@@ -792,7 +794,7 @@ export class WorkbenchService {
       const explicitIssue = input.issueId ? await this.getIssue(workspaceId, input.issueId) : undefined;
       const request = input.requestId ? await (await this.context(workspaceId)).store.workRequests.get(input.requestId) : undefined;
       const sourceSessionId = request?.sourceSessionId ?? input.sourceSessionId;
-      const linkedIssue = explicitIssue ?? (await this.listIssues(workspaceId)).find((issue) => issue.discussionSessionId === sourceSessionId);
+      const linkedIssue = explicitIssue ?? (sourceSessionId ? (await this.listIssues(workspaceId)).find((issue) => issue.discussionSessionId === sourceSessionId) : undefined);
       if (linkedIssue && ["closed", "duplicate"].includes(linkedIssue.status)) throw new Error("已关闭或重复的 Issue 不能创建关联工单。");
       const item = await this.createWorkItemRecord(workspaceId, { ...input, issueId: linkedIssue?.issueId });
       if (!linkedIssue) return item;
