@@ -194,6 +194,76 @@ it("merges partial verification with existing results before deciding whether to
   expect(closed.evidence?.commands).toContainEqual({ command: "check", output: "pass" });
 });
 
+it("invalidates replaced acceptance results and retains their original meaning in history", async () => {
+  const { service, client, workspaceId, options } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract,
+    acceptance: [{ text: "A" }, { text: "B" }] });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, verify: { verdict: "rework", items: [
+    { index: 0, status: "pass", evidence: "Only A verified" },
+    { index: 1, status: "incomplete", evidence: "B pending" }
+  ] } });
+  const updated = await client.request("workItem.update", { workspaceId, workItemId: item.workItemId,
+    acceptance: [{ text: "C" }, { text: "B" }], note: "Replace A with C" });
+  expect(updated.verify?.items).toMatchObject([{ index: 0, status: "incomplete" }, { index: 1, evidence: "B pending" }]);
+  const restarted = new WorkbenchService(options);
+  try {
+    expect((await restarted.getWorkItem(workspaceId, item.workItemId)).verify).toEqual(updated.verify);
+    const history = (await restarted.listActions(workspaceId))[0]!.history.find((entry) => entry.event === "acceptance.updated")!;
+    expect(history.message).toContain('"text":"A"');
+    expect(history.message).toContain("Only A verified");
+  } finally { await restarted.dispose(); }
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const stale = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+  expect(stale.rejections.at(-1)?.reason).toContain("提交依据已过期");
+  expect(stale.verify).toEqual(updated.verify);
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, contractRevision: updated.contractRevision,
+    verify: { verdict: "pass", items: [{ index: 1, status: "pass", evidence: "B verified" }] } });
+  expect(pending.status).toBe("queued");
+  expect(pending.verify?.items[0]?.status).toBe("incomplete");
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, contractRevision: updated.contractRevision,
+    verify: { verdict: "pass", items: [{ index: 0, status: "pass", evidence: "C verified" }] } });
+  expect(closed.status).toBe("closed");
+  expect(closed.verify?.items.map((entry) => entry.evidence)).toEqual(["C verified", "B verified"]);
+  const inbox = (await service.listInbox()).find((entry) => entry.kind === "merged" && entry.workItem.workItemId === item.workItemId);
+  expect(inbox).toMatchObject({ kind: "merged", workItem: { acceptance: closed.acceptance, verify: closed.verify } });
+});
+
+it("removes deleted results and remaps retained results when acceptance is reordered", async () => {
+  const { service, workspaceId } = await fixture();
+  const acceptance = [{ text: "A", source: "Requirement A" }, { text: "B" }, { text: "C" }];
+  const item = await service.createWorkItem(workspaceId, { ...contract, acceptance });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const waiting = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, verify: { verdict: "rework", items: [
+    { index: 0, status: "pass", evidence: "A checked" },
+    { index: 1, status: "blocked", evidence: "B blocked" },
+    { index: 2, status: "pass", evidence: "C checked" }
+  ] } });
+  const renamed = await service.updateWorkItem(workspaceId, item.workItemId, { title: "Renamed", note: "Title only" });
+  expect(renamed.verify).toEqual(waiting.verify);
+  const updated = await service.updateWorkItem(workspaceId, item.workItemId, { acceptance: [acceptance[2]!, acceptance[0]!], note: "Remove B and reorder" });
+  expect(updated.verify?.items).toEqual([
+    { index: 0, status: "pass", evidence: "C checked" }, { index: 1, status: "pass", evidence: "A checked" }
+  ]);
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, contractRevision: updated.contractRevision,
+    verify: { verdict: "pass", items: [] } });
+  expect(closed.status).toBe("closed");
+  expect(closed.verify?.items).toEqual(updated.verify?.items);
+});
+
+it("does not transfer evidence to a different source or ambiguous duplicate acceptance", async () => {
+  const { service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, acceptance: [{ text: "A", source: "original" }] });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+  await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, verify: { ...submission.verify, verdict: "rework" } });
+  const updated = await service.updateWorkItem(workspaceId, item.workItemId, { note: "Change source and add duplicate requirements",
+    acceptance: [{ text: "A", source: "different" }, { text: "A", source: "original" }, { text: "A", source: "original" }] });
+  expect(updated.verify?.items.map((entry) => entry.status)).toEqual(["incomplete", "incomplete", "incomplete"]);
+});
+
 it("rejects a submission based on an old contract revision while preserving prior evidence", async () => {
   const { service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
