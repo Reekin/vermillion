@@ -518,7 +518,8 @@ export class WorkbenchService {
       catch { changedPaths = []; }
       const relevant = changedPaths.filter((path) => pathMatches(path, config.triggerPaths));
       if (config.retryAt) {
-        const failed = (await store.patrolRuns.list()).find((run) => run.domainId === domain.domainId && run.status === "failed");
+        const failed = (await store.patrolRuns.list()).filter((run) => run.domainId === domain.domainId && run.status === "failed")
+          .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
         created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, failed?.trigger ?? "scheduled", relevant.length ? relevant : failed?.changedPaths ?? [], head));
         continue;
       }
