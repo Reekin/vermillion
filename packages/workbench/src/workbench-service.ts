@@ -29,6 +29,9 @@ const RETRY_MINUTES = [1, 5, 30, 300];
 
 const createId = (prefix: string): string =>
   prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+const issueStatusText: Record<Issue["status"], string> = {
+  open: "待处理", investigating: "调查中", decision: "待决策", started: "已开工", closed: "关闭", duplicate: "重复"
+};
 
 /** Source of truth for workspace identity; the session engine's registry in production. */
 export type WorkspaceSource = {
@@ -396,7 +399,7 @@ export class WorkbenchService {
       source, type: input.type ?? "problem", status: input.status ?? "open", requirement: input.requirement,
       evidence: input.evidence ?? [], suggestion: input.suggestion, decisionQuestion: input.decisionQuestion,
       sourceSessionId: input.sourceSessionId, sourceTurnId: input.sourceTurnId, workItemIds: [], unread: source !== "user",
-      activities: [{ at: now, kind: "created", message: source === "user" ? "用户创建议题" : source + " 创建议题", sessionId: input.sourceSessionId }],
+      activities: [{ at: now, kind: "created", message: source === "user" ? "用户创建议题" : source === "maintainer" ? "Maintainer 创建议题" : "Liaison 创建议题", sessionId: input.sourceSessionId }],
       createdAt: now, updatedAt: now
     };
     this.validateIssue(issue);
@@ -416,7 +419,7 @@ export class WorkbenchService {
       if (!current) throw new Error("Unknown issue: " + issueId);
       const { appendEvidence = [], ...fields } = changes;
       const status = fields.status ?? current.status;
-      const message = appendEvidence.length ? `补充 ${appendEvidence.length} 条证据` : status !== current.status ? `状态变为 ${status}` : "更新议题";
+      const message = appendEvidence.length ? `补充 ${appendEvidence.length} 条证据` : status !== current.status ? `状态变为 ${issueStatusText[status]}` : "更新议题";
       const issue: Issue = { ...current, ...fields,
         evidence: [...current.evidence, ...appendEvidence],
         activities: [...current.activities, { at: now, kind: appendEvidence.length ? "evidence" : status === "closed" || status === "duplicate" ? "resolved" : "updated", message,
