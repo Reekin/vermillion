@@ -325,6 +325,8 @@ export type DesktopTransport = {
     markRead: (input: { sessionId: string; nodeId: string }) => Promise<{ readNodeIds: string[] }>;
     submit: (input: import("@vermillion/shared").ChatTreeSendInput) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
     retry: (input: { operationId: string }) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
+    cancel: (input: { operationId: string }) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
+    remove: (input: { operationId: string }) => Promise<import("@vermillion/shared").ChatTreeSendOperation>;
     operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
     get: (sessionId: string) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
@@ -880,6 +882,8 @@ export const createDesktopTransport = (
       markRead: (input) => rpc.request("chatTree.markRead", input),
       submit: (input) => rpc.request("chatTree.submit", input),
       retry: (input) => rpc.request("chatTree.retry", input),
+      cancel: (input) => rpc.request("chatTree.cancel", input),
+      remove: (input) => rpc.request("chatTree.remove", input),
       operations: (input) => rpc.request("chatTree.operations", input),
       get: async (sessionId: string) => {
         const result = await rpc.request("chatTree.get", {

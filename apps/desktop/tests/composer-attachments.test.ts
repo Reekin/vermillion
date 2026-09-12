@@ -6,6 +6,7 @@ import {
   formatComposerAttachmentSize,
   mergeComposerAttachments,
   releaseComposerAttachments,
+  restoreComposerAttachment,
   writeComposerAttachmentDraft,
   type ComposerAttachment
 } from "../src/ui/chat-shell/composer-attachments.js";
@@ -197,6 +198,18 @@ describe("composer attachment helpers", () => {
     const withoutSessionB = writeComposerAttachmentDraft(withBoth, "session-b", []);
     expect(withoutSessionB).toEqual({ "session-a": [imageA] });
     expect(withoutSessionB).not.toHaveProperty("session-b");
+  });
+
+  it("restores a submitted attachment without taking ownership of its preview", () => {
+    const attachment = { attachmentId: "kept", mimeType: "image/png", name: "kept.png",
+      uri: "file:///C:/images/kept.png" };
+    expect(restoreComposerAttachment(attachment)).toMatchObject({
+      attachment,
+      dedupeKey: attachment.uri,
+      displayName: "kept.png",
+      isImage: true,
+      releasePreviewUrl: false
+    });
   });
 
   it("releases only preview URLs that require cleanup", () => {

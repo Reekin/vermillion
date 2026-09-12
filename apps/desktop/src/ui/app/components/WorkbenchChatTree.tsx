@@ -7,6 +7,7 @@ import { writeClipboardText } from "../../chat-shell/clipboard.js";
 import { projectChatTreeWorkers } from "../chat-tree-workers.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
+import { ContextMenu } from "./ContextMenu.js";
 import { statusLabel } from "./task-labels.js";
 import { Badge, InlineNotice, ListRow, SectionLabel, Toggle } from "./ui.js";
 
@@ -14,14 +15,18 @@ type Props = ChatTreePanelProps & {
   client: WorkbenchClient;
   transport: DesktopTransport;
   onSelectSession: (sessionId: string) => void;
+  onCancelOperation: (operationId: string, action: "cancel" | "remove") => Promise<void>;
 };
 
-export const WorkbenchChatTree = ({ client, transport, onSelectSession, ...props }: Props) => {
+export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancelOperation, ...props }: Props) => {
   const [expandedTree, setExpandedTree] = useState<string>();
   const [menu, setMenu] = useState<SessionMenu & { nodeId: string }>();
+  const [operationMenu, setOperationMenu] = useState<{
+    operationId: string; action: "cancel" | "remove"; x: number; y: number;
+  }>();
   const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
   const treeId = props.chatTree?.treeId ?? props.chatTree?.sessionId;
-  useEffect(() => { setMenu(undefined); setNotice(undefined); }, [treeId]);
+  useEffect(() => { setMenu(undefined); setOperationMenu(undefined); setNotice(undefined); }, [treeId]);
   useEffect(() => {
     if (!notice || notice.error) return;
     const timer = setTimeout(() => setNotice(undefined), 2500);
@@ -39,6 +44,17 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, ...props
         }
         setNotice({ text: "已复制 " + result.copiedText });
       }
+    } catch (error) {
+      setNotice({ text: (error as Error).message, error: true });
+    }
+  };
+  const runOperationAction = async () => {
+    if (!operationMenu) return;
+    const { operationId, action } = operationMenu;
+    setOperationMenu(undefined);
+    try {
+      await onCancelOperation(operationId, action);
+      setNotice({ text: action === "cancel" ? "已取消发送" : "已移除失败发送" });
     } catch (error) {
       setNotice({ text: (error as Error).message, error: true });
     }
@@ -81,6 +97,14 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, ...props
         { action: "archive", label: "删除分支", disabled: !node.canArchive }
       ] });
     }}
+    onOperationContextMenu={(event, operationId) => {
+      event.preventDefault();
+      const operation = props.operations?.find((item) => item.operationId === operationId);
+      if (!operation || operation.status === "sent") return;
+      setMenu(undefined);
+      setOperationMenu({ operationId, action: operation.status === "failed" ? "remove" : "cancel",
+        x: event.clientX, y: event.clientY });
+    }}
     header={workers.length > 0 && <div className="border-b border-border px-3 py-2"><Toggle label="显示全部 Worker" checked={showAll} onChange={(checked) => setExpandedTree(checked ? treeId : undefined)} /></div>}
     renderNodeStatus={(status) => <Badge>{status}</Badge>}
     footer={(activeWorkers.length > 0 || current?.error) && <div className="max-h-60 shrink-0 overflow-auto border-t border-border">
@@ -96,5 +120,11 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, ...props
       onRunAction={(_sessionId, action) => {
         if (action === "copy_session_id" || action === "copy_awb_session_id" || action === "archive") void runNodeAction(action);
       }} notice={notice} onClearNotice={() => setNotice(undefined)} />
+    {operationMenu && <ContextMenu x={operationMenu.x} y={operationMenu.y}
+      onClose={() => setOperationMenu(undefined)} items={[{
+        key: operationMenu.action,
+        label: operationMenu.action === "cancel" ? "取消发送" : "移除",
+        onSelect: () => { void runOperationAction(); }
+      }]} />}
   </>;
 };

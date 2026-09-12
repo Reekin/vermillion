@@ -5,6 +5,7 @@ import { recordUiOperation } from "../../../diagnostics/ui-performance.js";
 import type {
   ApprovalRequest,
   Attachment,
+  ChatTreeSendOperation,
   ChatSession,
   EngineSurfaceRpc,
   RuntimeInteraction,
@@ -43,6 +44,8 @@ export type ComposerContainerProps = {
   lastExecution?: ComposerExecutionSelection;
   activeTurnExecutionProfile?: TurnExecutionProfile;
   pendingExecution?: ComposerExecutionSelection;
+  pendingBranchSend?: ChatTreeSendOperation;
+  recoveredBranchSends?: ChatTreeSendOperation[];
   skillsCwd?: string;
   turns: Turn[];
   interruptTurns: Turn[];
@@ -60,6 +63,7 @@ export type ComposerContainerProps = {
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
   onBeforeStop?: (sessionId: string) => Promise<"cancelled" | void>;
+  onCancelBranchSend?: (operationId: string) => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
     engineId: string,
@@ -86,6 +90,8 @@ export const ComposerContainer = memo(({
   lastExecution,
   activeTurnExecutionProfile,
   pendingExecution,
+  pendingBranchSend,
+  recoveredBranchSends,
   skillsCwd,
   turns,
   interruptTurns,
@@ -103,6 +109,7 @@ export const ComposerContainer = memo(({
   autoSendQueuedMessages,
   onResumeSession,
   onBeforeStop,
+  onCancelBranchSend,
   onRequestTranscriptBottom,
   onExecutionPreferenceChange,
   onRespondApproval,
@@ -125,6 +132,8 @@ export const ComposerContainer = memo(({
     lastExecution,
     activeTurnExecutionProfile,
     pendingExecution,
+    pendingBranchSend,
+    recoveredBranchSends,
     skillsCwd,
     turns,
     interruptTurns,
@@ -140,6 +149,7 @@ export const ComposerContainer = memo(({
     autoSendQueuedMessages,
     onResumeSession,
     onBeforeStop,
+    onCancelBranchSend,
     onRequestTranscriptBottom,
     onExecutionPreferenceChange
   });

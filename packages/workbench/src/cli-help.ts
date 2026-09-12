@@ -62,6 +62,8 @@ export function methodHelp(method: string): string | undefined {
     "chatTree.markRead": { params: "sessionId: string, nodeId: string", state: "Desktop online; marks completed turns on the displayed node's ancestor path read. Returns readNodeIds.", example: { sessionId: "<sessionId>", nodeId: "<nodeId>" } },
     "chatTree.submit": { params: "sessionId: string, nodeId: string, content: string; attachments?: Attachment[], execution?: TurnExecutionOptions", state: "桌面在线，sessionId 与 nodeId 指向现存会话节点。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", content: "继续" } },
     "chatTree.retry": { params: "operationId: 非空 string", state: "桌面在线，operationId 指向失败的发送操作。", example: { operationId: "<operationId>" } },
+    "chatTree.cancel": { params: "operationId: 非空 string", state: "桌面在线，operationId 指向正在创建或发送的虚态操作。", example: { operationId: "<operationId>" } },
+    "chatTree.remove": { params: "operationId: 非空 string", state: "桌面在线，operationId 指向失败或清理待重试的虚态操作。", example: { operationId: "<operationId>" } },
     "chatTree.operations": { params: "sessionId: 非空 string", state: "桌面在线；只读查询指定会话的发送操作。", example: { sessionId: "<sessionId>" } }
   };
   const desktop = desktopHelp[method];

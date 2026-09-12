@@ -99,7 +99,10 @@ const autoRefreshBacklogStreamThreshold = 500;
 
 export type SessionPaneProps = {
   renderTurnNavigation?: (position: { sessionId: string; turnId: string }) => ReactNode;
-  renderChatTree?: (props: ChatTreePanelProps & { onSelectSession: (sessionId: string) => void }) => ReactNode;
+  renderChatTree?: (props: ChatTreePanelProps & {
+    onSelectSession: (sessionId: string) => void;
+    onCancelOperation: (operationId: string, action: "cancel" | "remove") => Promise<void>;
+  }) => ReactNode;
   store: RendererStore;
   transport: DesktopTransport;
   /** Tree entry to display; undefined renders the draft state (no session yet). */
@@ -727,6 +730,8 @@ export const SessionPane = ({
 
   const {
     chatTree: activeChatTree,
+    chatTreeError,
+    isChatTreeLoading,
     viewSessionId,
     isOpening: isOpeningSelectedSession,
     refreshChatTree,
@@ -735,7 +740,9 @@ export const SessionPane = ({
     submitBranch: submitChatTreeBranch,
     operations,
     pendingSend,
-    retrySend
+    retrySend,
+    cancelSend: cancelChatTreeSend,
+    recoveredSends
   } = useChatTreeController({
     store,
     transport,
@@ -1186,12 +1193,15 @@ export const SessionPane = ({
                 {(renderChatTree ?? ((props) => <ChatTreePanel {...props} />))({
                   operations,
                   chatTree: activeChatTree,
+                  loading: isChatTreeLoading,
+                  error: activeChatTree ? undefined : chatTreeError,
                   onSelectSession: (id) => {
                     void transport.sessionBrowser.activate(id, { focusTree: true }).then(() => refreshChatTree());
                   },
                   onJump: sessionId ? (nodeId) => {
                     void onJumpChatTree(nodeId).then(() => viewport.scrollToBottom(sessionId));
-                  } : undefined
+                  } : undefined,
+                  onCancelOperation: cancelChatTreeSend
                 })}
               </section>
             </aside>
@@ -1222,6 +1232,8 @@ export const SessionPane = ({
           lastExecution={lastExecution}
           activeTurnExecutionProfile={currentTurn?.executionProfile}
           pendingExecution={toComposerExecutionSelection(pendingSend?.execution)}
+          pendingBranchSend={pendingSend}
+          recoveredBranchSends={recoveredSends}
           skillsCwd={skillsCwd}
           turns={composerTurns}
           interruptTurns={composerTurns}
@@ -1238,6 +1250,7 @@ export const SessionPane = ({
           autoSendQueuedMessages={currentTurn?.turnId === displayedSession?.lastTurnId}
           onResumeSession={viewSessionId ? onResumeSession : undefined}
           onBeforeStop={onBeforeStop}
+          onCancelBranchSend={(operationId) => cancelChatTreeSend(operationId, "cancel")}
           onRequestTranscriptBottom={onRequestTranscriptBottom}
           onExecutionPreferenceChange={onExecutionPreferenceChange}
           onRespondApproval={onRespondApproval}

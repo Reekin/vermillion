@@ -16,6 +16,7 @@ import {
 import type {
   ApprovalRequest,
   Attachment,
+  ChatTreeSendOperation,
   ChatInteractionCapabilitiesRpc,
   ChatSession,
   EngineModelCatalogRpc,
@@ -32,6 +33,7 @@ import {
   extractPastedMessageImages,
   mergeComposerAttachments,
   releaseComposerAttachments,
+  restoreComposerAttachment,
   writeComposerAttachmentDraft,
   type ComposerAttachment
 } from "./composer-attachments.js";
@@ -366,6 +368,8 @@ type UseComposerControllerInput = {
   activeTurnExecutionProfile?: TurnExecutionProfile;
   /** Configuration captured when an asynchronous branch send was submitted. */
   pendingExecution?: ComposerExecutionSelection;
+  recoveredBranchSends?: ChatTreeSendOperation[];
+  pendingBranchSend?: ChatTreeSendOperation;
   /** Working directory used to resolve project-scoped skills. */
   skillsCwd?: string;
   turns: Turn[];
@@ -383,6 +387,7 @@ type UseComposerControllerInput = {
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
   onBeforeStop?: (sessionId: string) => Promise<"cancelled" | void>;
+  onCancelBranchSend?: (operationId: string) => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
     engineId: string,
@@ -446,6 +451,7 @@ export const useComposerController = (
     Record<string, string | undefined>
   >({});
   const [draftProfile, setDraftProfile] = useState<SessionExecutionProfileInput>();
+  const [recoveredExecution, setRecoveredExecution] = useState<ComposerExecutionSelection>();
   const [draftProfileReady, setDraftProfileReady] = useState(!input.initializeDraftExecution);
   const [detachedModelId, setDetachedModelId] = useState<string>();
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc>();
@@ -468,6 +474,7 @@ export const useComposerController = (
   const detachedAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
+  const restoredOperationIdsRef = useRef(new Set<string>());
   const previousContentDraftKeyRef = useRef(contentDraftKey);
   const executionKey = draftKey ?? input.activeSessionId;
   const previousExecutionKeyRef = useRef(executionKey);
@@ -479,6 +486,7 @@ export const useComposerController = (
     }
     previousExecutionKeyRef.current = executionKey;
     setModelSelection(undefined);
+    setRecoveredExecution(undefined);
   }, [executionKey, isExplicitExecutionKey]);
 
   useEffect(() => {
@@ -568,6 +576,11 @@ export const useComposerController = (
                 engineId: input.selectedEngineId,
                 ...input.pendingExecution
               }
+            : recoveredExecution
+            ? {
+                engineId: input.selectedEngineId,
+                ...recoveredExecution
+              }
             : input.activeTurnExecutionProfile
             ? {
                 engineId: input.selectedEngineId,
@@ -584,6 +597,7 @@ export const useComposerController = (
       input.activeSessionId,
       input.activeTurnExecutionProfile,
       input.pendingExecution,
+      recoveredExecution,
       input.selectedEngineId,
       draftProfile,
       input.lastExecution,
@@ -631,9 +645,11 @@ export const useComposerController = (
       selectedSkills.length > 0 ||
       attachments.length > 0) &&
     isTurnActive;
-  const canStop =
-    Boolean(input.activeSessionId && interruptTurnId) &&
-    isTurnActive;
+  const cancellableBranchSend = input.pendingBranchSend &&
+    (input.pendingBranchSend.status === "creating" || input.pendingBranchSend.status === "sending")
+    ? input.pendingBranchSend : undefined;
+  const canStop = Boolean(cancellableBranchSend) ||
+    (Boolean(input.activeSessionId && interruptTurnId) && isTurnActive);
 
   useEffect(() => {
     selectedSkillsRef.current = selectedSkills;
@@ -902,6 +918,22 @@ export const useComposerController = (
     attachmentDraftsRef.current = nextDrafts;
     setAttachmentDrafts(nextDrafts);
   };
+
+  useEffect(() => {
+    const recovered = input.recoveredBranchSends?.find((operation) =>
+      !restoredOperationIdsRef.current.has(operation.operationId));
+    if (!recovered || restoredOperationIdsRef.current.has(recovered.operationId) ||
+      draft.trim().length > 0 || attachments.length > 0 || selectedSkills.length > 0) return;
+    restoredOperationIdsRef.current.add(recovered.operationId);
+    onDraftChange(recovered.content);
+    setRecoveredExecution(recovered.execution?.modelId
+      ? { modelId: recovered.execution.modelId,
+          reasoningOptionId: recovered.execution.reasoningOptionId,
+          serviceTierId: recovered.execution.serviceTierId }
+      : undefined);
+    replaceAttachmentsForSession(contentDraftKey,
+      recovered.attachments.map((attachment) => restoreComposerAttachment(attachment)));
+  }, [attachments.length, contentDraftKey, draft, input.recoveredBranchSends, selectedSkills.length]);
 
   const appendQueueItem = (
     item: Omit<QueuedComposerMessage, "id" | "createdAt">
@@ -1231,6 +1263,22 @@ export const useComposerController = (
   };
 
   const onStop = async (): Promise<void> => {
+    if (cancellableBranchSend) {
+      setIsDispatching(true);
+      try {
+        await input.onCancelBranchSend?.(cancellableBranchSend.operationId);
+      } catch (error) {
+        input.onStatusNotice({
+          message: `Cancel send failed: ${(error as Error).message}`,
+          persistent: true,
+          source: "send",
+          ...statusNoticeErrorDetails(error)
+        });
+      } finally {
+        setIsDispatching(false);
+      }
+      return;
+    }
     if (!input.activeSessionId || !interruptTurnId || !canStop) {
       return;
     }

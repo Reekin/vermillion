@@ -55,6 +55,8 @@ export const sessionRpcMethods = [
   "chatTree.prepareSend",
   "chatTree.submit",
   "chatTree.retry",
+  "chatTree.cancel",
+  "chatTree.remove",
   "chatTree.operations",
   "delegation.get",
   "worktree.get",
@@ -734,6 +736,8 @@ const zChatTreePrepareSendRequestSchema = z.object({
 
 const zChatTreeSubmitRequestSchema = z.object({ id: zRequestId, method: z.literal("chatTree.submit"), params: zChatTreeSendInputSchema });
 const zChatTreeRetryRequestSchema = z.object({ id: zRequestId, method: z.literal("chatTree.retry"), params: z.object({ operationId: z.string().min(1) }) });
+const zChatTreeCancelRequestSchema = z.object({ id: zRequestId, method: z.literal("chatTree.cancel"), params: z.object({ operationId: z.string().min(1) }) });
+const zChatTreeRemoveRequestSchema = z.object({ id: zRequestId, method: z.literal("chatTree.remove"), params: z.object({ operationId: z.string().min(1) }) });
 const zChatTreeOperationsRequestSchema = z.object({ id: zRequestId, method: z.literal("chatTree.operations"), params: z.object({ sessionId: zSessionId }) });
 
 const zChatTreeNodeActionRequestSchema = z.object({
@@ -931,6 +935,8 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zChatTreePrepareSendRequestSchema,
   zChatTreeSubmitRequestSchema,
   zChatTreeRetryRequestSchema,
+  zChatTreeCancelRequestSchema,
+  zChatTreeRemoveRequestSchema,
   zChatTreeOperationsRequestSchema,
   zDelegationGetRequestSchema,
   zWorktreeGetRequestSchema,
@@ -1191,6 +1197,8 @@ const zChatTreePrepareSendResponseSchema = z.object({
 
 const zChatTreeSubmitResponseSchema = z.object({ id: zRequestId, method: z.literal("chatTree.submit"), ok: z.literal(true), result: zChatTreeSendOperationSchema });
 const zChatTreeRetryResponseSchema = z.object({ id: zRequestId, method: z.literal("chatTree.retry"), ok: z.literal(true), result: zChatTreeSendOperationSchema });
+const zChatTreeCancelResponseSchema = z.object({ id: zRequestId, method: z.literal("chatTree.cancel"), ok: z.literal(true), result: zChatTreeSendOperationSchema });
+const zChatTreeRemoveResponseSchema = z.object({ id: zRequestId, method: z.literal("chatTree.remove"), ok: z.literal(true), result: zChatTreeSendOperationSchema });
 const zChatTreeOperationsResponseSchema = z.object({ id: zRequestId, method: z.literal("chatTree.operations"), ok: z.literal(true), result: z.object({ operations: z.array(zChatTreeSendOperationSchema) }) });
 
 const zChatTreeNodeActionResponseSchema = z.object({
@@ -1407,6 +1415,8 @@ export const zSessionRpcResponseSchema = z.union([
   zChatTreePrepareSendResponseSchema,
   zChatTreeSubmitResponseSchema,
   zChatTreeRetryResponseSchema,
+  zChatTreeCancelResponseSchema,
+  zChatTreeRemoveResponseSchema,
   zChatTreeOperationsResponseSchema,
   zDelegationGetResponseSchema,
   zWorktreeGetResponseSchema,

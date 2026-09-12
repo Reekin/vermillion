@@ -418,6 +418,14 @@ export const createWorkbenchRpcHandler = (
               id: request.id, method: request.method, ok: true,
               result: shellService.retryChatTreeSend(request.params)
             });
+          case "chatTree.cancel":
+          case "chatTree.remove":
+            if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");
+            return parseSessionRpcResponse({
+              id: request.id, method: request.method, ok: true,
+              result: await shellService.cancelChatTreeSend(request.params.operationId,
+                request.method === "chatTree.cancel" ? "cancel" : "remove")
+            });
           case "chatTree.operations":
             if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");
             return parseSessionRpcResponse({

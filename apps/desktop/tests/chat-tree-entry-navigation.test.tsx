@@ -35,6 +35,8 @@ describe("chat tree entry navigation", () => {
   it("opens once and focuses the requested branch and turn before reading its tree", async () => {
     const test = setup({ focusTree: true, turnId: "historical" });
     expect(test.controller.isOpening).toBe(true);
+    expect(test.controller.isChatTreeLoading).toBe(true);
+    expect(test.controller.chatTreeError).toBeUndefined();
     await test.controller.refreshChatTree();
     expect(test.calls).toEqual(["open:worker", "activate:worker", "jump:historical", "get:worker"]);
     expect(test.activate).toHaveBeenCalledWith("worker", { focusTree: true });

@@ -13,7 +13,7 @@ describe("branch send RPC contracts", () => {
       const operation = { ...input, operationId: "operation", status, targetSessionId: "branch",
         ...(status === "sent" ? { turnId: "new-turn" } : {}),
         ...(status === "failed" ? { error: "provider unavailable" } : {}) };
-      for (const method of ["chatTree.submit", "chatTree.retry", "chatTree.operations"]) {
+      for (const method of ["chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations"]) {
         const result = method === "chatTree.operations" ? { operations: [operation] } : operation;
         expect(parseSessionRpcResponse({ id: "request", method, ok: true, result })).toEqual({ id: "request", method, ok: true, result });
       }
@@ -30,5 +30,9 @@ describe("branch send RPC contracts", () => {
     expect(() => parseSessionRpcRequest({ id: "request", method: "chatTree.retry", params: { operationId: "" } })).toThrow();
     expect(parseSessionRpcRequest({ id: "request", method: "chatTree.retry", params: { operationId: "operation" } }).params)
       .toEqual({ operationId: "operation" });
+    for (const method of ["chatTree.cancel", "chatTree.remove"] as const) {
+      expect(parseSessionRpcRequest({ id: "request", method, params: { operationId: "operation" } }).params)
+        .toEqual({ operationId: "operation" });
+    }
   });
 });

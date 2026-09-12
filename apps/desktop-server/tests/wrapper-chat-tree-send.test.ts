@@ -174,6 +174,78 @@ describe("asynchronous wrapper branch sends", () => {
     expect(f.send.mock.lastCall![0].command).toMatchObject({ content: f.input.content, attachments: f.input.attachments, execution: f.input.execution });
   });
 
+  it("cancels a pending fork and archives the empty branch without sending", async () => {
+    const f = await fixture();
+    const forkGate = deferred<string>();
+    f.fork.mockImplementation(() => forkGate.promise);
+    const accepted = f.service.submit(f.input, f.send);
+    await vi.waitFor(() => expect(f.fork).toHaveBeenCalled());
+    const archive = vi.fn(async () => undefined);
+    const interrupt = vi.fn(async () => undefined);
+    const cancelled = f.service.cancel(accepted.operationId, "cancel", { archive, interrupt });
+    expect(f.service.listOperations("root")).toEqual([]);
+    forkGate.resolve(await f.addBranch("branch-cancelled", "a"));
+    await expect(cancelled).resolves.toMatchObject({ operationId: accepted.operationId, content: f.input.content,
+      attachments: f.input.attachments, execution: f.input.execution });
+    expect(archive).toHaveBeenCalledWith("branch-cancelled");
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.service.listOperations("root")).toEqual([]);
+  });
+
+  it("interrupts an accepted turn when cancellation races with send", async () => {
+    const f = await fixture();
+    const sendGate = deferred<{ accepted: boolean; turnId: string }>();
+    f.send.mockImplementation(() => sendGate.promise);
+    const accepted = f.service.submit(f.input, f.send);
+    await vi.waitFor(() => expect(f.send).toHaveBeenCalled());
+    const archive = vi.fn(async () => undefined);
+    const interrupt = vi.fn(async () => undefined);
+    const cancelled = f.service.cancel(accepted.operationId, "cancel", { archive, interrupt });
+    sendGate.resolve({ accepted: true, turnId: "accepted-turn" });
+    await cancelled;
+    expect(interrupt).toHaveBeenCalledWith("branch-a", "accepted-turn");
+    expect(archive).not.toHaveBeenCalled();
+    expect(f.service.listOperations("root")).toEqual([]);
+  });
+
+  it("keeps an accepted turn cleanup failure removable", async () => {
+    const f = await fixture();
+    const sendGate = deferred<{ accepted: boolean; turnId: string }>();
+    f.send.mockImplementation(() => sendGate.promise);
+    const accepted = f.service.submit(f.input, f.send);
+    await vi.waitFor(() => expect(f.send).toHaveBeenCalled());
+    const interrupt = vi.fn().mockRejectedValueOnce(new Error("interrupt failed")).mockResolvedValue(undefined);
+    const cleanup = { archive: vi.fn(async () => undefined), interrupt };
+    const cancelled = f.service.cancel(accepted.operationId, "cancel", cleanup);
+    sendGate.resolve({ accepted: true, turnId: "accepted-turn" });
+    await expect(cancelled).rejects.toThrow("interrupt failed");
+    expect(f.service.listOperations("root")[0]).toMatchObject({
+      status: "failed", turnId: "accepted-turn", cleanupPending: true,
+      error: "Branch cleanup failed: interrupt failed"
+    });
+    await f.service.cancel(accepted.operationId, "remove", cleanup);
+    expect(interrupt).toHaveBeenCalledTimes(2);
+    expect(f.service.listOperations("root")).toEqual([]);
+  });
+
+  it("keeps a cleanup failure removable and retries only cleanup", async () => {
+    const f = await fixture();
+    f.send.mockRejectedValueOnce(new Error("send failed"));
+    const accepted = f.service.submit(f.input, f.send);
+    await vi.waitFor(() => expect(f.service.listOperations("root")[0]?.status).toBe("failed"));
+    const archive = vi.fn().mockRejectedValueOnce(new Error("archive failed")).mockResolvedValue(undefined);
+    const cleanup = { archive, interrupt: vi.fn(async () => undefined) };
+    await expect(f.service.cancel(accepted.operationId, "remove", cleanup)).rejects.toThrow("archive failed");
+    expect(f.service.listOperations("root")[0]).toMatchObject({
+      status: "failed", cleanupPending: true, error: "Branch cleanup failed: archive failed"
+    });
+    await expect(f.service.cancel(accepted.operationId, "remove", cleanup)).resolves.toMatchObject({ operationId: accepted.operationId });
+    expect(f.service.listOperations("root")).toEqual([]);
+    expect(f.fork).toHaveBeenCalledTimes(1);
+    expect(f.send).toHaveBeenCalledTimes(1);
+  });
+
   it("reports fork failure and creates the target on retry", async () => {
     const f = await fixture();
     f.fork.mockRejectedValueOnce(new Error("fork unavailable"));
