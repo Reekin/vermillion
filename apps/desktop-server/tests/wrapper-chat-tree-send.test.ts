@@ -202,10 +202,22 @@ describe("asynchronous wrapper branch sends", () => {
     const archive = vi.fn(async () => undefined);
     const interrupt = vi.fn(async () => undefined);
     const cancelled = f.service.cancel(accepted.operationId, "cancel", { archive, interrupt });
+    const duplicate = f.service.cancel(accepted.operationId, "cancel", { archive, interrupt });
     sendGate.resolve({ accepted: true, turnId: "accepted-turn" });
-    await cancelled;
+    await Promise.all([cancelled, duplicate]);
     expect(interrupt).toHaveBeenCalledWith("branch-a", "accepted-turn");
+    expect(interrupt).toHaveBeenCalledTimes(1);
     expect(archive).not.toHaveBeenCalled();
+    expect(f.service.listOperations("root")).toEqual([]);
+  });
+
+  it("can cancel a sent operation before its formal node is projected", async () => {
+    const f = await fixture();
+    const accepted = f.service.submit(f.input, f.send);
+    await vi.waitFor(() => expect(f.service.listOperations("root")[0]?.status).toBe("sent"));
+    const cleanup = { archive: vi.fn(async () => undefined), interrupt: vi.fn(async () => undefined) };
+    await f.service.cancel(accepted.operationId, "cancel", cleanup);
+    expect(cleanup.interrupt).toHaveBeenCalledWith("branch-a", "new-turn");
     expect(f.service.listOperations("root")).toEqual([]);
   });
 

@@ -646,7 +646,7 @@ export const useComposerController = (
       attachments.length > 0) &&
     isTurnActive;
   const cancellableBranchSend = input.pendingBranchSend &&
-    (input.pendingBranchSend.status === "creating" || input.pendingBranchSend.status === "sending")
+    (input.pendingBranchSend.status === "creating" || input.pendingBranchSend.status === "sending" || input.pendingBranchSend.status === "sent")
     ? input.pendingBranchSend : undefined;
   const canStop = Boolean(cancellableBranchSend) ||
     (Boolean(input.activeSessionId && interruptTurnId) && isTurnActive);
@@ -1264,7 +1264,6 @@ export const useComposerController = (
 
   const onStop = async (): Promise<void> => {
     if (cancellableBranchSend) {
-      setIsDispatching(true);
       try {
         await input.onCancelBranchSend?.(cancellableBranchSend.operationId);
       } catch (error) {
@@ -1274,8 +1273,6 @@ export const useComposerController = (
           source: "send",
           ...statusNoticeErrorDetails(error)
         });
-      } finally {
-        setIsDispatching(false);
       }
       return;
     }

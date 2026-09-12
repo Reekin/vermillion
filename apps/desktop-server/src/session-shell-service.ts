@@ -989,7 +989,9 @@ export class SessionShellService {
         const receipt = await this.executeCommand({ commandId: randomUUID(), command: {
           type: "interruptTurn", sessionId, turnId
         } });
-        if (!receipt.accepted) throw new Error(receipt.error?.message ?? "Branch turn interrupt was not accepted.");
+        if (!receipt.accepted && receipt.error?.message !== "no active turn to interrupt") {
+          throw new Error(receipt.error?.message ?? "Branch turn interrupt was not accepted.");
+        }
       }
     });
   }

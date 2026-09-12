@@ -285,4 +285,19 @@ describe("composer content lifetime", () => {
     }));
     expect(h.render().draft).toBe("");
   });
+
+  it("does not lock the shared composer while a branch cancellation settles", async () => {
+    let finish!: () => void;
+    const onCancelBranchSend = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const h = setup({
+      pendingBranchSend: { operationId: "pending", sessionId: "a", nodeId: "old", content: "cancel", attachments: [], status: "sending" },
+      onCancelBranchSend
+    });
+    const c = await h.flush();
+    const pending = c.onStop();
+    expect(onCancelBranchSend).toHaveBeenCalledWith("pending");
+    expect(h.render().isDispatching).toBe(false);
+    finish();
+    await pending;
+  });
 });

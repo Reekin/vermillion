@@ -439,8 +439,9 @@ export const useChatTreeController = (input: {
     },
     cancelSend: async (operationId: string, action: "cancel" | "remove"): Promise<void> => {
       if (!entry || !sessionId) return;
+      const navigation = navigationRef.current;
       const operation = await transport.chatTree[action]({ operationId });
-      const selected = selectedSendRef.current === operationId;
+      const selected = selectedSendRef.current === operationId && navigationRef.current === navigation;
       entry.operations = entry.operations.filter((item) => item.operationId !== operationId);
       setRecoveredSends((current) => current.some((item) => item.operationId === operation.operationId)
         ? current : [...current, operation]);
