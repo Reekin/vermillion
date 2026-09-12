@@ -40,6 +40,7 @@ const codexEventTypeByMethod: Record<string, RuntimeEvent["type"]> = {
   "session.archived": "session.archived",
   "session.disposed": "session.disposed",
   "turn.started": "turn.started",
+  "turn.execution.updated": "turn.execution.updated",
   "turn.completed": "turn.completed",
   "message.started": "message.started",
   "message.delta": "message.delta",

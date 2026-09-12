@@ -834,6 +834,111 @@ describe("Codex app-server runtime port", () => {
     );
   });
 
+  it("associates confirmed settings with the canonical turn and tracks model reroutes", async () => {
+    const port = createCodexAppServerRuntimePort({
+      resolveConversationIdBySessionId: () => "conversation-1"
+    });
+    vi.spyOn(port, "start").mockResolvedValue();
+    let resolveTurnStart!: (value: unknown) => void;
+    const turnStart = new Promise((resolve) => {
+      resolveTurnStart = resolve;
+    });
+    const rpc = vi
+      .spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockImplementation(async (method) => {
+        if (method === "thread/resume") {
+          return {
+            thread: { id: "provider-thread-confirmed" },
+            model: "bootstrap-model",
+            serviceTier: "default",
+            reasoningEffort: "low"
+          };
+        }
+        if (method === "turn/start") {
+          return turnStart;
+        }
+        throw new Error(`Unexpected RPC method: ${String(method)}`);
+      });
+    const events: Array<{ method: string; params: Record<string, unknown> }> = [];
+    port.subscribe((event) => events.push(event));
+
+    const request = port.request({
+      id: "confirmed-settings-request",
+      method: "turn/start",
+      params: {
+        sessionId: "session-confirmed",
+        providerSessionId: "provider-thread-confirmed",
+        content: "use the confirmed settings",
+        execution: {
+          modelId: "requested-model",
+          reasoningOptionId: "high",
+          serviceTierId: "priority"
+        }
+      }
+    });
+    await waitFor(() => rpc.mock.calls.some(([method]) => method === "turn/start"));
+
+    const handleNotification = (
+      method: string,
+      params: Record<string, unknown>
+    ) =>
+      (
+        port as unknown as {
+          handleNotification: (
+            method: string,
+            params: Record<string, unknown>
+          ) => void;
+        }
+      ).handleNotification.call(port, method, params);
+    handleNotification("thread/settings/updated", {
+      threadId: "provider-thread-confirmed",
+      threadSettings: {
+        model: "confirmed-model",
+        effort: "high",
+        serviceTier: "priority"
+      }
+    });
+    resolveTurnStart({ turn: { id: "turn-confirmed" } });
+    await expect(request).resolves.toMatchObject({
+      result: {
+        turnId: "turn-confirmed"
+      }
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      method: "turn.started",
+      params: {
+        sessionId: "session-confirmed",
+        turnId: "turn-confirmed",
+        executionProfile: {
+          modelId: "confirmed-model",
+          reasoningOptionId: "high",
+          serviceTierId: "priority"
+        }
+      }
+    }));
+
+    handleNotification("model/rerouted", {
+      threadId: "provider-thread-confirmed",
+      turnId: "turn-confirmed",
+      fromModel: "confirmed-model",
+      toModel: "rerouted-model",
+      reason: "model_not_available"
+    });
+    expect(events).toContainEqual(expect.objectContaining({
+      method: "turn.execution.updated",
+      params: {
+        sessionId: "session-confirmed",
+        turnId: "turn-confirmed",
+        executionProfile: {
+          modelId: "rerouted-model",
+          reasoningOptionId: "high",
+          serviceTierId: "priority"
+        }
+      }
+    }));
+  });
+
   it("passes an explicit null service tier to return a thread to standard speed", async () => {
     const port = createCodexAppServerRuntimePort({
       resolveConversationIdBySessionId: () => "conversation-1"

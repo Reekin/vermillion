@@ -9,7 +9,8 @@ import type {
   EngineSurfaceRpc,
   RuntimeInteraction,
   ThreadGoal,
-  Turn
+  Turn,
+  TurnExecutionProfile
 } from "@vermillion/shared";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { ImageLightboxState } from "../ImageLightbox.js";
@@ -40,6 +41,7 @@ export type ComposerContainerProps = {
   customModelReasoningOptionIds?: Record<string, string[]>;
   modelExecutionPreferences?: ComposerModelExecutionPreferences;
   lastExecution?: ComposerExecutionSelection;
+  activeTurnExecutionProfile?: TurnExecutionProfile;
   skillsCwd?: string;
   turns: Turn[];
   interruptTurns: Turn[];
@@ -81,6 +83,7 @@ export const ComposerContainer = memo(({
   customModelReasoningOptionIds,
   modelExecutionPreferences,
   lastExecution,
+  activeTurnExecutionProfile,
   skillsCwd,
   turns,
   interruptTurns,
@@ -118,6 +121,7 @@ export const ComposerContainer = memo(({
     customModelReasoningOptionIds,
     modelExecutionPreferences,
     lastExecution,
+    activeTurnExecutionProfile,
     skillsCwd,
     turns,
     interruptTurns,

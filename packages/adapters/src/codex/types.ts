@@ -25,6 +25,7 @@ export const codexRuntimeEventMethods = [
   "session.archived",
   "session.disposed",
   "turn.started",
+  "turn.execution.updated",
   "turn.completed",
   "message.started",
   "message.delta",

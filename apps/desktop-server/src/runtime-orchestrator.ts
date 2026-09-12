@@ -974,6 +974,8 @@ export class RuntimeOrchestrator {
       case "session.updated":
       case "session.created":
       case "session.disposed":
+      case "turn.started":
+      case "turn.execution.updated":
       case "turn.completed":
       case "message.completed":
         return true;

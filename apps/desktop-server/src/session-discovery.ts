@@ -18,6 +18,7 @@ import {
   parseToolCall,
   parseTurn
 } from "@vermillion/shared";
+import { readTurnExecutionProfiles } from "@vermillion/shared";
 import { isPathInsideWorkspace } from "@vermillion/shared";
 import type { Thread } from "./codex-app-server-generated/v2/Thread.js";
 import type { CodexErrorInfo } from "./codex-app-server-generated/v2/CodexErrorInfo.js";
@@ -585,6 +586,7 @@ const hydrateCodexTurnEntities = async (input: {
   const messageBlocks: MessageBlock[] = [];
   const toolCalls: ToolCall[] = [];
   const terminalStreams: TerminalStream[] = [];
+  const executionProfiles = readTurnExecutionProfiles(entry.metadata);
   const rolloutTimestampGroups = await readCodexRolloutTimestampGroups(
     rolloutPath ?? thread.path
   );
@@ -884,6 +886,7 @@ const hydrateCodexTurnEntities = async (input: {
       turnId: turn.id,
       sessionId: entry.sessionId,
       status: turn.status === "inProgress" ? "streaming" : "completed",
+      executionProfile: executionProfiles[turn.id],
       finishReason:
         turn.status === "failed"
           ? "failed"
@@ -1804,6 +1807,7 @@ export class SessionReconciliationService {
         completedAt: currentTurn.completedAt ?? turn.completedAt,
         actor: currentTurn.actor ?? turn.actor,
         finalMessageId: currentTurn.finalMessageId ?? turn.finalMessageId,
+        executionProfile: currentTurn.executionProfile ?? turn.executionProfile,
         messageIds: mergeTurnIds(turn.messageIds, currentTurn.messageIds),
         toolCallIds: mergeTurnIds(turn.toolCallIds, currentTurn.toolCallIds),
         terminalIds: mergeTurnIds(turn.terminalIds, currentTurn.terminalIds),

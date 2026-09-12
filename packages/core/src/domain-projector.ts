@@ -12,6 +12,7 @@ import {
   parseToolCall,
   parseTurn
 } from "@vermillion/shared";
+import { writeTurnExecutionProfile } from "@vermillion/shared";
 import type { RuntimeEventEnvelope } from "./event-bus.js";
 import { DomainStore } from "./domain-store.js";
 
@@ -48,6 +49,7 @@ type TurnRecordInput = {
   terminalIds?: string[];
   approvalRequestIds?: string[];
   interactionRequestIds?: string[];
+  executionProfile?: import("@vermillion/shared").TurnExecutionProfile;
 };
 
 export type DomainProjectorOptions = {
@@ -339,11 +341,13 @@ export class DomainProjector {
       }
       case "turn.started": {
         const existing = this.store.getTurn(event.turnId);
+        const executionProfile = event.executionProfile ?? existing?.executionProfile;
         this.upsertTurnRecord({
           turnId: event.turnId,
           sessionId: event.sessionId,
           status: existing?.status ?? "started",
           finishReason: existing?.finishReason,
+          executionProfile,
           startedAt: existing?.startedAt ?? timestamp,
           completedAt: existing?.completedAt,
           actor: existing?.actor,
@@ -354,13 +358,56 @@ export class DomainProjector {
           approvalRequestIds: existing?.approvalRequestIds,
           interactionRequestIds: existing?.interactionRequestIds
         });
+        if (event.executionProfile) {
+          const session = this.store.getSession(event.sessionId);
+          if (session) {
+            this.upsertSessionRecord({
+              ...session,
+              metadata: writeTurnExecutionProfile(
+                session.metadata,
+                event.turnId,
+                event.executionProfile
+              )
+            });
+          }
+        }
         if (existing?.status !== "completed") {
           this.setSessionStatus(event.sessionId, "running", timestamp, event.turnId);
         }
         return;
       }
+      case "turn.execution.updated": {
+        const existing = this.store.getTurn(event.turnId);
+        if (!existing) {
+          return;
+        }
+        const executionProfile = {
+          ...existing.executionProfile,
+          ...event.executionProfile
+        };
+        if (!executionProfile.modelId) {
+          return;
+        }
+        this.upsertTurnRecord({
+          ...existing,
+          executionProfile
+        });
+        const session = this.store.getSession(event.sessionId);
+        if (session) {
+          this.upsertSessionRecord({
+            ...session,
+            metadata: writeTurnExecutionProfile(
+              session.metadata,
+              event.turnId,
+              executionProfile
+            )
+          });
+        }
+        return;
+      }
       case "turn.completed": {
         const existing = this.store.getTurn(event.turnId);
+        const executionProfile = event.executionProfile ?? existing?.executionProfile;
         const finalMessageId =
           existing?.finalMessageId ??
           selectFinalAssistantMessageId(this.store, existing?.messageIds ?? []);
@@ -369,6 +416,7 @@ export class DomainProjector {
           sessionId: event.sessionId,
           status: "completed",
           finishReason: event.finishReason,
+          executionProfile,
           startedAt: existing?.startedAt ?? timestamp,
           completedAt: timestamp,
           actor: existing?.actor,
@@ -379,6 +427,19 @@ export class DomainProjector {
           approvalRequestIds: existing?.approvalRequestIds,
           interactionRequestIds: existing?.interactionRequestIds
         });
+        if (executionProfile) {
+          const session = this.store.getSession(event.sessionId);
+          if (session) {
+            this.upsertSessionRecord({
+              ...session,
+              metadata: writeTurnExecutionProfile(
+                session.metadata,
+                event.turnId,
+                executionProfile
+              )
+            });
+          }
+        }
         this.setSessionStatus(
           event.sessionId,
           event.finishReason === "failed" ? "error" : "idle",
@@ -817,6 +878,7 @@ export class DomainProjector {
       sessionId: input.sessionId,
       status: input.status ?? existing?.status ?? "streaming",
       finishReason: input.finishReason ?? existing?.finishReason,
+      executionProfile: input.executionProfile ?? existing?.executionProfile,
       startedAt: input.startedAt ?? existing?.startedAt ?? this.now(),
       completedAt: input.completedAt ?? existing?.completedAt,
       actor: input.actor ?? existing?.actor,

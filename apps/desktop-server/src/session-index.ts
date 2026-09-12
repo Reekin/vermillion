@@ -404,7 +404,13 @@ export class SessionIndexStore {
       unreadState: input.unreadState ?? existing?.unreadState ?? "read",
       readTurnIds: existing?.readTurnIds,
       source: input.source ?? existing?.source ?? "registry",
-      metadata: input.session.metadata
+      metadata:
+        existing?.metadata || input.session.metadata
+          ? {
+              ...(existing?.metadata ?? {}),
+              ...(input.session.metadata ?? {})
+            }
+          : undefined
     });
   }
 

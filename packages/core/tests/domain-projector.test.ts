@@ -4,6 +4,54 @@ import { DomainProjector } from "../src/domain-projector.js";
 import { DomainStore } from "../src/domain-store.js";
 
 describe("DomainProjector", () => {
+  it("stores a turn execution profile without replacing the session profile", () => {
+    const projector = new DomainProjector();
+    projector.apply({
+      type: "session.created",
+      conversationId: "conversation-execution",
+      sessionId: "session-execution",
+      engineId: "codex",
+      status: "idle"
+    }, "2026-08-08T00:00:00.000Z");
+
+    projector.apply({
+      type: "turn.started",
+      sessionId: "session-execution",
+      turnId: "turn-execution",
+      executionProfile: {
+        modelId: "worker-model",
+        reasoningOptionId: "high",
+        serviceTierId: "priority"
+      }
+    }, "2026-08-08T00:00:01.000Z");
+
+    projector.apply({
+      type: "turn.execution.updated",
+      sessionId: "session-execution",
+      turnId: "turn-execution",
+      executionProfile: {
+        modelId: "rerouted-model"
+      }
+    }, "2026-08-08T00:00:02.000Z");
+
+    expect(projector.store.getTurn("turn-execution")).toMatchObject({
+      executionProfile: {
+        modelId: "rerouted-model",
+        reasoningOptionId: "high",
+        serviceTierId: "priority"
+      }
+    });
+    expect(projector.store.getSession("session-execution")?.metadata).toMatchObject({
+      turnExecutionProfiles: {
+        "turn-execution": {
+          modelId: "rerouted-model",
+          reasoningOptionId: "high",
+          serviceTierId: "priority"
+        }
+      }
+    });
+  });
+
   it("preserves a completed-only user message role", () => {
     const projector = new DomainProjector();
     projector.apply({

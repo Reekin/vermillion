@@ -1,4 +1,8 @@
-import type { SessionExecutionProfile, SessionExecutionProfileInput } from "@vermillion/shared";
+import type {
+  SessionExecutionProfile,
+  SessionExecutionProfileInput,
+  TurnExecutionProfile
+} from "@vermillion/shared";
 import {
   useEffect,
   useMemo,
@@ -358,6 +362,8 @@ type UseComposerControllerInput = {
   customModelReasoningOptionIds?: Record<string, string[]>;
   modelExecutionPreferences?: ComposerModelExecutionPreferences;
   lastExecution?: ComposerExecutionSelection;
+  /** Execution profile recorded for the node currently shown in the composer. */
+  activeTurnExecutionProfile?: TurnExecutionProfile;
   /** Working directory used to resolve project-scoped skills. */
   skillsCwd?: string;
   turns: Turn[];
@@ -430,7 +436,7 @@ export const useComposerController = (
   const [queueBySessionId, setQueueBySessionId] = useState<
     Record<string, QueuedComposerMessage[]>
   >({});
-  const [modelIdBySessionId, setModelIdBySessionId] = useState<
+  const [modelIdByExecutionKey, setModelIdByExecutionKey] = useState<
     Record<string, string | undefined>
   >({});
   const [draftProfile, setDraftProfile] = useState<SessionExecutionProfileInput>();
@@ -510,7 +516,7 @@ export const useComposerController = (
     ? (queueBySessionId[input.activeSessionId] ?? [])
     : [];
   const currentModelId = draftKey
-    ? modelIdBySessionId[draftKey]
+    ? modelIdByExecutionKey[draftKey]
     : detachedModelId;
   const supportsTurnConfiguration = Boolean(
     input.engineSurface?.sharedCapabilities.includes("turnConfiguration")
@@ -539,7 +545,12 @@ export const useComposerController = (
         models,
         currentModelId,
         persistedProfile: input.activeSessionId
-          ? readSessionExecutionProfile(input.activeSession?.metadata)
+          ? input.activeTurnExecutionProfile
+            ? {
+                engineId: input.selectedEngineId,
+                ...input.activeTurnExecutionProfile
+              }
+            : readSessionExecutionProfile(input.activeSession?.metadata)
           : { engineId: input.selectedEngineId, ...draftProfile },
         lastExecution: input.lastExecution,
         modelExecutionPreferences: currentModelId ? input.modelExecutionPreferences : undefined
@@ -548,6 +559,7 @@ export const useComposerController = (
       currentModelId,
       input.activeSession?.metadata,
       input.activeSessionId,
+      input.activeTurnExecutionProfile,
       input.selectedEngineId,
       draftProfile,
       input.lastExecution,
@@ -1539,7 +1551,7 @@ export const useComposerController = (
       input.onExecutionPreferenceChange?.(input.selectedEngineId, nextExecution);
     }
     if (input.activeSessionId) {
-      setModelIdBySessionId((current) => ({
+      setModelIdByExecutionKey((current) => ({
         ...current,
         [draftKey!]: nextExecution.modelId
       }));

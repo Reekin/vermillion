@@ -912,6 +912,13 @@ export const SessionPane = ({
     },
     [domain, currentTurn?.turnId, currentTurn?.status, activeChatTree]
   );
+  const executionDraftKey =
+    pendingSend?.operationId ??
+    operations.find((operation) =>
+      operation.targetSessionId === activeSessionId &&
+      operation.turnId === viewTurnId
+    )?.operationId ??
+    (activeSessionId ? `${activeSessionId}:${viewTurnId ?? "tip"}` : undefined);
   const renderedTranscriptRows = isOpeningSelectedSession ? [] : visibleTranscriptRows;
   const { approvals: activeSessionApprovals, interactions: activeSessionInteractions } = useRendererSessionSelection(
     store, activeSessionId, () => ({
@@ -1177,7 +1184,7 @@ export const SessionPane = ({
         <ComposerContainer
           contentDraftKey={composerDraftKey}
           onComposerChange={onComposerChange}
-          draftKey={pendingSend?.operationId ?? operations.find((operation) => operation.targetSessionId === activeSessionId)?.operationId ?? activeSessionId}
+          draftKey={executionDraftKey}
           initializeDraftExecution={initializeDraftExecution}
           extraExecutionControls={composerExtras}
           transport={transport}
@@ -1196,6 +1203,7 @@ export const SessionPane = ({
             executionPreferencesByEngineId[displayedEngineId]?.modelPreferences
           }
           lastExecution={lastExecution}
+          activeTurnExecutionProfile={currentTurn?.executionProfile}
           skillsCwd={skillsCwd}
           turns={composerTurns}
           interruptTurns={composerTurns}
