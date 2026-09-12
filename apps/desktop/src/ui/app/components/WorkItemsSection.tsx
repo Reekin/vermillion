@@ -68,11 +68,12 @@ type WorkItemsSectionProps = {
   setWorkGroupExpanded: WorkbenchState["setWorkGroupExpanded"];
   detailTarget?: { workspaceId: string; workItemId: string; nonce: number };
   onDetailTargetConsumed?: () => void;
+  onOpenIssue?: (issueId: string) => void;
   /** Task picked from the status bar: keep it visible in the overlay and scroll to it once. */
   taskTarget?: TaskTarget;
 };
 
-export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, runs, actions, onOpenSession, compact, onExpand, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
+export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, runs, actions, onOpenSession, onOpenIssue, compact, onExpand, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
   const board = useRef<HTMLDivElement>(null);
   const located = useRef<TaskTarget | undefined>(undefined);
   useEffect(() => {
@@ -158,7 +159,7 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
       )}
       {creating && <CreateWorkItemDialog client={client} workspaceId={workspaceId} onClose={() => setCreating(false)} />}
       {detail?.workspaceId === workspaceId && <WorkItemDialog key={workspaceId + "/" + detail.workItemId} client={client} workspaceId={workspaceId}
-        workItemId={detail.workItemId} workItems={workItems} runs={runs} actions={actions} onClose={() => setDetail(undefined)} onOpenSession={onOpenSession} />}
+        workItemId={detail.workItemId} workItems={workItems} runs={runs} actions={actions} onClose={() => setDetail(undefined)} onOpenSession={onOpenSession} onOpenIssue={onOpenIssue} />}
     </div>
   );
 };

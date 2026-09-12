@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, Issue, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
 
 export type Panel = "workbench" | "inbox" | "settings";
 export type WorkspaceSection = "workItems" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
@@ -15,6 +15,7 @@ export type WorkspaceView = {
   workspaceId: string;
   workItems: WorkItem[];
   decisions: DecisionCard[];
+  issues: Issue[];
   docs: DocFile[];
   pendingDocChanges: DocChange[];
   roles: RoleFile[];
@@ -115,9 +116,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         return;
       }
       try {
-        const [workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
+        const [workItems, decisions, issues, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
           client.request("workItem.list", { workspaceId }),
           client.request("decision.list", { workspaceId }),
+          client.request("issue.list", { workspaceId }),
           client.request("docs.list", { workspaceId }),
           client.request("docs.pending", { workspaceId }),
           client.request("role.list", { workspaceId }),
@@ -126,7 +128,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           client.request("action.list", { workspaceId })
         ]);
         if (generation !== viewGeneration) return;
-        set({ view: { workspaceId, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
+        set({ view: { workspaceId, workItems, decisions, issues, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
       } catch (error) {
         if (generation !== viewGeneration) return;
         set({ viewError: (error as Error).message });
@@ -220,6 +222,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
               void loadInbox();
               return;
             case "decisions.changed":
+            case "issues.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               void loadInbox();
               return;

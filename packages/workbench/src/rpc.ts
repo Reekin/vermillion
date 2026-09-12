@@ -14,6 +14,11 @@ import {
   zDocRef,
   zEvidence,
   zInboxItem,
+  zIssue,
+  zIssueEvidence,
+  zIssueSource,
+  zIssueStatus,
+  zIssueType,
   zWorkRequest,
   zWorkMessage,
   zReviewDisposition,
@@ -96,6 +101,29 @@ export const workbenchRpc = {
   "role.write": { params: zWs.extend({ roleId: z.string().min(1), content: z.string() }), result: zEmpty },
   "role.reset": { params: zWs.extend({ roleId: z.string().min(1) }), result: zEmpty },
 
+  "issue.list": { params: zWs, result: z.array(zIssue) },
+  "issue.get": { params: zWs.extend({ issueId: z.string().min(1) }), result: zIssue },
+  "issue.create": {
+    params: zWs.extend({
+      title: z.string().trim().min(1), summary: z.string(), domainId: z.string().trim().min(1),
+      source: zIssueSource.optional(), type: zIssueType.optional(), status: zIssueStatus.optional(),
+      requirement: zIssue.shape.requirement, evidence: z.array(zIssueEvidence).optional(), suggestion: z.string().optional(),
+      decisionQuestion: z.string().trim().min(1).optional(), sourceSessionId: z.string().min(1).optional(), sourceTurnId: z.string().min(1).optional()
+    }),
+    result: zIssue
+  },
+  "issue.update": {
+    params: zWs.extend({
+      issueId: z.string().min(1), title: z.string().trim().min(1).optional(), summary: z.string().optional(), domainId: z.string().trim().min(1).optional(),
+      type: zIssueType.optional(), status: zIssueStatus.optional(), requirement: zIssue.shape.requirement,
+      suggestion: z.string().optional(), decisionQuestion: z.string().trim().min(1).optional(),
+      resolutionReason: z.string().trim().min(1).optional(), duplicateOf: z.string().min(1).optional(),
+      appendEvidence: z.array(zIssueEvidence).optional(), unread: z.boolean().optional()
+    }), result: zIssue
+  },
+  "issue.read": { params: zWs.extend({ issueId: z.string().min(1) }), result: zIssue },
+  "issue.discuss": { params: zWs.extend({ issueId: z.string().min(1) }), result: zIssue },
+
   "work.start": { params: zWs.extend({ sessionId: z.string().min(1), turnId: z.string().min(1).optional(), scope: z.string().optional(), message: zWorkMessage.optional() }), result: zWorkRequest },
   "work.list": { params: zWs, result: z.array(zWorkRequest) },
   "work.retry": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
@@ -107,7 +135,7 @@ export const workbenchRpc = {
   "workItem.get": { params: zWi, result: zWorkItem },
   "workItem.create": {
     params: zWs.extend({
-      sessionId: z.string().optional(), sourceSessionId: z.string().optional(), sourceTurnId: z.string().optional(), treeId: z.string().optional(), requestId: z.string().optional(), worktreePath: z.string().optional(), branch: z.string().optional(),
+      sessionId: z.string().optional(), sourceSessionId: z.string().optional(), sourceTurnId: z.string().optional(), treeId: z.string().optional(), requestId: z.string().optional(), issueId: z.string().optional(), worktreePath: z.string().optional(), branch: z.string().optional(),
       title: z.string().min(1),
       objective: z.string(),
       risk: zRisk,

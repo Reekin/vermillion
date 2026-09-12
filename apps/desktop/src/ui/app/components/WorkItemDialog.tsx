@@ -16,6 +16,7 @@ type WorkItemDialogProps = {
   actions?: WorkflowAction[];
   onClose: () => void;
   onOpenSession: (sessionId: string, turnId?: string) => void;
+  onOpenIssue?: (issueId: string) => void;
 };
 
 const lines = (values: string[]) => values.length ? values.map((value) => "• " + value).join("\n") : "无";
@@ -25,7 +26,7 @@ const verificationStatus = (entry: { status: string }) => entry.status;
 const verificationLabel = (status: string) => ({ pass: "通过", defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成" }[status] ?? "未通过");
 
 
-export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, runs, actions = [], onClose, onOpenSession }: WorkItemDialogProps) => {
+export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, runs, actions = [], onClose, onOpenSession, onOpenIssue }: WorkItemDialogProps) => {
   const item = workItems.find((entry) => entry.workItemId === workItemId);
   const [decisions, setDecisions] = useState<DecisionCard[]>();
   const [error, setError] = useState<string>();
@@ -66,7 +67,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     {!item ? <EmptyState title="工单不存在" hint={workItemId} /> : <Card
       className="m-4"
       header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{item.run.pauseReason === "user" ? "用户暂停" : integration ? actionStatusText(integration, item) : statusLabel[item.status]}</Badge>{item.run.pauseReason === "user" && <Button className="ml-auto" variant="primary" disabled={resuming} onClick={() => void resume()}>恢复执行</Button>}</>}
-      footer={<>{sessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(sessionId); }}>会话</Button>}{item.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(item.sourceSessionId!, item.sourceTurnId); }}>来源</Button>}</>}
+      footer={<>{item.issueId && onOpenIssue && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenIssue(item.issueId!); }}>Issue</Button>}{sessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(sessionId); }}>会话</Button>}{item.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(item.sourceSessionId!, item.sourceTurnId); }}>来源</Button>}</>}
     >
       <DetailSection title="工单">{item.title}</DetailSection>
       <DetailSection title="目标">{item.objective || "未填写"}</DetailSection>

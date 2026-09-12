@@ -45,6 +45,13 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "role.write": async (p) => { await service.writeRoleOverride(p.workspaceId, p.roleId, p.content); return {}; },
     "role.reset": async (p) => { await service.resetRoleOverride(p.workspaceId, p.roleId); return {}; },
 
+    "issue.list": (p) => service.listIssues(p.workspaceId),
+    "issue.get": (p) => service.getIssue(p.workspaceId, p.issueId),
+    "issue.create": ({ workspaceId, ...p }) => service.createIssue(workspaceId, p),
+    "issue.update": ({ workspaceId, issueId, ...p }) => service.updateIssue(workspaceId, issueId, p),
+    "issue.read": (p) => service.readIssue(p.workspaceId, p.issueId),
+    "issue.discuss": (p) => service.discussIssue(p.workspaceId, p.issueId),
+
 
     "work.start": (p) => service.startWork(p.workspaceId, p),
     "work.list": (p) => service.listWorkRequests(p.workspaceId),

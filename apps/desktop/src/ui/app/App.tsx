@@ -50,6 +50,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const overlay = store((s) => s.overlay);
   const section = store((s) => s.workspaceSection);
   const inboxCount = store((s) => s.inbox.length);
+  const issueUnreadCount = store((s) => s.view?.issues.filter((issue) => issue.unread).length ?? 0);
   const workspaces = store((s) => s.workspaces);
   const draftWorkspaceId = store((s) => s.draftWorkspaceId);
   const setPanel = store((s) => s.setPanel);
@@ -228,7 +229,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <Tabs items={tabs} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} />
+            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} />
             <div className={section === "sessions" ? "flex min-h-0 flex-1" : "hidden"}>
               <main className="relative min-w-0 flex-1">
                 <SessionPane

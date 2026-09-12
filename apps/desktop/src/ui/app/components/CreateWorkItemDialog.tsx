@@ -1,13 +1,13 @@
 import { useState } from "react";
-import type { WorkbenchClient } from "@vermillion/workbench/client";
+import type { Issue, WorkbenchClient } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
 import { Button, Field, InlineNotice } from "./ui.js";
 
-export const CreateWorkItemDialog = ({ client, workspaceId, onClose }: {
-  client: WorkbenchClient; workspaceId: string; onClose: () => void;
+export const CreateWorkItemDialog = ({ client, workspaceId, issue, onClose }: {
+  client: WorkbenchClient; workspaceId: string; issue?: Issue; onClose: () => void;
 }) => {
-  const [title, setTitle] = useState("");
-  const [objective, setObjective] = useState("");
+  const [title, setTitle] = useState(issue?.title ?? "");
+  const [objective, setObjective] = useState(issue?.summary ?? "");
   const [paths, setPaths] = useState("");
   const [acceptance, setAcceptance] = useState("");
   const [refs, setRefs] = useState("");
@@ -21,7 +21,7 @@ export const CreateWorkItemDialog = ({ client, workspaceId, onClose }: {
     setError(undefined);
     try {
       await client.request("workItem.create", {
-        workspaceId, title: title.trim(), objective: objective.trim(), risk,
+        workspaceId, issueId: issue?.issueId, title: title.trim(), objective: objective.trim(), risk,
         scope: { inScope: [], outOfScope: [], allowedPaths: lines(paths) },
         acceptance: lines(acceptance).map((text) => ({ text })),
         refs: lines(refs).map((path) => ({ path, commit: commit.trim() }))
