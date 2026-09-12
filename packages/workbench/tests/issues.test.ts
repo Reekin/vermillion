@@ -42,7 +42,9 @@ it("reuses an issue discussion and links work created from that session", async 
     await service.discussIssue(f.workspaceId, issue.issueId);
     expect(start).toHaveBeenCalledTimes(1);
 
-    const item = await service.createWorkItem(f.workspaceId, { ...contract, sourceSessionId: "issue-discussion" });
+    const request = await service.startWork(f.workspaceId, { sessionId: "issue-discussion", turnId: "turn-1" });
+    await service.putWorkRequest(f.workspaceId, { ...request, status: "preparing", workerSessionId: "preparation" });
+    const item = await service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "preparation" });
     expect(item.issueId).toBe(issue.issueId);
     expect(await service.getIssue(f.workspaceId, issue.issueId)).toMatchObject({ status: "started", unread: true, workItemIds: [item.workItemId] });
   } finally { await service.dispose(); }
