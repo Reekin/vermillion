@@ -1,4 +1,4 @@
-import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type WorkflowAction, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 
@@ -61,8 +61,6 @@ export class Orchestrator {
   private readonly settling = new Map<string, number>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly preparing = new Map<string, string>();
-  private readonly integrationDeliveries = new Set<string>();
-  private readonly integrationRecoveryDispatched = new Set<string>();
   private disposed = false;
 
   constructor(options: OrchestratorOptions) {
@@ -135,8 +133,6 @@ export class Orchestrator {
     for (const dispose of this.disposers.splice(0)) dispose();
     for (const timer of this.retryTimers.values()) clearTimeout(timer);
     this.retryTimers.clear();
-    this.integrationDeliveries.clear();
-    this.integrationRecoveryDispatched.clear();
     await Promise.allSettled([...workspaceQueues.values()]);
   }
 
@@ -200,7 +196,6 @@ export class Orchestrator {
     await this.service.refreshActions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
     this.clearRetryTimer(workspaceId);
-    await this.dispatchIntegrationTakeovers(workspaceId);
     if (!scheduler.enabled) { await this.scheduleRetry(workspaceId); return; }
     await this.service.continueIntegrations(workspaceId);
     let actions = await this.service.listActions(workspaceId);
@@ -246,64 +241,6 @@ export class Orchestrator {
     const timer = this.retryTimers.get(workspaceId);
     if (timer) clearTimeout(timer);
     this.retryTimers.delete(workspaceId);
-  }
-
-  private async dispatchIntegrationTakeovers(workspaceId: string): Promise<void> {
-    const pending = (await this.service.listActions(workspaceId)).filter((entry): entry is Extract<WorkflowAction, { kind: "integration" }> => {
-      if (entry.kind !== "integration" || entry.stage !== "merge" || !actionIsOpen(entry) || !entry.agent || entry.agent.pausedAt) return false;
-      return (!entry.agent.deliveredAt && !entry.agent.deliveryAttemptedAt) ||
-        (!!entry.agent.deliveredAt && !entry.agent.deliveryAttemptedAt && !this.integrationRecoveryDispatched.has(entry.actionId));
-    });
-    for (const action of pending) {
-      if (this.integrationDeliveries.has(action.actionId)) continue;
-      this.integrationDeliveries.add(action.actionId);
-      try {
-        const item = await this.service.getWorkItem(workspaceId, action.workItemId);
-        const sessionId = action.agent!.sessionId;
-        const root = await this.service.workspaceRoot(workspaceId);
-        const role = await this.workerRole(root);
-        const message = [
-          action.agent!.deliveredAt ? "继续接管合入本单。" : "接管合入本单。",
-          "workspaceId: " + workspaceId,
-          "workItemId: " + item.workItemId,
-          "integrationActionId: " + action.actionId,
-          "sessionId: " + sessionId,
-          "工作目录: " + (item.run.worktreePath ?? root),
-          "workspace 根目录（主分支）: " + root,
-          "当前成果: " + (item.evidence?.commit ?? "未登记 commit"),
-          "已失败次数: " + action.attempts,
-          action.failure ? "最近合入失败：" + action.failure : "",
-          action.agent!.note ? "用户说明：" + action.agent!.note : "",
-          "请先读取最新 workItem.get 和 action.list，保留主工作区其他人的修改。处理 worktree/rebase 后，使用 vermillion workItem.integration.complete " + JSON.stringify({ workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId }) + " 请求工作台在串行边界执行最终合入；不要自行并发写主分支。完成后结束会话。"
-        ].filter(Boolean).join("\n");
-        const active = this.runner.isActive?.(sessionId) ?? false;
-        if (active && action.agent!.deliveredAt) {
-          this.integrationRecoveryDispatched.add(action.actionId);
-          continue;
-        }
-        let sent: { turnId?: string };
-        if (active) sent = await this.runner.steer(sessionId, message);
-        else {
-          if (!await this.runner.resume(sessionId, { cwd: root, developerInstructions: role.content, modelConfig: role.modelConfig,
-            title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId,
-              sourceTurnId: item.sourceTurnId, treeId: item.treeId, integrationActionId: action.actionId } })) throw new Error("原 Worker 会话无法恢复：" + sessionId);
-          sent = await this.runner.send(sessionId, message) ?? {};
-        }
-        await this.service.updateAction(workspaceId, action, (current) => current.kind === "integration" && actionIsOpen(current) && current.agent
-          ? { ...current, status: "running", failure: undefined, agent: { ...current.agent, deliveredAt: this.now(), ...(sent.turnId ? { turnId: sent.turnId } : {}) },
-            history: [...current.history, { at: this.now(), event: "takeover:delivered", message: "合入接管已送达原 Worker" }] }
-          : current);
-        this.integrationRecoveryDispatched.add(action.actionId);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        await this.service.updateAction(workspaceId, action, (current) => current.kind === "integration" && actionIsOpen(current) && current.agent
-          ? { ...current, failure: reason, agent: { ...current.agent, deliveredAt: undefined, deliveryAttemptedAt: this.now() },
-            history: [...current.history, { at: this.now(), event: "failed:takeover", message: reason }] }
-          : current).catch(() => undefined);
-      } finally {
-        this.integrationDeliveries.delete(action.actionId);
-      }
-    }
   }
 
   private async dispatch(workspaceId: string, initial: Execution): Promise<void> {
@@ -414,7 +351,7 @@ export class Orchestrator {
   private async onTurn(bound: WorkerBinding, turn: WorkerTurn, finishReason: string, failure?: string): Promise<void> {
     const ownsExecution = () => this.turnsBySession.get(bound.run.sessionId) === turn && this.runsBySession.get(bound.run.sessionId) === bound;
     const result = bound.run.workItemId ? await this.service.settleWorkerTurn(bound.workspaceId, bound.run.workItemId, {
-      ownsExecution, turnId: turn.turnId, scheduled: turn.scheduled, finishReason, failure, maxIdleTurns: this.maxIdleTurns, completion: this.completion()
+      ownsExecution, turnId: turn.turnId, scheduled: turn.scheduled, finishReason, failure, maxIdleTurns: this.maxIdleTurns, completion: await this.completion(bound.workspaceId, bound.actionId)
     }) : undefined;
     // Every turn settles its own run once, even when a newer turn already owns the execution.
     bound.run = { ...bound.run, turns: bound.run.turns + 1 };
@@ -448,7 +385,11 @@ export class Orchestrator {
     ].join("\n");
   }
 
-  private completion(): string {
+  private async completion(workspaceId: string, actionId: string): Promise<string> {
+    const action = (await this.service.listActions(workspaceId)).find((entry) => entry.actionId === actionId);
+    if (action?.kind === "execute" && action.integrationActionId) return "处理当前合入后执行 vermillion workItem.integration.complete " + JSON.stringify({
+      workspaceId, workItemId: action.workItemId, actionId: action.integrationActionId, sessionId: action.sessionId
+    }) + "；需要用户取舍时调用 decision.create。";
     return "完成后重新读取 workItem.get，将当前 contractRevision 传给 workItem.submit，并提交证据、review 和逐条验收；需要用户取舍时调用 decision.create。";
   }
 
@@ -467,6 +408,7 @@ export class Orchestrator {
 
   private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {
     const update = [action.message.trim(), action.failure].filter(Boolean).join("\n");
+    if (action.integrationActionId) return [update, await this.completion(workspaceId, action.actionId)].filter(Boolean).join("\n");
     if (action.deliveredAt) return update;
     const item = await this.service.getWorkItem(workspaceId, action.workItemId);
     return [await this.workerMessage(workspaceId, item, cwd), "sessionId: " + action.sessionId,

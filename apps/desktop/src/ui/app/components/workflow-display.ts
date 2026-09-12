@@ -6,9 +6,15 @@ export const actionKindLabel: Record<WorkflowAction["kind"], string> = { execute
 const stageLabel: Record<WorkflowAction["stage"], string> = { open: "打开会话", deliver: "送达消息", execute: "执行", merge: "合入", rollback: "回滚" };
 export const actionRoleLabel = (action: WorkflowAction) => roleLabel[action.kind === "execute" || (action.kind === "integration" && action.agent) ? "worker" : "workbench"];
 
-export const integrationProgress = (action: WorkflowAction): string | undefined => {
+export const integrationProgress = (action: WorkflowAction, item?: WorkItem): string | undefined => {
   if (action.kind !== "integration") return undefined;
-  if (action.agent) return action.agent.deliveredAt ? "Agent 处理合入" : "等待 Agent 接手";
+  if (action.agent) {
+    if (item?.run.pauseReason === "user") return "用户暂停";
+    if (item?.status === "decision") return "Agent 合入等待答复";
+    if (item?.run.retryAt) return "Agent 合入等待重试";
+    if (item?.status === "queued") return "等待 Agent 接手";
+    return "Agent 处理合入";
+  }
   if (action.status === "retry") return `合入失败 · 自动重试第 ${Math.min(action.attempts, 4)}/4 次`;
   if (action.status === "decision") return `合入失败 · 自动重试已用尽（已失败 ${action.attempts} 次）`;
   if (action.status === "running") return "正在合入";
@@ -16,9 +22,9 @@ export const integrationProgress = (action: WorkflowAction): string | undefined 
   return actionStatusLabel[action.status];
 };
 
-export const integrationShortStatus = (action: WorkflowAction): string | undefined => {
+export const integrationShortStatus = (action: WorkflowAction, item?: WorkItem): string | undefined => {
   if (action.kind !== "integration") return undefined;
-  if (action.agent) return "Agent处理";
+  if (action.agent) return item?.status === "running" ? "Agent处理" : integrationProgress(action, item);
   if (action.status === "retry") return "等待重试";
   if (action.status === "decision") return "待处置";
   if (action.status === "running") return "合入中";
@@ -40,7 +46,7 @@ export const integrationFailureSummary = (action: WorkflowAction): string | unde
   return summary.length > 160 ? summary.slice(0, 157) + "…" : summary;
 };
 
-export const actionStatusText = (action: WorkflowAction) => integrationProgress(action) ?? actionStatusLabel[action.status];
+export const actionStatusText = (action: WorkflowAction, item?: WorkItem) => integrationProgress(action, item) ?? actionStatusLabel[action.status];
 
 export const dispositionSummary = (action: WorkflowAction): string[] => action.history.flatMap((entry) => {
   const stage = entry.event.startsWith("failed:") ? entry.event.slice(7) : "";

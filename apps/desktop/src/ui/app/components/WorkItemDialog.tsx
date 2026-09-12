@@ -65,13 +65,13 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   return <Modal title="工单详情" onClose={onClose} width={800}>
     {!item ? <EmptyState title="工单不存在" hint={workItemId} /> : <Card
       className="m-4"
-      header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{item.run.pauseReason === "user" ? "用户暂停" : integration ? actionStatusText(integration) : statusLabel[item.status]}</Badge>{item.run.pauseReason === "user" && <Button className="ml-auto" variant="primary" disabled={resuming} onClick={() => void resume()}>恢复执行</Button>}</>}
+      header={<><Badge>{item.risk}</Badge><Badge status={item.status}>{item.run.pauseReason === "user" ? "用户暂停" : integration ? actionStatusText(integration, item) : statusLabel[item.status]}</Badge>{item.run.pauseReason === "user" && <Button className="ml-auto" variant="primary" disabled={resuming} onClick={() => void resume()}>恢复执行</Button>}</>}
       footer={<>{sessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(sessionId); }}>会话</Button>}{item.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(item.sourceSessionId!, item.sourceTurnId); }}>来源</Button>}</>}
     >
       <DetailSection title="工单">{item.title}</DetailSection>
       <DetailSection title="目标">{item.objective || "未填写"}</DetailSection>
       <WorkflowDetails actions={itemActions} onOpenSession={(id) => { onClose(); onOpenSession(id); }} />
-      <IntegrationControls client={client} workspaceId={workspaceId} workItemId={workItemId} action={integration} showStatus={false} />
+      <IntegrationControls client={client} workspaceId={workspaceId} workItemId={workItemId} action={integration} item={item} showStatus={false} />
       <DetailSection title="范围">{lines(item.scope.inScope)}</DetailSection>
       <DetailSection title="不在范围内">{lines(item.scope.outOfScope)}</DetailSection>
       <DetailSection title="允许路径">{lines(item.scope.allowedPaths)}</DetailSection>
