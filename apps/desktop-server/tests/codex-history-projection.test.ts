@@ -71,4 +71,49 @@ describe("CodexHistoryProjection", () => {
       path: join(directory, "thread_history_1.sqlite")
     });
   });
+
+  it("keeps the caller responsive during a lock timeout and can clear after the lock is released", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "vermillion-history-lock-"));
+    tempDirs.push(directory);
+    const database = new DatabaseSync(join(directory, "thread_history_1.sqlite"));
+    database.exec("CREATE TABLE thread_turns (thread_id TEXT); INSERT INTO thread_turns VALUES ('target'); BEGIN IMMEDIATE");
+    const warnings: Record<string, unknown>[] = [];
+    const projection = new CodexHistoryProjection({
+      resolveSqliteHome: () => directory,
+      onWarning: (_message, details) => { warnings.push(details); }
+    });
+    let completed = false;
+    const clearing = projection.clearThread("target").then((result) => {
+      completed = true;
+      return result;
+    });
+    try {
+      const started = performance.now();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(performance.now() - started).toBeLessThan(1_000);
+      expect(completed).toBe(false);
+      await expect(clearing).resolves.toMatchObject({ status: "failed" });
+      expect(warnings).toEqual([expect.objectContaining({ threadId: "target", error: expect.stringMatching(/locked/i) })]);
+      expect(database.prepare("SELECT * FROM thread_turns").all()).toHaveLength(1);
+    } finally {
+      database.exec("ROLLBACK");
+      database.close();
+      await clearing;
+    }
+    await expect(projection.clearThread("target")).resolves.toMatchObject({ status: "cleared" });
+  });
+
+  it("rolls back the entire cleanup when a projection table cannot be cleared", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "vermillion-history-rollback-"));
+    tempDirs.push(directory);
+    const database = new DatabaseSync(join(directory, "thread_history_1.sqlite"));
+    database.exec("CREATE TABLE thread_items (thread_id TEXT); INSERT INTO thread_items VALUES ('target'); CREATE TABLE thread_turns (unexpected TEXT)");
+    const projection = new CodexHistoryProjection({ resolveSqliteHome: () => directory, onWarning: () => {} });
+    try {
+      await expect(projection.clearThread("target")).resolves.toMatchObject({ status: "failed" });
+      expect(database.prepare("SELECT * FROM thread_items").all()).toEqual([{ thread_id: "target" }]);
+    } finally {
+      database.close();
+    }
+  });
 });
