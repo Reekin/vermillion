@@ -65,6 +65,8 @@ export class Orchestrator {
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly preparing = new Map<string, string>();
   private readonly patrolsBySession = new Map<string, PatrolBinding>();
+  private readonly patrolQueues = new Map<string, Promise<void>>();
+  private readonly patrolRequested = new Set<string>();
   private disposed = false;
 
   constructor(options: OrchestratorOptions) {
@@ -96,7 +98,7 @@ export class Orchestrator {
     this.disposers.push(() => clearInterval(cleanupTimer));
     const patrolTimer = setInterval(() => {
       void this.service.listWorkspaces().then((workspaces) => {
-        for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, () => this.reconcile(workspace.workspaceId));
+        for (const workspace of workspaces) this.requestPatrol(workspace.workspaceId);
       });
     }, this.patrolIntervalMs);
     patrolTimer.unref();
@@ -105,8 +107,10 @@ export class Orchestrator {
       if (!("workspaceId" in event)) return;
       if (event.type === "workItem.updated") {
         void this.enqueue(event.workspaceId, () => this.deliverUpdate(event.workspaceId, event.workItemId, event.sessionId, event.note));
-      } else if (["actions.changed", "workItems.changed", "workRequests.changed", "decisions.changed", "scheduler.changed", "domains.changed", "docs.changed", "issues.changed"].includes(event.type)) {
+      } else if (["actions.changed", "workItems.changed", "workRequests.changed", "decisions.changed", "scheduler.changed"].includes(event.type)) {
         void this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
+      } else if (["domains.changed", "docs.changed", "issues.changed"].includes(event.type)) {
+        this.requestPatrol(event.workspaceId);
       } else if (event.type === "workRequest.cancelled") {
         const sessionId = event.sessionId;
         void this.enqueue(event.workspaceId, async () => {
@@ -133,10 +137,13 @@ export class Orchestrator {
       void this.settleTurn(event).catch((error) => console.error("[orchestrator] turn completion", event.sessionId, event.turnId, error));
     }));
     void this.service.listWorkspaces().then((workspaces) => {
-      for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, async () => {
-        await this.service.releaseIdleWorkers(workspace.workspaceId);
-        await this.reconcile(workspace.workspaceId);
-      });
+      for (const workspace of workspaces) {
+        this.requestPatrol(workspace.workspaceId);
+        void this.enqueue(workspace.workspaceId, async () => {
+          await this.service.releaseIdleWorkers(workspace.workspaceId);
+          await this.reconcile(workspace.workspaceId);
+        });
+      }
     });
   }
 
@@ -145,7 +152,7 @@ export class Orchestrator {
     for (const dispose of this.disposers.splice(0)) dispose();
     for (const timer of this.retryTimers.values()) clearTimeout(timer);
     this.retryTimers.clear();
-    await Promise.allSettled([...workspaceQueues.values()]);
+    await Promise.allSettled([...workspaceQueues.values(), ...this.patrolQueues.values()]);
   }
 
   private enqueue(workspaceId: string, task: () => Promise<void>): Promise<void> {
@@ -155,6 +162,19 @@ export class Orchestrator {
     });
     workspaceQueues.set(workspaceId, drained);
     return next;
+  }
+
+  private requestPatrol(workspaceId: string): void {
+    if (this.disposed || this.patrolRequested.has(workspaceId)) return;
+    this.patrolRequested.add(workspaceId);
+    const next = (this.patrolQueues.get(workspaceId) ?? Promise.resolve()).then(async () => {
+      this.patrolRequested.delete(workspaceId);
+      if (!this.disposed) await this.reconcilePatrol(workspaceId);
+    });
+    const drained = next.catch((error) => console.error("[orchestrator] patrol", workspaceId, error)).finally(() => {
+      if (this.patrolQueues.get(workspaceId) === drained) this.patrolQueues.delete(workspaceId);
+    });
+    this.patrolQueues.set(workspaceId, drained);
   }
 
   private async settleTurn(event: Parameters<Parameters<AgentRunner["onTurnCompleted"]>[0]>[0]): Promise<void> {
@@ -212,8 +232,6 @@ export class Orchestrator {
 
   private async reconcile(workspaceId: string): Promise<void> {
     if (this.disposed) return;
-    await this.service.scanPatrols(workspaceId);
-    await this.dispatchPatrol(workspaceId);
     await this.prepareRequests(workspaceId);
     await this.service.refreshActions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
@@ -241,6 +259,12 @@ export class Orchestrator {
       await this.dispatch(workspaceId, action);
     }
     await this.scheduleRetry(workspaceId);
+  }
+
+  private async reconcilePatrol(workspaceId: string): Promise<void> {
+    if (this.disposed) return;
+    await this.service.scanPatrols(workspaceId);
+    await this.dispatchPatrol(workspaceId);
   }
 
   private async dispatchPatrol(workspaceId: string): Promise<void> {

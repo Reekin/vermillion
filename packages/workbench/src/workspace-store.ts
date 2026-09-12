@@ -95,6 +95,22 @@ const createCollection = <T extends Record<string, unknown>>(
   }
 });
 
+const transactCollection = async <T, R>(
+  key: string,
+  collection: Collection<T>,
+  id: string,
+  update: (record: T | undefined) => { record: T; result: R }
+): Promise<R> => {
+  const next = (recordWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+    const { record, result } = update(await collection.get(id));
+    await collection.put(record);
+    return result;
+  });
+  recordWrites.set(key, next);
+  try { return await next; }
+  finally { if (recordWrites.get(key) === next) recordWrites.delete(key); }
+};
+
 export class WorkspaceStore {
   readonly rootPath: string;
   readonly stateDir: string;
@@ -124,51 +140,19 @@ export class WorkspaceStore {
   }
 
   async transactRecord<T>(id: string, update: (record: WorkItemRecord | undefined) => { record: WorkItemRecord; result: T }): Promise<T> {
-    const key = join(this.stateDir, "workitems", id);
-    const next = (recordWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
-      const { record, result } = update(await this.records.get(id));
-      await this.records.put(record);
-      return result;
-    });
-    recordWrites.set(key, next);
-    try { return await next; }
-    finally { if (recordWrites.get(key) === next) recordWrites.delete(key); }
+    return transactCollection(join(this.stateDir, "workitems", id), this.records, id, update);
   }
 
   async transactIssue<T>(id: string, update: (record: Issue | undefined) => { record: Issue; result: T }): Promise<T> {
-    const key = join(this.stateDir, "issues", id);
-    const next = (recordWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
-      const { record, result } = update(await this.issues.get(id));
-      await this.issues.put(record);
-      return result;
-    });
-    recordWrites.set(key, next);
-    try { return await next; }
-    finally { if (recordWrites.get(key) === next) recordWrites.delete(key); }
+    return transactCollection(join(this.stateDir, "issues", id), this.issues, id, update);
   }
 
   async transactDomainConfig<T>(id: string, update: (record: DomainConfig | undefined) => { record: DomainConfig; result: T }): Promise<T> {
-    const key = join(this.stateDir, "domains", id);
-    const next = (recordWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
-      const { record, result } = update(await this.domainConfigs.get(id));
-      await this.domainConfigs.put(record);
-      return result;
-    });
-    recordWrites.set(key, next);
-    try { return await next; }
-    finally { if (recordWrites.get(key) === next) recordWrites.delete(key); }
+    return transactCollection(join(this.stateDir, "domains", id), this.domainConfigs, id, update);
   }
 
   async transactPatrolRun<T>(id: string, update: (record: PatrolRun | undefined) => { record: PatrolRun; result: T }): Promise<T> {
-    const key = join(this.stateDir, "patrols", id);
-    const next = (recordWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
-      const { record, result } = update(await this.patrolRuns.get(id));
-      await this.patrolRuns.put(record);
-      return result;
-    });
-    recordWrites.set(key, next);
-    try { return await next; }
-    finally { if (recordWrites.get(key) === next) recordWrites.delete(key); }
+    return transactCollection(join(this.stateDir, "patrols", id), this.patrolRuns, id, update);
   }
 
   constructor(rootPath: string) {

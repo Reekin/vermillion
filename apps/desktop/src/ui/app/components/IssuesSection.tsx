@@ -99,38 +99,129 @@ const CreateIssueDialog = ({ client, workspaceId, domainIds, onCreated, onClose 
 };
 
 const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, onOpenIssue, onOpenSession, onOpenWorkItem }: {
-  client: WorkbenchClient; workspaceId: string; issue: Issue; issues: Issue[]; workItems: WorkItem[]; onClose: () => void;
+  client: WorkbenchClient;
+  workspaceId: string;
+  issue: Issue;
+  issues: Issue[];
+  workItems: WorkItem[];
+  onClose: () => void;
   onOpenIssue: (issueId: string) => void;
-  onOpenSession: (sessionId: string, turnId?: string) => void; onOpenWorkItem: (workItemId: string) => void;
+  onOpenSession: (sessionId: string, turnId?: string) => void;
+  onOpenWorkItem: (workItemId: string) => void;
 }) => {
-  const [handling, setHandling] = useState(false); const [creatingWork, setCreatingWork] = useState(false);
-  const [resolution, setResolution] = useState<"closed" | "duplicate">("closed"); const [reason, setReason] = useState(""); const [duplicateOf, setDuplicateOf] = useState("");
-  const [error, setError] = useState<string>(); const [busy, setBusy] = useState(false);
-  useEffect(() => { if (issue.unread) void client.request("issue.read", { workspaceId, issueId: issue.issueId }); }, [client, issue.issueId, issue.unread, workspaceId]);
-  const discuss = async () => { setBusy(true); setError(undefined); try { const updated = await client.request("issue.discuss", { workspaceId, issueId: issue.issueId }); onClose(); onOpenSession(updated.discussionSessionId!, updated.discussionTurnId); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); } finally { setBusy(false); } };
-  const resolve = async () => { setBusy(true); setError(undefined); try { await client.request("issue.update", { workspaceId, issueId: issue.issueId, status: resolution, resolutionReason: reason, ...(resolution === "duplicate" ? { duplicateOf } : {}) }); setHandling(false); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); } finally { setBusy(false); } };
-  const linked = issue.workItemIds.map((id) => workItems.find((item) => item.workItemId === id)).filter(Boolean) as WorkItem[];
-  return <><Modal title={"Issue · " + issue.issueId} onClose={onClose} width={760}>
-    <Card className="m-4" header={<>{issue.type === "suggestion" && <Badge>建议</Badge>}<Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{statusLabel[issue.status]}</Badge><span className="text-caption text-muted-foreground">{issue.domainId} · {sourceLabel[issue.source]}</span></>}
-      footer={<>{issue.sourceSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(issue.sourceSessionId!, issue.sourceTurnId); }}>来源</Button>}{issue.duplicateOf && <Button variant="ghost" outlined onClick={() => onOpenIssue(issue.duplicateOf!)}>原议题</Button>}{linked.map((item) => <Button key={item.workItemId} variant="ghost" outlined onClick={() => { onClose(); onOpenWorkItem(item.workItemId); }}>工单</Button>)}
-        {issue.discussionSessionId && <Button variant="ghost" outlined onClick={() => { onClose(); onOpenSession(issue.discussionSessionId!, issue.discussionTurnId); }}>讨论</Button>}
-        {!handling && !["closed", "duplicate"].includes(issue.status) && <Button className="ml-auto" onClick={() => setHandling(true)}>处理</Button>}
-        {!handling && !["closed", "duplicate"].includes(issue.status) && <Button onClick={() => setCreatingWork(true)}>创建工单</Button>}
-        {!handling && !["closed", "duplicate"].includes(issue.status) && <Button variant="primary" disabled={busy} onClick={() => void discuss()}>{issue.discussionSessionId ? "继续讨论" : "进入讨论"}</Button>}
-      </>}>
-      <DetailSection title="议题">{issue.title}</DetailSection><DetailSection title="问题与影响">{issue.summary || "未填写"}</DetailSection>
-      {issue.requirement && <DetailSection title="要求依据">{[issue.requirement.text, issue.requirement.path, issue.requirement.section, issue.requirement.commit].filter(Boolean).join("\n")}</DetailSection>}
-      <DetailSection title="证据">{issue.evidence.length ? issue.evidence.map((entry) => `${evidenceLabel[entry.kind]}：${entry.text}${entry.path ? "\n" + entry.path : ""}`).join("\n\n") : "暂无证据"}</DetailSection>
-      {issue.decisionQuestion && <DetailSection title="需要决定">{issue.decisionQuestion}</DetailSection>}{issue.suggestion && <DetailSection title="建议方向">{issue.suggestion}</DetailSection>}
-      {issue.resolutionReason && <DetailSection title="处理结果">{issue.resolutionReason}{issue.duplicateOf ? "\n原议题：" + issue.duplicateOf : ""}</DetailSection>}
-      <DetailSection title="活动">{issue.activities.map((entry) => `${new Date(entry.at).toLocaleString("zh-CN")} · ${entry.message}${entry.workItemId ? " · " + entry.workItemId : ""}`).join("\n")}</DetailSection>
-      {handling && <div className="mt-3 space-y-3 border-t border-border pt-3"><Field kind="select" label="处理方式" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}><option value="closed">关闭</option><option value="duplicate">重复</option></Field>
-        {resolution === "duplicate" && <Field kind="select" label="原议题" value={duplicateOf} onChange={(event) => setDuplicateOf(event.target.value)}><option value="">选择原议题</option>{issues.filter((entry) => entry.issueId !== issue.issueId).map((entry) => <option key={entry.issueId} value={entry.issueId}>{entry.title}</option>)}</Field>}
-        <Field kind="textarea" label="处理原因" rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
-        <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setHandling(false)}>取消</Button><Button variant="primary" disabled={busy || !reason.trim() || (resolution === "duplicate" && !duplicateOf)} onClick={() => void resolve()}>保存</Button></div></div>}
-      {error && <InlineNotice tone="error">{error}</InlineNotice>}
-    </Card>
-  </Modal>{creatingWork && <CreateWorkItemDialog client={client} workspaceId={workspaceId} issue={issue} onClose={() => setCreatingWork(false)} />}</>;
+  const [handling, setHandling] = useState(false);
+  const [creatingWork, setCreatingWork] = useState(false);
+  const [resolution, setResolution] = useState<"closed" | "duplicate">("closed");
+  const [reason, setReason] = useState("");
+  const [duplicateOf, setDuplicateOf] = useState("");
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (issue.unread) void client.request("issue.read", { workspaceId, issueId: issue.issueId });
+  }, [client, issue.issueId, issue.unread, workspaceId]);
+
+  const discuss = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const updated = await client.request("issue.discuss", { workspaceId, issueId: issue.issueId });
+      onClose();
+      onOpenSession(updated.discussionSessionId!, updated.discussionTurnId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resolve = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await client.request("issue.update", {
+        workspaceId,
+        issueId: issue.issueId,
+        status: resolution,
+        resolutionReason: reason,
+        ...(resolution === "duplicate" ? { duplicateOf } : {})
+      });
+      setHandling(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const linked = issue.workItemIds
+    .map((id) => workItems.find((item) => item.workItemId === id))
+    .filter((item): item is WorkItem => !!item);
+  const canAct = !handling && !["closed", "duplicate"].includes(issue.status);
+
+  return <>
+    <Modal title={"Issue · " + issue.issueId} onClose={onClose} width={760}>
+      <Card
+        className="m-4"
+        header={<>
+          {issue.type === "suggestion" && <Badge>建议</Badge>}
+          <Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{statusLabel[issue.status]}</Badge>
+          <span className="text-caption text-muted-foreground">{issue.domainId} · {sourceLabel[issue.source]}</span>
+        </>}
+        footer={<>
+          {issue.sourceSessionId && <Button variant="ghost" outlined onClick={() => {
+            onClose(); onOpenSession(issue.sourceSessionId!, issue.sourceTurnId);
+          }}>来源</Button>}
+          {issue.duplicateOf && <Button variant="ghost" outlined onClick={() => onOpenIssue(issue.duplicateOf!)}>原议题</Button>}
+          {linked.map((item) => <Button key={item.workItemId} variant="ghost" outlined onClick={() => {
+            onClose(); onOpenWorkItem(item.workItemId);
+          }}>工单</Button>)}
+          {issue.discussionSessionId && <Button variant="ghost" outlined onClick={() => {
+            onClose(); onOpenSession(issue.discussionSessionId!, issue.discussionTurnId);
+          }}>讨论</Button>}
+          {canAct && <Button className="ml-auto" onClick={() => setHandling(true)}>处理</Button>}
+          {canAct && <Button onClick={() => setCreatingWork(true)}>创建工单</Button>}
+          {canAct && <Button variant="primary" disabled={busy} onClick={() => void discuss()}>
+            {issue.discussionSessionId ? "继续讨论" : "进入讨论"}
+          </Button>}
+        </>}
+      >
+        <DetailSection title="议题">{issue.title}</DetailSection>
+        <DetailSection title="问题与影响">{issue.summary || "未填写"}</DetailSection>
+        {issue.requirement && <DetailSection title="要求依据">
+          {[issue.requirement.text, issue.requirement.path, issue.requirement.section, issue.requirement.commit].filter(Boolean).join("\n")}
+        </DetailSection>}
+        <DetailSection title="证据">
+          {issue.evidence.length
+            ? issue.evidence.map((entry) => `${evidenceLabel[entry.kind]}：${entry.text}${entry.path ? "\n" + entry.path : ""}`).join("\n\n")
+            : "暂无证据"}
+        </DetailSection>
+        {issue.decisionQuestion && <DetailSection title="需要决定">{issue.decisionQuestion}</DetailSection>}
+        {issue.suggestion && <DetailSection title="建议方向">{issue.suggestion}</DetailSection>}
+        {issue.resolutionReason && <DetailSection title="处理结果">
+          {issue.resolutionReason}{issue.duplicateOf ? "\n原议题：" + issue.duplicateOf : ""}
+        </DetailSection>}
+        <DetailSection title="活动">
+          {issue.activities.map((entry) => `${new Date(entry.at).toLocaleString("zh-CN")} · ${entry.message}${entry.workItemId ? " · " + entry.workItemId : ""}`).join("\n")}
+        </DetailSection>
+        {handling && <div className="mt-3 space-y-3 border-t border-border pt-3">
+          <Field kind="select" label="处理方式" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}>
+            <option value="closed">关闭</option>
+            <option value="duplicate">重复</option>
+          </Field>
+          {resolution === "duplicate" && <Field kind="select" label="原议题" value={duplicateOf} onChange={(event) => setDuplicateOf(event.target.value)}>
+            <option value="">选择原议题</option>
+            {issues.filter((entry) => entry.issueId !== issue.issueId).map((entry) => <option key={entry.issueId} value={entry.issueId}>{entry.title}</option>)}
+          </Field>}
+          <Field kind="textarea" label="处理原因" rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setHandling(false)}>取消</Button>
+            <Button variant="primary" disabled={busy || !reason.trim() || (resolution === "duplicate" && !duplicateOf)} onClick={() => void resolve()}>保存</Button>
+          </div>
+        </div>}
+        {error && <InlineNotice tone="error">{error}</InlineNotice>}
+      </Card>
+    </Modal>
+    {creatingWork && <CreateWorkItemDialog client={client} workspaceId={workspaceId} issue={issue} onClose={() => setCreatingWork(false)} />}
+  </>;
 };

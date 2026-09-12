@@ -21,9 +21,21 @@ it("persists issue triage, evidence, resolutions and workspace isolation", async
   expect(issue).toMatchObject({ status: "open", unread: true, source: "maintainer" });
   await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "investigating",
     appendEvidence: [{ kind: "static", text: "Composer unmounts with the page" }] });
+  await Promise.all([
+    f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId,
+      appendEvidence: [{ kind: "unverified", text: "Check session ownership" }] }),
+    f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId,
+      appendEvidence: [{ kind: "unverified", text: "Check local draft state" }] })
+  ]);
   await expect(f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "closed" })).rejects.toThrow("处理原因");
   const closed = await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "closed", resolutionReason: "Fixed and verified" });
-  expect(closed).toMatchObject({ status: "closed", resolutionReason: "Fixed and verified", evidence: [{ kind: "reproduced" }, { kind: "static" }] });
+  expect(closed).toMatchObject({ status: "closed", resolutionReason: "Fixed and verified" });
+  expect(closed.evidence.map((entry) => entry.text)).toEqual([
+    "Typed, switched pages, returned to an empty input",
+    "Composer unmounts with the page",
+    "Check session ownership",
+    "Check local draft state"
+  ]);
   expect(await f.client.request("issue.list", { workspaceId: other.workspaceId })).toEqual([]);
 
   const restarted = new WorkbenchService(f.options);
