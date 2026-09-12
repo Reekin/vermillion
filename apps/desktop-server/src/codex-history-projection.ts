@@ -1,14 +1,8 @@
-import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
 const threadHistoryDatabaseName = "thread_history_1.sqlite";
-const projectionTables = [
-  "thread_items",
-  "thread_realtime_items",
-  "thread_turns",
-  "thread_history_projection_state"
-] as const;
 
 export type CodexHistoryProjectionClearResult = {
   status: "cleared" | "missing" | "unavailable" | "failed";
@@ -52,45 +46,28 @@ export class CodexHistoryProjection {
       return { status: "failed", path };
     }
 
-    let database: DatabaseSync | undefined;
     try {
-      database = new DatabaseSync(path);
-      database.exec("PRAGMA busy_timeout = 2000");
-      const existingTables = new Set(
-        (database
-          .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?)"
-          )
-          .all(...projectionTables) as Array<{ name?: unknown }>)
-          .map((row) => row.name)
-          .filter((name): name is string => typeof name === "string")
-      );
-      if (existingTables.size === 0) {
-        return { status: "missing", path };
-      }
-
-      database.exec("BEGIN IMMEDIATE");
-      try {
-        for (const table of projectionTables) {
-          if (existingTables.has(table)) {
-            database.prepare(`DELETE FROM ${table} WHERE thread_id = ?`).run(threadId);
+      // Each transaction owns its thread; completion includes closing the database and exiting.
+      const status = await new Promise<"cleared" | "missing">((resolve, reject) => {
+        const worker = new Worker(new URL("./codex-history-projection-worker.cjs", import.meta.url), {
+          workerData: { path, threadId }
+        });
+        let result: "cleared" | "missing" | undefined;
+        let failure: Error | undefined;
+        worker.once("message", (value: "cleared" | "missing") => { result = value; });
+        worker.once("error", (error) => { failure = error; });
+        worker.once("exit", (code) => {
+          if (failure || code !== 0 || !result) {
+            reject(failure ?? new Error(`History cleanup worker exited without a result (${code}).`));
+          } else {
+            resolve(result);
           }
-        }
-        database.exec("COMMIT");
-      } catch (error) {
-        try {
-          database.exec("ROLLBACK");
-        } catch {
-          // Preserve the original cleanup error.
-        }
-        throw error;
-      }
-      return { status: "cleared", path };
+        });
+      });
+      return { status, path };
     } catch (error) {
       this.warn(error, threadId, path);
       return { status: "failed", path };
-    } finally {
-      database?.close();
     }
   }
 

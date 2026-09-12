@@ -34,19 +34,29 @@ const preloadBuildOptions = {
   outfile: resolve(outputDir, "preload.cjs")
 };
 
+const historyWorkerBuildOptions = {
+  ...sharedOptions,
+  format: "cjs",
+  entryPoints: [resolve(desktopRoot, "../desktop-server/src/codex-history-projection-worker.cjs")],
+  outfile: resolve(outputDir, "codex-history-projection-worker.cjs")
+};
+
 await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });
 if (watchMode) {
   const mainContext = await context(mainBuildOptions);
   const preloadContext = await context(preloadBuildOptions);
+  const historyWorkerContext = await context(historyWorkerBuildOptions);
   await mainContext.watch();
   await preloadContext.watch();
+  await historyWorkerContext.watch();
   await mainContext.rebuild();
   await preloadContext.rebuild();
+  await historyWorkerContext.rebuild();
   const keepAlive = setInterval(() => {}, 2 ** 31 - 1);
   const shutdown = async () => {
     clearInterval(keepAlive);
-    await Promise.all([mainContext.dispose(), preloadContext.dispose()]);
+    await Promise.all([mainContext.dispose(), preloadContext.dispose(), historyWorkerContext.dispose()]);
     process.exit(0);
   };
   for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -57,4 +67,5 @@ if (watchMode) {
 } else {
   await build(mainBuildOptions);
   await build(preloadBuildOptions);
+  await build(historyWorkerBuildOptions);
 }
