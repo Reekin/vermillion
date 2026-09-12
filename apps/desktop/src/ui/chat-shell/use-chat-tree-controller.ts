@@ -13,6 +13,8 @@ import {
 } from "./composer-status.js";
 
 const emptyOperations: ChatTreeSendOperation[] = [];
+/** A new object represents a new entry, including another click on the same session. */
+export type ChatTreeNavigationEntry = { focusTree?: boolean; turnId?: string };
 type ChatTreeWindow = NonNullable<ChatTreeSnapshotRpc["windows"]>[number];
 
 const windowHydrationKey = (window: ChatTreeWindow): string | undefined => {
@@ -33,15 +35,24 @@ export const useChatTreeController = (input: {
   store: RendererStore;
   transport: DesktopTransport;
   sessionId?: string;
+  navigationEntry?: ChatTreeNavigationEntry;
   refreshSignal: number;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
 }) => {
-  const { store, transport, sessionId, onStatusNotice } = input;
+  const { store, transport, sessionId, navigationEntry, onStatusNotice } = input;
+  const entry = useMemo(() => ({
+    opened: { current: undefined as { sessionId: string; promise: Promise<void> } | undefined },
+    activation: { current: undefined as { sessionId: string; promise: Promise<void> } | undefined },
+    hydrated: { current: new Map<string, string>() }
+  }), [sessionId, navigationEntry]);
+  const entryRef = useRef(entry);
+  entryRef.current = entry;
   const [loaded, setLoaded] = useState<{
     entrySessionId: string;
+    entry: typeof entry;
     tree: ChatTreeSnapshotRpc;
   }>();
-  const [failedSessionId, setFailedSessionId] = useState<string>();
+  const [failedEntry, setFailedEntry] = useState<typeof entry>();
   const [sends, setSends] = useState<{ sessionId: string; operations: ChatTreeSendOperation[] }>();
   const [selectedSend, setSelectedSend] = useState<string>();
   const selectedSendRef = useRef<string | undefined>(undefined);
@@ -52,9 +63,9 @@ export const useChatTreeController = (input: {
   };
   const sessionIdRef = useRef(sessionId);
   const requestIdRef = useRef(0);
-  const hydratedWindowKeyBySessionIdRef = useRef(new Map<string, string>());
-  const activationRef = useRef<{ sessionId: string; promise: Promise<void> } | undefined>(undefined);
-  const openedSessionRef = useRef<{ sessionId: string; promise: Promise<void> } | undefined>(undefined);
+  const hydratedWindowKeyBySessionIdRef = entry.hydrated;
+  const activationRef = entry.activation;
+  const openedSessionRef = entry.opened;
   sessionIdRef.current = sessionId;
 
   const ensureSessionOpened = useCallback((): Promise<void> => {
@@ -63,22 +74,36 @@ export const useChatTreeController = (input: {
     if (current?.sessionId === sessionId) return current.promise;
 
     hydratedWindowKeyBySessionIdRef.current.clear();
-    const entry = {
+    const opened = {
       sessionId,
-      promise: transport.sessionBrowser.open(sessionId).then(() => undefined)
+      promise: (async () => {
+        await transport.sessionBrowser.open(sessionId);
+        if (entryRef.current !== entry) return;
+        if (navigationEntry?.focusTree) {
+          const activation = { sessionId, promise: transport.sessionBrowser.activate(sessionId, { focusTree: true }).then(() => undefined) };
+          activationRef.current = activation;
+          await activation.promise;
+          if (entryRef.current !== entry) return;
+        }
+        if (navigationEntry?.turnId) {
+          await transport.chatTree.jump({ sessionId, nodeId: navigationEntry.turnId });
+          if (entryRef.current !== entry) return;
+        }
+        store.dispatch({ type: "store/sessionBrowserChanged" });
+      })()
     };
-    openedSessionRef.current = entry;
-    void entry.promise.catch(() => {
-      if (openedSessionRef.current === entry) openedSessionRef.current = undefined;
+    openedSessionRef.current = opened;
+    void opened.promise.catch(() => {
+      if (openedSessionRef.current === opened) openedSessionRef.current = undefined;
     });
-    return entry.promise;
-  }, [sessionId, transport]);
+    return opened.promise;
+  }, [entry, navigationEntry, sessionId, store, transport]);
 
   const refreshChatTree = useCallback(async (): Promise<void> => {
-    if (!sessionId || sessionIdRef.current !== sessionId) return;
+    if (!sessionId || entryRef.current !== entry) return;
     const requestId = ++requestIdRef.current;
     const startedAt = performance.now();
-    const isCurrent = () => sessionIdRef.current === sessionId && requestId === requestIdRef.current;
+    const isCurrent = () => entryRef.current === entry && requestId === requestIdRef.current;
     try {
       await ensureSessionOpened();
       if (!isCurrent()) return;
@@ -174,41 +199,41 @@ export const useChatTreeController = (input: {
         }
       }
       // The shell keeps selecting the tree entry; only this pane changes its viewed member.
-      const entry = store.getDomainReadModel().getSession(sessionId);
-      if (entry) {
-        store.dispatch({ type: "store/setActiveConversation", conversationId: entry.conversationId });
+      const entrySession = store.getDomainReadModel().getSession(sessionId);
+      if (entrySession) {
+        store.dispatch({ type: "store/setActiveConversation", conversationId: entrySession.conversationId });
         store.dispatch({ type: "store/setActiveSession", sessionId });
       }
-      setLoaded({ entrySessionId: sessionId, tree });
+      setLoaded({ entrySessionId: sessionId, entry, tree });
       if (selected?.turnId && tree.currentNodeId === selected.turnId && selectedSendRef.current === selected.operationId) {
         selectSend(undefined);
       }
-      setFailedSessionId(undefined);
+      setFailedEntry(undefined);
     } catch (error) {
       if (!isCurrent()) return;
       throw error;
     } finally {
       recordUiOperation("chat-tree.refresh", startedAt, { sessionId }, "async");
     }
-  }, [ensureSessionOpened, sessionId, store, transport]);
+  }, [entry, ensureSessionOpened, sessionId, store, transport]);
 
   useEffect(() => {
     if (!sessionId) openedSessionRef.current = undefined;
     activationRef.current = undefined;
     setLoaded(undefined);
-    setFailedSessionId(undefined);
+    setFailedEntry(undefined);
     setSends(undefined);
     selectSend(undefined);
     navigationRef.current += 1;
     return () => { requestIdRef.current += 1; };
-  }, [sessionId]);
+  }, [entry]);
 
   useEffect(() => {
     const refresh = refreshChatTree();
     const requestId = requestIdRef.current;
     void refresh.catch((error) => {
-      if (sessionIdRef.current !== sessionId || requestId !== requestIdRef.current) return;
-      setFailedSessionId(sessionId);
+      if (entryRef.current !== entry || requestId !== requestIdRef.current) return;
+      setFailedEntry(entry);
       onStatusNotice({
         message: `Chat tree refresh failed: ${(error as Error).message}`,
         source: "chat-tree",
@@ -218,7 +243,7 @@ export const useChatTreeController = (input: {
   }, [refreshChatTree, input.refreshSignal, onStatusNotice]);
 
   const operations = sends && sends.sessionId === sessionId ? sends.operations : emptyOperations;
-  const loadedTree = loaded && loaded.entrySessionId === sessionId ? loaded.tree : undefined;
+  const loadedTree = loaded && loaded.entry === entry ? loaded.tree : undefined;
   const chatTree = useMemo(
     () => projectChatTreeSends(loadedTree, operations, selectedSend),
     [loadedTree, operations, selectedSend]
@@ -235,9 +260,10 @@ export const useChatTreeController = (input: {
         : [...(current && current.sessionId === sessionId ? current.operations : []), operation]
     }));
   };
-  // A session the store already holds renders at once; the tree refresh then narrows the view to the saved position.
+  // Explicit navigation waits for the refreshed branch/turn, never showing a cached different position.
   const isOpening = Boolean(
-    sessionId && !chatTree && failedSessionId !== sessionId && !store.getDomainReadModel().getSession(sessionId)
+    sessionId && !chatTree && failedEntry !== entry &&
+    (navigationEntry || !store.getDomainReadModel().getSession(sessionId))
   );
 
   return {

@@ -491,6 +491,32 @@ export class DomainService {
     return this.domainReplica.getSnapshot();
   }
 
+  public getSessionActivity(sessionId: string): {
+    lastCompletedTurnAt: string | undefined;
+    lastUserMessageAt: string | undefined;
+  } {
+    let lastCompletedTurnAt: string | undefined;
+    for (const turn of this.domainReplica.listTurns({ sessionId })) {
+      if (
+        turn.status === "completed" &&
+        turn.completedAt &&
+        (!lastCompletedTurnAt || turn.completedAt > lastCompletedTurnAt)
+      ) {
+        lastCompletedTurnAt = turn.completedAt;
+      }
+    }
+    let lastUserMessageAt: string | undefined;
+    for (const block of this.domainReplica.listMessageBlocks({ sessionId })) {
+      if (
+        block.role === "user" &&
+        (!lastUserMessageAt || block.startedAt > lastUserMessageAt)
+      ) {
+        lastUserMessageAt = block.startedAt;
+      }
+    }
+    return { lastCompletedTurnAt, lastUserMessageAt };
+  }
+
   public ingestRuntimeEvent(event: RuntimeEvent, occurredAt?: string): void {
     this.applyRuntimeEvent(event, occurredAt);
   }

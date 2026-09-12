@@ -408,9 +408,13 @@ const defaultEventBacklogPressurePendingThreshold = 2_000;
 const defaultEventBacklogPressureStreamThreshold = 500;
 
 const scheduleDefaultEventDrain: EventDrainScheduler = (callback) => {
-  if (typeof globalThis.requestAnimationFrame === "function") {
-    const id = globalThis.requestAnimationFrame(() => callback());
-    return () => globalThis.cancelAnimationFrame?.(id);
+  // Data ingestion must keep progressing when the window stops painting.
+  if (typeof document !== "undefined" && typeof MessageChannel !== "undefined") {
+    const channel = new MessageChannel();
+    const close = () => { channel.port1.close(); channel.port2.close(); };
+    channel.port1.onmessage = () => { close(); callback(); };
+    channel.port2.postMessage(undefined);
+    return close;
   }
   const id = globalThis.setTimeout(callback, 0);
   return () => globalThis.clearTimeout(id);
@@ -1073,18 +1077,19 @@ export const createDesktopTransport = (
           const startedAt = monotonicNow();
           const queuedAt = envelopeQueue[envelopeQueueHead]!.queuedAt;
           recordUiOperation("events.queue", queuedAt, { pending: pendingEnvelopeCount() }, "async");
-          const batch: EventEnvelope[] = [];
+          let batch: EventEnvelope[] = [];
+          let deliveredCount = 0;
           let batchBytes = 0;
           while (
             pendingEnvelopeCount() > 0 &&
-            batch.length < eventBatchMaxSize
+            deliveredCount + batch.length < eventBatchMaxSize
           ) {
             const queued = envelopeQueue[envelopeQueueHead];
             if (!queued) {
               break;
             }
             if (
-              batch.length > 0 &&
+              deliveredCount + batch.length > 0 &&
               (batchBytes + queued.bytes > eventBatchMaxBytes ||
                 monotonicNow() - startedAt >= eventDrainBudgetMs)
             ) {
@@ -1094,10 +1099,17 @@ export const createDesktopTransport = (
             batchBytes += queued.bytes;
             removeEnvelopeFromBacklogStats(queued.envelope);
             batch.push(queued.envelope);
+            // Include synchronous store work in the budget, yielding between small batches.
+            if (batch.length === 16) {
+              deliverEnvelopes(batch);
+              deliveredCount += batch.length;
+              batch = [];
+            }
           }
           deliverEnvelopes(batch);
+          deliveredCount += batch.length;
           recordUiOperation("events.drain", startedAt, {
-            events: batch.length, bytes: batchBytes, pending: pendingEnvelopeCount(),
+            events: deliveredCount, bytes: batchBytes, pending: pendingEnvelopeCount(),
             streamPending: streamPendingCount, queueWaitMs: Math.round(startedAt - queuedAt)
           });
           if (pendingEnvelopeCount() === 0) {
