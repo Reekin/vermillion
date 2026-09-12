@@ -426,6 +426,7 @@ export type UseComposerControllerResult = ComposerViewModel & {
 export const useComposerController = (
   input: UseComposerControllerInput
 ): UseComposerControllerResult => {
+  const isExplicitExecutionKey = input.draftKey !== undefined;
   const draftKey = input.draftKey ?? input.activeSessionId;
   const contentDraftKey = input.contentDraftKey ?? draftKey;
   const [draftBySessionId, setDraftBySessionId] = useState<Record<string, string>>({});
@@ -441,6 +442,9 @@ export const useComposerController = (
   const [modelSelection, setModelSelection] = useState<
     { key: string; modelId: string } | undefined
   >();
+  const [modelIdBySessionId, setModelIdBySessionId] = useState<
+    Record<string, string | undefined>
+  >({});
   const [draftProfile, setDraftProfile] = useState<SessionExecutionProfileInput>();
   const [draftProfileReady, setDraftProfileReady] = useState(!input.initializeDraftExecution);
   const [detachedModelId, setDetachedModelId] = useState<string>();
@@ -465,16 +469,17 @@ export const useComposerController = (
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
   const previousContentDraftKeyRef = useRef(contentDraftKey);
-  const previousExecutionKeyRef = useRef(draftKey);
+  const executionKey = draftKey ?? input.activeSessionId;
+  const previousExecutionKeyRef = useRef(executionKey);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    if (previousExecutionKeyRef.current === draftKey) {
+    if (!isExplicitExecutionKey || previousExecutionKeyRef.current === executionKey) {
       return;
     }
-    previousExecutionKeyRef.current = draftKey;
+    previousExecutionKeyRef.current = executionKey;
     setModelSelection(undefined);
-  }, [draftKey]);
+  }, [executionKey, isExplicitExecutionKey]);
 
   useEffect(() => {
     if (input.activeSessionId) return;
@@ -526,9 +531,11 @@ export const useComposerController = (
   const queue = input.activeSessionId
     ? (queueBySessionId[input.activeSessionId] ?? [])
     : [];
-  const currentModelId = draftKey
-    ? modelSelection?.key === draftKey ? modelSelection.modelId : undefined
-    : detachedModelId;
+  const currentModelId = isExplicitExecutionKey
+    ? modelSelection?.key === executionKey ? modelSelection?.modelId : undefined
+    : input.activeSessionId
+      ? modelIdBySessionId[input.activeSessionId]
+      : detachedModelId;
   const supportsTurnConfiguration = Boolean(
     input.engineSurface?.sharedCapabilities.includes("turnConfiguration")
   );
@@ -1568,8 +1575,13 @@ export const useComposerController = (
       input.onExecutionPreferenceChange?.(input.selectedEngineId, nextExecution);
     }
     if (input.activeSessionId) {
-      if (draftKey) {
-        setModelSelection({ key: draftKey, modelId: nextExecution.modelId });
+      if (isExplicitExecutionKey) {
+        setModelSelection({ key: draftKey!, modelId: nextExecution.modelId });
+      } else {
+        setModelIdBySessionId((current) => ({
+          ...current,
+          [input.activeSessionId!]: nextExecution.modelId
+        }));
       }
       return;
     }
