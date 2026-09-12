@@ -111,6 +111,11 @@ type EngineModelCatalogResult = {
 };
 type LocalRpcResponse = { ok?: boolean; result?: unknown; error?: string };
 const launchRecordFile = "app-start.json";
+// Keep Page Visibility tied to the acceptance window's own hide/minimize state while it runs on an inactive desktop.
+const hiddenDesktopChromiumArgs = [
+  "--disable-features=CalculateNativeWinOcclusion",
+  "--disable-backgrounding-occluded-windows"
+];
 
 const resolveConfiguredCodexPath = async (): Promise<string | undefined> => {
   for (const value of [process.env.VERMILLION_CODEX_BIN, process.env.CODEX_BIN, process.env.CODEX_PATH]) {
@@ -196,7 +201,10 @@ export class AppLauncher {
     if (!env.VERMILLION_CODEX_BIN && !env.CODEX_BIN && !env.CODEX_PATH && configuredCodexPath) {
       env.VERMILLION_CODEX_BIN = configuredCodexPath;
     }
-    const pid = process.platform === "win32" ? await this.startHidden(env) : await this.startPlain(env);
+    const launchArgs = process.platform === "win32"
+      ? [...this.command.args, ...hiddenDesktopChromiumArgs]
+      : this.command.args;
+    const pid = process.platform === "win32" ? await this.startHidden(env, launchArgs) : await this.startPlain(env, launchArgs);
     const cdpUrl = "http://127.0.0.1:" + input.port;
     // Electron takes a few seconds to open its debugging port. Return only once it answers, so callers can attach
     // immediately; a CDP client that probes too early may fall back to launching its own browser.
@@ -241,9 +249,9 @@ export class AppLauncher {
     }
   }
 
-  private async startHidden(env: Record<string, string>): Promise<number> {
+  private async startHidden(env: Record<string, string>, args: string[]): Promise<number> {
     if (!existsSync(this.scriptPath)) throw new Error("Launcher script missing: " + this.scriptPath);
-    const quoted = this.command.args.map((a) => (/[\s"]/.test(a) ? '"' + a.replace(/"/g, '\\"') + '"' : a)).join(" ");
+    const quoted = args.map((a) => (/[\s"]/.test(a) ? '"' + a.replace(/"/g, '\\"') + '"' : a)).join(" ");
     const { stdout } = await execFileAsync("powershell", [
       "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", this.scriptPath,
       "-Desktop", this.desktop, "-Exe", this.command.exe, "-Args", quoted, "-Cwd", this.command.cwd, "-EnvJson", JSON.stringify(env)
@@ -253,9 +261,9 @@ export class AppLauncher {
     return pid;
   }
 
-  private async startPlain(env: Record<string, string>): Promise<number> {
+  private async startPlain(env: Record<string, string>, args: string[]): Promise<number> {
     const { spawn } = await import("node:child_process");
-    const child = spawn(this.command.exe, this.command.args, { cwd: this.command.cwd, env: { ...process.env, ...env }, detached: true, stdio: "ignore" });
+    const child = spawn(this.command.exe, args, { cwd: this.command.cwd, env: { ...process.env, ...env }, detached: true, stdio: "ignore" });
     child.unref();
     if (!child.pid) throw new Error("spawn failed");
     return child.pid;
