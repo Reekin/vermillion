@@ -41,6 +41,57 @@ afterEach(async () => {
 });
 
 describe("SessionIndexStore", () => {
+  it("retains turn execution metadata while discovery refreshes session fields", async () => {
+    const baseDir = await createTempDir();
+    const store = new SessionIndexStore({ baseDir });
+    await store.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        createdAt: "2026-04-18T00:00:01Z",
+        updatedAt: "2026-04-18T00:00:02Z",
+        metadata: {
+          turnExecutionProfiles: {
+            "turn-1": {
+              modelId: "design-model",
+              reasoningOptionId: "medium",
+              serviceTierId: "default"
+            }
+          }
+        }
+      }
+    });
+
+    await store.applyWorkspaceRepair({
+      workspaceId: "workspace-1",
+      engineId: "codex",
+      entries: [{
+        workspaceId: "workspace-1",
+        session: {
+          sessionId: "session-1",
+          conversationId: "conversation-1",
+          engineId: "codex",
+          createdAt: "2026-04-18T00:00:01Z",
+          updatedAt: "2026-04-18T00:00:03Z",
+          metadata: { cwd: "I:/workspace" }
+        }
+      }]
+    });
+
+    expect(store.getEntry("session-1")?.metadata).toMatchObject({
+      cwd: "I:/workspace",
+      turnExecutionProfiles: {
+        "turn-1": {
+          modelId: "design-model",
+          reasoningOptionId: "medium",
+          serviceTierId: "default"
+        }
+      }
+    });
+  });
+
   it("does not persist or advance revision for an identical session upsert", async () => {
     const baseDir = await createTempDir();
     const store = new SessionIndexStore({ baseDir });

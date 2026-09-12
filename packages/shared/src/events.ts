@@ -18,6 +18,7 @@ import {
   zContextUsageSchema,
   zMessagePhase,
   zSessionRelationSchema,
+  zTurnExecutionProfileSchema,
   zThreadGoalSchema
 } from "./domain.js";
 
@@ -29,6 +30,7 @@ export const eventTypes = [
   "session.archived",
   "session.disposed",
   "turn.started",
+  "turn.execution.updated",
   "turn.completed",
   "message.started",
   "message.delta",
@@ -107,14 +109,23 @@ const zSessionDisposedEvent = z.object({
 const zTurnStartedEvent = z.object({
   type: z.literal("turn.started"),
   sessionId: zSessionId,
-  turnId: zTurnId
+  turnId: zTurnId,
+  executionProfile: zTurnExecutionProfileSchema.optional()
+});
+
+const zTurnExecutionUpdatedEvent = z.object({
+  type: z.literal("turn.execution.updated"),
+  sessionId: zSessionId,
+  turnId: zTurnId,
+  executionProfile: zTurnExecutionProfileSchema
 });
 
 const zTurnCompletedEvent = z.object({
   type: z.literal("turn.completed"),
   sessionId: zSessionId,
   turnId: zTurnId,
-  finishReason: z.enum(["completed", "interrupted", "failed"])
+  finishReason: z.enum(["completed", "interrupted", "failed"]),
+  executionProfile: zTurnExecutionProfileSchema.optional()
 });
 
 const zMessageStartedEvent = z
@@ -335,6 +346,7 @@ export const zEventSchema = z
     zSessionArchivedEvent,
     zSessionDisposedEvent,
     zTurnStartedEvent,
+    zTurnExecutionUpdatedEvent,
     zTurnCompletedEvent,
     zMessageStartedEvent,
     zMessageDeltaEvent,
@@ -388,6 +400,7 @@ export const invalidatesSessionBrowser = (event: RuntimeEvent): boolean => {
     case "session.archived":
     case "session.disposed":
     case "turn.started":
+    case "turn.execution.updated":
     case "turn.completed":
     case "approval.requested":
     case "interaction.requested":

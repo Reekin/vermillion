@@ -1,8 +1,10 @@
 import { z } from "zod";
-import type { ChatSession } from "./domain.js";
+import type { ChatSession, TurnExecutionProfile } from "./domain.js";
+import { zTurnExecutionProfileSchema } from "./domain.js";
 import { zJsonRecord } from "./common.js";
 
 export const sessionProfileMetadataKey = "sessionProfile";
+export const turnExecutionProfilesMetadataKey = "turnExecutionProfiles";
 
 export const zSessionExecutionProfileSchema = z.object({
   engineId: z.string().min(1),
@@ -48,6 +50,15 @@ export type ExecutionPreferencesByEngineId = z.infer<
   typeof zExecutionPreferencesByEngineIdSchema
 >;
 
+export const zTurnExecutionProfilesSchema = z.record(
+  z.string().min(1),
+  zTurnExecutionProfileSchema
+);
+
+export type TurnExecutionProfiles = z.infer<
+  typeof zTurnExecutionProfilesSchema
+>;
+
 /** Apply only explicit fields, including an explicit Default reasoning selection. */
 export const mergeSessionExecutionProfile = (
   base: SessionExecutionProfileInput | undefined,
@@ -84,6 +95,34 @@ export const writeSessionExecutionProfile = (
   return {
     ...base,
     [sessionProfileMetadataKey]: zSessionExecutionProfileSchema.parse(profile)
+  };
+};
+
+export const readTurnExecutionProfiles = (
+  metadata: Record<string, unknown> | undefined
+): TurnExecutionProfiles => {
+  if (!metadata) {
+    return {};
+  }
+  const parsed = zTurnExecutionProfilesSchema.safeParse(
+    metadata[turnExecutionProfilesMetadataKey]
+  );
+  return parsed.success ? parsed.data : {};
+};
+
+export const writeTurnExecutionProfile = (
+  metadata: Record<string, unknown> | undefined,
+  turnId: string,
+  profile: TurnExecutionProfile
+): Record<string, unknown> => {
+  const base = metadata ? zJsonRecord.parse(metadata) : {};
+  const profiles = readTurnExecutionProfiles(base);
+  return {
+    ...base,
+    [turnExecutionProfilesMetadataKey]: {
+      ...profiles,
+      [turnId]: zTurnExecutionProfileSchema.parse(profile)
+    }
   };
 };
 

@@ -21,6 +21,7 @@ import type {
   EngineModelCatalogRpc,
   EventType
 } from "@vermillion/shared";
+import type { TurnExecutionProfile } from "@vermillion/shared";
 import { RuntimePipelineDiagnostics } from "./runtime/runtime-pipeline-diagnostics.js";
 import type { GetAuthStatusParams } from "./codex-app-server-generated/GetAuthStatusParams.js";
 import type { GetAuthStatusResponse } from "./codex-app-server-generated/GetAuthStatusResponse.js";
@@ -53,6 +54,7 @@ import type { ThreadReadParams } from "./codex-app-server-generated/v2/ThreadRea
 import type { ThreadReadResponse } from "./codex-app-server-generated/v2/ThreadReadResponse.js";
 import type { ThreadResumeParams } from "./codex-app-server-generated/v2/ThreadResumeParams.js";
 import type { ThreadResumeResponse } from "./codex-app-server-generated/v2/ThreadResumeResponse.js";
+import type { ThreadSettings } from "./codex-app-server-generated/v2/ThreadSettings.js";
 import type { ThreadUnsubscribeParams } from "./codex-app-server-generated/v2/ThreadUnsubscribeParams.js";
 import type { TurnInterruptParams } from "./codex-app-server-generated/v2/TurnInterruptParams.js";
 import type { TurnSteerParams } from "./codex-app-server-generated/v2/TurnSteerParams.js";
@@ -362,6 +364,34 @@ const isThreadGoalStatus = (
 
 const optionalString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+const mapCodexExecutionProfile = (
+  value: unknown
+): TurnExecutionProfile | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const modelId = optionalString(value.model ?? value.modelId);
+  if (!modelId) {
+    return undefined;
+  }
+  const profile: TurnExecutionProfile = { modelId };
+  const reasoningOptionId = optionalString(
+    value.effort ?? value.reasoningEffort ?? value.reasoningOptionId
+  );
+  if (reasoningOptionId) {
+    profile.reasoningOptionId = reasoningOptionId;
+  }
+  if (value.serviceTier === null || value.serviceTierId === null) {
+    profile.serviceTierId = null;
+  } else {
+    const serviceTierId = optionalString(value.serviceTier ?? value.serviceTierId);
+    if (serviceTierId) {
+      profile.serviceTierId = serviceTierId;
+    }
+  }
+  return profile;
+};
 
 const toJsonRecord = (value: unknown): Record<string, unknown> | undefined =>
   isRecord(value) ? value : undefined;
@@ -889,6 +919,13 @@ export class CodexAppServerRuntimePort
   private readonly sessionIdByThreadId = new Map<string, string>();
   private readonly sessionIdsByThreadId = new Map<string, Set<string>>();
   private readonly pendingTurnSessionIdByThreadId = new Map<string, string>();
+  private readonly pendingTurnStartInfoByThreadId = new Map<
+    string,
+    { settingsRevision: number; hasExplicitExecution: boolean }
+  >();
+  private readonly threadSettingsRevisionByThreadId = new Map<string, number>();
+  private readonly executionProfileByThreadId = new Map<string, TurnExecutionProfile>();
+  private readonly executionProfileByTurnId = new Map<string, TurnExecutionProfile>();
   private readonly sessionIdByThreadAndTurnId = new Map<string, string>();
   private readonly activeTurnByThreadId = new Map<
     string,
@@ -1148,6 +1185,10 @@ export class CodexAppServerRuntimePort
     this.sessionIdByThreadId.clear();
     this.sessionIdsByThreadId.clear();
     this.pendingTurnSessionIdByThreadId.clear();
+    this.pendingTurnStartInfoByThreadId.clear();
+    this.threadSettingsRevisionByThreadId.clear();
+    this.executionProfileByThreadId.clear();
+    this.executionProfileByTurnId.clear();
     this.sessionIdByThreadAndTurnId.clear();
     this.activeTurnByThreadId.clear();
     this.childThreadIdsByParentThreadId.clear();
@@ -1396,6 +1437,10 @@ export class CodexAppServerRuntimePort
       sandbox: selected.sandbox ?? null,
       ...(developerInstructions ? { developerInstructions: await this.appendDeveloperInstructions(developerInstructions, cwd, options) } : {})
     } satisfies ThreadResumeParams, options)) as ThreadResumeResponse;
+    this.rememberThreadExecutionProfile(
+      result.thread.id,
+      mapCodexExecutionProfile(result)
+    );
     this.detachedThreadIds.delete(result.thread.id);
     return result.thread;
   }
@@ -1414,6 +1459,10 @@ export class CodexAppServerRuntimePort
       ...(developerInstructions ? { developerInstructions, deferGoalContinuation: true } : {}),
       threadSource: "user"
     } satisfies ThreadForkParams & { lastTurnId?: string; deferGoalContinuation?: boolean })) as ThreadForkResponse;
+    this.rememberThreadExecutionProfile(
+      result.thread.id,
+      mapCodexExecutionProfile(result)
+    );
     if (options.developerInstructions) {
       // Fork config governs future compaction; this same-priority tail switches the inherited history now.
       await this.injectDeveloperInstructions(result.thread.id, options.developerInstructions);
@@ -1776,9 +1825,18 @@ export class CodexAppServerRuntimePort
       developerInstructions
     );
     const input = buildCodexTurnInput(content, attachments);
+    let startInfoForTurn:
+      | { settingsRevision: number; hasExplicitExecution: boolean }
+      | undefined;
 
     const startTurn = async (targetThreadId: string): Promise<TurnStartResponse> => {
+      startInfoForTurn = {
+        settingsRevision:
+          this.threadSettingsRevisionByThreadId.get(targetThreadId) ?? 0,
+        hasExplicitExecution: Boolean(execution)
+      };
       this.pendingTurnSessionIdByThreadId.set(targetThreadId, sessionId);
+      this.pendingTurnStartInfoByThreadId.set(targetThreadId, startInfoForTurn);
       try {
         if (injectContext) await this.injectWorkbenchContext(targetThreadId, payload.params, options);
         const params: Record<string, unknown> = {
@@ -1799,6 +1857,7 @@ export class CodexAppServerRuntimePort
         ) {
           this.pendingTurnSessionIdByThreadId.delete(targetThreadId);
         }
+        this.pendingTurnStartInfoByThreadId.delete(targetThreadId);
       }
     };
 
@@ -1827,10 +1886,21 @@ export class CodexAppServerRuntimePort
     if (!result?.turn?.id) {
       throw new Error("Codex turn/start did not return a canonical turn id.");
     }
+    const currentSettingsRevision =
+      this.threadSettingsRevisionByThreadId.get(threadId) ?? 0;
+    const executionProfile = this.executionProfileForStartedTurn(
+      threadId,
+      startInfoForTurn,
+      currentSettingsRevision
+    );
+    if (executionProfile) {
+      this.executionProfileByTurnId.set(result.turn.id, executionProfile);
+    }
     this.setActiveTurnForThread(threadId, result.turn.id, sessionId);
     this.emitEvent("turn.started", {
       sessionId,
-      turnId: result.turn.id
+      turnId: result.turn.id,
+      ...(executionProfile ? { executionProfile } : {})
     });
     return {
       sessionId,
@@ -2248,6 +2318,10 @@ export class CodexAppServerRuntimePort
     )) as ThreadStartResponse;
 
     const threadId = result.thread.id;
+    this.rememberThreadExecutionProfile(
+      threadId,
+      mapCodexExecutionProfile(result)
+    );
     this.attachThreadToSession(sessionId, threadId);
     return threadId;
   }
@@ -2268,6 +2342,36 @@ export class CodexAppServerRuntimePort
     )) as ConfigReadResponse;
     const base = config.config.developer_instructions?.trim();
     return base ? `${base}\n\n${extra}` : extra;
+  }
+
+  private rememberThreadExecutionProfile(
+    threadId: string,
+    profile: TurnExecutionProfile | undefined
+  ): void {
+    if (profile) {
+      this.executionProfileByThreadId.set(threadId, profile);
+    }
+  }
+
+  private executionProfileForStartedTurn(
+    threadId: string,
+    startInfo: { settingsRevision: number; hasExplicitExecution: boolean } | undefined,
+    currentSettingsRevision: number
+  ): TurnExecutionProfile | undefined {
+    const profile = this.executionProfileByThreadId.get(threadId);
+    if (
+      !profile ||
+      (startInfo?.hasExplicitExecution &&
+        currentSettingsRevision <= startInfo.settingsRevision)
+    ) {
+      return undefined;
+    }
+    return { ...profile };
+  }
+
+  private executionProfileForTurn(turnId: string): TurnExecutionProfile | undefined {
+    const profile = this.executionProfileByTurnId.get(turnId);
+    return profile ? { ...profile } : undefined;
   }
 
   private resolveSelectedConfig(): CodexSelectedConfig {
@@ -2593,6 +2697,55 @@ export class CodexAppServerRuntimePort
 
   private handleNotification(method: string, params: Record<string, unknown>): void {
     switch (method) {
+      case "thread/settings/updated": {
+        const threadId = optionalString(params.threadId);
+        const settings = isRecord(params.threadSettings)
+          ? (params.threadSettings as ThreadSettings)
+          : undefined;
+        const profile = mapCodexExecutionProfile(settings);
+        if (!threadId || !profile) {
+          return;
+        }
+        this.threadSettingsRevisionByThreadId.set(
+          threadId,
+          (this.threadSettingsRevisionByThreadId.get(threadId) ?? 0) + 1
+        );
+        this.executionProfileByThreadId.set(threadId, profile);
+        const activeTurn = this.activeTurnByThreadId.get(threadId);
+        if (activeTurn) {
+          this.executionProfileByTurnId.set(activeTurn.turnId, profile);
+          this.emitEvent("turn.execution.updated", {
+            sessionId: activeTurn.sessionId,
+            turnId: activeTurn.turnId,
+            executionProfile: profile
+          });
+        }
+        return;
+      }
+      case "model/rerouted": {
+        const threadId = optionalString(params.threadId);
+        const turnId = optionalString(params.turnId);
+        const modelId = optionalString(params.toModel);
+        if (!threadId || !turnId || !modelId) {
+          return;
+        }
+        const sessionId = this.resolveSessionIdForTurn(threadId, turnId);
+        if (!sessionId) {
+          return;
+        }
+        const current = this.executionProfileByTurnId.get(turnId);
+        const profile: TurnExecutionProfile = {
+          ...(current ?? { modelId }),
+          modelId
+        };
+        this.executionProfileByTurnId.set(turnId, profile);
+        this.emitEvent("turn.execution.updated", {
+          sessionId,
+          turnId,
+          executionProfile: profile
+        });
+        return;
+      }
       case "thread/closed": {
         const threadId = String(params.threadId);
         this.detachedThreadIds.add(threadId);
@@ -2749,7 +2902,25 @@ export class CodexAppServerRuntimePort
           return;
         }
         if (threadId) {
+          const pendingStartInfo =
+            this.pendingTurnStartInfoByThreadId.get(threadId);
+          const profile =
+            this.executionProfileByTurnId.get(turn.id) ??
+            this.executionProfileForStartedTurn(
+              threadId,
+              pendingStartInfo,
+              this.threadSettingsRevisionByThreadId.get(threadId) ?? 0
+            );
+          if (profile) {
+            this.executionProfileByTurnId.set(turn.id, profile);
+          }
           this.setActiveTurnForThread(threadId, turn.id, sessionId);
+          this.emitEvent("turn.started", {
+            sessionId,
+            turnId: turn.id,
+            ...(profile ? { executionProfile: profile } : {})
+          });
+          return;
         }
         this.emitEvent("turn.started", {
           sessionId,
@@ -2768,13 +2939,16 @@ export class CodexAppServerRuntimePort
         if (threadId) {
           this.clearActiveTurnForThread(threadId, turn.id);
         }
+        const executionProfile = this.executionProfileForTurn(turn.id);
         this.emitEvent("turn.completed", {
           sessionId,
           turnId: turn.id,
           finishReason: mapFinishReason(
             typeof turn.status === "string" ? turn.status : undefined
-          )
+          ),
+          ...(executionProfile ? { executionProfile } : {})
         });
+        this.executionProfileByTurnId.delete(turn.id);
         this.processActivitySummariesByTurn.delete(
           this.processActivityKey(sessionId, turn.id)
         );

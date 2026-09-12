@@ -30,6 +30,12 @@ export const zTurnFinishReason = z.enum([
   "failed"
 ]);
 
+export const zTurnExecutionProfileSchema = z.object({
+  modelId: z.string().min(1),
+  reasoningOptionId: z.string().min(1).optional(),
+  serviceTierId: z.string().min(1).nullable().optional()
+});
+
 export const zMessageRole = z.enum(["assistant", "user", "system"]);
 
 export const zMessagePhase = z.enum(["commentary", "final_answer"]);
@@ -126,6 +132,7 @@ export const zTurnSchema = z.object({
   sessionId: zSessionId,
   status: zTurnStatus,
   finishReason: zTurnFinishReason.optional(),
+  executionProfile: zTurnExecutionProfileSchema.optional(),
   startedAt: zIsoDateTime,
   completedAt: zIsoDateTime.optional(),
   actor: zTurnActorRef,
@@ -271,6 +278,7 @@ export const zDomainSnapshotSchema = z.object({
 export type SessionStatus = z.infer<typeof zSessionStatus>;
 export type TurnStatus = z.infer<typeof zTurnStatus>;
 export type TurnFinishReason = z.infer<typeof zTurnFinishReason>;
+export type TurnExecutionProfile = z.infer<typeof zTurnExecutionProfileSchema>;
 export type MessageRole = z.infer<typeof zMessageRole>;
 export type MessageBlockKind = z.infer<typeof zMessageBlockKind>;
 export type ToolCallStatus = z.infer<typeof zToolCallStatus>;
@@ -320,4 +328,3 @@ export const parseSessionRelation = (value: unknown): SessionRelation =>
   zSessionRelationSchema.parse(value);
 export const parseDomainSnapshot = (value: unknown): DomainSnapshot =>
   zDomainSnapshotSchema.parse(value);
-

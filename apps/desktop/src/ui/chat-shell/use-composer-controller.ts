@@ -1,4 +1,8 @@
-import type { SessionExecutionProfile, SessionExecutionProfileInput } from "@vermillion/shared";
+import type {
+  SessionExecutionProfile,
+  SessionExecutionProfileInput,
+  TurnExecutionProfile
+} from "@vermillion/shared";
 import {
   useEffect,
   useMemo,
@@ -358,6 +362,10 @@ type UseComposerControllerInput = {
   customModelReasoningOptionIds?: Record<string, string[]>;
   modelExecutionPreferences?: ComposerModelExecutionPreferences;
   lastExecution?: ComposerExecutionSelection;
+  /** Execution profile recorded for the node currently shown in the composer. */
+  activeTurnExecutionProfile?: TurnExecutionProfile;
+  /** Configuration captured when an asynchronous branch send was submitted. */
+  pendingExecution?: ComposerExecutionSelection;
   /** Working directory used to resolve project-scoped skills. */
   skillsCwd?: string;
   turns: Turn[];
@@ -418,6 +426,7 @@ export type UseComposerControllerResult = ComposerViewModel & {
 export const useComposerController = (
   input: UseComposerControllerInput
 ): UseComposerControllerResult => {
+  const isExplicitExecutionKey = input.draftKey !== undefined;
   const draftKey = input.draftKey ?? input.activeSessionId;
   const contentDraftKey = input.contentDraftKey ?? draftKey;
   const [draftBySessionId, setDraftBySessionId] = useState<Record<string, string>>({});
@@ -430,6 +439,9 @@ export const useComposerController = (
   const [queueBySessionId, setQueueBySessionId] = useState<
     Record<string, QueuedComposerMessage[]>
   >({});
+  const [modelSelection, setModelSelection] = useState<
+    { key: string; modelId: string } | undefined
+  >();
   const [modelIdBySessionId, setModelIdBySessionId] = useState<
     Record<string, string | undefined>
   >({});
@@ -457,7 +469,17 @@ export const useComposerController = (
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
   const previousContentDraftKeyRef = useRef(contentDraftKey);
+  const executionKey = draftKey ?? input.activeSessionId;
+  const previousExecutionKeyRef = useRef(executionKey);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!isExplicitExecutionKey || previousExecutionKeyRef.current === executionKey) {
+      return;
+    }
+    previousExecutionKeyRef.current = executionKey;
+    setModelSelection(undefined);
+  }, [executionKey, isExplicitExecutionKey]);
 
   useEffect(() => {
     if (input.activeSessionId) return;
@@ -509,9 +531,11 @@ export const useComposerController = (
   const queue = input.activeSessionId
     ? (queueBySessionId[input.activeSessionId] ?? [])
     : [];
-  const currentModelId = draftKey
-    ? modelIdBySessionId[draftKey]
-    : detachedModelId;
+  const currentModelId = isExplicitExecutionKey
+    ? modelSelection?.key === executionKey ? modelSelection?.modelId : undefined
+    : input.activeSessionId
+      ? modelIdBySessionId[input.activeSessionId]
+      : detachedModelId;
   const supportsTurnConfiguration = Boolean(
     input.engineSurface?.sharedCapabilities.includes("turnConfiguration")
   );
@@ -539,7 +563,17 @@ export const useComposerController = (
         models,
         currentModelId,
         persistedProfile: input.activeSessionId
-          ? readSessionExecutionProfile(input.activeSession?.metadata)
+          ? input.pendingExecution
+            ? {
+                engineId: input.selectedEngineId,
+                ...input.pendingExecution
+              }
+            : input.activeTurnExecutionProfile
+            ? {
+                engineId: input.selectedEngineId,
+                ...input.activeTurnExecutionProfile
+              }
+            : readSessionExecutionProfile(input.activeSession?.metadata)
           : { engineId: input.selectedEngineId, ...draftProfile },
         lastExecution: input.lastExecution,
         modelExecutionPreferences: currentModelId ? input.modelExecutionPreferences : undefined
@@ -548,6 +582,8 @@ export const useComposerController = (
       currentModelId,
       input.activeSession?.metadata,
       input.activeSessionId,
+      input.activeTurnExecutionProfile,
+      input.pendingExecution,
       input.selectedEngineId,
       draftProfile,
       input.lastExecution,
@@ -1539,10 +1575,14 @@ export const useComposerController = (
       input.onExecutionPreferenceChange?.(input.selectedEngineId, nextExecution);
     }
     if (input.activeSessionId) {
-      setModelIdBySessionId((current) => ({
-        ...current,
-        [draftKey!]: nextExecution.modelId
-      }));
+      if (isExplicitExecutionKey) {
+        setModelSelection({ key: draftKey!, modelId: nextExecution.modelId });
+      } else {
+        setModelIdBySessionId((current) => ({
+          ...current,
+          [input.activeSessionId!]: nextExecution.modelId
+        }));
+      }
       return;
     }
     setDetachedModelId(nextExecution.modelId);

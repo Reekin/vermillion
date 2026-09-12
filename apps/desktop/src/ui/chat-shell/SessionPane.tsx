@@ -1,4 +1,7 @@
-import type { SessionExecutionProfileInput } from "@vermillion/shared";
+import type {
+  SessionExecutionProfileInput,
+  TurnExecutionOptions
+} from "@vermillion/shared";
 import {
   memo,
   useCallback,
@@ -171,6 +174,17 @@ const toComposerExecution = (
         modelId: profile.modelId,
         reasoningOptionId: profile.reasoningOptionId,
         serviceTierId: profile.serviceTierId
+      }
+    : undefined;
+
+const toComposerExecutionSelection = (
+  execution: TurnExecutionOptions | undefined
+): ComposerExecutionSelection | undefined =>
+  execution?.modelId
+    ? {
+        modelId: execution.modelId,
+        reasoningOptionId: execution.reasoningOptionId,
+        serviceTierId: execution.serviceTierId
       }
     : undefined;
 
@@ -912,6 +926,9 @@ export const SessionPane = ({
     },
     [domain, currentTurn?.turnId, currentTurn?.status, activeChatTree]
   );
+  const executionDraftKey =
+    pendingSend?.operationId ??
+    (activeSessionId ? `${activeSessionId}:${viewTurnId ?? "tip"}` : undefined);
   const renderedTranscriptRows = isOpeningSelectedSession ? [] : visibleTranscriptRows;
   const { approvals: activeSessionApprovals, interactions: activeSessionInteractions } = useRendererSessionSelection(
     store, activeSessionId, () => ({
@@ -1177,7 +1194,7 @@ export const SessionPane = ({
         <ComposerContainer
           contentDraftKey={composerDraftKey}
           onComposerChange={onComposerChange}
-          draftKey={pendingSend?.operationId ?? operations.find((operation) => operation.targetSessionId === activeSessionId)?.operationId ?? activeSessionId}
+          draftKey={executionDraftKey}
           initializeDraftExecution={initializeDraftExecution}
           extraExecutionControls={composerExtras}
           transport={transport}
@@ -1196,6 +1213,8 @@ export const SessionPane = ({
             executionPreferencesByEngineId[displayedEngineId]?.modelPreferences
           }
           lastExecution={lastExecution}
+          activeTurnExecutionProfile={currentTurn?.executionProfile}
+          pendingExecution={toComposerExecutionSelection(pendingSend?.execution)}
           skillsCwd={skillsCwd}
           turns={composerTurns}
           interruptTurns={composerTurns}
