@@ -37,6 +37,10 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
   const [domainId, setDomainId] = useState("");
   const [selectedId, setSelectedId] = useState<string>();
   const [creating, setCreating] = useState(false);
+  const availableDomainIds = useMemo(() => {
+    const values = [...new Set([...domainIds, ...issues.map((issue) => issue.domainId)])].sort();
+    return values.length ? values : ["general"];
+  }, [domainIds, issues]);
   useEffect(() => {
     if (!targetIssueId || !issues.some((issue) => issue.issueId === targetIssueId)) return;
     setSelectedId(targetIssueId);
@@ -57,7 +61,7 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
         <option value="closed">关闭</option><option value="duplicate">重复</option>
       </Field>
       <Field kind="select" compact aria-label="Issue 领域" className="w-40" value={domainId} onChange={(event) => setDomainId(event.target.value)}>
-        <option value="">全部领域</option>{domainIds.map((id) => <option key={id} value={id}>{id}</option>)}
+        <option value="">全部领域</option>{availableDomainIds.map((id) => <option key={id} value={id}>{id}</option>)}
       </Field>
       <Button size="sm" onClick={() => setCreating(true)}>新建 Issue</Button>
     </div>
@@ -66,10 +70,10 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
         <ListRow title={<span title={issue.title}>{issue.unread && <span aria-label="未读">• </span>}{issue.title}</span>}
           meta={<span className="font-mono text-micro">{issue.issueId} · {issue.evidence[0] ? evidenceLabel[issue.evidence[0].kind] : "暂无证据"}</span>}
           onClick={() => setSelectedId(issue.issueId)}
-          columns={{ info: <span>{issue.domainId} · {sourceLabel[issue.source]}</span>, status: <span className="flex items-center gap-1">{issue.type === "suggestion" && <Badge>建议</Badge>}<Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{statusLabel[issue.status]}</Badge></span>, action: <span>{relativeTime(issue.updatedAt)}</span> }} />
+          columns={{ info: <span>{issue.type === "suggestion" && "建议 · "}{issue.domainId} · {sourceLabel[issue.source]} · {relativeTime(issue.updatedAt)}</span>, status: <Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{statusLabel[issue.status]}</Badge> }} />
       </li>)}
     </ul> : <EmptyState title={filter === "decision" ? "没有待决策的 Issue" : "没有符合条件的 Issue"} hint="调整筛选，或新建一条议题。" />}
-    {creating && <CreateIssueDialog client={client} workspaceId={workspaceId} domainIds={domainIds} onCreated={(issue) => { setCreating(false); setSelectedId(issue.issueId); }} onClose={() => setCreating(false)} />}
+    {creating && <CreateIssueDialog client={client} workspaceId={workspaceId} domainIds={availableDomainIds} onCreated={(issue) => { setCreating(false); setSelectedId(issue.issueId); }} onClose={() => setCreating(false)} />}
     {selected && <IssueDialog key={selected.issueId} client={client} workspaceId={workspaceId} issue={selected} issues={issues} workItems={workItems}
       onClose={() => setSelectedId(undefined)} onOpenIssue={setSelectedId} onOpenSession={onOpenSession} onOpenWorkItem={onOpenWorkItem} />}
   </div>;
