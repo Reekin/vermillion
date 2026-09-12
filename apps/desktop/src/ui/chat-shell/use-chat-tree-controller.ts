@@ -13,9 +13,35 @@ import {
 } from "./composer-status.js";
 
 const emptyOperations: ChatTreeSendOperation[] = [];
-/** A new object represents a new entry, including another click on the same session. */
+/** Explicit navigation supplied by a work-item, search or session link. */
 export type ChatTreeNavigationEntry = { focusTree?: boolean; turnId?: string };
 type ChatTreeWindow = NonNullable<ChatTreeSnapshotRpc["windows"]>[number];
+type SessionRequest = { sessionId: string; promise: Promise<void> };
+type ChatTreeEntry = {
+  opened: { current: SessionRequest | undefined };
+  activation: { current: SessionRequest | undefined };
+  hydrated: Map<string, string>;
+  tree?: ChatTreeSnapshotRpc;
+  operations: ChatTreeSendOperation[];
+  appliedNavigation?: ChatTreeNavigationEntry;
+};
+
+export const hasExplicitChatTreeNavigation = (
+  navigationEntry: ChatTreeNavigationEntry | undefined
+): boolean => Boolean(navigationEntry?.focusTree || navigationEntry?.turnId);
+
+export const canDisplayCachedChatTree = (
+  tree: ChatTreeSnapshotRpc | undefined,
+  sessionId: string | undefined,
+  navigationEntry: ChatTreeNavigationEntry | undefined
+): boolean => {
+  if (!tree || !hasExplicitChatTreeNavigation(navigationEntry)) return Boolean(tree);
+  if (navigationEntry?.turnId) {
+    const currentNode = tree.nodes.find((node) => node.nodeId === tree.currentNodeId);
+    return (currentNode?.turnId ?? tree.currentNodeId) === navigationEntry.turnId;
+  }
+  return !navigationEntry?.focusTree || tree.currentSessionId === sessionId;
+};
 
 const windowHydrationKey = (window: ChatTreeWindow): string | undefined => {
   if (!window.revision) return undefined;
@@ -40,20 +66,24 @@ export const useChatTreeController = (input: {
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
 }) => {
   const { store, transport, sessionId, navigationEntry, onStatusNotice } = input;
-  const entry = useMemo(() => ({
-    opened: { current: undefined as { sessionId: string; promise: Promise<void> } | undefined },
-    activation: { current: undefined as { sessionId: string; promise: Promise<void> } | undefined },
-    hydrated: { current: new Map<string, string>() }
-  }), [sessionId, navigationEntry]);
-  const entryRef = useRef(entry);
+  const entriesRef = useRef(new Map<string, ChatTreeEntry>());
+  let entry: ChatTreeEntry | undefined;
+  if (sessionId) {
+    entry = entriesRef.current.get(sessionId);
+    if (!entry) {
+      entry = {
+        opened: { current: undefined },
+        activation: { current: undefined },
+        hydrated: new Map<string, string>(),
+        operations: []
+      };
+      entriesRef.current.set(sessionId, entry);
+    }
+  }
+  const entryRef = useRef<ChatTreeEntry | undefined>(entry);
   entryRef.current = entry;
-  const [loaded, setLoaded] = useState<{
-    entrySessionId: string;
-    entry: typeof entry;
-    tree: ChatTreeSnapshotRpc;
-  }>();
-  const [failedEntry, setFailedEntry] = useState<typeof entry>();
-  const [sends, setSends] = useState<{ sessionId: string; operations: ChatTreeSendOperation[] }>();
+  const [, setCacheRevision] = useState(0);
+  const [failedEntry, setFailedEntry] = useState<ChatTreeEntry | undefined>();
   const [selectedSend, setSelectedSend] = useState<string>();
   const selectedSendRef = useRef<string | undefined>(undefined);
   const navigationRef = useRef(0);
@@ -63,56 +93,129 @@ export const useChatTreeController = (input: {
   };
   const sessionIdRef = useRef(sessionId);
   const requestIdRef = useRef(0);
-  const hydratedWindowKeyBySessionIdRef = entry.hydrated;
-  const activationRef = entry.activation;
-  const openedSessionRef = entry.opened;
+  const navigationEntryRef = useRef(navigationEntry);
+  const navigationRequestRef = useRef<{
+    entry: ChatTreeEntry;
+    navigationEntry: ChatTreeNavigationEntry;
+    promise: Promise<void>;
+  } | undefined>(undefined);
   sessionIdRef.current = sessionId;
+  navigationEntryRef.current = navigationEntry;
 
   const ensureSessionOpened = useCallback((): Promise<void> => {
-    if (!sessionId) return Promise.resolve();
-    const current = openedSessionRef.current;
+    if (!sessionId || !entry) return Promise.resolve();
+    const current = entry.opened.current;
     if (current?.sessionId === sessionId) return current.promise;
 
-    hydratedWindowKeyBySessionIdRef.current.clear();
-    const opened = {
+    entry.hydrated.clear();
+    const opened: SessionRequest = {
       sessionId,
-      promise: (async () => {
-        await transport.sessionBrowser.open(sessionId);
-        if (entryRef.current !== entry) return;
-        if (navigationEntry?.focusTree) {
-          const activation = { sessionId, promise: transport.sessionBrowser.activate(sessionId, { focusTree: true }).then(() => undefined) };
-          activationRef.current = activation;
-          await activation.promise;
-          if (entryRef.current !== entry) return;
-        }
-        if (navigationEntry?.turnId) {
-          await transport.chatTree.jump({ sessionId, nodeId: navigationEntry.turnId });
-          if (entryRef.current !== entry) return;
-        }
-        store.dispatch({ type: "store/sessionBrowserChanged" });
-      })()
+      promise: transport.sessionBrowser.open(sessionId).then(() => undefined)
     };
-    openedSessionRef.current = opened;
+    entry.opened.current = opened;
     void opened.promise.catch(() => {
-      if (openedSessionRef.current === opened) openedSessionRef.current = undefined;
+      if (entry.opened.current === opened) entry.opened.current = undefined;
     });
     return opened.promise;
-  }, [entry, navigationEntry, sessionId, store, transport]);
+  }, [entry, sessionId, transport]);
 
-  const refreshChatTree = useCallback(async (): Promise<void> => {
-    if (!sessionId || entryRef.current !== entry) return;
+  const ensureNavigation = useCallback((
+    requestedNavigation: ChatTreeNavigationEntry | undefined
+  ): Promise<void> => {
+    if (!entry || !sessionId || !hasExplicitChatTreeNavigation(requestedNavigation)) {
+      return Promise.resolve();
+    }
+    const current = navigationRequestRef.current;
+    if (
+      current?.entry === entry &&
+      current.navigationEntry === requestedNavigation
+    ) {
+      return current.promise;
+    }
+    const pending: {
+      entry: ChatTreeEntry;
+      navigationEntry: ChatTreeNavigationEntry;
+      promise: Promise<void>;
+    } = {
+      entry,
+      navigationEntry: requestedNavigation!,
+      promise: Promise.resolve()
+    };
+    navigationRequestRef.current = pending;
+    const isCurrent = () =>
+      navigationRequestRef.current === pending &&
+      navigationEntryRef.current === requestedNavigation &&
+      entryRef.current === entry;
+    pending.promise = (async () => {
+      if (!isCurrent()) return;
+      if (requestedNavigation?.focusTree) {
+        const activation: SessionRequest = {
+          sessionId,
+          promise: transport.sessionBrowser.activate(sessionId, { focusTree: true }).then(() => undefined)
+        };
+        entry.activation.current = activation;
+        await activation.promise;
+        if (!isCurrent()) return;
+      } else {
+        entry.activation.current = undefined;
+      }
+      if (requestedNavigation?.turnId) {
+        if (!isCurrent()) return;
+        await transport.chatTree.jump({ sessionId, nodeId: requestedNavigation.turnId });
+      }
+      if (isCurrent() && entryRef.current === entry) {
+        store.dispatch({ type: "store/sessionBrowserChanged" });
+      }
+    })();
+    void pending.promise.catch(() => {
+      if (navigationRequestRef.current === pending) {
+        navigationRequestRef.current = undefined;
+      }
+    });
+    return pending.promise;
+  }, [entry, sessionId, store, transport]);
+
+  const activateViewedSession = useCallback((
+    viewedEntry: ChatTreeEntry,
+    viewedSessionId: string
+  ): Promise<void> => {
+    const current = viewedEntry.activation.current;
+    if (current?.sessionId === viewedSessionId) return current.promise;
+    const activation: SessionRequest = {
+      sessionId: viewedSessionId,
+      promise: transport.sessionBrowser.activate(viewedSessionId).then(() => {
+        if (viewedEntry.activation.current === activation) {
+          store.dispatch({ type: "store/sessionBrowserChanged" });
+        }
+      })
+    };
+    viewedEntry.activation.current = activation;
+    void activation.promise.catch((error) => {
+      if (viewedEntry.activation.current === activation) viewedEntry.activation.current = undefined;
+      throw error;
+    });
+    return activation.promise;
+  }, [store, transport]);
+
+  const refreshChatTree = useCallback(async (
+    requestedNavigation?: ChatTreeNavigationEntry
+  ): Promise<void> => {
+    if (!sessionId || !entry || entryRef.current !== entry) return;
     const requestId = ++requestIdRef.current;
     const startedAt = performance.now();
     const isCurrent = () => entryRef.current === entry && requestId === requestIdRef.current;
+    const navigationForRequest = requestedNavigation ?? navigationEntry;
     try {
       await ensureSessionOpened();
+      if (!isCurrent()) return;
+      await ensureNavigation(navigationForRequest);
       if (!isCurrent()) return;
       const [initialTree, result] = await Promise.all([
         transport.chatTree.get(sessionId),
         transport.chatTree.operations({ sessionId })
       ]);
       if (!isCurrent()) return;
-      setSends({ sessionId, operations: result.operations });
+      entry.operations = result.operations;
       let tree = initialTree;
       const selected = result.operations.find((op) => op.operationId === selectedSendRef.current);
       if (selected?.turnId && tree.nodes.some((node) => node.turnId === selected.turnId)) {
@@ -123,27 +226,12 @@ export const useChatTreeController = (input: {
         if (!isCurrent() || navigationRef.current !== navigation) return;
       }
       const viewedSessionId = tree.currentSessionId ?? sessionId;
-      // Keep the pending activation as well as its result across refreshes.
-      if (activationRef.current?.sessionId !== viewedSessionId) {
-        const activation = {
-          sessionId: viewedSessionId,
-          promise: transport.sessionBrowser.activate(viewedSessionId).then(() => {
-            if (activationRef.current === activation) {
-              store.dispatch({ type: "store/sessionBrowserChanged" });
-            }
-          }).catch((error) => {
-            if (activationRef.current === activation) activationRef.current = undefined;
-            throw error;
-          })
-        };
-        activationRef.current = activation;
-      }
-      await activationRef.current.promise;
+      await activateViewedSession(entry, viewedSessionId);
       if (!isCurrent()) return;
       const windowsToHydrate = (tree.windows ?? []).filter((window) => {
         const key = windowHydrationKey(window);
         return key === undefined ||
-          hydratedWindowKeyBySessionIdRef.current.get(window.sessionId) !== key;
+          entry.hydrated.get(window.sessionId) !== key;
       });
       const stateBeforeHydration = store.getState();
       const latestCursorBySessionId = new Map(
@@ -194,7 +282,7 @@ export const useChatTreeController = (input: {
         for (const window of freshWindowsToHydrate) {
           const key = windowHydrationKey(window);
           if (key !== undefined) {
-            hydratedWindowKeyBySessionIdRef.current.set(window.sessionId, key);
+            entry.hydrated.set(window.sessionId, key);
           }
         }
       }
@@ -204,7 +292,9 @@ export const useChatTreeController = (input: {
         store.dispatch({ type: "store/setActiveConversation", conversationId: entrySession.conversationId });
         store.dispatch({ type: "store/setActiveSession", sessionId });
       }
-      setLoaded({ entrySessionId: sessionId, entry, tree });
+      entry.tree = tree;
+      entry.appliedNavigation = navigationForRequest;
+      setCacheRevision((revision) => revision + 1);
       if (selected?.turnId && tree.currentNodeId === selected.turnId && selectedSendRef.current === selected.operationId) {
         selectSend(undefined);
       }
@@ -215,21 +305,23 @@ export const useChatTreeController = (input: {
     } finally {
       recordUiOperation("chat-tree.refresh", startedAt, { sessionId }, "async");
     }
-  }, [entry, ensureSessionOpened, sessionId, store, transport]);
+  }, [activateViewedSession, entry, ensureNavigation, ensureSessionOpened, navigationEntry, sessionId, store, transport]);
 
   useEffect(() => {
-    if (!sessionId) openedSessionRef.current = undefined;
-    activationRef.current = undefined;
-    setLoaded(undefined);
+    if (entry) {
+      entry.opened.current = undefined;
+      entry.activation.current = undefined;
+      entry.hydrated.clear();
+    }
+    navigationRequestRef.current = undefined;
     setFailedEntry(undefined);
-    setSends(undefined);
     selectSend(undefined);
     navigationRef.current += 1;
     return () => { requestIdRef.current += 1; };
   }, [entry]);
 
   useEffect(() => {
-    const refresh = refreshChatTree();
+    const refresh = refreshChatTree(navigationEntry);
     const requestId = requestIdRef.current;
     void refresh.catch((error) => {
       if (entryRef.current !== entry || requestId !== requestIdRef.current) return;
@@ -240,10 +332,22 @@ export const useChatTreeController = (input: {
         ...statusNoticeErrorDetails(error)
       });
     });
-  }, [refreshChatTree, input.refreshSignal, onStatusNotice]);
+  }, [entry, input.refreshSignal, navigationEntry, onStatusNotice, refreshChatTree]);
 
-  const operations = sends && sends.sessionId === sessionId ? sends.operations : emptyOperations;
-  const loadedTree = loaded && loaded.entry === entry ? loaded.tree : undefined;
+  useEffect(() => {
+    const pending = navigationRequestRef.current;
+    if (pending && pending.entry === entry && pending.navigationEntry !== navigationEntry) {
+      navigationRequestRef.current = undefined;
+    }
+  }, [entry, navigationEntry]);
+
+  const operations = entry?.operations ?? emptyOperations;
+  const pendingNavigation = entry?.appliedNavigation === navigationEntry
+    ? undefined
+    : navigationEntry;
+  const loadedTree = canDisplayCachedChatTree(entry?.tree, sessionId, pendingNavigation)
+    ? entry?.tree
+    : undefined;
   const chatTree = useMemo(
     () => projectChatTreeSends(loadedTree, operations, selectedSend),
     [loadedTree, operations, selectedSend]
@@ -253,17 +357,16 @@ export const useChatTreeController = (input: {
     (!op.turnId || !chatTree?.nodes.some((node) => node.turnId === op.turnId)));
 
   const receiveSend = (operation: ChatTreeSendOperation) => {
-    setSends((current) => ({
-      sessionId: sessionId!,
-      operations: current && current.sessionId === sessionId && current.operations.some((item) => item.operationId === operation.operationId)
-        ? current.operations.map((item) => item.operationId === operation.operationId ? operation : item)
-        : [...(current && current.sessionId === sessionId ? current.operations : []), operation]
-    }));
+    if (!entry || !sessionId) return;
+    entry.operations = entry.operations.some((item) => item.operationId === operation.operationId)
+      ? entry.operations.map((item) => item.operationId === operation.operationId ? operation : item)
+      : [...entry.operations, operation];
+    setCacheRevision((revision) => revision + 1);
   };
-  // Explicit navigation waits for the refreshed branch/turn, never showing a cached different position.
+  const hasCachedTargetTree = canDisplayCachedChatTree(entry?.tree, sessionId, pendingNavigation);
   const isOpening = Boolean(
-    sessionId && !chatTree && failedEntry !== entry &&
-    (navigationEntry || !store.getDomainReadModel().getSession(sessionId))
+    sessionId && failedEntry !== entry && !hasCachedTargetTree &&
+    (hasExplicitChatTreeNavigation(navigationEntry) || !store.getDomainReadModel().getSession(sessionId))
   );
 
   return {
@@ -318,8 +421,12 @@ export const useChatTreeController = (input: {
         receiveSend(operation);
         void refreshChatTree().catch(() => undefined);
       } catch (error) {
-        setSends((current) => current && ({ ...current, operations: current.operations.map((op) =>
-          op.operationId === operationId ? { ...op, error: (error as Error).message } : op) }));
+        if (entry && sessionIdRef.current === sessionId) {
+          entry.operations = entry.operations.map((op) =>
+            op.operationId === operationId ? { ...op, error: (error as Error).message } : op
+          );
+          setCacheRevision((revision) => revision + 1);
+        }
       }
     },
     prepareSend: async (): Promise<string> => {
