@@ -78,6 +78,13 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
       <DetailSection title="允许路径">{lines(item.scope.allowedPaths)}</DetailSection>
       <DetailSection title="验收条目">{item.acceptance.length ? item.acceptance.map((entry, index) => `${index + 1}. ${entry.text}${entry.source ? "\n来源：" + entry.source : ""}`).join("\n\n") : "无"}</DetailSection>
       <DetailSection title="引用文档">{item.refs.length ? item.refs.map((ref) => `${ref.path}${ref.section ? " · " + ref.section : ""}\ncommit: ${ref.commit}`).join("\n\n") : "无"}</DetailSection>
+      {item.owner && <DetailSection title="Owner 授权">{[
+        `领域：${item.owner.domainId}`, `巡检：${item.owner.patrolRunId}`,
+        `授权判断：${item.owner.authorizationReason}`, `预期恢复：${item.owner.expectedBehavior}`,
+        "授权范围：\n" + lines(item.owner.authorizationScope),
+        `要求：${item.owner.requirement.text}\n${item.owner.requirement.path ?? ""}${item.owner.requirement.section ? " · " + item.owner.requirement.section : ""}\n${item.owner.requirement.commit ? "commit: " + item.owner.requirement.commit : ""}`,
+        "证据：\n" + item.owner.evidence.map((entry) => `• ${entry.kind}：${entry.text}${entry.path ? "\n  " + entry.path : ""}`).join("\n")
+      ].join("\n\n")}</DetailSection>}
       <DetailSection title="依赖工单">{item.dependsOn.length ? item.dependsOn.map((id) => {
         const dependency = workItems.find((entry) => entry.workItemId === id);
         return <ListRow key={id} title={dependency?.title ?? id} trailing={dependency && <Badge status={dependency.status}>{statusLabel[dependency.status]}</Badge>} />;

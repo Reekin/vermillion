@@ -1,11 +1,12 @@
 import { Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { type DecisionCard, type RoleFile, type WorkbenchClient, type WorkItem } from "@vermillion/workbench/client";
+import { type DecisionCard, type DomainConfig, type DomainDefinition, type PatrolRun, type RoleFile, type WorkbenchClient, type WorkItem } from "@vermillion/workbench/client";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { WorkbenchStore } from "../workbench-store.js";
-import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel } from "./ui.js";
+import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, Toggle } from "./ui.js";
 import { WorkItemsSection } from "./WorkItemsSection.js";
 import { IssuesSection } from "./IssuesSection.js";
+import { Modal } from "./Modal.js";
 
 type WorkspacePagesProps = {
   store: WorkbenchStore;
@@ -88,6 +89,7 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
   const [error, setError] = useState<string>();
   const [sourceTitles, setSourceTitles] = useState<Record<string, string>>({});
   const [linkedWorkItemTarget, setLinkedWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
+  const [linkedIssueDomain, setLinkedIssueDomain] = useState<string>();
   const sourceIdsKey = JSON.stringify(view?.workItems.map(({ treeId, sourceSessionId }) => [treeId, sourceSessionId]) ?? []);
   useEffect(() => {
     let active = true;
@@ -126,13 +128,17 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
         <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
       </div>
       <div hidden={section !== "domains"}>
-        <DomainsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} docs={view?.docs.map((d) => d.path) ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
+        <DomainsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} domains={view?.domains ?? []} patrolRuns={view?.patrolRuns ?? []}
+          onOpenDoc={(path) => openEditor({ kind: "doc", path })}
+          onOpenInstruction={(domainId) => openEditor({ kind: "maintainer", domainId, path: `.vermillion/roles/maintainer/${domainId}.md` })}
+          onOpenSession={(id) => showAgentSession(activeWorkspaceId, id)} onOpenIssues={(domainId) => { setLinkedIssueDomain(domainId); store.getState().setWorkspaceSection("issues"); }} />
       </div>
       <div hidden={section !== "roles"}>
         <RolesSection client={client} workspaceId={activeWorkspaceId} roles={view?.roles ?? []} onEdit={(roleId) => openEditor({ kind: "role", roleId })} />
       </div>
       {section === "issues" && <IssuesSection client={client} workspaceId={activeWorkspaceId} issues={view?.issues ?? []} workItems={view?.workItems ?? []}
-        domainIds={(view?.docs ?? []).map((doc) => doc.path).filter((path) => path.startsWith(DOMAINS_DIR) && !path.slice(DOMAINS_DIR.length).includes("/") && path.endsWith(".md")).map((path) => path.slice(DOMAINS_DIR.length, -3))}
+        domainIds={(view?.domains ?? []).map((domain) => domain.domainId)}
+        targetDomainId={linkedIssueDomain}
         targetIssueId={issueTarget?.workspaceId === activeWorkspaceId ? issueTarget.issueId : undefined} onTargetConsumed={() => store.setState({ issueTarget: undefined })} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)}
         onOpenWorkItem={(workItemId) => { setLinkedWorkItemTarget({ workspaceId: activeWorkspaceId, workItemId, nonce: Date.now() }); store.getState().setWorkspaceSection("workItems"); }} />}
       {section === "automation" && <EmptyState title="Automation 暂未提供" />}
@@ -151,37 +157,114 @@ standards:
 ## 什么样的改动应该考虑它
 `;
 
-const DomainsSection = ({ client, workspaceId, docs, onOpen }: { client: WorkbenchClient; workspaceId: string; docs: string[]; onOpen: (path: string) => void }) => {
+const patrolStatus: Record<PatrolRun["status"], string> = {
+  queued: "等待巡检", running: "巡检中", completed: "已完成", skipped: "已跳过", failed: "失败"
+};
+const patrolTrigger: Record<PatrolRun["trigger"], string> = { manual: "手动", change: "目录变更", scheduled: "定时" };
+const relativePatrolTime = (value: string): string => {
+  const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 60_000));
+  return minutes < 1 ? "刚刚" : minutes < 60 ? `${minutes} 分钟前` : new Date(value).toLocaleString();
+};
+const fileTitle = (path: string): string => path.split("/").at(-1)?.replace(/\.md$/i, "") || path;
+
+const DomainsSection = ({ client, workspaceId, domains, patrolRuns, onOpenDoc, onOpenInstruction, onOpenSession, onOpenIssues }: {
+  client: WorkbenchClient; workspaceId: string; domains: DomainDefinition[]; patrolRuns: PatrolRun[];
+  onOpenDoc: (path: string) => void; onOpenInstruction: (domainId: string) => void; onOpenSession: (sessionId: string) => void;
+  onOpenIssues: (domainId: string) => void;
+}) => {
+  const [selectedId, setSelectedId] = useState(domains[0]?.domainId ?? "");
   const [draft, setDraft] = useState("");
-  const domains = docs.filter((p) => p.startsWith(DOMAINS_DIR) && p.endsWith(".md"));
+  const [creating, setCreating] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
+  const [error, setError] = useState<string>();
+  const selected = domains.find((domain) => domain.domainId === selectedId) ?? domains[0];
+  useEffect(() => { if (selected && selected.domainId !== selectedId) setSelectedId(selected.domainId); }, [selected, selectedId]);
   const create = async () => {
     const id = draft.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
     if (!id) return;
-    const path = DOMAINS_DIR + id + ".md";
-    await client.request("docs.write", { workspaceId, path, content: DOMAIN_TEMPLATE });
-    setDraft("");
-    onOpen(path);
+    setError(undefined);
+    try {
+      const path = DOMAINS_DIR + id + ".md";
+      await client.request("docs.write", { workspaceId, path, content: DOMAIN_TEMPLATE });
+      setDraft(""); setCreating(false); setSelectedId(id); onOpenDoc(path);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
   };
-  return (
-    <div>
-      <PanelHeader title="Domain">
-        <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-          <Field value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="领域 id" className="w-36 [&>input]:h-7" />
-          <IconButton icon={Plus} label="新建领域" type="submit" disabled={!draft.trim()} />
-        </form>
+  const run = async () => {
+    if (!selected) return;
+    setError(undefined);
+    try { await client.request("domain.patrol.run", { workspaceId, domainId: selected.domainId }); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+  };
+  if (!selected) return <div><PanelHeader title="Domain"><IconButton icon={Plus} label="新建领域" onClick={() => setCreating(true)} /></PanelHeader>
+    {creating ? <form className="flex items-center gap-1 px-4 py-2" onSubmit={(event) => { event.preventDefault(); void create(); }}><Field value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="领域 id" className="w-48" /><Button type="submit" disabled={!draft.trim()}>创建</Button></form>
+      : <EmptyState title="还没有领域定义" action={<Button onClick={() => setCreating(true)}>新建领域</Button>} />}</div>;
+  const instructionPath = `.vermillion/roles/maintainer/${selected.domainId}.md`;
+  const runs = patrolRuns.filter((run) => run.domainId === selected.domainId);
+  return <div className="pb-4">
+    <PanelHeader title="Domain">
+      <Field kind="select" compact aria-label="选择领域" value={selected.domainId} className="w-56" onChange={(event) => setSelectedId(event.target.value)}>
+        {domains.map((domain) => <option key={domain.domainId} value={domain.domainId}>{domain.title}</option>)}
+      </Field>
+      <IconButton icon={Plus} label="新建领域" onClick={() => setCreating((value) => !value)} />
+    </PanelHeader>
+    {creating && <form className="flex items-center gap-1 px-4 pb-2" onSubmit={(event) => { event.preventDefault(); void create(); }}><Field value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="领域 id" className="w-48" /><Button type="submit" size="sm" disabled={!draft.trim()}>创建</Button></form>}
+    {error && <InlineNotice tone="error">{error}</InlineNotice>}
+    <InlineNotice>{selected.summary || "领域定义说明覆盖范围和应考虑它的改动。"}</InlineNotice>
+    <SectionLabel>领域文件</SectionLabel>
+    <ul>
+      <li><ListRow title={selected.title} meta={selected.path} trailing="领域定义" onClick={() => onOpenDoc(selected.path)} className="py-1.5" /></li>
+      {selected.standards.map((path) => <li key={path}><ListRow title={fileTitle(path)} meta={path} trailing="检查依据" onClick={() => onOpenDoc(path)} className="py-1.5" /></li>)}
+      <li><ListRow title={`${selected.title} 巡检指令`} meta={instructionPath} trailing="巡检指令" onClick={() => onOpenInstruction(selected.domainId)} className="py-1.5" /></li>
+    </ul>
+    <div className="mt-3 border-t border-border">
+      <PanelHeader title={<span className="flex items-center gap-2">Maintainer <Badge tone={selected.config.enabled ? "accent" : "neutral"}>{selected.config.enabled ? "已启用" : "已暂停"}</Badge></span>}>
+        <Button size="sm" onClick={() => setConfiguring(true)}>配置</Button><Button size="sm" onClick={() => void run()}>立即巡检</Button>
       </PanelHeader>
-      <InlineNotice>每个领域一份 md：正文说明覆盖什么、什么改动该考虑它，头部 standards 列规范路径。Worker 建单时读全部定义，判断涉及的领域并把规范附进工单。</InlineNotice>
-      {domains.length === 0 ? (
-        <InlineNotice>还没有领域定义。</InlineNotice>
-      ) : (
-        <ul>
-          {domains.map((path) => (
-            <li key={path}><ListRow title={path.slice(DOMAINS_DIR.length, -3)} meta={path} onClick={() => onOpen(path)} /></li>
-          ))}
-        </ul>
-      )}
+      <div className="flex flex-wrap gap-x-7 gap-y-1 px-4 pb-3 text-label text-foreground">
+        <span><span className="text-muted-foreground">变更触发　</span>{selected.config.changeTrigger ? selected.config.triggerPaths.length ? "目录变更后" : "等待配置目录" : "关闭"}</span>
+        <span><span className="text-muted-foreground">定时巡检　</span>每 {selected.config.intervalHours} 小时</span>
+        <span><span className="text-muted-foreground">下次检查　</span>{selected.config.enabled ? new Date(selected.config.nextRunAt).toLocaleString("zh-CN") : "—"}</span>
+        <span><span className="text-muted-foreground">自动开单　</span>{selected.config.autoWorkEnabled ? selected.config.authorizationScope.length ? `已授权 ${selected.config.authorizationScope.length} 项` : "等待授权范围" : "关闭"}</span>
+      </div>
     </div>
-  );
+    <div className="border-t border-border">
+      <PanelHeader title="巡检记录"><Button size="sm" variant="ghost" outlined onClick={() => onOpenIssues(selected.domainId)}>相关 Issues</Button></PanelHeader>
+      {runs.length ? <ul>{runs.map((patrol) => <li key={patrol.patrolRunId} className="border-b border-border"><ListRow
+        title={patrol.summary || patrolStatus[patrol.status]} meta={`${relativePatrolTime(patrol.startedAt)} · ${patrolTrigger[patrol.trigger]}${patrol.changedPaths.length ? ` · ${patrol.changedPaths.length} 个文件` : ""}`}
+        trailing={patrol.sessionId ? "会话" : patrolStatus[patrol.status]} onClick={patrol.sessionId ? () => onOpenSession(patrol.sessionId!) : undefined} /></li>)}</ul>
+        : <InlineNotice>暂无巡检记录。</InlineNotice>}
+    </div>
+    {configuring && <DomainConfigDialog client={client} workspaceId={workspaceId} domain={selected} onClose={() => setConfiguring(false)} />}
+  </div>;
+};
+
+const DomainConfigDialog = ({ client, workspaceId, domain, onClose }: { client: WorkbenchClient; workspaceId: string; domain: DomainDefinition; onClose: () => void }) => {
+  const [value, setValue] = useState<DomainConfig>(domain.config);
+  const [paths, setPaths] = useState(domain.config.triggerPaths.join("\n"));
+  const [authorization, setAuthorization] = useState(domain.config.authorizationScope.join("\n"));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const save = async () => {
+    setBusy(true); setError(undefined);
+    try {
+      await client.request("domain.config.set", { workspaceId, domainId: domain.domainId, value: { ...value,
+        triggerPaths: paths.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+        authorizationScope: authorization.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) } });
+      onClose();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); setBusy(false); }
+  };
+  return <Modal title={`${domain.title} · 巡检配置`} onClose={onClose} width={640}><div className="space-y-4 p-4">
+    <Toggle label="启用自动巡检" checked={value.enabled} onChange={(enabled) => setValue({ ...value, enabled })} />
+    <Toggle label="相关目录变更后巡检" checked={value.changeTrigger} onChange={(changeTrigger) => setValue({ ...value, changeTrigger })} />
+    <Field kind="textarea" label="触发目录（每行一个）" value={paths} rows={4} onChange={(event) => setPaths(event.target.value)} />
+    <Field kind="select" label="定时巡检" value={String(value.intervalHours)} onChange={(event) => setValue({ ...value, intervalHours: Number(event.target.value) })}>
+      {[3, 6, 12, 24, 48, 168].map((hours) => <option key={hours} value={hours}>每 {hours} 小时</option>)}
+    </Field>
+    <Toggle label="允许 Owner 在授权范围内自动开单" checked={value.autoWorkEnabled} onChange={(autoWorkEnabled) => setValue({ ...value, autoWorkEnabled })} />
+    <Field kind="textarea" label="自动修复授权范围（每行一项）" hint="只填写允许自动恢复的既定要求偏差；需求取舍仍进入待决策。" value={authorization} rows={4} onChange={(event) => setAuthorization(event.target.value)} />
+    {error && <InlineNotice tone="error" className="px-0">{error}</InlineNotice>}
+    <div className="flex justify-end gap-2"><Button onClick={onClose}>取消</Button><Button variant="primary" disabled={busy} onClick={() => void save()}>保存</Button></div>
+  </div></Modal>;
 };
 
 const roleLabelForFile = (role: RoleFile) => role.title;

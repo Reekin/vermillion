@@ -1,4 +1,4 @@
-import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type PatrolRun, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 
@@ -31,10 +31,12 @@ export type OrchestratorOptions = {
   /** Worker turns without status progress before the item is requeued. */
   maxIdleTurns?: number;
   cleanupIntervalMs?: number;
+  patrolIntervalMs?: number;
 };
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
 type WorkerTurn = { turnId?: string; scheduled: boolean; settled?: boolean; bound?: WorkerBinding };
+type PatrolBinding = { workspaceId: string; patrolRunId: string; sessionId: string };
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
 /** Maps the role resolver's names to the native multi-agent tool's top-level parameters. */
@@ -54,6 +56,7 @@ export class Orchestrator {
   private readonly now: () => string;
   private readonly maxIdleTurns: number;
   private readonly cleanupIntervalMs: number;
+  private readonly patrolIntervalMs: number;
   private readonly disposers: Array<() => void> = [];
   private readonly runsBySession = new Map<string, WorkerBinding>();
   private readonly turnsBySession = new Map<string, WorkerTurn>();
@@ -61,6 +64,7 @@ export class Orchestrator {
   private readonly settling = new Map<string, number>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly preparing = new Map<string, string>();
+  private readonly patrolsBySession = new Map<string, PatrolBinding>();
   private disposed = false;
 
   constructor(options: OrchestratorOptions) {
@@ -70,6 +74,7 @@ export class Orchestrator {
     this.now = options.now ?? (() => new Date().toISOString());
     this.maxIdleTurns = options.maxIdleTurns ?? 3;
     this.cleanupIntervalMs = options.cleanupIntervalMs ?? 5 * 60_000;
+    this.patrolIntervalMs = options.patrolIntervalMs ?? 60_000;
 
   }
 
@@ -89,11 +94,18 @@ export class Orchestrator {
     }, this.cleanupIntervalMs);
     cleanupTimer.unref();
     this.disposers.push(() => clearInterval(cleanupTimer));
+    const patrolTimer = setInterval(() => {
+      void this.service.listWorkspaces().then((workspaces) => {
+        for (const workspace of workspaces) void this.enqueue(workspace.workspaceId, () => this.reconcile(workspace.workspaceId));
+      });
+    }, this.patrolIntervalMs);
+    patrolTimer.unref();
+    this.disposers.push(() => clearInterval(patrolTimer));
     this.disposers.push(this.service.subscribe((event) => {
       if (!("workspaceId" in event)) return;
       if (event.type === "workItem.updated") {
         void this.enqueue(event.workspaceId, () => this.deliverUpdate(event.workspaceId, event.workItemId, event.sessionId, event.note));
-      } else if (["actions.changed", "workItems.changed", "workRequests.changed", "decisions.changed", "scheduler.changed"].includes(event.type)) {
+      } else if (["actions.changed", "workItems.changed", "workRequests.changed", "decisions.changed", "scheduler.changed", "domains.changed", "docs.changed", "issues.changed"].includes(event.type)) {
         void this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
       } else if (event.type === "workRequest.cancelled") {
         const sessionId = event.sessionId;
@@ -150,6 +162,14 @@ export class Orchestrator {
     const bound = turn?.bound;
     const workspaces = await this.service.listWorkspaces();
     try {
+      const patrol = this.patrolsBySession.get(event.sessionId);
+      if (patrol) {
+        const run = await this.service.getPatrolRun(patrol.workspaceId, patrol.patrolRunId);
+        if (run.status === "running") await this.service.failPatrolRun(patrol.workspaceId, patrol.patrolRunId,
+          event.finishReason === "completed" ? "巡检轮次结束但未登记结果。" : event.failure ?? `巡检轮次${event.finishReason}。`);
+        this.patrolsBySession.delete(event.sessionId);
+        await this.runner.release(event.sessionId);
+      }
       await Promise.all(workspaces.map(({ workspaceId }) => this.enqueue(workspaceId, async () => {
         await this.service.workerTurnCompleted(workspaceId, event.sessionId);
         if (bound?.workspaceId === workspaceId && turn && !turn.settled) {
@@ -192,6 +212,8 @@ export class Orchestrator {
 
   private async reconcile(workspaceId: string): Promise<void> {
     if (this.disposed) return;
+    await this.service.scanPatrols(workspaceId);
+    await this.dispatchPatrol(workspaceId);
     await this.prepareRequests(workspaceId);
     await this.service.refreshActions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
@@ -219,6 +241,40 @@ export class Orchestrator {
       await this.dispatch(workspaceId, action);
     }
     await this.scheduleRetry(workspaceId);
+  }
+
+  private async dispatchPatrol(workspaceId: string): Promise<void> {
+    const runs = await this.service.listPatrolRuns(workspaceId);
+    const current = runs.find((run) => run.status === "running") ?? runs.find((run) => run.status === "queued");
+    if (!current) return;
+    let sessionId = current.sessionId;
+    try {
+      const root = await this.service.workspaceRoot(workspaceId);
+      const role = await this.service.resolveMaintainer(workspaceId, current.domainId);
+      const metadata = { role: "maintainer", patrolRunId: current.patrolRunId, domainId: current.domainId };
+      if (current.status === "running") {
+        if (!sessionId) throw new Error("运行中的巡检缺少会话。");
+        if (this.patrolsBySession.has(sessionId)) return;
+        if (!await this.runner.resume(sessionId, { cwd: root, developerInstructions: role.content, modelConfig: role.modelConfig,
+          title: "Maintainer · " + current.domainId, metadata })) throw new Error("无法恢复巡检会话：" + sessionId);
+        this.patrolsBySession.set(sessionId, { workspaceId, patrolRunId: current.patrolRunId, sessionId });
+        if (this.runner.isActive?.(sessionId)) return;
+        const receipt = await this.runner.send(sessionId, "巡检会话已恢复。重新核对当前记录，避免重复创建 Issue 或工单，然后继续尚未完成的巡检。\n\n" + await this.service.patrolMessage(workspaceId, current.patrolRunId));
+        await this.service.setPatrolTurn(workspaceId, current.patrolRunId, receipt?.turnId);
+        return;
+      }
+      const opened = await this.runner.open({ workspaceId, cwd: root, developerInstructions: role.content, modelConfig: role.modelConfig,
+        title: "Maintainer · " + current.domainId, metadata });
+      sessionId = opened.sessionId;
+      await this.service.startPatrolRun(workspaceId, current.patrolRunId, sessionId);
+      this.patrolsBySession.set(sessionId, { workspaceId, patrolRunId: current.patrolRunId, sessionId });
+      const receipt = await this.runner.send(sessionId, await this.service.patrolMessage(workspaceId, current.patrolRunId));
+      await this.service.setPatrolTurn(workspaceId, current.patrolRunId, receipt?.turnId);
+    } catch (error) {
+      this.patrolsBySession.delete(sessionId ?? "");
+      if (sessionId) await this.runner.release(sessionId).catch(() => undefined);
+      await this.service.failPatrolRun(workspaceId, current.patrolRunId, error instanceof Error ? error.message : String(error));
+    }
   }
 
   private async scheduleRetry(workspaceId: string): Promise<void> {

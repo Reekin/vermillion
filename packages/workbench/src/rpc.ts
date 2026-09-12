@@ -12,6 +12,8 @@ import {
   zDocCommit,
   zDocFile,
   zDocRef,
+  zDomainConfig,
+  zDomainDefinition,
   zEvidence,
   zInboxItem,
   zIssue,
@@ -19,6 +21,7 @@ import {
   zIssueSource,
   zIssueStatus,
   zIssueType,
+  zPatrolRun,
   zWorkRequest,
   zWorkMessage,
   zReviewDisposition,
@@ -123,6 +126,28 @@ export const workbenchRpc = {
   },
   "issue.read": { params: zWs.extend({ issueId: z.string().min(1) }), result: zIssue },
   "issue.discuss": { params: zWs.extend({ issueId: z.string().min(1) }), result: zIssue },
+
+  "domain.list": { params: zWs, result: z.array(zDomainDefinition) },
+  "domain.config.get": { params: zWs.extend({ domainId: z.string().min(1) }), result: zDomainConfig },
+  "domain.config.set": { params: zWs.extend({ domainId: z.string().min(1), value: zDomainConfig.pick({
+    enabled: true, changeTrigger: true, intervalHours: true, triggerPaths: true, autoWorkEnabled: true, authorizationScope: true
+  }) }), result: zDomainConfig },
+  "domain.instruction.read": { params: zWs.extend({ domainId: z.string().min(1) }), result: z.object({ content: z.string() }) },
+  "domain.instruction.write": { params: zWs.extend({ domainId: z.string().min(1), content: z.string() }), result: zEmpty },
+  "domain.patrol.list": { params: zWs.extend({ domainId: z.string().min(1).optional() }), result: z.array(zPatrolRun) },
+  "domain.patrol.get": { params: zWs.extend({ patrolRunId: z.string().min(1) }), result: zPatrolRun },
+  "domain.patrol.run": { params: zWs.extend({ domainId: z.string().min(1) }), result: zPatrolRun },
+  "domain.patrol.scan": { params: zWs, result: z.array(zPatrolRun) },
+  "domain.patrol.complete": { params: zWs.extend({ patrolRunId: z.string().min(1), sessionId: z.string().min(1), issueIds: z.array(z.string().min(1)), summary: z.string().trim().min(1) }), result: zPatrolRun },
+  "domain.issue.workItem.create": {
+    params: zWs.extend({
+      patrolRunId: z.string().min(1), sessionId: z.string().min(1), issueId: z.string().min(1),
+      authorizationReason: z.string().trim().min(1), expectedBehavior: z.string().trim().min(1),
+      title: z.string().trim().min(1), objective: z.string(), risk: zRisk,
+      refs: z.array(zDocRef).min(1), scope: zScope, acceptance: z.array(zAcceptanceItem).min(1),
+      needs: z.array(z.string()).optional(), dependsOn: z.array(z.string()).optional()
+    }), result: zWorkItem
+  },
 
   "work.start": { params: zWs.extend({ sessionId: z.string().min(1), turnId: z.string().min(1).optional(), scope: z.string().optional(), message: zWorkMessage.optional() }), result: zWorkRequest },
   "work.list": { params: zWs, result: z.array(zWorkRequest) },

@@ -43,6 +43,50 @@ export const zIssue = z.object({
 });
 export type Issue = z.infer<typeof zIssue>;
 
+export const zDomainConfig = z.object({
+  domainId: z.string().min(1),
+  enabled: z.boolean(),
+  changeTrigger: z.boolean(),
+  intervalHours: z.number().int().min(1).max(168),
+  triggerPaths: z.array(z.string().min(1)),
+  autoWorkEnabled: z.boolean(),
+  authorizationScope: z.array(z.string().min(1)),
+  lastCommit: z.string().min(1).optional(),
+  nextRunAt: z.string().datetime(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+export type DomainConfig = z.infer<typeof zDomainConfig>;
+
+export const zDomainDefinition = z.object({
+  domainId: z.string().min(1),
+  title: z.string().min(1),
+  summary: z.string(),
+  path: z.string().min(1),
+  standards: z.array(z.string().min(1)),
+  config: zDomainConfig
+});
+export type DomainDefinition = z.infer<typeof zDomainDefinition>;
+
+export const zPatrolRun = z.object({
+  patrolRunId: z.string().min(1),
+  domainId: z.string().min(1),
+  trigger: z.enum(["manual", "change", "scheduled"]),
+  status: z.enum(["queued", "running", "completed", "skipped", "failed"]),
+  changedPaths: z.array(z.string()),
+  requirementRefs: z.array(z.object({ path: z.string().min(1), section: z.string().optional(), commit: z.string().min(1) })),
+  targetCommit: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  turnId: z.string().min(1).optional(),
+  issueIds: z.array(z.string().min(1)),
+  workItemIds: z.array(z.string().min(1)),
+  summary: z.string().optional(),
+  startedAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  endedAt: z.string().datetime().optional()
+});
+export type PatrolRun = z.infer<typeof zPatrolRun>;
+
 export const zDocRef = z.object({
   path: z.string().min(1),
   section: z.string().optional(),
@@ -126,6 +170,12 @@ export const zRun = z.object({
 export const zWorkItem = z.object({
   workItemId: z.string().min(1),
   issueId: z.string().min(1).optional(),
+  owner: z.object({
+    domainId: z.string().min(1), patrolRunId: z.string().min(1),
+    authorizationScope: z.array(z.string().min(1)), authorizationReason: z.string().min(1),
+    expectedBehavior: z.string().min(1), requirement: zIssueRequirement,
+    evidence: z.array(zIssueEvidence).min(1)
+  }).optional(),
   /** Origin of the execution branch; absent for manually created work. */
   sourceSessionId: z.string().optional(),
   sourceTurnId: z.string().optional(),
@@ -405,6 +455,7 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("issues.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("domains.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("roles.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("scheduler.changed"), workspaceId: z.string() }),
   /** A running work item's contract changed; the orchestrator steers its worker right away. */

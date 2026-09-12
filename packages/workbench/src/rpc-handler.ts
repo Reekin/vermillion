@@ -52,6 +52,18 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "issue.read": (p) => service.readIssue(p.workspaceId, p.issueId),
     "issue.discuss": (p) => service.discussIssue(p.workspaceId, p.issueId),
 
+    "domain.list": (p) => service.listDomains(p.workspaceId),
+    "domain.config.get": (p) => service.getDomainConfig(p.workspaceId, p.domainId),
+    "domain.config.set": (p) => service.setDomainConfig(p.workspaceId, p.domainId, p.value),
+    "domain.instruction.read": async (p) => ({ content: await service.readMaintainerInstruction(p.workspaceId, p.domainId) }),
+    "domain.instruction.write": async (p) => { await service.writeMaintainerInstruction(p.workspaceId, p.domainId, p.content); return {}; },
+    "domain.patrol.list": async (p) => (await service.listPatrolRuns(p.workspaceId)).filter((run) => !p.domainId || run.domainId === p.domainId),
+    "domain.patrol.get": (p) => service.getPatrolRun(p.workspaceId, p.patrolRunId),
+    "domain.patrol.run": (p) => service.queuePatrol(p.workspaceId, p.domainId),
+    "domain.patrol.scan": (p) => service.scanPatrols(p.workspaceId),
+    "domain.patrol.complete": (p) => service.completePatrolRun(p.workspaceId, p.patrolRunId, p.sessionId, p.issueIds, p.summary),
+    "domain.issue.workItem.create": ({ workspaceId, ...p }) => service.createAuthorizedIssueWorkItem(workspaceId, p),
+
 
     "work.start": (p) => service.startWork(p.workspaceId, p),
     "work.list": (p) => service.listWorkRequests(p.workspaceId),

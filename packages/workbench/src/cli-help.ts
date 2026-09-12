@@ -27,7 +27,13 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。",
   "search.query": "只读查询；搜索已登记的 workspace 工单和 Vermillion rollout 文件，返回命中上下文。",
   "issue.discuss": "桌面在线；为议题创建或返回已有设计伙伴讨论会话。",
-  "issue.update": "更新议题分诊、证据或处理结果；关闭和重复需要处理原因。"
+  "issue.update": "更新议题分诊、证据或处理结果；关闭和重复需要处理原因。",
+  "domain.config.set": "用户管理领域巡检与自动开单授权；按领域独立保存。",
+  "domain.instruction.write": "编辑领域专属 Maintainer developer instruction；保存到当前 workspace。",
+  "domain.patrol.run": "手动排入一次真实领域巡检；桌面调度在线时启动 Maintainer 会话。",
+  "domain.patrol.scan": "扫描目录变更和定时到期条件；无事可查时记录跳过，不启动模型。",
+  "domain.patrol.complete": "当前 Maintainer 巡检会话登记结果和关联 Issue。",
+  "domain.issue.workItem.create": "当前 Maintainer 巡检会话；仅在领域授权、固定要求引用和证据均有效时自动创建关联修复工单。"
 };
 
 /** Parameters and examples come from the RPC schema rather than a second parameter registry. */
