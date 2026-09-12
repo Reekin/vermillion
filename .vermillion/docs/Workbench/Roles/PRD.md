@@ -10,7 +10,7 @@
 
 - **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/design-partner.md)。
 - **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/worker.md)。
-- **Maintainer**：领域巡检与 Issue 汇总，指令见 [maintainer.md](../../../../packages/workbench/roles/maintainer.md)。
+- **Maintainer（领域 Owner）**：领域巡检、Issue 分诊与授权范围内自动开单，指令见 [maintainer.md](../../../../packages/workbench/roles/maintainer.md)。
 - **Liaison**：IM 反馈收集，指令见 [liaison.md](../../../../packages/workbench/roles/liaison.md)。
 
 Maintainer 和 IM 接入属于扩展能力，不是基本执行循环的前提。
@@ -65,4 +65,4 @@ CLI `vermillion asksource` 接收 `workspaceId`、`workItemId`、调用者 `sess
 
 巡检会话使用按全局与项目覆盖规则解析的 `maintainer.md` 作为通用角色指令，再追加当前 workspace 的 `.vermillion/roles/maintainer/<domain-id>.md` 正文作为领域专属 developer instruction。专属文件可选，未配置时只使用通用角色；它不替换通用角色，也不单独配置模型。通用角色负责检查与 Issue 汇总的职责边界，领域专属文件约定检查方法与重点。
 
-领域专属指令在 Domain 详情编辑，不作为独立角色列入角色列表。领域定义及其关联 PRD、Standards 作为检查材料提供给会话，不直接拼成 developer instruction。
+领域专属指令在 Domain 详情通过统一的 Markdown 编辑界面编辑，不作为独立角色列入角色列表。编辑目标标记为 Maintainer 配置，由对应配置存储负责读取和保存。领域定义及其关联 PRD、Standards 作为检查材料提供给会话，不直接拼成 developer instruction。Domain 页面列出的所有 Markdown 文件使用同一编辑入口。

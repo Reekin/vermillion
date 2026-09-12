@@ -9,7 +9,7 @@ Vermillion（朱砂）是个人 agent 工作台：通过讨论明确需求，把
 | Workspace | 对应一个项目目录，关联文档、工单和会话 | |
 | Domain | 一个业务或跨模块领域的定义：覆盖什么、什么改动应考虑它、遵守哪些规范 | [Domain](../Workbench/Domains/PRD.md) |
 | Doc | 驱动工作的文档，存放于 `.vermillion/docs/` 并用 Git 管理 | [文档管理](../Workbench/Documents/PRD.md) |
-| Issue | 用户提出或 agent 收集的议题，经讨论后才能开工 | [Issues](../Workbench/Issues/PRD.md) |
+| Issue | 用户提出或 agent 收集的议题，支持分诊、讨论及授权范围内自动开单 | [Issues](../Workbench/Issues/PRD.md) |
 | WorkItem | 可独立执行和验收的工单，由开工分支创建并执行 | [工单](../Workbench/Missions/PRD.md) |
 | DecisionCard | 执行中需要用户决定的问题，进入 Inbox | [Inbox](../Workbench/Inbox/PRD.md) |
 
