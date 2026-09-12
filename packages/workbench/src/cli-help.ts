@@ -25,7 +25,9 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "asksource": "当前执行中工单的 Worker；从工单记录的开单位置临时询问来源设计伙伴并等待答复。",
   "steer": "桌面在线；向任意可访问会话追加当前轮或启动该会话的新轮。",
   "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。",
-  "search.query": "只读查询；搜索已登记的 workspace 工单和 Vermillion rollout 文件，返回命中上下文。"
+  "search.query": "只读查询；搜索已登记的 workspace 工单和 Vermillion rollout 文件，返回命中上下文。",
+  "issue.discuss": "桌面在线；为议题创建或返回已有设计伙伴讨论会话。",
+  "issue.update": "更新议题分诊、证据或处理结果；关闭和重复需要处理原因。"
 };
 
 /** Parameters and examples come from the RPC schema rather than a second parameter registry. */

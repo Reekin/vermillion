@@ -6,12 +6,14 @@ import {
   zAgentRun,
   zScheduler,
   zDecisionCard,
+  zIssue,
   zWorkRequest,
   zWorkItemRecord,
   type WorkItemRecord,
   type AgentRun,
   type Scheduler,
   type DecisionCard,
+  type Issue,
   type WorkRequest
 } from "./contracts.js";
 
@@ -94,6 +96,7 @@ export class WorkspaceStore {
   readonly stateDir: string;
   readonly workRequests: Collection<WorkRequest>;
   readonly decisions: Collection<DecisionCard>;
+  readonly issues: Collection<Issue>;
   readonly runs: Collection<AgentRun>;
   private readonly schedulerPath: string;
   private readonly records: Collection<WorkItemRecord>;
@@ -126,12 +129,25 @@ export class WorkspaceStore {
     finally { if (recordWrites.get(key) === next) recordWrites.delete(key); }
   }
 
+  async transactIssue<T>(id: string, update: (record: Issue | undefined) => { record: Issue; result: T }): Promise<T> {
+    const key = join(this.stateDir, "issues", id);
+    const next = (recordWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      const { record, result } = update(await this.issues.get(id));
+      await this.issues.put(record);
+      return result;
+    });
+    recordWrites.set(key, next);
+    try { return await next; }
+    finally { if (recordWrites.get(key) === next) recordWrites.delete(key); }
+  }
+
   constructor(rootPath: string) {
     this.rootPath = rootPath;
     this.stateDir = join(rootPath, STATE_DIR);
     this.workRequests = createCollection(join(this.stateDir, "work-requests"), zWorkRequest, "requestId");
     this.records = createCollection(join(this.stateDir, "workitems"), zWorkItemRecord, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
+    this.issues = createCollection(join(this.stateDir, "issues"), zIssue, "issueId");
     this.runs = createCollection(join(this.stateDir, "runs"), zAgentRun, "runId");
     this.schedulerPath = join(this.stateDir, "scheduler.json");
   }

@@ -762,6 +762,16 @@ const boot = async (): Promise<void> => {
   const workbenchService = new WorkbenchService({
     roles: roleService,
     sourceAsker,
+    issueDiscussionStarter: async ({ workspaceId, issueId, title, content }) => {
+      const workspace = (await service.listWorkspaces()).workspaces.find((entry) => entry.workspaceId === workspaceId);
+      if (!workspace) throw new Error("Workspace not found: " + workspaceId);
+      const role = await roleService.resolve(workspace.absolutePath, "design-partner");
+      const opened = await agentRunner.open({ workspaceId, cwd: workspace.absolutePath,
+        developerInstructions: role.content, modelConfig: role.modelConfig, title: "Issue · " + title,
+        metadata: { role: "design-partner", issueId } });
+      const sent = await agentRunner.send(opened.sessionId, content);
+      return { sessionId: opened.sessionId, ...(sent?.turnId ? { turnId: sent.turnId } : {}) };
+    },
     sessionSteerer: async ({ sessionId, content }) => {
       return sessionSteerer(sessionId, content);
     },

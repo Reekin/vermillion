@@ -17,6 +17,32 @@ export type WorkItemStatus = z.infer<typeof zWorkItemStatus>;
 export const zRisk = z.enum(["R0", "R1", "R2"]);
 export type Risk = z.infer<typeof zRisk>;
 
+export const issueStatuses = ["open", "investigating", "decision", "started", "closed", "duplicate"] as const;
+export const zIssueStatus = z.enum(issueStatuses);
+export const zIssueType = z.enum(["problem", "suggestion"]);
+export const zIssueSource = z.enum(["user", "maintainer", "liaison"]);
+export const zIssueEvidenceKind = z.enum(["static", "reproduced", "unverified", "user"]);
+
+export const zIssueRequirement = z.object({
+  text: z.string().min(1), path: z.string().min(1).optional(), section: z.string().optional(), commit: z.string().min(1).optional()
+});
+export const zIssueEvidence = z.object({ kind: zIssueEvidenceKind, text: z.string().min(1), path: z.string().min(1).optional() });
+export const zIssueActivity = z.object({
+  at: z.string(), kind: z.enum(["created", "updated", "evidence", "discussion", "workItem", "resolved"]),
+  message: z.string().min(1), sessionId: z.string().min(1).optional(), workItemId: z.string().min(1).optional(), issueId: z.string().min(1).optional()
+});
+export const zIssue = z.object({
+  issueId: z.string().min(1), title: z.string().min(1), summary: z.string(), domainId: z.string().min(1),
+  source: zIssueSource, type: zIssueType, status: zIssueStatus,
+  requirement: zIssueRequirement.optional(), evidence: z.array(zIssueEvidence), suggestion: z.string().optional(),
+  decisionQuestion: z.string().min(1).optional(), resolutionReason: z.string().min(1).optional(), duplicateOf: z.string().min(1).optional(),
+  sourceSessionId: z.string().min(1).optional(), sourceTurnId: z.string().min(1).optional(),
+  discussionSessionId: z.string().min(1).optional(), discussionTurnId: z.string().min(1).optional(),
+  workItemIds: z.array(z.string().min(1)), activities: z.array(zIssueActivity), unread: z.boolean(),
+  createdAt: z.string(), updatedAt: z.string()
+});
+export type Issue = z.infer<typeof zIssue>;
+
 export const zDocRef = z.object({
   path: z.string().min(1),
   section: z.string().optional(),
@@ -99,6 +125,7 @@ export const zRun = z.object({
 
 export const zWorkItem = z.object({
   workItemId: z.string().min(1),
+  issueId: z.string().min(1).optional(),
   /** Origin of the execution branch; absent for manually created work. */
   sourceSessionId: z.string().optional(),
   sourceTurnId: z.string().optional(),
@@ -377,6 +404,7 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workRequests.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("workItems.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("decisions.changed"), workspaceId: z.string() }),
+  z.object({ type: z.literal("issues.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("roles.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("scheduler.changed"), workspaceId: z.string() }),
   /** A running work item's contract changed; the orchestrator steers its worker right away. */

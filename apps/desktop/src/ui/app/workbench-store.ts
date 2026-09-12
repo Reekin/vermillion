@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, DocChange, DocFile, InboxItem, Issue, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
 
 export type Panel = "workbench" | "inbox" | "settings";
 export type WorkspaceSection = "workItems" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
@@ -8,6 +8,7 @@ export type CommitOutcome =
   | { kind: "commit"; commit: string; message: string }
   | { kind: "work"; title: string };
 export type TaskTarget = { workspaceId: string; kind: "workItem"; id: string };
+export type IssueTarget = { workspaceId: string; issueId: string };
 export type TaskSummary = TaskTarget & { title: string; status: WorkItem["status"]; sessionId?: string };
 
 /** Everything that belongs to one workspace, tagged so stale responses can be dropped. */
@@ -15,6 +16,7 @@ export type WorkspaceView = {
   workspaceId: string;
   workItems: WorkItem[];
   decisions: DecisionCard[];
+  issues: Issue[];
   docs: DocFile[];
   pendingDocChanges: DocChange[];
   roles: RoleFile[];
@@ -50,7 +52,9 @@ export type WorkbenchState = {
   tasks: TaskSummary[];
   tasksError: string | undefined;
   taskTarget: TaskTarget | undefined;
+  issueTarget: IssueTarget | undefined;
   showTask: (target: TaskTarget) => void;
+  showIssue: (target: IssueTarget) => void;
   editor: EditorTarget | undefined;
   /** Open the workbench work-items tab. */
   showTaskBoard: () => void;
@@ -115,9 +119,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         return;
       }
       try {
-        const [workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
+        const [workItems, decisions, issues, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
           client.request("workItem.list", { workspaceId }),
           client.request("decision.list", { workspaceId }),
+          client.request("issue.list", { workspaceId }),
           client.request("docs.list", { workspaceId }),
           client.request("docs.pending", { workspaceId }),
           client.request("role.list", { workspaceId }),
@@ -126,7 +131,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           client.request("action.list", { workspaceId })
         ]);
         if (generation !== viewGeneration) return;
-        set({ view: { workspaceId, workItems, decisions, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
+        set({ view: { workspaceId, workItems, decisions, issues, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
       } catch (error) {
         if (generation !== viewGeneration) return;
         set({ viewError: (error as Error).message });
@@ -164,9 +169,14 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       tasks: [],
       tasksError: undefined,
       taskTarget: undefined,
+      issueTarget: undefined,
       showTask: (target) => {
         get().browseWorkspace(target.workspaceId);
         set({ taskTarget: { ...target }, workspaceSection: "workItems", panel: "workbench", overlay: undefined });
+      },
+      showIssue: (target) => {
+        get().browseWorkspace(target.workspaceId);
+        set({ issueTarget: target, workspaceSection: "issues", panel: "workbench", overlay: undefined });
       },
       editor: undefined,
       showTaskBoard: () => set({ workspaceSection: "workItems", panel: "workbench", overlay: undefined }),
@@ -188,7 +198,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
       browseWorkspace: (workspaceId) => {
         if (workspaceId === get().browsingWorkspaceId) return;
-        set({ browsingWorkspaceId: workspaceId, editor: undefined, view: undefined, viewError: undefined });
+        set({ browsingWorkspaceId: workspaceId, editor: undefined, issueTarget: undefined, view: undefined, viewError: undefined });
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),
@@ -220,6 +230,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
               void loadInbox();
               return;
             case "decisions.changed":
+            case "issues.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               void loadInbox();
               return;

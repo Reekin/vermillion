@@ -17,7 +17,7 @@ import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
-import { EmptyState, InlineNotice, PanelHeader, Tabs } from "./components/ui.js";
+import { Button, EmptyState, InlineNotice, PanelHeader, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
@@ -50,6 +50,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const overlay = store((s) => s.overlay);
   const section = store((s) => s.workspaceSection);
   const inboxCount = store((s) => s.inbox.length);
+  const issueUnreadCount = store((s) => s.view?.issues.filter((issue) => issue.unread).length ?? 0);
   const workspaces = store((s) => s.workspaces);
   const draftWorkspaceId = store((s) => s.draftWorkspaceId);
   const setPanel = store((s) => s.setPanel);
@@ -62,6 +63,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
+  const discussionIssue = store((s) => s.view?.issues.find((issue) => issue.discussionSessionId === sessionId));
   const [workspaceFilterId, setWorkspaceFilterId] = useState<string | undefined>();
   const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
   const [composerActions, setComposerActions] = useState<ComposerActions>();
@@ -228,7 +230,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <Tabs items={tabs} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} />
+            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} />
             <div className={section === "sessions" ? "flex min-h-0 flex-1" : "hidden"}>
               <main className="relative min-w-0 flex-1">
                 <SessionPane
@@ -256,9 +258,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   onComposerChange={setComposerActions}
                   renderTurnNavigation={renderSessionNavigation}
                   renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} transport={transport} />}
-                  composerExtras={
+                  composerExtras={<>
                     <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
-                  }
+                    {discussionIssue && sessionWorkspaceId && <Button size="sm" variant="ghost" outlined onClick={() => store.getState().showIssue({ workspaceId: sessionWorkspaceId, issueId: discussionIssue.issueId })}>Issue</Button>}
+                  </>}
                 />
               </main>
               <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">

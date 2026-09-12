@@ -8,6 +8,7 @@ import type {
   DocCommit,
   DocFile,
   InboxItem,
+  Issue,
   WorkRequest,
   RoleFile,
   WorkItem,
@@ -28,6 +29,9 @@ const RETRY_MINUTES = [1, 5, 30, 300];
 
 const createId = (prefix: string): string =>
   prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+const issueStatusText: Record<Issue["status"], string> = {
+  open: "待处理", investigating: "调查中", decision: "待决策", started: "已开工", closed: "关闭", duplicate: "重复"
+};
 
 /** Source of truth for workspace identity; the session engine's registry in production. */
 export type WorkspaceSource = {
@@ -63,11 +67,24 @@ export type SourceAsker = (input: {
   question: string;
 }) => Promise<SourceAskResult>;
 
+export type IssueDiscussionStarter = (input: {
+  workspaceId: string;
+  issueId: string;
+  title: string;
+  content: string;
+}) => Promise<{ sessionId: string; turnId?: string }>;
+
+type IssueUpdateInput = Partial<Pick<Issue, "title" | "summary" | "domainId" | "type" | "status" | "requirement" | "suggestion" | "decisionQuestion" | "resolutionReason" | "duplicateOf">> & {
+  appendEvidence?: Issue["evidence"];
+  unread?: boolean;
+};
+
 export type WorkbenchServiceOptions = {
   workspaces: WorkspaceSource;
   roles: RoleService;
   sourceAsker?: SourceAsker;
   sessionSteerer?: SessionSteerer;
+  issueDiscussionStarter?: IssueDiscussionStarter;
   sessionNavigation?: SessionNavigationPort;
   /** Starts isolated app instances for acceptance; absent when running without a desktop build around. */
   launcher?: AppLauncher;
@@ -85,6 +102,7 @@ export class WorkbenchService {
   private readonly roles: RoleService;
   private readonly sourceAsker?: SourceAsker;
   private readonly sessionSteerer?: SessionSteerer;
+  private readonly issueDiscussionStarter?: IssueDiscussionStarter;
   private readonly sessionNavigation?: SessionNavigationPort;
   private readonly launcher?: AppLauncher;
   private readonly appWindowController?: (input: AppWindowInput) => Promise<AppWindowResult>;
@@ -122,6 +140,7 @@ export class WorkbenchService {
     this.roles = options.roles;
     this.sourceAsker = options.sourceAsker;
     this.sessionSteerer = options.sessionSteerer;
+    this.issueDiscussionStarter = options.issueDiscussionStarter;
     this.sessionNavigation = options.sessionNavigation;
     this.launcher = options.launcher;
     this.appWindowController = options.appWindowController;
@@ -358,6 +377,102 @@ export class WorkbenchService {
   async resetRoleOverride(workspaceId: string, roleId: string): Promise<void> {
     await this.roles.removeOverride((await this.context(workspaceId)).rootPath, roleId);
     this.emit({ type: "roles.changed", workspaceId });
+  }
+
+  // ---- issues ----
+
+  async listIssues(workspaceId: string): Promise<Issue[]> {
+    return (await this.context(workspaceId)).store.issues.list().then((list) => list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+  }
+
+  async getIssue(workspaceId: string, issueId: string): Promise<Issue> {
+    const issue = await (await this.context(workspaceId)).store.issues.get(issueId);
+    if (!issue) throw new Error("Unknown issue: " + issueId);
+    return issue;
+  }
+
+  async createIssue(workspaceId: string, input: Pick<Issue, "title" | "summary" | "domainId"> & Partial<Pick<Issue, "source" | "type" | "status" | "requirement" | "evidence" | "suggestion" | "decisionQuestion" | "sourceSessionId" | "sourceTurnId">>): Promise<Issue> {
+    const now = this.now();
+    const source = input.source ?? "user";
+    const issue: Issue = {
+      issueId: createId("issue"), title: input.title.trim(), summary: input.summary, domainId: input.domainId.trim(),
+      source, type: input.type ?? "problem", status: input.status ?? "open", requirement: input.requirement,
+      evidence: input.evidence ?? [], suggestion: input.suggestion, decisionQuestion: input.decisionQuestion,
+      sourceSessionId: input.sourceSessionId, sourceTurnId: input.sourceTurnId, workItemIds: [], unread: source !== "user",
+      activities: [{ at: now, kind: "created", message: source === "user" ? "用户创建议题" : source === "maintainer" ? "Maintainer 创建议题" : "Liaison 创建议题", sessionId: input.sourceSessionId }],
+      createdAt: now, updatedAt: now
+    };
+    this.validateIssue(issue);
+    const saved = await (await this.context(workspaceId)).store.transactIssue(issue.issueId, (current) => {
+      if (current) throw new Error("Issue already exists: " + issue.issueId);
+      return { record: issue, result: issue };
+    });
+    this.emit({ type: "issues.changed", workspaceId });
+    return saved;
+  }
+
+  async updateIssue(workspaceId: string, issueId: string, changes: IssueUpdateInput): Promise<Issue> {
+    if (changes.duplicateOf === issueId) throw new Error("Issue 不能标记为自身的重复项。");
+    if (changes.duplicateOf) await this.getIssue(workspaceId, changes.duplicateOf);
+    const now = this.now();
+    const saved = await (await this.context(workspaceId)).store.transactIssue(issueId, (current) => {
+      if (!current) throw new Error("Unknown issue: " + issueId);
+      const { appendEvidence = [], ...fields } = changes;
+      const status = fields.status ?? current.status;
+      const message = appendEvidence.length ? `补充 ${appendEvidence.length} 条证据` : status !== current.status ? `状态变为 ${issueStatusText[status]}` : "更新议题";
+      const issue: Issue = { ...current, ...fields,
+        evidence: [...current.evidence, ...appendEvidence],
+        activities: [...current.activities, { at: now, kind: appendEvidence.length ? "evidence" : status === "closed" || status === "duplicate" ? "resolved" : "updated", message,
+          issueId: fields.duplicateOf }], updatedAt: now };
+      this.validateIssue(issue);
+      return { record: issue, result: issue };
+    });
+    this.emit({ type: "issues.changed", workspaceId });
+    return saved;
+  }
+
+  async readIssue(workspaceId: string, issueId: string): Promise<Issue> {
+    const saved = await (await this.context(workspaceId)).store.transactIssue(issueId, (current) => {
+      if (!current) throw new Error("Unknown issue: " + issueId);
+      const issue = current.unread ? { ...current, unread: false } : current;
+      return { record: issue, result: issue };
+    });
+    if (!saved.unread) this.emit({ type: "issues.changed", workspaceId });
+    return saved;
+  }
+
+  async discussIssue(workspaceId: string, issueId: string): Promise<Issue> {
+    return this.integrate(workspaceId, async () => {
+      const current = await this.getIssue(workspaceId, issueId);
+      if (current.discussionSessionId) return current;
+      if (!this.issueDiscussionStarter) throw new Error("issue.discuss requires a running desktop instance.");
+      const result = await this.issueDiscussionStarter({ workspaceId, issueId, title: current.title,
+        content: [
+          `请围绕 Issue ${current.issueId} 与用户讨论，明确预期和处理范围。`,
+          `标题：${current.title}`, `问题与影响：${current.summary}`,
+          current.decisionQuestion && `需要用户决定：${current.decisionQuestion}`,
+          current.requirement && `要求依据：${[current.requirement.text, current.requirement.path, current.requirement.section, current.requirement.commit && "commit: " + current.requirement.commit].filter(Boolean).join("\n")}`,
+          current.evidence.length && `证据：\n${current.evidence.map((entry) => `- ${entry.kind}：${entry.text}${entry.path ? "\n  " + entry.path : ""}`).join("\n")}`,
+          current.suggestion && `建议方向：${current.suggestion}`,
+          "如果用户决定开工，沿正常 work.start 流程创建工单；工作台会按本讨论会话自动关联此 Issue。"
+        ].filter(Boolean).join("\n\n") });
+      const now = this.now();
+      const saved = await (await this.context(workspaceId)).store.transactIssue(issueId, (record) => {
+        if (!record) throw new Error("Unknown issue: " + issueId);
+        const issue: Issue = { ...record, discussionSessionId: result.sessionId, discussionTurnId: result.turnId,
+          unread: false, activities: [...record.activities, { at: now, kind: "discussion", message: "创建设计讨论会话", sessionId: result.sessionId }], updatedAt: now };
+        return { record: issue, result: issue };
+      });
+      this.emit({ type: "issues.changed", workspaceId });
+      return saved;
+    });
+  }
+
+  private validateIssue(issue: Issue): void {
+    if (issue.status === "started" && !issue.workItemIds.length) throw new Error("已开工 Issue 必须关联实际工单。");
+    if (issue.status === "decision" && !issue.decisionQuestion) throw new Error("待决策 Issue 必须提供具体决策问题。");
+    if (issue.status === "closed" && !issue.resolutionReason) throw new Error("关闭 Issue 必须提供处理原因。");
+    if (issue.status === "duplicate" && (!issue.duplicateOf || !issue.resolutionReason)) throw new Error("重复 Issue 必须提供原议题和处理原因。");
   }
 
   private async commitDocChanges(docs: DocsService, message: string, paths: string[] | undefined) {
@@ -676,9 +791,27 @@ export class WorkbenchService {
   /** Dependencies and agent actions share one durable queue; facts, not delivery receipts, release waiting work. */
   async createWorkItem(
     workspaceId: string,
-    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { sessionId?: string; sourceSessionId?: string; sourceTurnId?: string; treeId?: string; requestId?: string; worktreePath?: string; branch?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[] }
+    input: Pick<WorkItem, "title" | "objective" | "risk" | "scope" | "acceptance"> & { sessionId?: string; sourceSessionId?: string; sourceTurnId?: string; treeId?: string; requestId?: string; issueId?: string; worktreePath?: string; branch?: string; refs?: WorkItem["refs"]; needs?: string[]; dependsOn?: string[] }
   ): Promise<WorkItem> {
-    return this.integrate(workspaceId, () => this.createWorkItemRecord(workspaceId, input));
+    return this.integrate(workspaceId, async () => {
+      const explicitIssue = input.issueId ? await this.getIssue(workspaceId, input.issueId) : undefined;
+      const request = input.requestId ? await (await this.context(workspaceId)).store.workRequests.get(input.requestId) : undefined;
+      const sourceSessionId = request?.sourceSessionId ?? input.sourceSessionId;
+      const linkedIssue = explicitIssue ?? (sourceSessionId ? (await this.listIssues(workspaceId)).find((issue) => issue.discussionSessionId === sourceSessionId) : undefined);
+      if (linkedIssue && ["closed", "duplicate"].includes(linkedIssue.status)) throw new Error("已关闭或重复的 Issue 不能创建关联工单。");
+      const item = await this.createWorkItemRecord(workspaceId, { ...input, issueId: linkedIssue?.issueId });
+      if (!linkedIssue) return item;
+      const now = this.now();
+      await (await this.context(workspaceId)).store.transactIssue(linkedIssue.issueId, (current) => {
+        if (!current) throw new Error("Unknown issue: " + linkedIssue.issueId);
+        const issue: Issue = { ...current, status: "started", unread: true,
+          workItemIds: [...new Set([...current.workItemIds, item.workItemId])],
+          activities: [...current.activities, { at: now, kind: "workItem", message: "关联工单", workItemId: item.workItemId }], updatedAt: now };
+        return { record: issue, result: issue };
+      });
+      this.emit({ type: "issues.changed", workspaceId });
+      return item;
+    });
   }
 
   private async createWorkItemRecord(workspaceId: string, input: Parameters<WorkbenchService["createWorkItem"]>[1]): Promise<WorkItem> {
@@ -692,6 +825,7 @@ export class WorkbenchService {
     await this.checkDependencies(workspaceId, "(new)", input.dependsOn ?? []);
     const item: WorkItemRecord["item"] = {
       workItemId: createId("wi"),
+      issueId: input.issueId,
       sourceSessionId: request?.sourceSessionId ?? input.sourceSessionId, sourceTurnId: request?.sourceTurnId ?? input.sourceTurnId, treeId: request?.treeId ?? input.treeId, requestId: input.requestId,
       contractRevision: 0,
       title: input.title.trim(),
