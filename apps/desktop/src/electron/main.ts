@@ -11,7 +11,7 @@ import {
 } from "electron";
 import { createSessionRuntimeService } from "@vermillion/desktop-server";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, defaultCodexRolloutsDir, resolveAppCommand, startLocalEndpoint, type InboxItem } from "@vermillion/workbench";
+import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, defaultCodexRolloutsDir, resolveAppCommand, startLocalEndpoint, type AcceptanceLaunchRecord, type AppWindowInput, type AppWindowResult, type InboxItem } from "@vermillion/workbench";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "./agent-runner.js";
 import { createSessionNavigation } from "./session-navigation.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
@@ -628,6 +628,7 @@ const boot = async (): Promise<void> => {
     process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion");
   exposeCliOnPath(persistenceBaseDir);
 
+  let window = createMainWindow();
   const service = createSessionRuntimeService({
     persistenceBaseDir,
     pickWorkspaceDirectory: async () => {
@@ -645,7 +646,6 @@ const boot = async (): Promise<void> => {
       shell.showItemInFolder(path);
     }
   });
-  let window = createMainWindow();
   let completionTray: Tray | undefined;
   let completionTrayDestroyTimer: ReturnType<typeof setTimeout> | undefined;
   const focusMainWindow = (): void => {
@@ -769,6 +769,37 @@ const boot = async (): Promise<void> => {
     rolloutsDir: defaultCodexRolloutsDir(),
     sessionNavigation: createSessionNavigation(service, persistenceBaseDir),
     launcher: new AppLauncher({ command: resolveAppCommand(appRoot), packageRoot: launcherPackageRoot }),
+    appWindowController: async (input: AppWindowInput): Promise<AppWindowResult> => {
+      if (input.pid !== process.pid || resolve(input.dataDir) !== resolve(persistenceBaseDir)) {
+        throw new Error("app.window target does not belong to this desktop instance");
+      }
+      let launch: Partial<AcceptanceLaunchRecord>;
+      try {
+        launch = JSON.parse(readFileSync(join(persistenceBaseDir, "app-start.json"), "utf8")) as Partial<AcceptanceLaunchRecord>;
+      } catch {
+        throw new Error("app.window is only available for an app.start acceptance instance");
+      }
+      if (launch.kind !== "vermillion-acceptance" || launch.pid !== process.pid ||
+        !launch.token || launch.token !== process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN ||
+        launch.desktop !== (process.platform === "win32" ? "vermillion-qa" : "")) {
+        throw new Error("app.window is only available for an app.start acceptance instance");
+      }
+      if (window.isDestroyed()) throw new Error("The main window is no longer available");
+      if (input.action === "minimize") window.minimize();
+      if (input.action === "restore") {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+        window.webContents.focus();
+      }
+      return {
+        dataDir: resolve(persistenceBaseDir),
+        pid: process.pid,
+        action: input.action,
+        visible: window.isVisible() && !window.isMinimized(),
+        minimized: window.isMinimized() || !window.isVisible()
+      };
+    },
     workspaces: {
       list: async () =>
         (await service.listWorkspaces()).workspaces.map((workspace) => ({
@@ -817,7 +848,7 @@ const boot = async (): Promise<void> => {
     }
   });
   const localEndpoint = await startLocalEndpoint(persistenceBaseDir, async (request) => {
-    if (["sessionBrowser.open", "chatTree.get", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
+    if (["engine.listModels", "sessionBrowser.open", "chatTree.get", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
       const response = await router.handleRequest({ ...request, id: randomUUID() });
       return response.ok
         ? { ok: true, result: response.result }

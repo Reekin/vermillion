@@ -127,6 +127,27 @@ describe("vermillion cli", () => {
     }
   });
 
+  it("routes app.window through the target desktop endpoint", async () => {
+    const base = await mkdtemp(join(tmpdir(), "verm-cli-window-"));
+    dirs.push(base);
+    process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+    const requests: string[] = [];
+    const endpoint = await startLocalEndpoint(base, async (request) => {
+      requests.push(request.method);
+      if (request.method === "workspace.list") return { ok: true as const, result: [] };
+      return { ok: true as const, result: { dataDir: base, pid: 123, action: "status", visible: true, minimized: false } };
+    });
+    try {
+      const out: string[] = [];
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+      expect(await runCli(["app.window", JSON.stringify({ dataDir: base, pid: 123, action: "status" })])).toBe(0);
+      expect(JSON.parse(out.pop()!)).toMatchObject({ dataDir: base, pid: 123, action: "status" });
+      expect(requests).toEqual(["workspace.list", "app.window"]);
+    } finally {
+      await endpoint.close();
+    }
+  });
+
   it("searches registered work items and rollout files through the CLI", async () => {
     const base = await mkdtemp(join(tmpdir(), "verm-cli-search-"));
     const root = await mkdtemp(join(tmpdir(), "verm-cli-search-ws-"));

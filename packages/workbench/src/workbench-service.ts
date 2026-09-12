@@ -18,7 +18,7 @@ import { effectiveNeeds, actionIsOpen, projectWorkItem, type WorkflowAction, typ
 import type { SessionNavigationPort } from "./session-navigation.js";
 import { DocsService, WorktreeMergeConflict, WorktreeNotReady } from "./docs.js";
 import { RoleService } from "./roles.js";
-import type { AppLauncher, AppStartInput, AppStartResult } from "./app-launcher.js";
+import type { AppLauncher, AppStartInput, AppStartResult, AppWindowInput, AppWindowResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { diagnose } from "./diagnosis.js";
 import { runtimeInfo } from "./runtime-info.js";
@@ -71,6 +71,8 @@ export type WorkbenchServiceOptions = {
   sessionNavigation?: SessionNavigationPort;
   /** Starts isolated app instances for acceptance; absent when running without a desktop build around. */
   launcher?: AppLauncher;
+  /** Controls the current Electron window when the RPC is handled inside that app process. */
+  appWindowController?: (input: AppWindowInput) => Promise<AppWindowResult>;
   sessionSearch?: SessionSearchSource;
   rolloutsDir?: string;
   now?: () => string;
@@ -85,6 +87,7 @@ export class WorkbenchService {
   private readonly sessionSteerer?: SessionSteerer;
   private readonly sessionNavigation?: SessionNavigationPort;
   private readonly launcher?: AppLauncher;
+  private readonly appWindowController?: (input: AppWindowInput) => Promise<AppWindowResult>;
   private readonly sessionSearch?: SessionSearchSource;
   private readonly rolloutsDir?: string;
   private readonly now: () => string;
@@ -121,6 +124,7 @@ export class WorkbenchService {
     this.sessionSteerer = options.sessionSteerer;
     this.sessionNavigation = options.sessionNavigation;
     this.launcher = options.launcher;
+    this.appWindowController = options.appWindowController;
     this.sessionSearch = options.sessionSearch;
     this.rolloutsDir = options.rolloutsDir;
     this.now = options.now ?? (() => new Date().toISOString());
@@ -318,6 +322,11 @@ export class WorkbenchService {
   async stopApp(pid: number): Promise<void> {
     if (!this.launcher) throw new Error("app.stop is only available while the desktop is running");
     await this.launcher.stop(pid);
+  }
+
+  async controlAppWindow(input: AppWindowInput): Promise<AppWindowResult> {
+    if (this.appWindowController) return this.appWindowController(input);
+    throw new Error("app.window is only available through a running desktop instance");
   }
 
   // ---- roles ----
