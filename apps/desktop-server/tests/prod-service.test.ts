@@ -362,7 +362,6 @@ describe("prod runtime service", () => {
                   minLength: 1
                 }),
                 limit: expect.objectContaining({
-                  default: 50,
                   maximum: 200
                 }),
                 maxChars: expect.objectContaining({

@@ -36,9 +36,38 @@ export type WorkspaceSource = {
   remove: (workspaceId: string) => Promise<void>;
 };
 
+export type SessionSteerResult = {
+  sessionId: string;
+  turnId: string;
+  delivery: "steered" | "started";
+};
+
+export type SessionSteerer = (input: {
+  sessionId: string;
+  content: string;
+}) => Promise<SessionSteerResult>;
+
+export type SourceAskResult = {
+  answer: string;
+  askSessionId: string;
+  askTurnId: string;
+  archived: boolean;
+  archiveError?: string;
+};
+
+export type SourceAsker = (input: {
+  workspaceId: string;
+  workItemId: string;
+  sourceSessionId: string;
+  sourceTurnId: string;
+  question: string;
+}) => Promise<SourceAskResult>;
+
 export type WorkbenchServiceOptions = {
   workspaces: WorkspaceSource;
   roles: RoleService;
+  sourceAsker?: SourceAsker;
+  sessionSteerer?: SessionSteerer;
   sessionNavigation?: SessionNavigationPort;
   /** Starts isolated app instances for acceptance; absent when running without a desktop build around. */
   launcher?: AppLauncher;
@@ -52,6 +81,8 @@ type WorkspaceContext = { rootPath: string; store: WorkspaceStore; docs: DocsSer
 export class WorkbenchService {
   private readonly workspaces: WorkspaceSource;
   private readonly roles: RoleService;
+  private readonly sourceAsker?: SourceAsker;
+  private readonly sessionSteerer?: SessionSteerer;
   private readonly sessionNavigation?: SessionNavigationPort;
   private readonly launcher?: AppLauncher;
   private readonly sessionSearch?: SessionSearchSource;
@@ -86,6 +117,8 @@ export class WorkbenchService {
   constructor(options: WorkbenchServiceOptions) {
     this.workspaces = options.workspaces;
     this.roles = options.roles;
+    this.sourceAsker = options.sourceAsker;
+    this.sessionSteerer = options.sessionSteerer;
     this.sessionNavigation = options.sessionNavigation;
     this.launcher = options.launcher;
     this.sessionSearch = options.sessionSearch;
@@ -343,6 +376,35 @@ export class WorkbenchService {
       sessionSearch: this.sessionSearch,
       rolloutsDir: this.rolloutsDir
     });
+  }
+
+  async askSource(workspaceId: string, workItemId: string, sessionId: string, question: string): Promise<SourceAskResult> {
+    if (!question.trim()) throw new Error("asksource question is required.");
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    if (item.status !== "running" || item.run.sessionId !== sessionId) {
+      throw new Error("asksource 只允许当前 Worker 在执行中的工单调用：" + workItemId);
+    }
+    if (!item.sourceSessionId || !item.sourceTurnId) {
+      throw new Error("工单没有有效的开单来源位置：" + workItemId);
+    }
+    if (!this.sourceAsker) {
+      throw new Error("asksource requires a running desktop instance.");
+    }
+    return this.sourceAsker({
+      workspaceId,
+      workItemId,
+      sourceSessionId: item.sourceSessionId,
+      sourceTurnId: item.sourceTurnId,
+      question: question.trim()
+    });
+  }
+
+  async steerSession(sessionId: string, content: string): Promise<SessionSteerResult> {
+    if (!content.trim()) throw new Error("steer content is required.");
+    if (!this.sessionSteerer) {
+      throw new Error("steer requires a running desktop instance.");
+    }
+    return this.sessionSteerer({ sessionId, content: content.trim() });
   }
 
   async startWork(workspaceId: string, input: { sessionId: string; turnId?: string; scope?: string; message?: WorkRequest["message"] }): Promise<WorkRequest> {

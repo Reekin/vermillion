@@ -48,6 +48,29 @@ export const workbenchRpc = {
     params: z.object({ sessionId: z.string().min(1), turnId: z.string().min(1) }),
     result: z.array(zSessionNavigation)
   },
+  "asksource": {
+    params: z.object({
+      workspaceId: z.string().min(1),
+      workItemId: z.string().min(1),
+      sessionId: z.string().min(1),
+      question: z.string().trim().min(1)
+    }),
+    result: z.object({
+      answer: z.string(),
+      askSessionId: z.string().min(1),
+      askTurnId: z.string().min(1),
+      archived: z.boolean(),
+      archiveError: z.string().optional()
+    })
+  },
+  "steer": {
+    params: z.object({ sessionId: z.string().min(1), content: z.string().trim().min(1) }),
+    result: z.object({
+      sessionId: z.string().min(1),
+      turnId: z.string().min(1),
+      delivery: z.enum(["steered", "started"])
+    })
+  },
   "workspace.list": { params: zEmpty, result: z.array(zWorkspace) },
   "workspace.add": { params: z.object({ rootPath: z.string().min(1), label: z.string().optional() }), result: zWorkspace },
   "workspace.remove": { params: zWs, result: zEmpty },

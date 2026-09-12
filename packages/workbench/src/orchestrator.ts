@@ -9,7 +9,7 @@ export type AgentRunner = {
   fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; developerInstructions?: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
   open: (input: { workspaceId: string; cwd: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
   send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content">) => Promise<void | { turnId?: string }>;
-  /** Delivers into the running turn when there is one (returns its id), otherwise as the next message (returns undefined). */
+  /** Delivers into the running turn when there is one (returns its id), otherwise starts the next message. */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */

@@ -3,9 +3,8 @@ import type { HostToolRegistration, HostToolResult } from "./host-tools.js";
 import {
   buildReadSessionTranscript,
   defaultReadSessionMaxTextChars,
-  defaultReadSessionTurnLimit,
+  maxReadSessionMessageLimit,
   maxReadSessionMaxTextChars,
-  maxReadSessionTurnLimit,
   serializeReadSessionTranscript
 } from "./read-session-transcript.js";
 
@@ -55,10 +54,10 @@ const parseArgs = (value: unknown): ReadSessionArgs => {
     (typeof limitValue !== "number" ||
       !Number.isInteger(limitValue) ||
       limitValue <= 0 ||
-      limitValue > maxReadSessionTurnLimit)
+      limitValue > maxReadSessionMessageLimit)
   ) {
     throw new Error(
-      `limit must be a positive integer up to ${maxReadSessionTurnLimit} when provided.`
+      `limit must be a positive integer up to ${maxReadSessionMessageLimit} when provided.`
     );
   }
   if (typeof limitValue === "number") {
@@ -96,7 +95,7 @@ export const createReadSessionHostTool = (
   namespace: readSessionToolNamespace,
   name: readSessionToolName,
   description:
-    "Read a Vermillion session by sessionId and return the collapsed visible user/final-agent transcript as JSON.",
+    "Read a Vermillion session by sessionId and return visible user and agent messages, turn status, and timestamps as JSON.",
   inputSchema: {
     type: "object",
     properties: {
@@ -108,10 +107,9 @@ export const createReadSessionHostTool = (
       limit: {
         type: "integer",
         minimum: 1,
-        maximum: maxReadSessionTurnLimit,
-        default: defaultReadSessionTurnLimit,
+        maximum: maxReadSessionMessageLimit,
         description:
-          "Optional maximum number of latest turns to return after chronological sorting."
+          "Optional maximum number of latest user/agent messages to return after chronological sorting; omit to return all messages."
       },
       maxChars: {
         type: "integer",
@@ -119,7 +117,7 @@ export const createReadSessionHostTool = (
         maximum: maxReadSessionMaxTextChars,
         default: defaultReadSessionMaxTextChars,
         description:
-          "Optional text character budget for user and agentFinal fields before truncation."
+          "Optional text character budget for returned user and agent message bodies before truncation."
       }
     },
     required: ["sessionId"],

@@ -1,12 +1,121 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAgentRunner } from "../src/electron/agent-runner.js";
+import { createAgentRunner, createSessionSteerer, createSourceAsker } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it("returns canonical delivery for generic session steering", async () => {
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: vi.fn().mockReturnValue("active-turn"),
+      executeCommand: vi.fn().mockResolvedValue({ accepted: true, turnId: "actual-turn", delivery: "steered" })
+    };
+
+    await expect(createSessionSteerer(shell as unknown as Parameters<typeof createSessionSteerer>[0])("target", "continue"))
+      .resolves.toEqual({ sessionId: "target", turnId: "actual-turn", delivery: "steered" });
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
+      type: "steerTurn", sessionId: "target", turnId: "active-turn", content: "continue"
+    }) }));
+  });
+
+  it("starts a new turn when generic steering finds an idle session", async () => {
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: vi.fn().mockReturnValue(undefined),
+      getSnapshot: vi.fn().mockReturnValue({ turns: [] }),
+      executeCommand: vi.fn().mockResolvedValue({ accepted: true, turnId: "started-turn" })
+    };
+
+    await expect(createSessionSteerer(shell as unknown as Parameters<typeof createSessionSteerer>[0])("target", "start"))
+      .resolves.toEqual({ sessionId: "target", turnId: "started-turn", delivery: "started" });
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
+      type: "sendUserMessage", sessionId: "target", content: "start"
+    }) }));
+  });
+
+  it("steers a cold-loaded active turn from hydrated transcript state", async () => {
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: vi.fn().mockReturnValue(undefined),
+      getSnapshot: vi.fn().mockReturnValue({ turns: [{ sessionId: "target", turnId: "cold-turn", status: "streaming" }] }),
+      executeCommand: vi.fn().mockResolvedValue({ accepted: true, turnId: "cold-turn", delivery: "steered" })
+    };
+
+    await expect(createSessionSteerer(shell as unknown as Parameters<typeof createSessionSteerer>[0])("target", "continue"))
+      .resolves.toMatchObject({ turnId: "cold-turn", delivery: "steered" });
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
+      type: "steerTurn", sessionId: "target", turnId: "cold-turn", content: "continue"
+    }) }));
+  });
+
+  it("asks from the recorded source turn and archives the temporary design fork", async () => {
+    let emit: ((envelope: { event: Record<string, unknown> }) => void) | undefined;
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
+      runSessionAction: vi.fn().mockImplementation(async (input: { action: string }) =>
+        input.action === "fork"
+          ? { action: "fork", status: "forked", forkedSessionId: "ask-session" }
+          : { action: "archive", archived: true }),
+      setSessionTitle: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn((listener) => { emit = listener; return () => { emit = undefined; }; }),
+      executeCommand: vi.fn().mockImplementation(async () => {
+        queueMicrotask(() => emit?.({ event: { type: "turn.completed", sessionId: "ask-session", turnId: "ask-turn", finishReason: "completed" } }));
+        return { accepted: true, turnId: "ask-turn" };
+      }),
+      getSnapshot: vi.fn().mockReturnValue({
+        turns: [{ sessionId: "ask-session", turnId: "ask-turn" }],
+        messageBlocks: [{
+          blockId: "answer-block", messageId: "answer", sessionId: "ask-session", turnId: "ask-turn",
+          role: "assistant", phase: "final_answer", kind: "markdown", text: "Use the original design.",
+          startedAt: "2026-06-06T00:00:01.000Z"
+        }]
+      })
+    };
+    const asker = createSourceAsker(
+      shell as unknown as Parameters<typeof createSourceAsker>[0],
+      async () => ({ engineId: "codex", cwd: "I:/project", developerInstructions: "# Design", modelConfig: { modelId: "design-model", reasoningOptionId: "high", serviceTierId: null } })
+    );
+
+    await expect(asker({ workspaceId: "workspace", workItemId: "item", sourceSessionId: "design", sourceTurnId: "source-turn", question: "Clarify the boundary." }))
+      .resolves.toMatchObject({ answer: "Use the original design.", askSessionId: "ask-session", askTurnId: "ask-turn", archived: true });
+    expect(shell.runSessionAction).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      sessionId: "design", action: "fork", fromTurnId: "source-turn", activateFork: false,
+      cwd: "I:/project", developerInstructions: "# Design",
+      metadata: expect.objectContaining({ role: "design-partner", workItemId: "item", sourceTurnId: "source-turn", asksource: true })
+    }));
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
+      type: "sendUserMessage", sessionId: "ask-session", content: "Clarify the boundary.",
+      execution: { modelId: "design-model", reasoningOptionId: "high", serviceTierId: null }
+    }) }));
+    expect(shell.runSessionAction).toHaveBeenLastCalledWith({ sessionId: "ask-session", action: "archive" });
+  });
+
+  it("archives the temporary design fork when the source question fails", async () => {
+    const unsubscribe = vi.fn();
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
+      runSessionAction: vi.fn().mockImplementation(async (input: { action: string }) =>
+        input.action === "fork" ? { action: "fork", status: "forked", forkedSessionId: "ask-session" } : { action: "archive", archived: true }),
+      setSessionTitle: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn(() => unsubscribe),
+      executeCommand: vi.fn().mockRejectedValue(new Error("provider unavailable"))
+    };
+    const asker = createSourceAsker(
+      shell as unknown as Parameters<typeof createSourceAsker>[0],
+      async () => ({ engineId: "codex", cwd: "I:/project", developerInstructions: "# Design" })
+    );
+
+    await expect(asker({ workspaceId: "workspace", workItemId: "item", sourceSessionId: "design", sourceTurnId: "source-turn", question: "Clarify" }))
+      .rejects.toThrow("temporary fork archived");
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(shell.runSessionAction).toHaveBeenLastCalledWith({ sessionId: "ask-session", action: "archive" });
+  });
+
   it.each([
     { delivery: "start_or_steer", expected: {} },
     { delivery: "steered", expected: { turnId: "actual" } }
   ])("uses confirmed shared delivery instead of the requested turn: $delivery", async ({ delivery, expected }) => {
-    const shell = { getActiveTurnId: () => "ended", executeCommand: vi.fn()
+    const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getActiveTurnId: () => "ended", executeCommand: vi.fn()
       .mockResolvedValueOnce({ accepted: true, turnId: "actual", delivery }) };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
     await expect(runner.steer("worker", "update")).resolves.toEqual(expected);
@@ -14,15 +123,15 @@ describe("AgentRunner recovery", () => {
   });
 
   it.each(["connection lost", "no active turn to steer"])("leaves shared delivery failures to the caller without retrying: %s", async (message) => {
-    const shell = { getActiveTurnId: () => "running", executeCommand: vi.fn().mockRejectedValue(new Error(message)) };
+    const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getActiveTurnId: () => "running", executeCommand: vi.fn().mockRejectedValue(new Error(message)) };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
     await expect(runner.steer("worker", "update")).rejects.toThrow(message);
     expect(shell.executeCommand).toHaveBeenCalledOnce();
   });
 
   it("uses execution state instead of stale transcript state", async () => {
-    const shell = { getActiveTurnId: () => undefined,
-      getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "old", status: "streaming" }] }),
+    const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getActiveTurnId: () => undefined,
+      getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "old", status: "completed" }] }),
       executeCommand: vi.fn().mockResolvedValue({ accepted: true }) };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
     expect(runner.isActive!("worker")).toBe(false);
