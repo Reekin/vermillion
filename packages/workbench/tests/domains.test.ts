@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DocsService } from "../src/docs.js";
 import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
 import { WorkbenchService } from "../src/workbench-service.js";
 import { git, setup } from "./workflow-fixture.js";
@@ -26,7 +27,13 @@ describe("domain owner patrols", () => {
     const fixture = await setup(); fixtures.push(fixture);
     await createDomain(fixture);
     await fixture.client.request("docs.write", { workspaceId: fixture.workspaceId, path: ".vermillion/docs/domains/acceptance/Standards.md", content: "# Not a domain\n" });
+    const recursiveList = vi.spyOn(DocsService.prototype, "list");
+    const directList = vi.spyOn(DocsService.prototype, "listDirectMarkdown");
     const [domain] = await fixture.client.request("domain.list", { workspaceId: fixture.workspaceId });
+    expect(directList).toHaveBeenCalledWith(".vermillion/docs/domains");
+    expect(recursiveList).not.toHaveBeenCalled();
+    directList.mockRestore();
+    recursiveList.mockRestore();
     expect(domain).toMatchObject({ domainId: "ui-ux", title: "UI/UX", summary: "桌面界面和交互。",
       standards: [".vermillion/docs/Foundation/UIUX/Standards.md"], config: { enabled: true, intervalHours: 6, autoWorkEnabled: false } });
     expect(await fixture.client.request("domain.list", { workspaceId: fixture.workspaceId })).toHaveLength(1);

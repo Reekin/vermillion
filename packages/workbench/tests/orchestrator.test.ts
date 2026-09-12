@@ -10,6 +10,23 @@ afterEach(async () => {
   for (const f of fixtures.splice(0)) await f.cleanup();
 });
 
+it("schedules workers without waiting for patrol scans and does not rescan for work events", async () => {
+  const f = await fixture();
+  let finishScan!: () => void;
+  const domainRead = vi.spyOn(f.service, "listDomains").mockImplementationOnce(() => new Promise((resolve) => {
+    finishScan = () => resolve([]);
+  })).mockResolvedValue([]);
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker-a" });
+  f.orchestrator.start();
+
+  await vi.waitFor(() => expect(domainRead).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker-b" });
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(domainRead).toHaveBeenCalledOnce();
+  finishScan();
+});
+
 it("keeps the worker session at workspace root while directing tools to its worktree", async () => {
   const f = await fixture();
   const worktreePath = f.root + "/worker-tree";

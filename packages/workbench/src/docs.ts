@@ -111,6 +111,20 @@ export class DocsService {
     return out.sort((a, b) => a.path.localeCompare(b.path));
   }
 
+  async listDirectMarkdown(dirPath: string): Promise<string[]> {
+    assertDocPathOrRoot(dirPath);
+    const dir = join(this.rootPath, dirPath);
+    try {
+      const entries = await readdir(dir, { withFileTypes: true });
+      return entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+        .map((entry) => toPosix(relative(this.rootPath, join(dir, entry.name))))
+        .sort((a, b) => a.localeCompare(b));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
   async read(path: string, commit?: string): Promise<string> {
     assertDocPath(path);
     let bytes: Buffer;

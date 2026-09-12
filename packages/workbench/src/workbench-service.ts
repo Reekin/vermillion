@@ -27,7 +27,7 @@ import { WorkspaceStore } from "./workspace-store.js";
 import { diagnose } from "./diagnosis.js";
 import { runtimeInfo } from "./runtime-info.js";
 import { searchWorkbench, type SearchQuery, type SearchResult, type SessionSearchSource } from "./search.js";
-import { defaultDomainConfig, domainIdFromPath, nextRunAt, parseDomainDefinition, pathMatches } from "./domains.js";
+import { DOMAINS_DIR, defaultDomainConfig, domainIdFromPath, nextRunAt, parseDomainDefinition, pathMatches } from "./domains.js";
 
 const RETRY_MINUTES = [1, 5, 30, 300];
 
@@ -124,6 +124,7 @@ export class WorkbenchService {
   private readonly contextLoads = new Map<string, Promise<WorkspaceContext>>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
   private readonly integrations = new Map<string, Promise<unknown>>();
+  private readonly patrolScans = new Map<string, Promise<unknown>>();
   private readonly decisionDeliveries = new Map<string, Promise<void>>();
   private schedulerOwner?: object;
   private sourceTurnResolver?: (sessionId: string) => Promise<string | undefined>;
@@ -170,17 +171,25 @@ export class WorkbenchService {
 
   /** Workers share the workspace Git index; integrate their results one at a time. */
   private async integrate<T>(workspaceId: string, action: () => Promise<T>): Promise<T> {
-    const previous = this.integrations.get(workspaceId) ?? Promise.resolve();
+    return this.serializeWorkspace(this.integrations, workspaceId, action);
+  }
+
+  private async serializePatrol<T>(workspaceId: string, action: () => Promise<T>): Promise<T> {
+    return this.serializeWorkspace(this.patrolScans, workspaceId, action);
+  }
+
+  private async serializeWorkspace<T>(queue: Map<string, Promise<unknown>>, workspaceId: string, action: () => Promise<T>): Promise<T> {
+    const previous = queue.get(workspaceId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(action);
-    this.integrations.set(workspaceId, next);
+    queue.set(workspaceId, next);
     try { return await next; }
-    finally { if (this.integrations.get(workspaceId) === next) this.integrations.delete(workspaceId); }
+    finally { if (queue.get(workspaceId) === next) queue.delete(workspaceId); }
   }
 
   async dispose(): Promise<void> {
     await Promise.allSettled([...this.contextLoads.values()]);
     for (const context of this.contexts.values()) context.watcher?.close();
-    await Promise.allSettled([...this.integrations.values()]);
+    await Promise.allSettled([...this.integrations.values(), ...this.patrolScans.values()]);
     this.contexts.clear();
   }
 
@@ -401,10 +410,10 @@ export class WorkbenchService {
 
   async listDomains(workspaceId: string): Promise<DomainDefinition[]> {
     const { docs } = await this.context(workspaceId);
-    const files = (await docs.list()).filter((file) => !!domainIdFromPath(file.path));
-    const domains = await Promise.all(files.map(async (file) => {
-      const domainId = domainIdFromPath(file.path)!;
-      return parseDomainDefinition(file.path, await docs.read(file.path), await this.ensureDomainConfig(workspaceId, domainId));
+    const paths = await docs.listDirectMarkdown(DOMAINS_DIR.slice(0, -1));
+    const domains = await Promise.all(paths.map(async (path) => {
+      const domainId = domainIdFromPath(path)!;
+      return parseDomainDefinition(path, await docs.read(path), await this.ensureDomainConfig(workspaceId, domainId));
     }));
     return domains.sort((a, b) => a.title.localeCompare(b.title));
   }
@@ -456,9 +465,9 @@ export class WorkbenchService {
     return run;
   }
 
-  private async createPatrolRun(workspaceId: string, domain: DomainDefinition, trigger: PatrolRun["trigger"], changedPaths: string[], targetCommit: string): Promise<PatrolRun> {
+  private async createPatrolRun(workspaceId: string, domain: DomainDefinition, trigger: PatrolRun["trigger"], changedPaths: string[], targetCommit: string, knownRuns?: PatrolRun[]): Promise<PatrolRun> {
     const { store, docs } = await this.context(workspaceId);
-    const active = (await store.patrolRuns.list()).find((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status));
+    const active = (knownRuns ?? await store.patrolRuns.list()).find((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status));
     if (active) throw new Error(`领域 ${domain.title} 已有巡检等待或运行中：${active.patrolRunId}`);
     await Promise.all([domain.path, ...domain.standards].map((path) => docs.read(path, targetCommit)));
     const now = this.now();
@@ -476,7 +485,7 @@ export class WorkbenchService {
   }
 
   async queuePatrol(workspaceId: string, domainId: string): Promise<PatrolRun> {
-    return this.integrate(workspaceId, () => this.queuePatrolRecord(workspaceId, domainId));
+    return this.serializePatrol(workspaceId, () => this.queuePatrolRecord(workspaceId, domainId));
   }
 
   private async queuePatrolRecord(workspaceId: string, domainId: string): Promise<PatrolRun> {
@@ -500,7 +509,7 @@ export class WorkbenchService {
   }
 
   async scanPatrols(workspaceId: string): Promise<PatrolRun[]> {
-    return this.integrate(workspaceId, () => this.scanPatrolRecords(workspaceId));
+    return this.serializePatrol(workspaceId, () => this.scanPatrolRecords(workspaceId));
   }
 
   private async scanPatrolRecords(workspaceId: string): Promise<PatrolRun[]> {
@@ -508,29 +517,33 @@ export class WorkbenchService {
     const { docs, store } = await this.context(workspaceId);
     const head = await docs.head();
     if (!head) return [];
+    const [patrolRuns, issues] = await Promise.all([store.patrolRuns.list(), store.issues.list()]);
     const created: PatrolRun[] = [];
     for (const domain of domains) {
-      const config = await this.ensureDomainConfig(workspaceId, domain.domainId);
-      if (!config.enabled || (await store.patrolRuns.list()).some((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status))) continue;
+      const config = domain.config;
+      if (!config.enabled || patrolRuns.some((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status))) continue;
       if (config.retryAt && Date.parse(config.retryAt) > Date.parse(this.now())) continue;
       let changedPaths: string[] = [];
       try { changedPaths = await docs.changedPaths(config.lastCommit, head); }
       catch { changedPaths = []; }
       const relevant = changedPaths.filter((path) => pathMatches(path, config.triggerPaths));
       if (config.retryAt) {
-        const failed = (await store.patrolRuns.list()).filter((run) => run.domainId === domain.domainId && run.status === "failed")
+        const failed = patrolRuns.filter((run) => run.domainId === domain.domainId && run.status === "failed")
           .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-        created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, failed?.trigger ?? "scheduled", relevant.length ? relevant : failed?.changedPaths ?? [], head));
+        const run = await this.createPatrolRun(workspaceId, { ...domain, config }, failed?.trigger ?? "scheduled", relevant.length ? relevant : failed?.changedPaths ?? [], head, patrolRuns);
+        patrolRuns.push(run); created.push(run);
         continue;
       }
       if (config.changeTrigger && relevant.length) {
-        created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, "change", relevant, head));
+        const run = await this.createPatrolRun(workspaceId, { ...domain, config }, "change", relevant, head, patrolRuns);
+        patrolRuns.push(run); created.push(run);
         continue;
       }
       if (Date.parse(config.nextRunAt) > Date.parse(this.now())) continue;
-      const investigating = (await store.issues.list()).some((issue) => issue.domainId === domain.domainId && issue.status === "investigating");
+      const investigating = issues.some((issue) => issue.domainId === domain.domainId && issue.status === "investigating");
       if (relevant.length || investigating) {
-        created.push(await this.createPatrolRun(workspaceId, { ...domain, config }, "scheduled", relevant, head));
+        const run = await this.createPatrolRun(workspaceId, { ...domain, config }, "scheduled", relevant, head, patrolRuns);
+        patrolRuns.push(run); created.push(run);
         continue;
       }
       const now = this.now();
