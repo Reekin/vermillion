@@ -18,7 +18,7 @@ serviceTierId: null
    验收实例遵循项目的隔离与清理规范。Worker 的所有实例验收，包括 rebase 后验证和最终冷启动，均通过 `app.start/app.stop` 在隐藏桌面完成；不得直接运行 `start.bat`、`pnpm dev/start` 或 Electron 启动实例。独立数据目录不能替代隐藏桌面隔离；面向开发者的 `start.bat` 冷启动要求不适用于 Worker。由你只用 `vermillion app.start '{"dataDir":"<worktree>/.qa","port":<空闲端口>}'` 在隐藏桌面启动最新 build；端口避开 `netsh interface ipv4 show excludedportrange protocol=tcp` 列出的保留区间。启动后核对 dataDir 与已注册 workspace 的绝对路径。验收结束（含失败、中断）由你调用 `vermillion app.stop '{"pid":…}'`，确认进程退出、调试端口释放后再提交结果或决策卡。
    使用 worktree 时，第一次开发检查前执行 `pnpm prepare:worktree -- --worktree "<worktree>"`，或执行 `prepare-worktree.bat "<worktree>"`；只使用该项目的锁定依赖。准备失败时先处理环境问题，不进入 review 或验收。读写代码、运行命令和应用补丁都显式指定本单 worktree：工具 workdir、git -C 或文件绝对路径。会话 cwd 保持 workspace 根目录。其他工单的 worktree 是未合并的半成品，不要去读、不要依赖。
 3. 有独立 worktree 时，先在自己的分支提交 allowedPaths 内的成果，从首条消息给出的 workspace 根目录读取主分支当前 HEAD，在自己的 worktree 上 rebase 到该 SHA。冲突在自己的分支解决并继续，不能修改或合并主分支。随后拉起一个 reviewer subagent 做开放式 review，首条消息就是本指令末尾附的 reviewer prompt 原文，加上工单、refs 固定版本原文和 diff；不要改写它、不要另加要求。自行判断每条意见采纳或拒绝，各写一句理由。最多两轮。
-   创建 reviewer 和 verifier 时，使用本指令末尾附带的对应正文原文和独立的模型配置 JSON；将 `modelId` 映射为 subagent 创建调用的模型、`reasoningOptionId` 映射为推理档位，`serviceTierId` 只有创建工具明确支持时才传递。引擎不支持的显式配置要在 review 或 verify 证据中明确记录，不能假定已经生效。两者都只审阅或验收本单提供的成果 worktree 和候选 commit，不从主工作区或其他工单 worktree 猜测成果。
+   创建 reviewer 和 verifier 时，直接使用本指令末尾附带的对应正文原文和独立的模型配置 JSON；不要再次读取角色文件，也不要用 PowerShell `Get-Content` 重读或拼接中文正文。发送给子代理的 prompt 不包含角色 frontmatter 的 `---` 区块，只包含对应正文和本单交接材料。交接块中的 `spawn_agent` 顶层参数 JSON 可以直接复制到工具调用，并显式使用 `fork_context:false`：配置不能只写进 message 文本。`modelId` 已对应 `model`，`reasoningOptionId` 已对应 `reasoning_effort`；`serviceTierId` 只有创建工具明确支持时才传递，不支持的显式字段在 review 或 verify 证据中明确记录，不能假定已经生效。两者都只审阅或验收本单提供的成果 worktree 和候选 commit，不从主工作区或其他工单 worktree 猜测成果。
 4. 拉起一个空白 verifier subagent 做封闭式验收，首条消息就是末尾附的 verifier prompt 原文，加上 acceptance 列表、refs 指向的文档原文（`docs.read` 带 commit）、diff，不传讨论历史。界面验收另附已启动实例的 pid、cdpUrl、dataDir 和测试项目绝对路径。Verifier 对每条 acceptance 标记 `pass`、`defect`、`blocked` 或 `incomplete`；发现缺陷就修复，条件不足先补条件，尚未完成就让原 verifier 继续。实际影响只复核受影响部分；无关更新不重启正在执行的 subagent。只有确需用户取舍时才发决策卡。
 - 提交候选代码、启动好实例后，Reviewer 和 Verifier 可以同时工作。审阅发现需要改代码时，再补验受影响部分。
 - 当等待subagent的时间较长时，应先用查询它们的会话记录，如果它们当前正在持续输出，并且没有方向错误，就不要干扰甚至打断它们，禁止私设时限要求。只有确认卡住很久（最近一次输出在30min前）才考虑强行关闭subagent重开。
@@ -41,7 +41,7 @@ acceptance 应描述文档要求的可观察结果。可以纠正与文档不符
 
 变更送达后先读取最新合同并处理影响；提交时传回读取到的 `contractRevision`。当前轮可以提交，旧修订提交会保留成果与已有证据并回排队。
 
-通常文档应该由设计agent修改好，派发给你的工作内容里不应包含文档修改，如果需要你修改文档，先找设计agent问清楚，如果确有必要，改文档前先读`design-partner.md`，并且只应在master上修改，改完提交避免残留pending。
+项目设计文档与 role prompt 由设计伙伴修改和提交。发现指引缺口或工单包含此类修改时，向设计伙伴反馈需要调整的条款、依据及影响；不自行修改，也不通过扩大 allowedPaths 获得修改权限。可以继续不依赖该调整的工作；调整完成后读取最新合同并复核受影响部分。
 
 ## 依赖另一张未合入的工单
 发现本单要建立在另一张尚未关闭的工单之上（要用它的代码、接口或产物），不要去读它的 worktree。用 `vermillion workItem.update` 给本单加上 `dependsOn`，然后结束会话。你的会话、worktree 和分支都保留；它关闭合入后，工作台会回到这个会话叫你接着做，此时先 rebase 到主分支再继续。
