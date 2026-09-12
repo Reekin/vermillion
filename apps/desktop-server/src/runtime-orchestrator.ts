@@ -537,58 +537,31 @@ export class RuntimeOrchestrator {
     const conversation = this.domainService.getConversation(session.conversationId);
     const engineId = this.resolveSessionEngineId(session);
     const binding = this.bindings.get(engineId);
-    const lastCompletedTurnAt = this.resolveLastCompletedTurnAt(sessionId);
-    const lastUserMessageAt = this.resolveLastUserMessageAt(sessionId);
+    const activity = this.domainService.getSessionActivity(sessionId);
     return {
       workspaceId: conversation?.workspaceId,
       session,
       providerKind: binding?.providerKind,
       providerSessionId: binding?.resolveProviderSessionId?.(session.sessionId),
-      lastCompletedTurnAt,
-      lastUserMessageAt
+      ...activity
     };
-  }
-
-  private resolveLastCompletedTurnAt(sessionId: string): string | undefined {
-    let latestCompletedAt: string | undefined;
-    for (const turn of this.domainService.getSnapshot().turns) {
-      if (
-        turn.sessionId !== sessionId ||
-        turn.status !== "completed" ||
-        !turn.completedAt
-      ) {
-        continue;
-      }
-      if (!latestCompletedAt || turn.completedAt > latestCompletedAt) {
-        latestCompletedAt = turn.completedAt;
-      }
-    }
-    return latestCompletedAt;
-  }
-
-  private resolveLastUserMessageAt(sessionId: string): string | undefined {
-    let latestUserMessageAt: string | undefined;
-    for (const messageBlock of this.domainService.getSnapshot().messageBlocks) {
-      if (messageBlock.sessionId !== sessionId || messageBlock.role !== "user") {
-        continue;
-      }
-      if (!latestUserMessageAt || messageBlock.startedAt > latestUserMessageAt) {
-        latestUserMessageAt = messageBlock.startedAt;
-      }
-    }
-    return latestUserMessageAt;
   }
 
   public resolveProviderSessionHandle(
     sessionId: string
   ): ProviderSessionHandle | undefined {
-    const record = this.resolveSessionIndexRecord(sessionId);
-    if (!record?.providerKind || !record.providerSessionId) {
+    const session = this.domainService.getSession(sessionId);
+    if (!session) {
+      return undefined;
+    }
+    const binding = this.bindings.get(this.resolveSessionEngineId(session));
+    const providerSessionId = binding?.resolveProviderSessionId?.(sessionId);
+    if (!binding?.providerKind || !providerSessionId) {
       return undefined;
     }
     return {
-      providerKind: record.providerKind,
-      providerSessionId: record.providerSessionId
+      providerKind: binding.providerKind,
+      providerSessionId
     };
   }
 

@@ -1497,6 +1497,72 @@ describe("Desktop transport facade", () => {
     expect(batches.map((batch) => batch.length)).toEqual([1, 1, 1]);
   });
 
+  it("consumes hidden-window backlog without animation frames", async () => {
+    vi.stubGlobal("document", { visibilityState: "hidden" });
+    const raf = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", raf);
+    const preload = createPreloadMock();
+    const received: EventEnvelope[] = [];
+    const transport = createDesktopTransport(preload.api, { eventBatchMaxSize: 2 });
+    const subscription = await transport.events.subscribe({
+      isBackgroundStream: () => true,
+      onEnvelope: (envelope) => received.push(envelope)
+    });
+    try {
+      for (let index = 1; index <= 5; index += 1) {
+        preload.emitPush({
+          channel: "session.events", subscriptionId: "sub-1",
+          envelope: {
+            eventId: `hidden-${index}`, cursor: `cursor-${index}`, occurredAt: "2026-09-12T00:00:00.000Z",
+            event: { type: "message.delta", sessionId: "session-1", turnId: "turn-1", messageId: "message-1", delta: String(index) }
+          }
+        });
+      }
+      await vi.waitFor(() => expect(received).toHaveLength(5));
+      expect(received.map((e) => e.cursor)).toEqual(["cursor-1", "cursor-2", "cursor-3", "cursor-4", "cursor-5"]);
+      expect(raf).not.toHaveBeenCalled();
+    } finally {
+      await subscription.unsubscribe();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("yields after store ingestion exhausts the drain budget", async () => {
+    const scheduled: Array<() => void> = [];
+    const preload = createPreloadMock();
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    const received: EventEnvelope[] = [];
+    const transport = createDesktopTransport(preload.api, {
+      eventDrainBudgetMs: 8,
+      scheduleEventDrain: (callback) => { scheduled.push(callback); return () => undefined; }
+    });
+    const subscription = await transport.events.subscribe({
+      onEnvelope: () => undefined,
+      onEnvelopes: (batch) => { received.push(...batch); now += 9; }
+    });
+    try {
+      for (let index = 1; index <= 40; index += 1) {
+        preload.emitPush({
+          channel: "session.events", subscriptionId: "sub-1",
+          envelope: {
+            eventId: `budget-${index}`, cursor: `cursor-${index}`, occurredAt: "2026-09-12T00:00:00.000Z",
+            event: { type: "message.delta", sessionId: "session-1", turnId: "turn-1", messageId: "message-1", delta: String(index) }
+          }
+        });
+      }
+      scheduled.shift()!();
+      expect(received.length).toBeGreaterThan(0);
+      expect(received.length).toBeLessThan(40);
+      expect(scheduled).toHaveLength(1);
+      while (scheduled.length) scheduled.shift()!();
+      expect(received.map((e) => e.eventId)).toEqual(Array.from({ length: 40 }, (_, i) => `budget-${i + 1}`));
+    } finally {
+      await subscription.unsubscribe();
+      clock.mockRestore();
+    }
+  });
+
   it("reports backlog pressure for queued stream events", async () => {
     const scheduled: Array<() => void> = [];
     const preload = createPreloadMock();

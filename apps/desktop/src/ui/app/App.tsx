@@ -66,22 +66,18 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
   const [composerActions, setComposerActions] = useState<ComposerActions>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
+  const [sessionEntry, setSessionEntry] = useState<{ focusTree?: boolean; turnId?: string }>();
   const [navigationError, setNavigationError] = useState<string>();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchWorkItemTarget, setSearchWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
-    const tree = await transport.chatTree.get(targetSessionId);
-    const rootId = tree.treeId ?? targetSessionId;
-    await transport.sessionBrowser.open(rootId);
-    await transport.sessionBrowser.activate(targetSessionId, { focusTree: true });
-    if (turnId) await transport.chatTree.jump({ sessionId: targetSessionId, nodeId: turnId });
+    setSessionEntry({ focusTree: true, turnId });
     setNavigationTarget({ sessionId: targetSessionId, workspaceId });
     setSessionId(targetSessionId);
     if (workspaceFilterId && workspaceFilterId !== workspaceId) setWorkspaceFilterId(workspaceId);
-    sessionStore.dispatch({ type: "store/sessionBrowserChanged" });
     store.getState().browseWorkspace(workspaceId);
     store.setState({ workspaceSection: "sessions", panel: "workbench", overlay: undefined });
-  }, [store, sessionStore, transport, workspaceFilterId]);
+  }, [store, workspaceFilterId]);
   const openSearchWorkItem = useCallback((hit: SearchHit) => {
     if (!hit.workItemId) return;
     setSearchOpen(false);
@@ -162,6 +158,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       });
       sessionStore.dispatch({ type: "store/sessionBrowserChanged" });
       setSessionId(created.sessionId);
+      setSessionEntry(undefined);
       setNavigationTarget({ sessionId: created.sessionId, workspaceId: workspace.workspaceId });
       if (workspaceFilterId && workspaceFilterId !== workspace.workspaceId) setWorkspaceFilterId(workspace.workspaceId);
       return created.sessionId;
@@ -209,12 +206,14 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               if (!sessionId && id && section === "sessions") store.getState().setDraftWorkspace(id);
             }}
             onOpen={(id) => {
+              setSessionEntry({});
               const selected = sidebar.findSession(id);
               if (selected) setNavigationTarget({ sessionId: id, workspaceId: selected.workspaceId });
               setSessionId(id);
               store.getState().setWorkspaceSection("sessions");
             }}
             onNewChat={() => {
+              setSessionEntry(undefined);
               if (workspaceFilterId) store.getState().setDraftWorkspace(workspaceFilterId);
               setSessionId(undefined);
               store.getState().setWorkspaceSection("sessions");
@@ -237,6 +236,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   store={sessionStore}
                   transport={transport}
                   sessionId={sessionId}
+                  navigationEntry={sessionEntry}
                   reloadSignal={reloadSignal}
                   createSession={createSession}
                   initializeDraftExecution={initializeDraftExecution}
