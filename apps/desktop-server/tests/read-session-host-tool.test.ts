@@ -104,7 +104,6 @@ describe("createReadSessionHostTool", () => {
               minLength: 1
             }),
             limit: expect.objectContaining({
-              default: 50,
               maximum: 200
             }),
             maxChars: expect.objectContaining({
@@ -118,7 +117,7 @@ describe("createReadSessionHostTool", () => {
     ]);
   });
 
-  it("returns parseable collapsed transcript JSON", async () => {
+  it("returns parseable message transcript JSON", async () => {
     const tool = createReadSessionHostTool({
       getSnapshot: () => snapshot
     });
@@ -137,15 +136,13 @@ describe("createReadSessionHostTool", () => {
       : "";
     const parsed = JSON.parse(text) as {
       sessionId: string;
-      turns: Array<{ user: string[]; agentFinal?: string }>;
+      messages: Array<{ sender: string; text: string }>;
     };
     expect(parsed.sessionId).toBe("session-1");
-    expect(parsed.turns[0]).toEqual(
-      expect.objectContaining({
-        user: ["Please summarize this session."],
-        agentFinal: "Session summary is ready."
-      })
-    );
+    expect(parsed.messages).toEqual([
+      expect.objectContaining({ sender: "user", text: "Please summarize this session." }),
+      expect.objectContaining({ sender: "agent", text: "Session summary is ready." })
+    ]);
   });
 
   it("reads an already loaded non-partial session without rehydrating", async () => {
@@ -175,16 +172,14 @@ describe("createReadSessionHostTool", () => {
     const parsed = JSON.parse(text) as {
       sessionId: string;
       totalTurnCount: number;
-      turns: Array<{ user: string[]; agentFinal?: string }>;
+      messages: Array<{ sender: string; text: string }>;
     };
     expect(parsed.sessionId).toBe("session-1");
     expect(parsed.totalTurnCount).toBe(1);
-    expect(parsed.turns[0]).toEqual(
-      expect.objectContaining({
-        user: ["Please summarize this session."],
-        agentFinal: "Session summary is ready."
-      })
-    );
+    expect(parsed.messages).toEqual([
+      expect.objectContaining({ sender: "user", text: "Please summarize this session." }),
+      expect.objectContaining({ sender: "agent", text: "Session summary is ready." })
+    ]);
   });
 
   it("hydrates index-only sessions before reading the transcript", async () => {
@@ -220,15 +215,13 @@ describe("createReadSessionHostTool", () => {
       : "";
     const parsed = JSON.parse(text) as {
       sessionId: string;
-      turns: Array<{ user: string[]; agentFinal?: string }>;
+      messages: Array<{ sender: string; text: string }>;
     };
     expect(parsed.sessionId).toBe("session-1");
-    expect(parsed.turns[0]).toEqual(
-      expect.objectContaining({
-        user: ["Please summarize this session."],
-        agentFinal: "Session summary is ready."
-      })
-    );
+    expect(parsed.messages).toEqual([
+      expect.objectContaining({ sender: "user", text: "Please summarize this session." }),
+      expect.objectContaining({ sender: "agent", text: "Session summary is ready." })
+    ]);
   });
 
   it("forces full hydration before reading an already partially loaded session", async () => {
@@ -307,18 +300,15 @@ describe("createReadSessionHostTool", () => {
       sessionId: string;
       totalTurnCount: number;
       truncated: boolean;
-      turns: Array<{ user: string[]; agentFinal?: string }>;
+      messages: Array<{ messageId: string; sender: string; text: string }>;
     };
     expect(parsed.sessionId).toBe("session-1");
     expect(parsed.totalTurnCount).toBe(2);
     expect(parsed.truncated).toBe(false);
-    expect(parsed.turns).toHaveLength(2);
-    expect(parsed.turns[1]).toEqual(
-      expect.objectContaining({
-        user: ["What happened next?"],
-        agentFinal: "The full transcript is now loaded."
-      })
-    );
+    expect(parsed.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ messageId: "user-2", sender: "user", text: "What happened next?" }),
+      expect.objectContaining({ messageId: "assistant-final-2", sender: "agent", text: "The full transcript is now loaded." })
+    ]));
 
     const secondResult = await tool.handle({
       definition: tool,

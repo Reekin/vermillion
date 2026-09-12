@@ -26,7 +26,7 @@ import {
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
 import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, defaultCodexRolloutsDir, resolveAppCommand, startLocalEndpoint, type InboxItem } from "@vermillion/workbench";
-import { createAgentRunner } from "./agent-runner.js";
+import { createAgentRunner, createSessionSteerer, createSourceAsker } from "./agent-runner.js";
 import { createSessionNavigation } from "./session-navigation.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
 import {
@@ -746,8 +746,25 @@ const boot = async (): Promise<void> => {
   );
   const roleService = new RoleService({ globalDir: join(persistenceBaseDir, "roles"), defaultsDir: roleDefaultsDir });
   await roleService.ensureGlobal();
+  const agentRunner = createAgentRunner(service, "codex");
+  const sessionSteerer = createSessionSteerer(service);
+  const sourceAsker = createSourceAsker(service, async (workspaceId) => {
+    const workspace = (await service.listWorkspaces()).workspaces.find((entry) => entry.workspaceId === workspaceId);
+    if (!workspace) throw new Error("Workspace not found: " + workspaceId);
+    const role = await roleService.resolve(workspace.absolutePath, "design-partner");
+    return {
+      engineId: "codex",
+      cwd: workspace.absolutePath,
+      developerInstructions: role.content,
+      modelConfig: role.modelConfig
+    };
+  });
   const workbenchService = new WorkbenchService({
     roles: roleService,
+    sourceAsker,
+    sessionSteerer: async ({ sessionId, content }) => {
+      return sessionSteerer(sessionId, content);
+    },
     sessionSearch: () => service.listSessionSearchEntries(),
     rolloutsDir: defaultCodexRolloutsDir(),
     sessionNavigation: createSessionNavigation(service, persistenceBaseDir),
@@ -811,7 +828,7 @@ const boot = async (): Promise<void> => {
   const orchestrator = new Orchestrator({
     service: workbenchService,
     roles: roleService,
-    runner: createAgentRunner(service, "codex")
+    runner: agentRunner
   });
   orchestrator.start();
   app.on("before-quit", () => {

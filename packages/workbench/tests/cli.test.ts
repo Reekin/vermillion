@@ -99,6 +99,34 @@ describe("vermillion cli", () => {
     }
   });
 
+  it("routes asksource and steer through the running desktop endpoint", async () => {
+    const base = await mkdtemp(join(tmpdir(), "verm-cli-session-communication-"));
+    dirs.push(base);
+    process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+    const requests: Array<{ method: string; params: unknown }> = [];
+    const endpoint = await startLocalEndpoint(base, async (request) => {
+      requests.push(request);
+      if (request.method === "asksource") {
+        return { ok: true as const, result: { answer: "clarified", askSessionId: "ask", askTurnId: "ask-turn", archived: true } };
+      }
+      return { ok: true as const, result: { sessionId: "target", turnId: "turn", delivery: "started" } };
+    });
+    try {
+      const out: string[] = [];
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+      expect(await runCli(["asksource", JSON.stringify({ workspaceId: "ws", workItemId: "item", sessionId: "worker", question: "Clarify" })])).toBe(0);
+      expect(JSON.parse(out.pop()!).answer).toBe("clarified");
+      expect(await runCli(["steer", JSON.stringify({ sessionId: "target", content: "Continue" })])).toBe(0);
+      expect(JSON.parse(out.pop()!)).toEqual({ sessionId: "target", turnId: "turn", delivery: "started" });
+      expect(requests.filter((request) => request.method === "asksource" || request.method === "steer")).toEqual([
+        { method: "asksource", params: { workspaceId: "ws", workItemId: "item", sessionId: "worker", question: "Clarify" } },
+        { method: "steer", params: { sessionId: "target", content: "Continue" } }
+      ]);
+    } finally {
+      await endpoint.close();
+    }
+  });
+
   it("searches registered work items and rollout files through the CLI", async () => {
     const base = await mkdtemp(join(tmpdir(), "verm-cli-search-"));
     const root = await mkdtemp(join(tmpdir(), "verm-cli-search-ws-"));

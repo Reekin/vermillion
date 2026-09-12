@@ -1,10 +1,154 @@
 import type { createSessionRuntimeService } from "@vermillion/desktop-server";
-import type { AgentRunner } from "@vermillion/workbench";
+import type { AgentRunner, RoleExecutionOverrides, SessionSteerResult, SourceAsker } from "@vermillion/workbench";
 import { mergeSessionExecutionProfile, resolveEngineExecutionPreference, writeSessionExecutionProfile } from "@vermillion/shared";
 
 type SessionShell = ReturnType<typeof createSessionRuntimeService>;
 
 const createId = (): string => "cmd-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+
+type SourceAskRole = {
+  engineId: string;
+  cwd: string;
+  developerInstructions: string;
+  modelConfig?: RoleExecutionOverrides;
+};
+
+type SourceAskRoleResolver = (workspaceId: string) => Promise<SourceAskRole>;
+
+const resolveActiveTurnId = (shell: SessionShell, sessionId: string): string | undefined =>
+  shell.getActiveTurnId(sessionId) ?? shell.getSnapshot().turns
+    .filter((turn) => turn.sessionId === sessionId && turn.status !== "completed")
+    .at(-1)?.turnId;
+
+const lastAssistantText = (shell: SessionShell, sessionId: string): string | undefined => {
+  const snapshot = shell.getSnapshot();
+  const turn = snapshot.turns.filter((entry) => entry.sessionId === sessionId).at(-1);
+  if (!turn) return undefined;
+  const text = snapshot.messageBlocks
+    .filter((block) => block.turnId === turn.turnId && block.role === "assistant" && block.phase !== "commentary" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+  return text || undefined;
+};
+
+/** Deliver a message to an active turn, or start a new turn in the same session. */
+export const createSessionSteerer = (shell: SessionShell) => async (sessionId: string, content: string): Promise<SessionSteerResult> => {
+  if (!await shell.ensureSessionLoadedForRead(sessionId)) {
+    throw new Error("Session not found: " + sessionId);
+  }
+  const activeTurnId = resolveActiveTurnId(shell, sessionId);
+  const command = activeTurnId
+    ? { type: "steerTurn" as const, sessionId, turnId: activeTurnId, messageId: createId(), content, attachments: [] }
+    : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
+  const receipt = await shell.executeCommand({ commandId: createId(), command });
+  if (!receipt.accepted || !receipt.turnId) throw new Error("steer was not accepted for " + sessionId);
+  return {
+    sessionId,
+    turnId: receipt.turnId,
+    delivery: receipt.delivery === "steered" ? "steered" : "started"
+  };
+};
+
+/** Ask the design session at a work item's recorded source position through a disposable fork. */
+export const createSourceAsker = (
+  shell: SessionShell,
+  resolveRole: SourceAskRoleResolver
+): SourceAsker => async (input) => {
+  if (!await shell.ensureSessionLoadedForRead(input.sourceSessionId)) {
+    throw new Error("Source session not found: " + input.sourceSessionId);
+  }
+  const role = await resolveRole(input.workspaceId);
+  const settings = await shell.getSettings();
+  const execution = mergeSessionExecutionProfile(
+    resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[role.engineId]),
+    role.modelConfig
+  );
+  const sessionProfile = writeSessionExecutionProfile({
+    role: "design-partner",
+    sourceSessionId: input.sourceSessionId,
+    sourceTurnId: input.sourceTurnId,
+    workItemId: input.workItemId,
+    asksource: true
+  }, { engineId: role.engineId, ...execution });
+  const forked = await shell.runSessionAction({
+    sessionId: input.sourceSessionId,
+    action: "fork",
+    fromTurnId: input.sourceTurnId,
+    activateFork: false,
+    cwd: role.cwd,
+    developerInstructions: role.developerInstructions,
+    metadata: sessionProfile
+  });
+  if (forked.action !== "fork" || forked.status !== "forked") {
+    throw new Error("Source ask fork unavailable: " + input.sourceSessionId);
+  }
+
+  const askSessionId = forked.forkedSessionId;
+  let askTurnId: string | undefined;
+  let answer: string | undefined;
+  let askError: string | undefined;
+  let archiveError: string | undefined;
+  let unsubscribeCompleted: (() => void) | undefined;
+  try {
+    if (!await shell.ensureSessionLoadedForRead(askSessionId)) {
+      throw new Error("Source ask fork could not be loaded: " + askSessionId);
+    }
+    await shell.setSessionTitle(askSessionId, "澄清 · " + input.question.slice(0, 40));
+    const completed = new Promise<{ turnId: string; finishReason: string }>((resolve) => {
+      unsubscribeCompleted = shell.subscribe((envelope) => {
+        if (envelope.event.type === "turn.completed" && envelope.event.sessionId === askSessionId) {
+          unsubscribeCompleted?.();
+          unsubscribeCompleted = undefined;
+          resolve({ turnId: envelope.event.turnId, finishReason: envelope.event.finishReason });
+        }
+      }, { eventTypes: ["turn.completed"] });
+    });
+    const receipt = await shell.executeCommand({
+      commandId: createId(),
+      command: {
+        type: "sendUserMessage",
+        sessionId: askSessionId,
+        messageId: createId(),
+        content: input.question,
+        attachments: [],
+        execution: {
+          ...(execution.modelId ? { modelId: execution.modelId } : {}),
+          ...(execution.reasoningOptionId ? { reasoningOptionId: execution.reasoningOptionId } : {}),
+          ...(execution.serviceTierId !== undefined ? { serviceTierId: execution.serviceTierId } : {})
+        }
+      }
+    });
+    if (!receipt.accepted || !receipt.turnId) throw new Error("Source ask message was not accepted.");
+    askTurnId = receipt.turnId;
+    const result = await completed;
+    askTurnId = result.turnId;
+    if (result.finishReason !== "completed") throw new Error("Source ask turn ended: " + result.finishReason);
+    answer = lastAssistantText(shell, askSessionId) ?? "";
+  } catch (error) {
+    askError = error instanceof Error ? error.message : String(error);
+  } finally {
+    unsubscribeCompleted?.();
+    unsubscribeCompleted = undefined;
+    try {
+      await shell.runSessionAction({ sessionId: askSessionId, action: "archive" });
+    } catch (error) {
+      archiveError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  if (askError) {
+    throw new Error("asksource failed: " + askError + (archiveError ? "; temporary fork archive failed: " + archiveError : "; temporary fork archived."));
+  }
+  if (!askTurnId) throw new Error("Source ask completed without a turn id." + (archiveError ? " Temporary fork archive failed: " + archiveError : ""));
+  return {
+    answer: answer ?? "",
+    askSessionId,
+    askTurnId,
+    archived: !archiveError,
+    ...(archiveError ? { archiveError } : {})
+  };
+};
 
 /** Background agent sessions for the orchestrator: same engine and session list as the UI, opened headlessly. */
 export const createAgentRunner = (shell: SessionShell, engineId: string): AgentRunner => ({
@@ -67,7 +211,8 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     return { turnId: receipt.turnId };
   },
   steer: async (sessionId, content) => {
-    const turnId = shell.getActiveTurnId(sessionId);
+    if (!await shell.ensureSessionLoadedForRead(sessionId)) throw new Error("Session not found: " + sessionId);
+    const turnId = resolveActiveTurnId(shell, sessionId);
     const command = turnId
       ? { type: "steerTurn" as const, sessionId, turnId, messageId: createId(), content, attachments: [] }
       : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
