@@ -850,6 +850,36 @@ export const SessionPane = ({
       );
     }
   }, [executionRecoveryMessage, executionRecoveryStatus, setStatusNotice, viewSessionId]);
+  const chatTreeRefresh = displayedSession?.metadata?.chatTreeRefresh;
+  const chatTreeRefreshStatus =
+    chatTreeRefresh && typeof chatTreeRefresh === "object" && "status" in chatTreeRefresh
+      ? chatTreeRefresh.status
+      : undefined;
+  const chatTreeRefreshMessage =
+    chatTreeRefresh && typeof chatTreeRefresh === "object" && "message" in chatTreeRefresh &&
+      typeof chatTreeRefresh.message === "string"
+      ? chatTreeRefresh.message
+      : undefined;
+  useEffect(() => {
+    if (!viewSessionId) return;
+    if (chatTreeRefreshStatus === "failed") {
+      setStatusNotice((current) => current && current.source !== "chat-tree"
+        ? current
+        : {
+            message: `Chat tree refresh failed: ${chatTreeRefreshMessage ?? "Unknown error"}`,
+            persistent: true,
+            source: "chat-tree",
+            severity: "error",
+            context: { chatTreeRefreshSessionId: viewSessionId }
+          });
+      return;
+    }
+    if (chatTreeRefreshStatus === "ready") {
+      setStatusNotice((current) =>
+        current?.context?.chatTreeRefreshSessionId === viewSessionId ? undefined : current
+      );
+    }
+  }, [chatTreeRefreshMessage, chatTreeRefreshStatus, setStatusNotice, viewSessionId]);
 
   useRendererDiagnostics({
     transport,

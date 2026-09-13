@@ -33,6 +33,7 @@ const fixture = async () => {
   let listener: (event: EventEnvelope) => void = () => {};
   const load = vi.fn().mockResolvedValue(true);
   const changed = vi.fn();
+  const updateSessionMetadata = vi.fn().mockResolvedValue(undefined);
   const fork = vi.fn(async (_sessionId: string, _turnId: string) => "branch");
   const service = new WrapperChatTreeService({
     sessionIndexStore: index,
@@ -41,12 +42,13 @@ const fixture = async () => {
       getSnapshot: () => snapshot,
       getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
       getRevision: () => "initial",
+      updateSessionMetadata,
       notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
     fork
   });
-  return { service, index, snapshot, load, fork, baseDir, changed,
+  return { service, index, snapshot, load, fork, baseDir, changed, updateSessionMetadata,
     completed: (sessionId: string, turnId: string) => listener({ event: { type: "turn.completed", sessionId, turnId, finishReason: "completed" } } as EventEnvelope),
     started: (sessionId: string, turnId: string) => listener({ event: { type: "turn.started", sessionId, turnId } } as EventEnvelope) };
 };
@@ -232,9 +234,13 @@ describe("wrapper session trees", () => {
       "a", "b", "c"
     ]);
     await vi.waitFor(() => expect(f.changed).toHaveBeenCalledTimes(1));
-    await expect(f.service.get("root")).rejects.toThrow("reload failed");
-    await expect(f.service.get("root")).rejects.toThrow("reload failed");
+    expect((await f.service.get("root")).currentNodeId).toBe("b");
+    expect((await f.service.get("root")).currentNodeId).toBe("b");
     await expect(f.service.jump("root", "c")).resolves.toEqual({ jumped: true });
+    expect((await f.service.get("root")).currentNodeId).toBe("c");
+    expect(f.updateSessionMetadata).toHaveBeenCalledWith("root", {
+      chatTreeRefresh: { status: "failed", message: "reload failed" }
+    });
     expect(f.load).toHaveBeenCalledTimes(4);
     f.service.dispose();
   });

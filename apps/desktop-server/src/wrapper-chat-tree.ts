@@ -142,17 +142,26 @@ export class WrapperChatTreeService {
     const generation = state.generation;
     const hadPublished = Boolean(state.published);
     state.loading = this.loadTree(sessionId, generation)
-      .then((projection) => {
+      .then(async (projection) => {
         if (!projection || state.generation !== generation) return;
         state.published = projection;
         state.publishedGeneration = generation;
         state.loadError = undefined;
-        if (hadPublished) this.changed(sessionId);
+        if (hadPublished) {
+          await this.reportTreeRefresh(sessionId, { status: "ready" });
+          this.changed(sessionId);
+        }
       })
-      .catch((error) => {
+      .catch(async (error) => {
         if (state.generation === generation) {
           state.loadError = error;
-          if (state.published) this.changed(sessionId);
+          if (state.published) {
+            await this.reportTreeRefresh(sessionId, {
+              status: "failed",
+              message: error instanceof Error ? error.message : String(error)
+            });
+            this.changed(sessionId);
+          }
         }
       })
       .finally(() => {
@@ -160,6 +169,27 @@ export class WrapperChatTreeService {
         if (state.generation !== generation) void this.startTreeLoad(sessionId, state);
       });
     return state.loading;
+  }
+
+  private async reportTreeRefresh(
+    sessionId: string,
+    chatTreeRefresh: { status: "ready" | "failed"; message?: string }
+  ): Promise<void> {
+    const update = (this.options.runtimeService as SessionRuntimeService & {
+      updateSessionMetadata?: SessionRuntimeService["updateSessionMetadata"];
+    }).updateSessionMetadata;
+    if (typeof update !== "function") return;
+    await Promise.all(this.options.sessionIndexStore.getTreeMembers(sessionId).map(async (memberId) => {
+      try {
+        await update.call(this.options.runtimeService, memberId, { chatTreeRefresh });
+      } catch (error) {
+        console.warn("[vermillion] Failed to persist chat tree refresh status", {
+          sessionId: memberId,
+          status: chatTreeRefresh.status,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }));
   }
 
   private async loadPublishedTreeChanges(sessionId: string): Promise<void> {
@@ -320,7 +350,7 @@ export class WrapperChatTreeService {
     while (true) {
       const state = this.treeState(sessionId);
       if (state.publishedGeneration !== state.generation) {
-        if (state.loadError && !state.loading) throw state.loadError;
+        if (state.loadError && !state.loading && state.published) return state.published.tree;
         const loading = this.startTreeLoad(sessionId, state);
         if (!state.published) {
           await loading;
