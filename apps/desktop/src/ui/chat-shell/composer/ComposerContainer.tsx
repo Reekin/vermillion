@@ -46,6 +46,7 @@ export type ComposerContainerProps = {
   pendingExecution?: ComposerExecutionSelection;
   pendingBranchSend?: ChatTreeSendOperation;
   recoveredBranchSends?: ChatTreeSendOperation[];
+  onRecoveredBranchSendConsumed?: (operationId: string) => void;
   skillsCwd?: string;
   turns: Turn[];
   interruptTurns: Turn[];
@@ -92,6 +93,7 @@ export const ComposerContainer = memo(({
   pendingExecution,
   pendingBranchSend,
   recoveredBranchSends,
+  onRecoveredBranchSendConsumed,
   skillsCwd,
   turns,
   interruptTurns,
@@ -134,6 +136,7 @@ export const ComposerContainer = memo(({
     pendingExecution,
     pendingBranchSend,
     recoveredBranchSends,
+    onRecoveredBranchSendConsumed,
     skillsCwd,
     turns,
     interruptTurns,

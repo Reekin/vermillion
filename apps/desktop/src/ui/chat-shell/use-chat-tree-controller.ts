@@ -86,6 +86,9 @@ export const useChatTreeController = (input: {
   const [failedEntry, setFailedEntry] = useState<ChatTreeEntry | undefined>();
   const [treeFailure, setTreeFailure] = useState<{ entry: ChatTreeEntry; message: string }>();
   const [recoveredSends, setRecoveredSends] = useState<ChatTreeSendOperation[]>([]);
+  const consumeRecoveredSend = useCallback((operationId: string) => {
+    setRecoveredSends((current) => current.filter((item) => item.operationId !== operationId));
+  }, []);
   const [selectedSend, setSelectedSend] = useState<string>();
   const selectedSendRef = useRef<string | undefined>(undefined);
   const navigationRef = useRef(0);
@@ -454,6 +457,7 @@ export const useChatTreeController = (input: {
       }
     },
     recoveredSends,
+    consumeRecoveredSend,
     prepareSend: async (): Promise<string> => {
       if (!sessionId) throw new Error("Select a session before sending.");
       const result = await transport.chatTree.prepareSend({

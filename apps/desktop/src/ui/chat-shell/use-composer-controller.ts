@@ -369,6 +369,7 @@ type UseComposerControllerInput = {
   /** Configuration captured when an asynchronous branch send was submitted. */
   pendingExecution?: ComposerExecutionSelection;
   recoveredBranchSends?: ChatTreeSendOperation[];
+  onRecoveredBranchSendConsumed?: (operationId: string) => void;
   pendingBranchSend?: ChatTreeSendOperation;
   /** Working directory used to resolve project-scoped skills. */
   skillsCwd?: string;
@@ -474,7 +475,6 @@ export const useComposerController = (
   const detachedAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
-  const restoredOperationIdsRef = useRef(new Set<string>());
   const previousContentDraftKeyRef = useRef(contentDraftKey);
   const executionKey = draftKey ?? input.activeSessionId;
   const previousExecutionKeyRef = useRef(executionKey);
@@ -920,11 +920,9 @@ export const useComposerController = (
   };
 
   useEffect(() => {
-    const recovered = input.recoveredBranchSends?.find((operation) =>
-      !restoredOperationIdsRef.current.has(operation.operationId));
-    if (!recovered || restoredOperationIdsRef.current.has(recovered.operationId) ||
+    const recovered = input.recoveredBranchSends?.[0];
+    if (!recovered ||
       draft.trim().length > 0 || attachments.length > 0 || selectedSkills.length > 0) return;
-    restoredOperationIdsRef.current.add(recovered.operationId);
     onDraftChange(recovered.content);
     setRecoveredExecution(recovered.execution?.modelId
       ? { modelId: recovered.execution.modelId,
@@ -933,7 +931,8 @@ export const useComposerController = (
       : undefined);
     replaceAttachmentsForSession(contentDraftKey,
       recovered.attachments.map((attachment) => restoreComposerAttachment(attachment)));
-  }, [attachments.length, contentDraftKey, draft, input.recoveredBranchSends, selectedSkills.length]);
+    input.onRecoveredBranchSendConsumed?.(recovered.operationId);
+  }, [attachments.length, contentDraftKey, draft, input.recoveredBranchSends, input.onRecoveredBranchSendConsumed, selectedSkills.length]);
 
   const appendQueueItem = (
     item: Omit<QueuedComposerMessage, "id" | "createdAt">

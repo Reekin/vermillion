@@ -98,6 +98,28 @@ beforeEach(() => {
 });
 
 describe("composer content lifetime", () => {
+  it("consumes a recovered send after the existing draft clears without restoring it again", async () => {
+    const consumed = vi.fn();
+    const h = setup({ onRecoveredBranchSendConsumed: consumed });
+    let c = await h.flush();
+    c.onDraftChange("new draft");
+    c = h.render({ recoveredBranchSends: [{ operationId: "cancelled", sessionId: "a", nodeId: "old",
+      content: "recovered", attachments: [attachment.attachment], status: "creating", execution: { modelId: "two" } }] });
+    expect(c.draft).toBe("new draft");
+    expect(consumed).not.toHaveBeenCalled();
+    c.onDraftChange("");
+    c = h.render();
+    expect(c.draft).toBe("recovered");
+    expect(c.attachments[0]?.attachment).toEqual(attachment.attachment);
+    expect(c.execution?.modelId).toBe("two");
+    expect(consumed).toHaveBeenCalledExactlyOnceWith("cancelled");
+    c = h.render({ recoveredBranchSends: [] });
+    c.onDraftChange("");
+    c.onRemoveAttachment("image");
+    expect(h.render().draft).toBe("");
+    expect(h.send).not.toHaveBeenCalled();
+  });
+
   it.each(["idle", "running"] as const)("submits composed payload directly through a handler from a %s source", async (status) => {
     const prepareSend = vi.fn();
     const submitBranch = vi.fn();

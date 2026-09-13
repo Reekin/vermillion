@@ -742,7 +742,8 @@ export const SessionPane = ({
     pendingSend,
     retrySend,
     cancelSend: cancelChatTreeSend,
-    recoveredSends
+    recoveredSends,
+    consumeRecoveredSend
   } = useChatTreeController({
     store,
     transport,
@@ -1234,6 +1235,7 @@ export const SessionPane = ({
           pendingExecution={toComposerExecutionSelection(pendingSend?.execution)}
           pendingBranchSend={pendingSend}
           recoveredBranchSends={recoveredSends}
+          onRecoveredBranchSendConsumed={consumeRecoveredSend}
           skillsCwd={skillsCwd}
           turns={composerTurns}
           interruptTurns={composerTurns}

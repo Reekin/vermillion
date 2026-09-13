@@ -13,13 +13,13 @@ type SendOperationState = {
   cleanup?: Promise<ChatTreeSendOperation>;
 };
 
+type TreeLoadState = { published: boolean; loading?: Promise<void> };
+
 /** Fork membership and the viewing cursor belong to the wrapper, independently of running turns. */
 export class WrapperChatTreeService {
   private readonly loaded = new Set<string>();
   private readonly loading = new Map<string, Promise<void>>();
-  private readonly publishedTrees = new Set<string>();
-  private readonly treeVersions = new Map<string, number>();
-  private readonly treeLoading = new Map<string, { version: number; promise: Promise<void> }>();
+  private readonly trees = new Map<string, TreeLoadState>();
   private readonly operations = new Map<string, SendOperationState>();
   private readonly unsubscribe: () => void;
 
@@ -46,11 +46,20 @@ export class WrapperChatTreeService {
 
   public dispose(): void { this.unsubscribe(); }
 
+  private treeState(sessionId: string): TreeLoadState {
+    const treeId = this.options.sessionIndexStore.getTreeId(sessionId);
+    let state = this.trees.get(treeId);
+    if (!state) {
+      state = { published: false };
+      this.trees.set(treeId, state);
+    }
+    return state;
+  }
+
   public invalidate(sessionId: string): void {
     const index = this.options.sessionIndexStore;
     const treeId = index.getTreeId(sessionId);
-    this.publishedTrees.delete(treeId);
-    this.treeVersions.set(treeId, (this.treeVersions.get(treeId) ?? 0) + 1);
+    this.trees.delete(treeId);
     for (const memberId of index.getTreeMembers(sessionId)) {
       this.loaded.delete(memberId);
     }
@@ -63,8 +72,7 @@ export class WrapperChatTreeService {
         await existing;
         continue;
       }
-      const treeId = this.options.sessionIndexStore.getTreeId(sessionId);
-      const version = this.treeVersions.get(treeId) ?? 0;
+      const state = this.treeState(sessionId);
       const task = (async () => {
         const session = this.options.runtimeService.getSession(sessionId);
         const entry = this.options.sessionIndexStore.getEntry(sessionId);
@@ -75,7 +83,7 @@ export class WrapperChatTreeService {
           if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt) return;
           throw new Error(`Unable to load tree member: ${sessionId}`);
         }
-        if ((this.treeVersions.get(treeId) ?? 0) === version) this.loaded.add(sessionId);
+        if (this.treeState(sessionId) === state) this.loaded.add(sessionId);
       })();
       this.loading.set(sessionId, task);
       try {
@@ -84,7 +92,7 @@ export class WrapperChatTreeService {
         if (this.loading.get(sessionId) === task) this.loading.delete(sessionId);
       }
       if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt && !this.loaded.has(sessionId) &&
-        (this.treeVersions.get(treeId) ?? 0) === version) return;
+        this.treeState(sessionId) === state) return;
     }
   }
 
@@ -100,25 +108,6 @@ export class WrapperChatTreeService {
       }
       const current = index.getTreeMembers(sessionId);
       if (current.every((id) => this.loaded.has(id) || index.getEntry(id)?.archivedAt)) return;
-    }
-  }
-
-  private async ensureTreePublished(sessionId: string): Promise<void> {
-    const treeId = this.options.sessionIndexStore.getTreeId(sessionId);
-    while (!this.publishedTrees.has(treeId)) {
-      const version = this.treeVersions.get(treeId) ?? 0;
-      let loading = this.treeLoading.get(treeId);
-      if (!loading || loading.version !== version) {
-        const promise = this.loadTree(sessionId);
-        loading = { version, promise };
-        this.treeLoading.set(treeId, loading);
-      }
-      try {
-        await loading.promise;
-      } finally {
-        if (this.treeLoading.get(treeId) === loading) this.treeLoading.delete(treeId);
-      }
-      if ((this.treeVersions.get(treeId) ?? 0) === version) this.publishedTrees.add(treeId);
     }
   }
 
@@ -230,13 +219,16 @@ export class WrapperChatTreeService {
   public async get(sessionId: string): Promise<ChatTreeSnapshot> {
     await this.options.sessionIndexStore.ready();
     const index = this.options.sessionIndexStore;
-    const treeId = index.getTreeId(sessionId);
     let tree: ChatTreeSnapshot;
     while (true) {
-      await this.ensureTreePublished(sessionId);
-      const version = this.treeVersions.get(treeId) ?? 0;
+      const state = this.treeState(sessionId);
+      if (!state.published) {
+        state.loading ??= this.loadTree(sessionId).finally(() => { state.loading = undefined; });
+        await state.loading;
+      }
       await this.loadPublishedTreeChanges(sessionId);
-      if ((this.treeVersions.get(treeId) ?? 0) !== version || !this.publishedTrees.has(treeId)) continue;
+      if (this.treeState(sessionId) !== state) continue;
+      state.published = true;
       const members = index.getTreeMembers(sessionId);
       for (const id of members.filter((id) => !this.loaded.has(id) && !this.loading.has(id))) {
         void this.loadMember(id).then(() => this.changed(sessionId)).catch(() => {});
