@@ -942,39 +942,20 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     this.resolveHistoryCwd = options.resolveHistoryCwd;
   }
 
-  private readHistoryThread(
-    threadId: string,
-    includeTurns: boolean,
-    signal?: AbortSignal
-  ): Promise<Thread> {
-    return signal
-      ? this.codexRuntimePort.readThread(threadId, includeTurns, { signal })
-      : this.codexRuntimePort.readThread(threadId, includeTurns);
-  }
-
-  private resumeHistoryThread(
-    threadId: string,
-    cwd: string | undefined,
-    signal?: AbortSignal
-  ): Promise<Thread> {
-    return signal
-      ? this.codexRuntimePort.resumeThread(threadId, cwd, undefined, { signal })
-      : this.codexRuntimePort.resumeThread(threadId, cwd);
-  }
-
   private async withHistory<T>(
     entry: SessionIndexEntry,
     read: (thread: Thread, restored: boolean) => Promise<T>,
     signal?: AbortSignal,
     retainExecution = false
   ): Promise<T> {
-    const header = await this.readHistoryThread(entry.providerSessionId!, false, signal);
+    const header = await this.codexRuntimePort.readThread(entry.providerSessionId!, false, { signal });
     const restored = !entry.archivedAt && header.status.type === "notLoaded";
     const thread = restored
-      ? await this.resumeHistoryThread(
+      ? await this.codexRuntimePort.resumeThread(
           header.id,
           this.resolveHistoryCwd?.(entry.workspaceId) ?? header.cwd,
-          signal
+          undefined,
+          { signal }
         )
       : header;
     try {
@@ -1062,10 +1043,11 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       && !this.codexRuntimePort.isThreadExecutionReleased(threadId)) {
       return true;
     }
-    const thread = await this.resumeHistoryThread(
+    const thread = await this.codexRuntimePort.resumeThread(
       threadId,
       this.resolveHistoryCwd?.(entry.workspaceId),
-      input.signal
+      undefined,
+      { signal: input.signal }
     );
     this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id);
     return true;
@@ -1088,13 +1070,13 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       if (!entry.archivedAt || !input.historySources) {
         return this.withHistory(entry, read, input.signal, input.retainExecution);
       }
-      const header = await this.readHistoryThread(threadId, false, input.signal);
+      const header = await this.codexRuntimePort.readThread(threadId, false, { signal: input.signal });
       let sharedTurns: Thread["turns"] = [];
       for (const source of input.historySources) {
         const turns = await this.withHistory(source.entry, async (thread, restored) => {
           const history = restored
             ? thread
-            : await this.readHistoryThread(thread.id, true, input.signal);
+            : await this.codexRuntimePort.readThread(thread.id, true, { signal: input.signal });
           const end = history.turns.findIndex((turn) => source.sourceTurnIds.includes(turn.id));
           if (end < 0) throw new Error(`Fork points ${source.sourceTurnIds.join(", ")} are missing from ${thread.id}`);
           return history.turns.slice(0, end + 1);
@@ -1107,7 +1089,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     return readHistory(async (header, restored) => {
       const thread = restored
         ? header
-        : await this.readHistoryThread(threadId, true, input.signal);
+        : await this.codexRuntimePort.readThread(threadId, true, { signal: input.signal });
       if (input.isCancelled?.()) {
         return undefined;
       }
@@ -1205,9 +1187,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
           sortDirection: "desc",
           itemsView: "full"
         } as const;
-      const turnsPage = input.signal
-        ? await this.codexRuntimePort.listThreadTurns(turnsInput, { signal: input.signal })
-        : await this.codexRuntimePort.listThreadTurns(turnsInput);
+      const turnsPage = await this.codexRuntimePort.listThreadTurns(turnsInput, { signal: input.signal });
       if (input.isCancelled?.()) {
         return undefined;
       }
@@ -1224,7 +1204,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
           .map((turn) => turn.id)
       );
       if (incompleteTurnIds.size > 0) {
-        const completeThread = await this.readHistoryThread(threadId, true, input.signal);
+        const completeThread = await this.codexRuntimePort.readThread(threadId, true, { signal: input.signal });
         const completeTurnsById = new Map(
           completeThread.turns
             .filter(

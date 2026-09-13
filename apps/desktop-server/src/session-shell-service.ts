@@ -1308,12 +1308,8 @@ export class SessionShellService {
     sessionId: string,
     executionRecovery: { status: "pending" | "ready" | "failed"; message?: string }
   ): Promise<void> {
-    const update = (this.runtimeService as SessionRuntimeService & {
-      updateSessionMetadata?: SessionRuntimeService["updateSessionMetadata"];
-    }).updateSessionMetadata;
-    if (typeof update !== "function") return;
     try {
-      await update.call(this.runtimeService, sessionId, { executionRecovery });
+      await this.runtimeService.updateSessionMetadata(sessionId, { executionRecovery });
     } catch (error) {
       console.warn("[vermillion] Failed to persist session execution recovery", {
         sessionId,

@@ -175,13 +175,9 @@ export class WrapperChatTreeService {
     sessionId: string,
     chatTreeRefresh: { status: "ready" | "failed"; message?: string }
   ): Promise<void> {
-    const update = (this.options.runtimeService as SessionRuntimeService & {
-      updateSessionMetadata?: SessionRuntimeService["updateSessionMetadata"];
-    }).updateSessionMetadata;
-    if (typeof update !== "function") return;
     await Promise.all(this.options.sessionIndexStore.getTreeMembers(sessionId).map(async (memberId) => {
       try {
-        await update.call(this.options.runtimeService, memberId, { chatTreeRefresh });
+        await this.options.runtimeService.updateSessionMetadata(memberId, { chatTreeRefresh });
       } catch (error) {
         console.warn("[vermillion] Failed to persist chat tree refresh status", {
           sessionId: memberId,

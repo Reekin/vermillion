@@ -29,6 +29,7 @@ class FailingOutput extends EventEmitter {
   }
 }
 
+const clients = new Set<JsonRpcLineClient>();
 const createClient = (options: {
   ids?: Array<string | number>;
   timeoutMs?: number;
@@ -51,6 +52,7 @@ const createClient = (options: {
       return id;
     }
   });
+  clients.add(client);
   return {
     client,
     input,
@@ -60,6 +62,8 @@ const createClient = (options: {
 
 describe("JsonRpcLineClient", () => {
   afterEach(() => {
+    for (const client of clients) client.dispose();
+    clients.clear();
     vi.useRealTimers();
   });
 
@@ -349,4 +353,65 @@ describe("JsonRpcLineClient", () => {
       methods: { "<response>": 1 }
     });
   });
+
+  it("keeps a new connection's parser independent of a retiring worker", async () => {
+    const { client, input } = createClient({ timeoutMs: 10_000 });
+    const notifications: string[] = [];
+    const errors: Error[] = [];
+    client.onNotification(({ method }) => { notifications.push(method); });
+    client.onProtocolError((error) => { errors.push(error); });
+    const oldRequest = client.request("old");
+    const rejected = expect(oldRequest).rejects.toThrow("reconnect");
+    input.write(JSON.stringify({ id: "1", result: "x".repeat(300_000) }) +
+      '\n{"method":"old/notification"}\n');
+    client.dispose(new Error("reconnect"));
+    const nextInput = new PassThrough();
+    client.attach({ input: nextInput, output: new PassThrough() });
+    const nextRequest = client.request("new");
+    const result = "new".repeat(1_000_000);
+    nextInput.write(JSON.stringify({ id: "2", result }) + '\n{"method":"new/notification"}\n');
+    await rejected;
+    await expect(nextRequest).resolves.toBe(result);
+    expect(notifications).toEqual(["new/notification"]);
+    expect(errors).toEqual([]);
+  });
+
+  it("continues in wire order after a malformed large line", async () => {
+    const { client, input } = createClient();
+    const order: string[] = [];
+    client.onProtocolError(() => { order.push("error"); });
+    client.onNotification(({ method }) => { order.push(method); });
+    input.write('{"bad":' + "x".repeat(300_000) + '\n{"method":"after"}\n');
+    await vi.waitFor(() => expect(order).toEqual(["error", "after"]));
+  });
+
+  it("receives a 26 MB history in pipe-sized chunks without second-long stalls", async () => {
+    const { client, input } = createClient({ timeoutMs: 20_000 });
+    const items = Array.from({ length: 26_000 }, (_, id) => ({ id, text: "x".repeat(1_000) }));
+    const wire = JSON.stringify({ id: "1", result: items }) + "\n";
+    let maxLagMs = 0;
+    let lastTick = performance.now();
+    const ticker = setInterval(() => {
+      const now = performance.now();
+      maxLagMs = Math.max(maxLagMs, now - lastTick);
+      lastTick = now;
+    }, 5);
+    const startedAt = performance.now();
+    try {
+      const request = client.request("large-history");
+      for (let offset = 0; offset < wire.length; offset += 65_536) {
+        input.write(wire.slice(offset, offset + 65_536));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      const result = await request as typeof items;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      expect(result).toHaveLength(items.length);
+      expect(result.at(-1)).toEqual(items.at(-1));
+      expect(maxLagMs).toBeLessThan(1_000);
+      console.info({ bytes: wire.length, elapsedMs: Math.round(performance.now() - startedAt),
+        maxEventLoopGapMs: Math.round(maxLagMs) });
+    } finally {
+      clearInterval(ticker);
+    }
+  }, 20_000);
 });

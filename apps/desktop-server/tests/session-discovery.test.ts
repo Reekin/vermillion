@@ -270,7 +270,7 @@ describe("Session discovery and reconciliation", () => {
     } as never)).resolves.toBe(true);
 
     expect(resolveHistoryCwd).toHaveBeenCalledExactlyOnceWith("workspace-1");
-    expect(resumeThread).toHaveBeenCalledExactlyOnceWith("thread-main", "I:/workspace-alpha");
+    expect(resumeThread).toHaveBeenCalledExactlyOnceWith("thread-main", "I:/workspace-alpha", undefined, { signal: undefined });
     expect(attachThreadToSession).toHaveBeenCalledWith(
       "codex-thread:thread-main",
       "thread-main"
@@ -605,14 +605,14 @@ describe("Session discovery and reconciliation", () => {
         ]
       })
     );
-    expect(readThread).toHaveBeenCalledWith("thread-page", false);
+    expect(readThread).toHaveBeenCalledWith("thread-page", false, { signal: undefined });
     expect(listThreadTurns).toHaveBeenCalledWith({
       threadId: "thread-page",
       cursor: "cursor-1",
       limit: 1,
       sortDirection: "desc",
       itemsView: "full"
-    });
+    }, { signal: undefined });
     expect(resumeThread).not.toHaveBeenCalled();
     expect(attachThreadToSession).toHaveBeenCalledWith(
       "codex-thread:thread-page",
@@ -711,8 +711,8 @@ describe("Session discovery and reconciliation", () => {
       }
     );
 
-    expect(readThread).toHaveBeenNthCalledWith(1, "thread-page", false);
-    expect(readThread).toHaveBeenNthCalledWith(2, "thread-page", true);
+    expect(readThread).toHaveBeenNthCalledWith(1, "thread-page", false, { signal: undefined });
+    expect(readThread).toHaveBeenNthCalledWith(2, "thread-page", true, { signal: undefined });
     expect(hydrated?.messageBlocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -789,7 +789,7 @@ describe("Session discovery and reconciliation", () => {
       limit: 8,
       sortDirection: "desc",
       itemsView: "full"
-    });
+    }, { signal: undefined });
   });
 
   it("uses turn-level rollout timestamps for paged turns that start with compaction", async () => {
@@ -1876,7 +1876,10 @@ describe("Session discovery and reconciliation", () => {
       createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z"
     });
     expect(hydrated?.session.sessionId).toBe("worker");
-    expect(readThread.mock.calls).toEqual([["thread-released", false], ["thread-released", true]]);
+    expect(readThread.mock.calls).toEqual([
+      ["thread-released", false, { signal: undefined }],
+      ["thread-released", true, { signal: undefined }]
+    ]);
     expect(resumeThread).not.toHaveBeenCalled();
   });
 

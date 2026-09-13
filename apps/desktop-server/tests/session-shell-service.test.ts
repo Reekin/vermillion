@@ -1094,6 +1094,7 @@ describe("SessionShellService", () => {
       runtimeService: {
         listSessions: () => [],
         getSnapshot: () => buildSessionSnapshot(),
+        updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
         getSnapshotResult: () => ({
           snapshot: buildSessionSnapshot(),
           cursor: "runtime-cursor-1"
@@ -1185,6 +1186,7 @@ describe("SessionShellService", () => {
       runtimeService: {
         listSessions: () => snapshot.sessions,
         getSnapshot: () => hydratedSnapshot,
+        updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
         getWorkspaceRegistry: () => ({
           setLastActiveSelection
         }),
@@ -1261,6 +1263,7 @@ describe("SessionShellService", () => {
     const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [emptyProviderSession],
+        updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
         getSnapshot: () => ({
           ...snapshot,
           sessions: [emptyProviderSession],
@@ -1328,6 +1331,7 @@ describe("SessionShellService", () => {
     const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [providerSession],
+        updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
         getSnapshot: () => ({
           ...snapshot,
           sessions: [providerSession],

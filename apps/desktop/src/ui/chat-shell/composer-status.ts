@@ -29,6 +29,47 @@ export const statusNoticeErrorDetails = (
   stack: error instanceof Error ? error.stack : undefined
 });
 
+export const resolveRecoveryNotice = (
+  current: ComposerStatusNotice | undefined,
+  sessionId: string,
+  executionRecovery: unknown,
+  chatTreeRefresh: unknown
+): ComposerStatusNotice | undefined => {
+  const recoveries = [
+    {
+      value: executionRecovery,
+      source: "session-browser",
+      key: "executionRecoverySessionId",
+      prefix: "Session reconnect failed: ",
+      suffix: ". Use Resume to retry."
+    },
+    {
+      value: chatTreeRefresh,
+      source: "chat-tree",
+      key: "chatTreeRefreshSessionId",
+      prefix: "Chat tree refresh failed: ",
+      suffix: ""
+    }
+  ] as const;
+  for (const { value, source, key, prefix, suffix } of recoveries) {
+    if (!value || typeof value !== "object" || !("status" in value)) continue;
+    if (value.status === "failed" && (!current || current.source === source)) {
+      const message = "message" in value && typeof value.message === "string"
+        ? value.message : "Unknown error";
+      current = {
+        message: `${prefix}${message}${suffix}`,
+        persistent: true,
+        source,
+        severity: "error",
+        context: { [key]: sessionId }
+      };
+    } else if (value.status === "ready" && current?.context?.[key] === sessionId) {
+      current = undefined;
+    }
+  }
+  return current;
+};
+
 export type ResolveComposerStatusInput = {
   selectedEngineId?: string;
   activeSession?: ChatSession;

@@ -110,7 +110,7 @@ it("reads archived cold history without resuming the engine session", async () =
     createdAt: "2026-09-09T00:00:00Z", updatedAt: "2026-09-09T00:00:00Z" });
   expect(result?.turns.map((turn) => turn.turnId)).toEqual(["shared"]);
   expect(result?.messageBlocks).toContainEqual(expect.objectContaining({ text: "Shared ancestor answer" }));
-  expect(readThread).toHaveBeenCalledWith("archived", true);
+  expect(readThread).toHaveBeenCalledWith("archived", true, { signal: undefined });
   expect(resumeThread).not.toHaveBeenCalled();
   expect(releaseHistoryRead).not.toHaveBeenCalled();
 });

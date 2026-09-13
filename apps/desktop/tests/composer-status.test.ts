@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveComposerStatus,
+  resolveRecoveryNotice,
   resolveComposerStatusModel
 } from "../src/ui/chat-shell/composer-status.js";
+
+describe("resolveRecoveryNotice", () => {
+  it("preserves unrelated notices and clears only the recovered session's failure", () => {
+    const failure = { status: "failed", message: "offline" };
+    const notice = resolveRecoveryNotice(undefined, "a", failure, undefined)!;
+    expect(notice.message).toBe("Session reconnect failed: offline. Use Resume to retry.");
+    expect(resolveRecoveryNotice(notice, "b", { status: "ready" }, undefined)).toBe(notice);
+    expect(resolveRecoveryNotice(notice, "a", { status: "ready" }, undefined)).toBeUndefined();
+    const unrelated = { source: "send", message: "send failed" } as const;
+    expect(resolveRecoveryNotice(unrelated, "a", failure, failure)).toBe(unrelated);
+  });
+
+  it("keeps tree refresh failures visible when execution recovers", () => {
+    const ready = { status: "ready" };
+    const notice = resolveRecoveryNotice(undefined, "a", ready, { status: "failed", message: "missing" });
+    expect(notice?.message).toBe("Chat tree refresh failed: missing");
+    expect(resolveRecoveryNotice(notice, "a", ready, undefined)).toBe(notice);
+    expect(resolveRecoveryNotice(notice, "a", ready, ready)).toBeUndefined();
+  });
+});
 
 describe("resolveComposerStatus", () => {
   it("prefers pending approval state over generic session readiness", () => {

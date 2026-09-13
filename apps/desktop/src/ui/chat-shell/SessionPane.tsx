@@ -51,6 +51,7 @@ import {
 import { TurnProcessPanel } from "./TurnProcessPanel.js";
 import { buildParticipantDirectory } from "./participant-directory.js";
 import {
+  resolveRecoveryNotice,
   statusNoticeErrorDetails,
   type ComposerStatusNotice
 } from "./composer-status.js";
@@ -823,65 +824,13 @@ export const SessionPane = ({
       ? displayedSession.metadata.cwd
       : undefined;
   const executionRecovery = displayedSession?.metadata?.executionRecovery;
-  const executionRecoveryStatus =
-    executionRecovery && typeof executionRecovery === "object" && "status" in executionRecovery
-      ? executionRecovery.status
-      : undefined;
-  const executionRecoveryMessage =
-    executionRecovery && typeof executionRecovery === "object" && "message" in executionRecovery &&
-      typeof executionRecovery.message === "string"
-      ? executionRecovery.message
-      : undefined;
-  useEffect(() => {
-    if (!viewSessionId) return;
-    if (executionRecoveryStatus === "failed") {
-      setStatusNotice((current) => current && current.source !== "session-browser"
-        ? current
-        : {
-            message: `Session reconnect failed: ${executionRecoveryMessage ?? "Unknown error"}. Use Resume to retry.`,
-            persistent: true,
-            source: "session-browser",
-            severity: "error",
-            context: { executionRecoverySessionId: viewSessionId }
-          });
-      return;
-    }
-    if (executionRecoveryStatus === "ready") {
-      setStatusNotice((current) =>
-        current?.context?.executionRecoverySessionId === viewSessionId ? undefined : current
-      );
-    }
-  }, [executionRecoveryMessage, executionRecoveryStatus, setStatusNotice, viewSessionId]);
   const chatTreeRefresh = displayedSession?.metadata?.chatTreeRefresh;
-  const chatTreeRefreshStatus =
-    chatTreeRefresh && typeof chatTreeRefresh === "object" && "status" in chatTreeRefresh
-      ? chatTreeRefresh.status
-      : undefined;
-  const chatTreeRefreshMessage =
-    chatTreeRefresh && typeof chatTreeRefresh === "object" && "message" in chatTreeRefresh &&
-      typeof chatTreeRefresh.message === "string"
-      ? chatTreeRefresh.message
-      : undefined;
   useEffect(() => {
     if (!viewSessionId) return;
-    if (chatTreeRefreshStatus === "failed") {
-      setStatusNotice((current) => current && current.source !== "chat-tree"
-        ? current
-        : {
-            message: `Chat tree refresh failed: ${chatTreeRefreshMessage ?? "Unknown error"}`,
-            persistent: true,
-            source: "chat-tree",
-            severity: "error",
-            context: { chatTreeRefreshSessionId: viewSessionId }
-          });
-      return;
-    }
-    if (chatTreeRefreshStatus === "ready") {
-      setStatusNotice((current) =>
-        current?.context?.chatTreeRefreshSessionId === viewSessionId ? undefined : current
-      );
-    }
-  }, [chatTreeRefreshMessage, chatTreeRefreshStatus, setStatusNotice, viewSessionId]);
+    setStatusNotice((current) => resolveRecoveryNotice(
+      current, viewSessionId, executionRecovery, chatTreeRefresh
+    ));
+  }, [executionRecovery, chatTreeRefresh, setStatusNotice, viewSessionId]);
 
   useRendererDiagnostics({
     transport,
