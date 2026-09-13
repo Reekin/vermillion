@@ -20,6 +20,7 @@ type ModalProps = {
 /** Single modal frame for every overlay so they share position, backdrop and chrome. */
 export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, resizable = false, contentClassName, children, presentation = "modal", contained = false }: ModalProps) => {
   const dialog = useRef<HTMLDivElement>(null);
+  const pointerDownTarget = useRef<EventTarget | null>(null);
   useEffect(() => {
     if (presentation !== "modal") return;
     const onKey = (event: KeyboardEvent) => {
@@ -30,7 +31,16 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
   }, [onClose, presentation]);
 
   return (
-    <div className={cn(presentation === "hidden" ? "hidden" : presentation === "page" ? "h-full" : "inset-0 z-40 flex items-start justify-center bg-black/55 px-3 pt-[10vh]", presentation === "modal" && (contained ? "absolute" : "fixed"))} onClick={presentation === "modal" ? onClose : undefined} role="presentation">
+    <div
+      className={cn(presentation === "hidden" ? "hidden" : presentation === "page" ? "h-full" : "inset-0 z-40 flex items-start justify-center bg-black/55 px-3 pt-[10vh]", presentation === "modal" && (contained ? "absolute" : "fixed"))}
+      onPointerDownCapture={presentation === "modal" ? (event) => { pointerDownTarget.current = event.target; } : undefined}
+      onClick={presentation === "modal" ? (event) => {
+        const startedOnBackdrop = pointerDownTarget.current === event.currentTarget;
+        pointerDownTarget.current = null;
+        if (event.target === event.currentTarget && (startedOnBackdrop || event.detail === 0)) onClose();
+      } : undefined}
+      role="presentation"
+    >
       <div
         ref={dialog}
         role={presentation === "modal" ? "dialog" : undefined}
