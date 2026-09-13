@@ -43,6 +43,8 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
           throw new Error("无法写入剪贴板，请重试。");
         }
         setNotice({ text: "已复制 " + result.copiedText });
+      } else if (result.action === "open_rollout") {
+        await transport.file.runAction({ path: result.rolloutPath, action: "open" });
       }
     } catch (error) {
       setNotice({ text: (error as Error).message, error: true });
@@ -94,6 +96,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
       setMenu({ sessionId: props.chatTree.sessionId, nodeId, x: event.clientX, y: event.clientY, actions: [
         { action: "copy_session_id", label: "复制 session id" },
         { action: "copy_awb_session_id", label: "复制内部 session id" },
+        { action: "open_rollout", label: "Open rollout" },
         { action: "archive", label: "删除分支", disabled: !node.canArchive }
       ] });
     }}
@@ -118,7 +121,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
     </div>} />
     <SessionActionFeedback menu={menu} onCloseMenu={() => setMenu(undefined)}
       onRunAction={(_sessionId, action) => {
-        if (action === "copy_session_id" || action === "copy_awb_session_id" || action === "archive") void runNodeAction(action);
+        if (action === "copy_session_id" || action === "copy_awb_session_id" || action === "open_rollout" || action === "archive") void runNodeAction(action);
       }} notice={notice} onClearNotice={() => setNotice(undefined)} />
     {operationMenu && <ContextMenu x={operationMenu.x} y={operationMenu.y}
       onClose={() => setOperationMenu(undefined)} items={[{

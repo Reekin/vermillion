@@ -58,7 +58,8 @@ export function methodHelp(method: string): string | undefined {
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
     "sessionBrowser.open": { params: "sessionId: string; forceProviderHydration?: boolean", state: "桌面在线；进入会话并按当前 rollout 刷新 Codex 历史。", example: { sessionId: "<sessionId>" } },
     "chatTree.get": { params: "sessionId: string", state: "桌面在线；读取完整会话树，节点包含所属 sessionId 与 canArchive。", example: { sessionId: "<sessionId>" } },
-    "chatTree.nodeAction": { params: "sessionId: string, nodeId: string, action: copy_session_id | copy_awb_session_id | archive", state: "桌面在线；复制返回 copiedText，archive 仅归档末端 fork 分支。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", action: "copy_session_id" } },
+    "chatTree.nodeAction": { params: "sessionId: string, nodeId: string, action: copy_session_id | copy_awb_session_id | open_rollout | archive", state: "桌面在线；复制返回 copiedText，open_rollout 返回节点所属会话的文件，archive 仅归档末端 fork 分支。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", action: "copy_session_id" } },
+    "clipboard.writeImage": { params: "source: 非空 data:、file:、http: 或 https: 图片 URL", state: "桌面在线；将图片写入系统剪贴板并返回实际尺寸。", example: { source: "file:///C:/path/image.png" } },
     "chatTree.markRead": { params: "sessionId: string, nodeId: string", state: "Desktop online; marks completed turns on the displayed node's ancestor path read. Returns readNodeIds.", example: { sessionId: "<sessionId>", nodeId: "<nodeId>" } },
     "chatTree.submit": { params: "sessionId: string, nodeId: string, content: string; attachments?: Attachment[], execution?: TurnExecutionOptions", state: "桌面在线，sessionId 与 nodeId 指向现存会话节点。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", content: "继续" } },
     "chatTree.retry": { params: "operationId: 非空 string", state: "桌面在线，operationId 指向失败的发送操作。", example: { operationId: "<operationId>" } },

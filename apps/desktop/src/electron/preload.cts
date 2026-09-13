@@ -17,6 +17,7 @@ import {
   SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
   SESSION_IPC_REQUEST_CHANNEL,
   SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
+  SESSION_IPC_WRITE_CLIPBOARD_IMAGE_CHANNEL,
   WORKBENCH_IPC_EVENT_CHANNEL,
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
@@ -40,6 +41,7 @@ type SessionDesktopApi = {
     path?: string;
   }>;
   writeClipboardText: (text: string) => Promise<void>;
+  writeClipboardImage: (source: string) => Promise<{ width: number; height: number }>;
 };
 
 const handlersBySubscriptionId = new Map<string, Set<SessionEventHandler>>();
@@ -160,7 +162,12 @@ const desktopApi: SessionDesktopApi = {
     )) as Awaited<ReturnType<SessionDesktopApi["pickEngineProgramPath"]>>,
   writeClipboardText: async (text) => {
     await ipcRenderer.invoke(SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL, text);
-  }
+  },
+  writeClipboardImage: async (source) =>
+    (await ipcRenderer.invoke(
+      SESSION_IPC_WRITE_CLIPBOARD_IMAGE_CHANNEL,
+      source
+    )) as { width: number; height: number }
 };
 
 contextBridge.exposeInMainWorld("session", api);
