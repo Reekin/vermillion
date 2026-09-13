@@ -139,6 +139,7 @@ describe("wrapper session trees", () => {
     const tree = await f.service.get("branch");
     expect(tree.treeId).toBe("root");
     expect(tree.nodes.map((n) => [n.nodeId, n.parentNodeId])).toEqual([["a", undefined], ["b", "a"], ["c", "a"]]);
+    expect(tree.windows?.map((window) => window.sessionId)).toEqual(["root", "branch"]);
     expect(f.load).toHaveBeenCalledTimes(2);
     await f.service.jump("root", "a");
     expect((await f.service.get("root")).visibleTurnIds).toEqual(["a"]);
@@ -217,6 +218,24 @@ describe("wrapper session trees", () => {
     releaseReload();
     await vi.waitFor(() => expect(f.changed).toHaveBeenCalled());
     expect((await f.service.get("root")).currentNodeId).toBe("c");
+    f.service.dispose();
+  });
+
+  it("reports a failed rebuild without discarding or repeatedly reloading the published tree", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    f.changed.mockClear();
+    f.load.mockRejectedValue(new Error("reload failed"));
+
+    f.service.invalidate("root");
+    expect((await f.service.get("root")).nodes.map((node) => node.nodeId)).toEqual([
+      "a", "b", "c"
+    ]);
+    await vi.waitFor(() => expect(f.changed).toHaveBeenCalledTimes(1));
+    await expect(f.service.get("root")).rejects.toThrow("reload failed");
+    await expect(f.service.get("root")).rejects.toThrow("reload failed");
+    await expect(f.service.jump("root", "c")).resolves.toEqual({ jumped: true });
+    expect(f.load).toHaveBeenCalledTimes(4);
     f.service.dispose();
   });
 

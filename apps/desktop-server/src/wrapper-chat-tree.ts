@@ -255,23 +255,26 @@ export class WrapperChatTreeService {
     const currentNodeId = stored?.followTip === false ? stored.nodeId : paths.get(currentSessionId)?.at(-1);
     const currentPath = paths.get(currentSessionId) ?? [];
     const visibleTurnIds = currentNodeId ? currentPath.slice(0, currentPath.indexOf(currentNodeId) + 1) : [];
-    const currentSession = sessionsById.get(currentSessionId);
-    const windows = currentSession ? [buildSessionWindowSnapshotFromPage({
-      ...snapshot,
-      sessionId: currentSessionId,
-      session: currentSession,
-      conversation: snapshot.conversations.find((item) =>
-        item.conversationId === currentSession.conversationId)!,
-      turns: (turnsBySessionId.get(currentSessionId) ?? []).filter((turn) => retained.has(turn.turnId)),
-      sessionRelations: snapshot.sessionRelations.filter((item) =>
-        item.parentSessionId === currentSessionId || item.childSessionId === currentSessionId),
-      participants: snapshot.participants.filter((item) =>
-        item.conversationId === currentSession.conversationId),
-      cursor: runtimeService.getRevision() === "initial" ? undefined : runtimeService.getRevision(),
-      hasOlder: false,
-      hasNewer: false,
-      replaceSessionHistory: true
-    })] : [];
+    const windows = members.flatMap((memberId) => {
+      const memberSession = sessionsById.get(memberId);
+      if (!memberSession) return [];
+      return [buildSessionWindowSnapshotFromPage({
+        ...snapshot,
+        sessionId: memberId,
+        session: memberSession,
+        conversation: snapshot.conversations.find((item) =>
+          item.conversationId === memberSession.conversationId)!,
+        turns: (turnsBySessionId.get(memberId) ?? []).filter((turn) => retained.has(turn.turnId)),
+        sessionRelations: snapshot.sessionRelations.filter((item) =>
+          item.parentSessionId === memberId || item.childSessionId === memberId),
+        participants: snapshot.participants.filter((item) =>
+          item.conversationId === memberSession.conversationId),
+        cursor: runtimeService.getRevision() === "initial" ? undefined : runtimeService.getRevision(),
+        hasOlder: false,
+        hasNewer: false,
+        replaceSessionHistory: true
+      })];
+    });
     const tree: ChatTreeSnapshot = {
       sessionId, treeId, currentSessionId, memberSessionIds: treeMembers,
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
@@ -317,6 +320,7 @@ export class WrapperChatTreeService {
     while (true) {
       const state = this.treeState(sessionId);
       if (state.publishedGeneration !== state.generation) {
+        if (state.loadError && !state.loading) throw state.loadError;
         const loading = this.startTreeLoad(sessionId, state);
         if (!state.published) {
           await loading;

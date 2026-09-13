@@ -276,18 +276,24 @@ export const useChatTreeController = (input: {
         return true;
       });
       if (freshWindowsToHydrate.length > 0) {
-        store.hydrateSessionWindows(
-          freshWindowsToHydrate.map((window) => ({
-            sessionId: window.sessionId,
-            snapshot: window.snapshot,
-            cursor: window.cursor,
-            replaceSessionHistory: window.replaceSessionHistory
-          }))
-        );
-        for (const window of freshWindowsToHydrate) {
-          const key = windowHydrationKey(window);
-          if (key !== undefined) {
-            entry.hydrated.set(window.sessionId, key);
+        const batchSize = 2;
+        for (let start = 0; start < freshWindowsToHydrate.length; start += batchSize) {
+          if (!isCurrent()) return;
+          const batch = freshWindowsToHydrate.slice(start, start + batchSize);
+          store.hydrateSessionWindows(
+            batch.map((window) => ({
+              sessionId: window.sessionId,
+              snapshot: window.snapshot,
+              cursor: window.cursor,
+              replaceSessionHistory: window.replaceSessionHistory
+            }))
+          );
+          for (const window of batch) {
+            const key = windowHydrationKey(window);
+            if (key !== undefined) entry.hydrated.set(window.sessionId, key);
+          }
+          if (start + batchSize < freshWindowsToHydrate.length) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
           }
         }
       }
