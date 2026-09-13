@@ -33,6 +33,7 @@ const fixture = async () => {
   let listener: (event: EventEnvelope) => void = () => {};
   const load = vi.fn().mockResolvedValue(true);
   const changed = vi.fn();
+  const updateSessionMetadata = vi.fn().mockResolvedValue(undefined);
   const fork = vi.fn(async (_sessionId: string, _turnId: string) => "branch");
   const service = new WrapperChatTreeService({
     sessionIndexStore: index,
@@ -41,12 +42,13 @@ const fixture = async () => {
       getSnapshot: () => snapshot,
       getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
       getRevision: () => "initial",
+      updateSessionMetadata,
       notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
     fork
   });
-  return { service, index, snapshot, load, fork, baseDir, changed,
+  return { service, index, snapshot, load, fork, baseDir, changed, updateSessionMetadata,
     completed: (sessionId: string, turnId: string) => listener({ event: { type: "turn.completed", sessionId, turnId, finishReason: "completed" } } as EventEnvelope),
     started: (sessionId: string, turnId: string) => listener({ event: { type: "turn.started", sessionId, turnId } } as EventEnvelope) };
 };
@@ -139,6 +141,7 @@ describe("wrapper session trees", () => {
     const tree = await f.service.get("branch");
     expect(tree.treeId).toBe("root");
     expect(tree.nodes.map((n) => [n.nodeId, n.parentNodeId])).toEqual([["a", undefined], ["b", "a"], ["c", "a"]]);
+    expect(tree.windows?.map((window) => window.sessionId)).toEqual(["root", "branch"]);
     expect(f.load).toHaveBeenCalledTimes(2);
     await f.service.jump("root", "a");
     expect((await f.service.get("root")).visibleTurnIds).toEqual(["a"]);
@@ -189,6 +192,55 @@ describe("wrapper session trees", () => {
     f.service.invalidate("root");
     releaseInitial();
     await expect(tree).resolves.toMatchObject({ memberSessionIds: ["root", "branch"] });
+    expect(f.load).toHaveBeenCalledTimes(4);
+    f.service.dispose();
+  });
+
+  it("keeps published nodes navigable while an invalidated tree rebuilds", async () => {
+    const f = await fixture();
+    const published = await f.service.get("root");
+    expect(published.nodes.some((node) => node.nodeId === "c")).toBe(true);
+    let releaseReload!: () => void;
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    f.load.mockImplementation(async () => {
+      await reloadGate;
+      return true;
+    });
+
+    f.service.invalidate("root");
+    const duringReload = await f.service.get("root");
+    expect(duringReload.nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);
+    await expect(f.service.jump("root", "c")).resolves.toEqual({ jumped: true });
+    expect(f.index.getTreeView("root")).toEqual({
+      sessionId: "branch",
+      nodeId: "c",
+      followTip: false
+    });
+
+    releaseReload();
+    await vi.waitFor(() => expect(f.changed).toHaveBeenCalled());
+    expect((await f.service.get("root")).currentNodeId).toBe("c");
+    f.service.dispose();
+  });
+
+  it("reports a failed rebuild without discarding or repeatedly reloading the published tree", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    f.changed.mockClear();
+    f.load.mockRejectedValue(new Error("reload failed"));
+
+    f.service.invalidate("root");
+    expect((await f.service.get("root")).nodes.map((node) => node.nodeId)).toEqual([
+      "a", "b", "c"
+    ]);
+    await vi.waitFor(() => expect(f.changed).toHaveBeenCalledTimes(1));
+    expect((await f.service.get("root")).currentNodeId).toBe("b");
+    expect((await f.service.get("root")).currentNodeId).toBe("b");
+    await expect(f.service.jump("root", "c")).resolves.toEqual({ jumped: true });
+    expect((await f.service.get("root")).currentNodeId).toBe("c");
+    expect(f.updateSessionMetadata).toHaveBeenCalledWith("root", {
+      chatTreeRefresh: { status: "failed", message: "reload failed" }
+    });
     expect(f.load).toHaveBeenCalledTimes(4);
     f.service.dispose();
   });

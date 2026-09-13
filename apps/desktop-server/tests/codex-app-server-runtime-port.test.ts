@@ -179,7 +179,7 @@ describe("Codex app-server runtime port", () => {
     rpc.mockClear();
     await port.resumeThread("child", "I:/workspace", "Execution role");
     expect(rpc).toHaveBeenCalledWith("thread/resume", expect.objectContaining({
-      developerInstructions: "User configuration\n\nExecution role" }), {});
+      developerInstructions: "User configuration\n\nExecution role" }), { timeoutMs: 120_000 });
     expect(rpc.mock.calls.some(([method]) => method === "thread/inject_items")).toBe(false);
     await port.injectDeveloperInstructions("child", "Execution role");
     expect(rpc).toHaveBeenCalledWith("thread/inject_items", expect.objectContaining({ threadId: "child" }));
@@ -777,7 +777,7 @@ describe("Codex app-server runtime port", () => {
       expect.objectContaining({
         threadId: "provider-thread-1"
       }),
-      {}
+      { timeoutMs: 120_000 }
     );
     expect(rpc).toHaveBeenNthCalledWith(
       2,
@@ -788,6 +788,46 @@ describe("Codex app-server runtime port", () => {
       {}
     );
     expect(rpc).not.toHaveBeenCalledWith("thread/start", expect.anything());
+  });
+
+  it("reconciles a timed-out resume before retrying it", async () => {
+    const port = createCodexAppServerRuntimePort({
+      resolveConversationIdBySessionId: () => "conversation-1"
+    });
+    vi.spyOn(port, "start").mockResolvedValue();
+    const timeout = Object.assign(new Error("timed out"), {
+      code: "runtime_request_timeout",
+      details: { requestId: "resume-1" }
+    });
+    const rpc = vi
+      .spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce({ data: ["provider-thread-timeout"], nextCursor: null })
+      .mockResolvedValueOnce({
+        thread: {
+          id: "provider-thread-timeout",
+          turns: [],
+          status: { type: "idle" }
+        }
+      });
+
+    await expect(port.resumeThread("provider-thread-timeout")).rejects.toMatchObject({
+      code: "runtime_request_timeout",
+      details: {
+        method: "thread/resume",
+        threadId: "provider-thread-timeout",
+        stage: "execution-resume",
+        timeoutMs: 120_000
+      }
+    });
+    await expect(port.resumeThread("provider-thread-timeout")).resolves.toMatchObject({
+      id: "provider-thread-timeout"
+    });
+    expect(rpc.mock.calls.map(([method]) => method)).toEqual([
+      "thread/resume",
+      "thread/loaded/list",
+      "thread/read"
+    ]);
   });
 
   it("passes per-turn model, speed, and reasoning overrides to turn/start", async () => {

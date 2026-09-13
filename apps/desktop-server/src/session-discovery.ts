@@ -474,6 +474,8 @@ export type SessionDiscoveryProvider = {
     entry: SessionIndexEntry,
     input?: {
       isCancelled?: () => boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
       historySources?: { entry: SessionIndexEntry; sourceTurnIds: string[] }[];
     }
   ) => Promise<HydratedSessionSnapshot | undefined>;
@@ -484,13 +486,19 @@ export type SessionDiscoveryProvider = {
       cursor?: string;
       anchorTurnId?: string;
       isCancelled?: () => boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
     }
   ) => Promise<HydratedSessionWindowSnapshot | undefined>;
-  ensureSessionExecutable?: (entry: SessionIndexEntry) => Promise<boolean>;
+  ensureSessionExecutable?: (
+    entry: SessionIndexEntry,
+    input?: { signal?: AbortSignal }
+  ) => Promise<boolean>;
 };
 
 type HydrationConsumer = {
   isCancelled?: () => boolean;
+  signal?: AbortSignal;
 };
 
 type SharedHydrationTask<T> = {
@@ -505,7 +513,7 @@ const areAllHydrationConsumersCancelled = (
     return false;
   }
   for (const consumer of consumers) {
-    if (!consumer.isCancelled?.()) {
+    if (!consumer.signal?.aborted && !consumer.isCancelled?.()) {
       return false;
     }
   }
@@ -934,16 +942,45 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     this.resolveHistoryCwd = options.resolveHistoryCwd;
   }
 
-  private async withHistory<T>(entry: SessionIndexEntry, read: (thread: Thread, restored: boolean) => Promise<T>): Promise<T> {
-    const header = await this.codexRuntimePort.readThread(entry.providerSessionId!, false);
+  private readHistoryThread(
+    threadId: string,
+    includeTurns: boolean,
+    signal?: AbortSignal
+  ): Promise<Thread> {
+    return signal
+      ? this.codexRuntimePort.readThread(threadId, includeTurns, { signal })
+      : this.codexRuntimePort.readThread(threadId, includeTurns);
+  }
+
+  private resumeHistoryThread(
+    threadId: string,
+    cwd: string | undefined,
+    signal?: AbortSignal
+  ): Promise<Thread> {
+    return signal
+      ? this.codexRuntimePort.resumeThread(threadId, cwd, undefined, { signal })
+      : this.codexRuntimePort.resumeThread(threadId, cwd);
+  }
+
+  private async withHistory<T>(
+    entry: SessionIndexEntry,
+    read: (thread: Thread, restored: boolean) => Promise<T>,
+    signal?: AbortSignal,
+    retainExecution = false
+  ): Promise<T> {
+    const header = await this.readHistoryThread(entry.providerSessionId!, false, signal);
     const restored = !entry.archivedAt && header.status.type === "notLoaded";
     const thread = restored
-      ? await this.codexRuntimePort.resumeThread(header.id, this.resolveHistoryCwd?.(entry.workspaceId) ?? header.cwd)
+      ? await this.resumeHistoryThread(
+          header.id,
+          this.resolveHistoryCwd?.(entry.workspaceId) ?? header.cwd,
+          signal
+        )
       : header;
     try {
       return await read(thread, restored);
     } finally {
-      if (restored) await this.codexRuntimePort.releaseHistoryRead(thread.id);
+      if (restored && !retainExecution) await this.codexRuntimePort.releaseHistoryRead(thread.id);
     }
   }
 
@@ -1013,7 +1050,10 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     );
   }
 
-  public async ensureSessionExecutable(entry: SessionIndexEntry): Promise<boolean> {
+  public async ensureSessionExecutable(
+    entry: SessionIndexEntry,
+    input: { signal?: AbortSignal } = {}
+  ): Promise<boolean> {
     const threadId = entry.providerSessionId;
     if (!threadId) {
       return false;
@@ -1022,7 +1062,11 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       && !this.codexRuntimePort.isThreadExecutionReleased(threadId)) {
       return true;
     }
-    const thread = await this.codexRuntimePort.resumeThread(threadId, this.resolveHistoryCwd?.(entry.workspaceId));
+    const thread = await this.resumeHistoryThread(
+      threadId,
+      this.resolveHistoryCwd?.(entry.workspaceId),
+      input.signal
+    );
     this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id);
     return true;
   }
@@ -1031,6 +1075,8 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     entry: SessionIndexEntry,
     input: {
       isCancelled?: () => boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
       historySources?: { entry: SessionIndexEntry; sourceTurnIds: string[] }[];
     } = {}
   ): Promise<HydratedSessionSnapshot | undefined> {
@@ -1039,23 +1085,29 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       return undefined;
     }
     const readHistory = async (read: (thread: Thread, restored: boolean) => Promise<HydratedSessionSnapshot | undefined>) => {
-      if (!entry.archivedAt || !input.historySources) return this.withHistory(entry, read);
-      const header = await this.codexRuntimePort.readThread(threadId, false);
+      if (!entry.archivedAt || !input.historySources) {
+        return this.withHistory(entry, read, input.signal, input.retainExecution);
+      }
+      const header = await this.readHistoryThread(threadId, false, input.signal);
       let sharedTurns: Thread["turns"] = [];
       for (const source of input.historySources) {
         const turns = await this.withHistory(source.entry, async (thread, restored) => {
-          const history = restored ? thread : await this.codexRuntimePort.readThread(thread.id, true);
+          const history = restored
+            ? thread
+            : await this.readHistoryThread(thread.id, true, input.signal);
           const end = history.turns.findIndex((turn) => source.sourceTurnIds.includes(turn.id));
           if (end < 0) throw new Error(`Fork points ${source.sourceTurnIds.join(", ")} are missing from ${thread.id}`);
           return history.turns.slice(0, end + 1);
-        });
+        }, input.signal);
         // Every source contains a prefix of the same archived linear history.
         if (turns.length > sharedTurns.length) sharedTurns = turns;
       }
       return read({ ...header, turns: sharedTurns }, true);
     };
     return readHistory(async (header, restored) => {
-      const thread = restored ? header : await this.codexRuntimePort.readThread(threadId, true);
+      const thread = restored
+        ? header
+        : await this.readHistoryThread(threadId, true, input.signal);
       if (input.isCancelled?.()) {
         return undefined;
       }
@@ -1128,6 +1180,8 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       cursor?: string;
       anchorTurnId?: string;
       isCancelled?: () => boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
     }
   ): Promise<HydratedSessionWindowSnapshot | undefined> {
     const threadId = entry.providerSessionId;
@@ -1144,13 +1198,16 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
           })
         : null);
     return this.withHistory(entry, async (thread) => {
-      const turnsPage = await this.codexRuntimePort.listThreadTurns({
+      const turnsInput = {
           threadId,
           cursor,
           limit: input.limit,
           sortDirection: "desc",
           itemsView: "full"
-        });
+        } as const;
+      const turnsPage = input.signal
+        ? await this.codexRuntimePort.listThreadTurns(turnsInput, { signal: input.signal })
+        : await this.codexRuntimePort.listThreadTurns(turnsInput);
       if (input.isCancelled?.()) {
         return undefined;
       }
@@ -1167,7 +1224,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
           .map((turn) => turn.id)
       );
       if (incompleteTurnIds.size > 0) {
-        const completeThread = await this.codexRuntimePort.readThread(threadId, true);
+        const completeThread = await this.readHistoryThread(threadId, true, input.signal);
         const completeTurnsById = new Map(
           completeThread.turns
             .filter(
@@ -1245,7 +1302,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
           providerSessionId: thread.id
         }
       };
-    });
+    }, input.signal, input.retainExecution);
   }
 
   private async listAllThreads(): Promise<Thread[]> {
@@ -1344,6 +1401,7 @@ export class SessionReconciliationService {
     SharedHydrationTask<boolean>
   >();
   private readonly fullyHydratedSessionIds = new Set<string>();
+  private readonly hydrationGenerationBySessionId = new Map<string, number>();
   private readonly windowHydrationByKey = new Map<
     string,
     SharedHydrationTask<HydratedSessionWindowSnapshot | undefined>
@@ -1388,6 +1446,16 @@ export class SessionReconciliationService {
       () => undefined
     );
     return repair;
+  }
+
+  public invalidateSessions(sessionIds: readonly string[]): void {
+    for (const sessionId of sessionIds) {
+      this.hydrationGenerationBySessionId.set(
+        sessionId,
+        (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) + 1
+      );
+      this.fullyHydratedSessionIds.delete(sessionId);
+    }
   }
 
   private async runWorkspaceRepair(workspaceIds: readonly string[]): Promise<{
@@ -1514,10 +1582,14 @@ export class SessionReconciliationService {
       isCancelled?: () => boolean;
       force?: boolean;
       requireFull?: boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
     } = {}
   ): Promise<boolean> {
+    const generation = this.hydrationGenerationBySessionId.get(sessionId) ?? 0;
     const consumer: HydrationConsumer = {
-      isCancelled: input.isCancelled
+      isCancelled: input.isCancelled,
+      signal: input.signal
     };
     const loaded = this.runtimeService
       .listSessions({ includeArchived: true })
@@ -1533,6 +1605,10 @@ export class SessionReconciliationService {
       }
       existingHydration.consumers.add(consumer);
       const loadedByExisting = await existingHydration.promise;
+      if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
+          !input.isCancelled?.()) {
+        return this.ensureSessionLoaded(sessionId, input);
+      }
       return input.isCancelled?.() ? false : loadedByExisting;
     }
 
@@ -1549,23 +1625,38 @@ export class SessionReconciliationService {
     if (existingHydration) {
       existingHydration.consumers.add(consumer);
       const loadedByExisting = await existingHydration.promise;
+      if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
+          !input.isCancelled?.()) {
+        return this.ensureSessionLoaded(sessionId, input);
+      }
       return input.isCancelled?.() ? false : loadedByExisting;
     }
     const consumers = new Set<HydrationConsumer>([consumer]);
     const hydration: SharedHydrationTask<boolean> = {
       consumers,
       promise: this.hydrateSessionEntry(entry, provider, {
-        isCancelled: () => areAllHydrationConsumersCancelled(consumers)
+        signal: input.signal,
+        retainExecution: input.retainExecution,
+        isCancelled: () =>
+          areAllHydrationConsumersCancelled(consumers) ||
+          (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation
       }).finally(() => {
         this.hydrationBySessionId.delete(sessionId);
       })
     };
     this.hydrationBySessionId.set(sessionId, hydration);
     const loadedByHydration = await hydration.promise;
+    if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
+        !input.isCancelled?.()) {
+      return this.ensureSessionLoaded(sessionId, input);
+    }
     return input.isCancelled?.() ? false : loadedByHydration;
   }
 
-  public async ensureSessionExecutable(sessionId: string): Promise<boolean> {
+  public async ensureSessionExecutable(
+    sessionId: string,
+    input: { signal?: AbortSignal } = {}
+  ): Promise<boolean> {
     await this.sessionIndexStore.ready();
     const entry = this.sessionIndexStore.getEntry(sessionId);
     if (!entry) {
@@ -1575,7 +1666,7 @@ export class SessionReconciliationService {
     if (!provider?.ensureSessionExecutable) {
       return true;
     }
-    return provider.ensureSessionExecutable(entry);
+    return provider.ensureSessionExecutable(entry, input);
   }
 
   public async hydrateSessionWindow(
@@ -1585,8 +1676,11 @@ export class SessionReconciliationService {
       cursor?: string;
       anchorTurnId?: string;
       isCancelled?: () => boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
     }
   ): Promise<HydratedSessionWindowSnapshot | undefined> {
+    const generation = this.hydrationGenerationBySessionId.get(sessionId) ?? 0;
     await this.sessionIndexStore.ready();
     const entry = this.sessionIndexStore.getEntry(sessionId);
     if (!entry) {
@@ -1601,12 +1695,17 @@ export class SessionReconciliationService {
       anchorTurnId ?? ""
     }\u0000${input.limit}`;
     const consumer: HydrationConsumer = {
-      isCancelled: input.isCancelled
+      isCancelled: input.isCancelled,
+      signal: input.signal
     };
     const existingHydration = this.windowHydrationByKey.get(hydrationKey);
     if (existingHydration) {
       existingHydration.consumers.add(consumer);
       const hydrated = await existingHydration.promise;
+      if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
+          !input.isCancelled?.()) {
+        return this.hydrateSessionWindow(sessionId, input);
+      }
       return input.isCancelled?.() ? undefined : hydrated;
     }
     const consumers = new Set<HydrationConsumer>([consumer]);
@@ -1619,22 +1718,33 @@ export class SessionReconciliationService {
           limit: input.limit,
           cursor: input.cursor,
           anchorTurnId,
-          isCancelled: () => areAllHydrationConsumersCancelled(consumers)
+          signal: input.signal,
+          retainExecution: input.retainExecution,
+          isCancelled: () =>
+            areAllHydrationConsumersCancelled(consumers) ||
+            (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation
         })
         .then(async (hydrated) => {
-          if (!hydrated || areAllHydrationConsumersCancelled(consumers)) {
+          if (!hydrated || areAllHydrationConsumersCancelled(consumers) ||
+              (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation) {
             return undefined;
           }
           return this.commitHydratedSession(entry, hydrated, {
             partial: true,
             atLatest: !input.cursor && !anchorTurnId,
-            isCancelled: () => areAllHydrationConsumersCancelled(consumers)
+            isCancelled: () =>
+              areAllHydrationConsumersCancelled(consumers) ||
+              (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation
           });
         })
         .finally(() => this.windowHydrationByKey.delete(hydrationKey))
     };
     this.windowHydrationByKey.set(hydrationKey, hydration);
     const hydrated = await hydration.promise;
+    if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
+        !input.isCancelled?.()) {
+      return this.hydrateSessionWindow(sessionId, input);
+    }
     if (!hydrated || input.isCancelled?.()) {
       return undefined;
     }
@@ -1646,6 +1756,8 @@ export class SessionReconciliationService {
     provider: SessionDiscoveryProvider,
     input: {
       isCancelled?: () => boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
     } = {}
   ): Promise<boolean> {
     let hydrated: HydratedSessionSnapshot | undefined;
@@ -1667,6 +1779,8 @@ export class SessionReconciliationService {
       }
       hydrated = await provider.hydrateSession(entry, {
         isCancelled: input.isCancelled,
+        signal: input.signal,
+        retainExecution: input.retainExecution,
         historySources: entry.archivedAt ? historySources : undefined
       });
     } catch (error) {

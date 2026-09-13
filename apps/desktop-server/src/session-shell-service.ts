@@ -211,8 +211,10 @@ export class SessionShellService {
   private readonly codexHookActivityService: CodexHookActivityService;
   private readonly codexTurnChangesService: CodexTurnChangesService;
   private openSessionGeneration = 0;
+  private openSessionAbortController: AbortController | undefined;
   private activationQueue: Promise<void> = Promise.resolve();
   private readonly partiallyHydratedSessionIds = new Set<string>();
+  private readonly executionRecoveryBySessionId = new Map<string, Promise<void>>();
 
   public constructor(options: SessionShellServiceOptions) {
     this.wrapperChatTree = options.wrapperChatTree;
@@ -417,8 +419,12 @@ export class SessionShellService {
       if (this.releaseSessionExecutionImpl) {
         await this.releaseSessionExecutionImpl(sessionId);
       }
+      const members = this.sessionTreeMembers(sessionId);
       const refreshed = await this.clearSessionHistoryForTree(sessionId);
-      if (refreshed) this.wrapperChatTree?.invalidate(sessionId);
+      if (refreshed) {
+        this.sessionReconciliation?.invalidateSessions?.(members);
+        this.wrapperChatTree?.invalidate(sessionId);
+      }
       return refreshed;
     } catch (error) {
       console.warn("[vermillion] Failed to refresh Codex session history", {
@@ -691,8 +697,12 @@ export class SessionShellService {
       forceProviderHydration?: boolean;
     } = {}
   ): Promise<{ page: SessionWindowSnapshot }> {
+    this.openSessionAbortController?.abort();
+    const abortController = new AbortController();
+    this.openSessionAbortController = abortController;
     const generation = ++this.openSessionGeneration;
-    const isCancelled = () => generation !== this.openSessionGeneration;
+    const isCancelled = () =>
+      generation !== this.openSessionGeneration || abortController.signal.aborted;
     const refreshedHistory = await this.refreshSessionHistoryBeforeOpen(sessionId);
     const loadedSession = this.runtimeService
       .listSessions({ includeArchived: true })
@@ -725,7 +735,9 @@ export class SessionShellService {
         (await this.sessionReconciliation.ensureSessionLoaded(sessionId, {
           isCancelled,
           force: true,
-          requireFull: true
+          requireFull: true,
+          signal: abortController.signal,
+          retainExecution: true
         })) ?? false;
       if (isCancelled()) {
         throw new Error("Open session cancelled.");
@@ -734,8 +746,8 @@ export class SessionShellService {
         throw new Error("This session could not be fully loaded.");
       }
       this.partiallyHydratedSessionIds.delete(sessionId);
-      await this.ensureOpenedSessionExecutable(sessionId, { isCancelled });
       await this.activateOpenedSession(sessionId, { isCancelled });
+      this.startSessionExecutionRecovery(sessionId);
       return {
         page: this.buildSessionWindow(sessionId, {
           limit: defaultSessionWindowLimit,
@@ -747,7 +759,9 @@ export class SessionShellService {
       const loadedByFullHydration =
         (await this.sessionReconciliation?.ensureSessionLoaded(sessionId, {
           isCancelled,
-          force: true
+          force: true,
+          signal: abortController.signal,
+          retainExecution: true
         })) ?? false;
       if (isCancelled()) {
         throw new Error("Open session cancelled.");
@@ -757,8 +771,8 @@ export class SessionShellService {
       }
       if (loadedByFullHydration) {
         this.partiallyHydratedSessionIds.delete(sessionId);
-        await this.ensureOpenedSessionExecutable(sessionId, { isCancelled });
         await this.activateOpenedSession(sessionId, { isCancelled });
+        this.startSessionExecutionRecovery(sessionId);
         return {
           page: this.buildSessionWindow(sessionId, {
             limit: completeSessionWindowLimit,
@@ -770,14 +784,16 @@ export class SessionShellService {
       const hydratedPage = await this.hydrateSessionWindow(sessionId, {
         limit: defaultSessionWindowLimit,
         anchorTurnId,
-        isCancelled
+        isCancelled,
+        signal: abortController.signal,
+        retainExecution: true
       });
       if (isCancelled()) {
         throw new Error("Open session cancelled.");
       }
       if (hydratedPage) {
-        await this.ensureOpenedSessionExecutable(sessionId, { isCancelled });
         await this.activateOpenedSession(sessionId, { isCancelled });
+        this.startSessionExecutionRecovery(sessionId);
         return {
           page: hydratedPage
         };
@@ -787,7 +803,9 @@ export class SessionShellService {
       const loadedByFullHydration =
         (await this.sessionReconciliation?.ensureSessionLoaded(sessionId, {
           isCancelled,
-          force: alreadyLoaded
+          force: alreadyLoaded,
+          signal: abortController.signal,
+          retainExecution: true
         })) ?? false;
       if (isCancelled()) {
         throw new Error("Open session cancelled.");
@@ -808,8 +826,8 @@ export class SessionShellService {
     if (isCancelled()) {
       throw new Error("Open session cancelled.");
     }
-    await this.ensureOpenedSessionExecutable(sessionId, { isCancelled });
     await this.activateOpenedSession(sessionId, { isCancelled });
+    this.startSessionExecutionRecovery(sessionId);
     return {
       page: this.buildSessionWindow(sessionId, {
         limit: defaultSessionWindowLimit,
@@ -1259,6 +1277,52 @@ export class SessionShellService {
     }
   }
 
+  private startSessionExecutionRecovery(sessionId: string): void {
+    const context = this.sessionIdentity.resolveContext(sessionId);
+    if (!context.providerHandle || !this.sessionReconciliation ||
+        this.executionRecoveryBySessionId.has(sessionId)) {
+      return;
+    }
+    const recovery = (async () => {
+      await this.updateExecutionRecoveryStatus(sessionId, { status: "pending" });
+      try {
+        await this.ensureOpenedSessionExecutable(sessionId);
+        await this.updateExecutionRecoveryStatus(sessionId, { status: "ready" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.updateExecutionRecoveryStatus(sessionId, { status: "failed", message });
+        console.warn("[vermillion] Session execution recovery failed", {
+          sessionId,
+          error: message
+        });
+      }
+    })().finally(() => {
+      if (this.executionRecoveryBySessionId.get(sessionId) === recovery) {
+        this.executionRecoveryBySessionId.delete(sessionId);
+      }
+    });
+    this.executionRecoveryBySessionId.set(sessionId, recovery);
+  }
+
+  private async updateExecutionRecoveryStatus(
+    sessionId: string,
+    executionRecovery: { status: "pending" | "ready" | "failed"; message?: string }
+  ): Promise<void> {
+    const update = (this.runtimeService as SessionRuntimeService & {
+      updateSessionMetadata?: SessionRuntimeService["updateSessionMetadata"];
+    }).updateSessionMetadata;
+    if (typeof update !== "function") return;
+    try {
+      await update.call(this.runtimeService, sessionId, { executionRecovery });
+    } catch (error) {
+      console.warn("[vermillion] Failed to persist session execution recovery", {
+        sessionId,
+        status: executionRecovery.status,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   private async hydrateSessionWindow(
     sessionId: string,
     input: {
@@ -1266,6 +1330,8 @@ export class SessionShellService {
       cursor?: string;
       anchorTurnId?: string;
       isCancelled?: () => boolean;
+      signal?: AbortSignal;
+      retainExecution?: boolean;
     }
   ): Promise<SessionWindowSnapshot | undefined> {
     const hydration = this.sessionReconciliation?.hydrateSessionWindow?.(

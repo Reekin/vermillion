@@ -330,4 +330,23 @@ describe("JsonRpcLineClient", () => {
       }
     });
   });
+
+  it("parses oversized responses off the runtime event-loop turn", async () => {
+    const diagnostics: JsonRpcPipelineDiagnostic[] = [];
+    const { client, input } = createClient({
+      diagnostics: (event) => diagnostics.push(event)
+    });
+    const request = client.request("large-history");
+    const result = { history: "x".repeat(300_000) };
+
+    input.write(JSON.stringify({ id: "1", result }) + "\n");
+    expect(diagnostics).toHaveLength(0);
+    await expect(request).resolves.toEqual(result);
+    await vi.waitFor(() => expect(diagnostics).toHaveLength(1));
+    expect(diagnostics[0]).toMatchObject({
+      type: "read-completed",
+      parsedLineCount: 1,
+      methods: { "<response>": 1 }
+    });
+  });
 });

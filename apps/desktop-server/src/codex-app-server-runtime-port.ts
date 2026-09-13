@@ -43,6 +43,8 @@ import type { ChatTreeSetCurrentParams } from "./codex-app-server-generated/v2/C
 import type { ChatTreeSetCurrentResponse } from "./codex-app-server-generated/v2/ChatTreeSetCurrentResponse.js";
 import type { ThreadListParams } from "./codex-app-server-generated/v2/ThreadListParams.js";
 import type { ThreadListResponse } from "./codex-app-server-generated/v2/ThreadListResponse.js";
+import type { ThreadLoadedListParams } from "./codex-app-server-generated/v2/ThreadLoadedListParams.js";
+import type { ThreadLoadedListResponse } from "./codex-app-server-generated/v2/ThreadLoadedListResponse.js";
 import type { ThreadForkParams } from "./codex-app-server-generated/v2/ThreadForkParams.js";
 import type { ThreadForkResponse } from "./codex-app-server-generated/v2/ThreadForkResponse.js";
 import type { ThreadGoal } from "./codex-app-server-generated/v2/ThreadGoal.js";
@@ -213,6 +215,7 @@ export type CodexAppServerRuntimePortOptions = {
 
 const localRequestId = (value: string | number): string => String(value);
 const CODEX_RPC_TIMEOUT_MS = 30_000;
+const CODEX_HISTORY_RPC_TIMEOUT_MS = 120_000;
 
 const resolveConfiguredPath = (value: unknown): string | undefined => {
   if (typeof value !== "string" || !value.trim()) return undefined;
@@ -916,6 +919,8 @@ export class CodexAppServerRuntimePort
   private readonly threadIdBySessionId = new Map<string, string>();
   private readonly detachedThreadIds = new Set<string>();
   private readonly closedThreadIds = new Set<string>();
+  private readonly resumeByThreadId = new Map<string, Promise<Thread>>();
+  private readonly uncertainResumeThreadIds = new Set<string>();
   private readonly sessionIdByThreadId = new Map<string, string>();
   private readonly sessionIdsByThreadId = new Map<string, Set<string>>();
   private readonly pendingTurnSessionIdByThreadId = new Map<string, string>();
@@ -1179,6 +1184,8 @@ export class CodexAppServerRuntimePort
   private clearRuntimeState(): void {
     this.detachedThreadIds.clear();
     this.closedThreadIds.clear();
+    this.resumeByThreadId.clear();
+    this.uncertainResumeThreadIds.clear();
     this.pendingApprovalsById.clear();
     this.pendingApprovalResolutionsById.clear();
     this.threadIdBySessionId.clear();
@@ -1357,13 +1364,14 @@ export class CodexAppServerRuntimePort
 
   public async readThread(
     threadId: string,
-    includeTurns = false
+    includeTurns = false,
+    options: RuntimeOperationOptions = {}
   ): Promise<Thread> {
     await this.start(this.startConfig);
-    const result = (await this.rpc("thread/read", {
+    const result = (await this.historyRpc("thread/read", {
       threadId,
       includeTurns
-    } satisfies ThreadReadParams)) as ThreadReadResponse;
+    } satisfies ThreadReadParams, threadId, "history-read", options)) as ThreadReadResponse;
     return result.thread;
   }
 
@@ -1404,20 +1412,25 @@ export class CodexAppServerRuntimePort
     limit?: number | null;
     sortDirection?: "asc" | "desc" | null;
     itemsView?: TurnItemsView | null;
-  }): Promise<ThreadTurnsListResponse> {
+  }, options: RuntimeOperationOptions = {}): Promise<ThreadTurnsListResponse> {
     await this.start(this.startConfig);
-    return (await this.rpc("thread/turns/list", {
+    return (await this.historyRpc("thread/turns/list", {
       threadId: input.threadId,
       cursor: input.cursor ?? null,
       limit: input.limit ?? null,
       sortDirection: input.sortDirection ?? null,
       itemsView: input.itemsView ?? null
-    } satisfies ThreadTurnsListParams)) as ThreadTurnsListResponse;
+    } satisfies ThreadTurnsListParams, input.threadId, "history-page", options)) as ThreadTurnsListResponse;
   }
 
-  public async resumeThread(threadId: string, cwd?: string, developerInstructions?: string): Promise<Thread> {
+  public async resumeThread(
+    threadId: string,
+    cwd?: string,
+    developerInstructions?: string,
+    options: RuntimeOperationOptions = {}
+  ): Promise<Thread> {
     await this.start(this.startConfig);
-    return this.resumeThreadInCurrentProcess(threadId, cwd, {}, developerInstructions);
+    return this.resumeThreadInCurrentProcess(threadId, cwd, options, developerInstructions);
   }
 
   private async resumeThreadInCurrentProcess(
@@ -1426,23 +1439,73 @@ export class CodexAppServerRuntimePort
     options: RuntimeOperationOptions = {},
     developerInstructions?: string
   ): Promise<Thread> {
+    const existing = this.resumeByThreadId.get(threadId);
+    if (existing) return existing;
+    const resume = this.performThreadResume(threadId, cwd, options, developerInstructions);
+    this.resumeByThreadId.set(threadId, resume);
+    try {
+      return await resume;
+    } finally {
+      if (this.resumeByThreadId.get(threadId) === resume) this.resumeByThreadId.delete(threadId);
+    }
+  }
+
+  private async performThreadResume(
+    threadId: string,
+    cwd: string | undefined,
+    options: RuntimeOperationOptions,
+    developerInstructions?: string
+  ): Promise<Thread> {
+    if (this.uncertainResumeThreadIds.has(threadId) &&
+        await this.isThreadLoaded(threadId, options)) {
+      const loaded = await this.readThread(threadId, false, options);
+      this.uncertainResumeThreadIds.delete(threadId);
+      this.detachedThreadIds.delete(threadId);
+      return loaded;
+    }
     const selected = this.resolveSelectedConfig();
-    const result = (await this.rpc("thread/resume", {
-      threadId,
-      cwd: cwd ?? selected.cwd ?? this.startConfig.cwd ?? null,
-      model: selected.model ?? null,
-      modelProvider: selected.modelProvider ?? null,
-      serviceTier: selected.serviceTier ?? null,
-      approvalPolicy: selected.approvalPolicy ?? null,
-      sandbox: selected.sandbox ?? null,
-      ...(developerInstructions ? { developerInstructions: await this.appendDeveloperInstructions(developerInstructions, cwd, options) } : {})
-    } satisfies ThreadResumeParams, options)) as ThreadResumeResponse;
+    let result: ThreadResumeResponse;
+    try {
+      result = (await this.historyRpc("thread/resume", {
+        threadId,
+        cwd: cwd ?? selected.cwd ?? this.startConfig.cwd ?? null,
+        model: selected.model ?? null,
+        modelProvider: selected.modelProvider ?? null,
+        serviceTier: selected.serviceTier ?? null,
+        approvalPolicy: selected.approvalPolicy ?? null,
+        sandbox: selected.sandbox ?? null,
+        ...(developerInstructions ? { developerInstructions: await this.appendDeveloperInstructions(developerInstructions, cwd, options) } : {})
+      } satisfies ThreadResumeParams, threadId, "execution-resume", options)) as ThreadResumeResponse;
+    } catch (error) {
+      if ((error as { code?: unknown }).code === "runtime_request_timeout") {
+        this.uncertainResumeThreadIds.add(threadId);
+      }
+      throw error;
+    }
     this.rememberThreadExecutionProfile(
       result.thread.id,
       mapCodexExecutionProfile(result)
     );
     this.detachedThreadIds.delete(result.thread.id);
+    this.uncertainResumeThreadIds.delete(result.thread.id);
     return result.thread;
+  }
+
+  private async isThreadLoaded(
+    threadId: string,
+    options: RuntimeOperationOptions
+  ): Promise<boolean> {
+    let cursor: string | null | undefined;
+    do {
+      const result = (await this.rpc("thread/loaded/list", {
+        cursor: cursor ?? null,
+        limit: 256
+      } satisfies ThreadLoadedListParams, options)) as ThreadLoadedListResponse;
+      if (result.data.includes(threadId)) return true;
+      cursor = result.nextCursor;
+    } while (cursor);
+    this.uncertainResumeThreadIds.delete(threadId);
+    return false;
   }
 
   public async forkThread(threadId: string, lastTurnId?: string, options: {
@@ -3972,6 +4035,39 @@ export class CodexAppServerRuntimePort
     options: RuntimeOperationOptions = {}
   ): Promise<unknown> {
     return this.rpcClient.request(method, params, options);
+  }
+
+  private async historyRpc(
+    method: string,
+    params: Record<string, unknown>,
+    threadId: string,
+    stage: string,
+    options: RuntimeOperationOptions = {}
+  ): Promise<unknown> {
+    try {
+      return await this.rpc(method, params, {
+        ...options,
+        timeoutMs: options.timeoutMs ?? CODEX_HISTORY_RPC_TIMEOUT_MS
+      });
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== "runtime_request_timeout") throw error;
+      const details = (error as { details?: unknown }).details;
+      throw createRuntimePortError({
+        code: "runtime_request_timeout",
+        message: `Runtime request ${method} timed out after ${
+          options.timeoutMs ?? CODEX_HISTORY_RPC_TIMEOUT_MS
+        }ms.`,
+        retryable: true,
+        details: {
+          ...(details && typeof details === "object" ? details : {}),
+          method,
+          threadId,
+          stage,
+          timeoutMs: options.timeoutMs ?? CODEX_HISTORY_RPC_TIMEOUT_MS
+        },
+        cause: error
+      });
+    }
   }
 
   private async write(
