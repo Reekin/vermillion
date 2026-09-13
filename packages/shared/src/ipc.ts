@@ -743,7 +743,7 @@ const zChatTreeOperationsRequestSchema = z.object({ id: zRequestId, method: z.li
 const zChatTreeNodeActionRequestSchema = z.object({
   id: zRequestId, method: z.literal("chatTree.nodeAction"),
   params: z.object({ sessionId: zSessionId, nodeId: zTurnId,
-    action: z.enum(["copy_session_id", "copy_awb_session_id", "archive"]) })
+    action: z.enum(["copy_session_id", "copy_awb_session_id", "open_rollout", "archive"]) })
 });
 
 const zDelegationGetRequestSchema = z.object({

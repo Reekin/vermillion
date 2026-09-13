@@ -944,6 +944,9 @@ export const SessionPane = ({
   const executionDraftKey =
     pendingSend?.operationId ??
     (activeSessionId ? `${activeSessionId}:${viewTurnId ?? "tip"}` : undefined);
+  const contentDraftKey = sessionId
+    ? (activeChatTree?.treeId ?? activeChatTree?.sessionId ?? sessionId)
+    : composerDraftKey;
   const renderedTranscriptRows = isOpeningSelectedSession ? [] : visibleTranscriptRows;
   const { approvals: activeSessionApprovals, interactions: activeSessionInteractions } = useRendererSessionSelection(
     store, activeSessionId, () => ({
@@ -1210,7 +1213,7 @@ export const SessionPane = ({
         </div>
 
         <ComposerContainer
-          contentDraftKey={composerDraftKey}
+          contentDraftKey={contentDraftKey}
           onComposerChange={onComposerChange}
           draftKey={executionDraftKey}
           initializeDraftExecution={initializeDraftExecution}

@@ -21,6 +21,7 @@ declare global {
       path?: string;
     }>;
     writeClipboardText: (text: string) => Promise<void>;
+    writeClipboardImage: (source: string) => Promise<{ width: number; height: number }>;
   };
 
   interface Window {

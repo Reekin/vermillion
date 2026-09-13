@@ -21,6 +21,7 @@ import {
   SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
   SESSION_IPC_REQUEST_CHANNEL,
   SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
+  SESSION_IPC_WRITE_CLIPBOARD_IMAGE_CHANNEL,
   WORKBENCH_IPC_EVENT_CHANNEL,
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
@@ -44,6 +45,7 @@ import {
   type RendererHealthSnapshot
 } from "./electron-diagnostics.js";
 import { writeVerifiedClipboardText } from "./clipboard-writer.js";
+import { writeVerifiedClipboardImage } from "./clipboard-image-writer.js";
 import { createAgentCompletionNotifier } from "./agent-completion-notification.js";
 
 app.setName("Vermillion");
@@ -858,6 +860,13 @@ const boot = async (): Promise<void> => {
     }
   });
   const localEndpoint = await startLocalEndpoint(persistenceBaseDir, async (request) => {
+    if (request.method === "clipboard.writeImage") {
+      const source = (request.params as { source?: unknown })?.source;
+      if (typeof source !== "string" || !source.trim()) {
+        return { ok: false, error: "source must be a non-empty image URL." };
+      }
+      return { ok: true, result: await writeVerifiedClipboardImage(clipboard, source) };
+    }
     if (["engine.listModels", "sessionBrowser.open", "chatTree.get", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
       const response = await router.handleRequest({ ...request, id: randomUUID() });
       return response.ok
@@ -906,6 +915,15 @@ const boot = async (): Promise<void> => {
       writeVerifiedClipboardText(clipboard, diagnostics, text);
     }
   );
+  ipcMain.handle(
+    SESSION_IPC_WRITE_CLIPBOARD_IMAGE_CHANNEL,
+    (_event, source: unknown) => {
+      if (typeof source !== "string" || !source.trim()) {
+        throw new TypeError("Clipboard image source must be a non-empty string.");
+      }
+      return writeVerifiedClipboardImage(clipboard, source);
+    }
+  );
 
   await loadRendererTarget(window);
 
@@ -931,6 +949,7 @@ const boot = async (): Promise<void> => {
     ipcMain.removeHandler(SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL);
     ipcMain.removeHandler(SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL);
     ipcMain.removeHandler(SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL);
+    ipcMain.removeHandler(SESSION_IPC_WRITE_CLIPBOARD_IMAGE_CHANNEL);
     void router.dispose();
   });
 };

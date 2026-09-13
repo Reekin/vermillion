@@ -13,7 +13,7 @@ it("exposes node identifiers and forwards each node action to the owning desktop
   const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
   try {
     const params = { sessionId: "tree-root", nodeId: "other-branch-turn" };
-    for (const action of ["copy_session_id", "copy_awb_session_id", "archive"]) {
+    for (const action of ["copy_session_id", "copy_awb_session_id", "open_rollout", "archive"]) {
       const input = { ...params, action };
       expect(await runCli(["chatTree.nodeAction", JSON.stringify(input)])).toBe(0);
       expect(handler).toHaveBeenLastCalledWith({ method: "chatTree.nodeAction", params: input });
@@ -23,6 +23,12 @@ it("exposes node identifiers and forwards each node action to the owning desktop
     expect(handler).toHaveBeenLastCalledWith({ method: "chatTree.get", params: { sessionId: params.sessionId } });
     expect(await runCli(["chatTree.nodeAction", "--help"])).toBe(0);
     expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining("copy_awb_session_id"));
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining("open_rollout"));
+    const imageInput = { source: "file:///C:/images/example.png" };
+    expect(await runCli(["clipboard.writeImage", JSON.stringify(imageInput)])).toBe(0);
+    expect(handler).toHaveBeenLastCalledWith({ method: "clipboard.writeImage", params: imageInput });
+    expect(await runCli(["clipboard.writeImage", "--help"])).toBe(0);
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining("系统剪贴板"));
   } finally {
     await endpoint.close();
     vi.restoreAllMocks();

@@ -438,7 +438,10 @@ export const useComposerController = (
   const [draftBySessionId, setDraftBySessionId] = useState<Record<string, string>>({});
   const [detachedDraft, setDetachedDraft] = useState("");
   const [detachedAttachments, setDetachedAttachments] = useState<ComposerAttachment[]>([]);
-  const [selectedSkills, setSelectedSkills] = useState<ComposerSkillReference[]>([]);
+  const [selectedSkillsByDraftKey, setSelectedSkillsByDraftKey] = useState<
+    Record<string, ComposerSkillReference[]>
+  >({});
+  const [detachedSelectedSkills, setDetachedSelectedSkills] = useState<ComposerSkillReference[]>([]);
   const [attachmentDrafts, setAttachmentDrafts] = useState<
     Record<string, ComposerAttachment[]>
   >({});
@@ -469,8 +472,9 @@ export const useComposerController = (
   const [isSkillsLoading, setIsSkillsLoading] = useState(false);
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(0);
   const mountedRef = useRef(true);
-  const contentRevisionRef = useRef(0);
-  const selectedSkillsRef = useRef<ComposerSkillReference[]>([]);
+  const contentRevisionByDraftKeyRef = useRef(new Map<string, number>());
+  const selectedSkillDraftsRef = useRef<Record<string, ComposerSkillReference[]>>({});
+  const detachedSelectedSkillsRef = useRef<ComposerSkillReference[]>([]);
   const attachmentDraftsRef = useRef<Record<string, ComposerAttachment[]>>({});
   const detachedAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
@@ -536,6 +540,9 @@ export const useComposerController = (
   const attachments = contentDraftKey
     ? (attachmentDrafts[contentDraftKey] ?? [])
     : detachedAttachments;
+  const selectedSkills = contentDraftKey
+    ? (selectedSkillsByDraftKey[contentDraftKey] ?? [])
+    : detachedSelectedSkills;
   const queue = input.activeSessionId
     ? (queueBySessionId[input.activeSessionId] ?? [])
     : [];
@@ -652,10 +659,6 @@ export const useComposerController = (
     (Boolean(input.activeSessionId && interruptTurnId) && isTurnActive);
 
   useEffect(() => {
-    selectedSkillsRef.current = selectedSkills;
-  }, [selectedSkills]);
-
-  useEffect(() => {
     queueRef.current = queueBySessionId;
   }, [queueBySessionId]);
 
@@ -663,7 +666,8 @@ export const useComposerController = (
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      selectedSkillsRef.current = [];
+      selectedSkillDraftsRef.current = {};
+      detachedSelectedSkillsRef.current = [];
       releaseComposerAttachments(detachedAttachmentsRef.current);
       for (const draftAttachments of Object.values(attachmentDraftsRef.current)) {
         releaseComposerAttachments(draftAttachments);
@@ -681,9 +685,6 @@ export const useComposerController = (
       return;
     }
     previousContentDraftKeyRef.current = contentDraftKey;
-    contentRevisionRef.current += 1;
-    selectedSkillsRef.current = [];
-    setSelectedSkills([]);
   }, [contentDraftKey]);
 
   useEffect(() => {
@@ -793,12 +794,20 @@ export const useComposerController = (
     };
   }, [input.skillsCwd, input.onStatusNotice, input.transport]);
 
-  const setDraft = (value: string): void => {
-    contentRevisionRef.current += 1;
-    if (contentDraftKey) {
+  const revisionKey = (key: string | undefined): string => key ?? "\u0000detached";
+  const getContentRevision = (key: string | undefined): number =>
+    contentRevisionByDraftKeyRef.current.get(revisionKey(key)) ?? 0;
+  const incrementContentRevision = (key: string | undefined): void => {
+    const normalized = revisionKey(key);
+    contentRevisionByDraftKeyRef.current.set(normalized, getContentRevision(key) + 1);
+  };
+
+  const setDraft = (value: string, key = contentDraftKey): void => {
+    incrementContentRevision(key);
+    if (key) {
       setDraftBySessionId((current) => ({
         ...current,
-        [contentDraftKey]: value
+        [key]: value
       }));
       return;
     }
@@ -817,11 +826,26 @@ export const useComposerController = (
     setCursorPosition(value.length);
   };
 
-  const replaceSelectedSkills = (nextSkills: ComposerSkillReference[]): void => {
-    contentRevisionRef.current += 1;
-    selectedSkillsRef.current = nextSkills;
-    setSelectedSkills(nextSkills);
+  const replaceSelectedSkills = (
+    nextSkills: ComposerSkillReference[],
+    key = contentDraftKey
+  ): void => {
+    incrementContentRevision(key);
+    if (key) {
+      const nextDrafts = nextSkills.length > 0
+        ? { ...selectedSkillDraftsRef.current, [key]: nextSkills }
+        : Object.fromEntries(Object.entries(selectedSkillDraftsRef.current)
+          .filter(([draftKey]) => draftKey !== key));
+      selectedSkillDraftsRef.current = nextDrafts;
+      setSelectedSkillsByDraftKey(nextDrafts);
+    } else {
+      detachedSelectedSkillsRef.current = nextSkills;
+      setDetachedSelectedSkills(nextSkills);
+    }
   };
+
+  const getSelectedSkills = (key = contentDraftKey): ComposerSkillReference[] =>
+    key ? (selectedSkillDraftsRef.current[key] ?? []) : detachedSelectedSkillsRef.current;
 
   const suggestionQuery = useMemo(() => {
     if (input.isOpeningSelectedSession) {
@@ -901,7 +925,7 @@ export const useComposerController = (
     } = {}
   ): void => {
     const currentAttachments = getAttachmentsForSession(sessionId);
-    contentRevisionRef.current += 1;
+    incrementContentRevision(sessionId);
     if (options.releaseCurrent ?? true) {
       releaseComposerAttachments(currentAttachments);
     }
@@ -991,7 +1015,7 @@ export const useComposerController = (
     source: QueuedComposerMessage["source"],
     text = draft.trim()
   ): void => {
-    const currentSkills = selectedSkillsRef.current;
+    const currentSkills = getSelectedSkills();
     const currentAttachments = getAttachmentsForSession();
     if (!text && currentSkills.length === 0 && currentAttachments.length === 0) {
       return;
@@ -1186,7 +1210,7 @@ export const useComposerController = (
     }
     if (goalCommand) {
       if (
-        selectedSkillsRef.current.length > 0 ||
+        getSelectedSkills().length > 0 ||
         getAttachmentsForSession().length > 0
       ) {
         input.onStatusNotice({
@@ -1195,12 +1219,13 @@ export const useComposerController = (
         });
         return;
       }
-      const submittedRevision = contentRevisionRef.current;
+      const submittedKey = contentDraftKey;
+      const submittedRevision = getContentRevision(submittedKey);
       const succeeded = await dispatchGoalCommand(goalCommand);
-      if (!succeeded || submittedRevision !== contentRevisionRef.current) {
+      if (!succeeded || submittedRevision !== getContentRevision(submittedKey)) {
         return;
       }
-      onDraftChange("");
+      setDraft("", submittedKey);
       return;
     }
     await submitCurrentInput(draft);
@@ -1212,30 +1237,32 @@ export const useComposerController = (
       return;
     }
     const currentAttachments = getAttachmentsForSession();
-    const submittedRevision = contentRevisionRef.current;
+    const submittedKey = contentDraftKey;
+    const submittedRevision = getContentRevision(submittedKey);
     const succeeded = await dispatchPayload({
       text,
-      payloadSkills: selectedSkillsRef.current,
+      payloadSkills: getSelectedSkills(),
       payloadAttachments: currentAttachments,
       mode: intent,
       turnId: activeTurnId,
       execution: intent === "steer" ? undefined : execution
     });
-    if (!succeeded || submittedRevision !== contentRevisionRef.current) {
+    if (!succeeded || submittedRevision !== getContentRevision(submittedKey)) {
       return;
     }
-    onDraftChange("");
-    replaceSelectedSkills([]);
-    replaceAttachmentsForSession(contentDraftKey, [], {
+    setDraft("", submittedKey);
+    replaceSelectedSkills([], submittedKey);
+    replaceAttachmentsForSession(submittedKey, [], {
       releaseCurrent: true
     });
   };
 
   const onSubmitUsing = async (handler: ComposerSubmitHandler): Promise<void> => {
     if (!canSubmit) return;
-    const submittedRevision = contentRevisionRef.current;
+    const submittedKey = contentDraftKey;
+    const submittedRevision = getContentRevision(submittedKey);
     const payload = {
-      content: serializeComposerContent(draft, selectedSkillsRef.current),
+      content: serializeComposerContent(draft, getSelectedSkills()),
       attachments: getAttachmentsForSession().map((item) => item.attachment),
       execution: snapshotComposerExecution(execution)
     };
@@ -1244,10 +1271,10 @@ export const useComposerController = (
       const sessionId = input.activeSessionId ?? await input.createSession!(payload);
       await handler({ sessionId, ...payload });
       input.onStatusNotice(undefined);
-      if (submittedRevision === contentRevisionRef.current) {
-        onDraftChange("");
-        replaceSelectedSkills([]);
-        replaceAttachmentsForSession(contentDraftKey, [], { releaseCurrent: true });
+      if (submittedRevision === getContentRevision(submittedKey)) {
+        setDraft("", submittedKey);
+        replaceSelectedSkills([], submittedKey);
+        replaceAttachmentsForSession(submittedKey, [], { releaseCurrent: true });
       }
     } finally {
       setIsDispatching(false);
@@ -1328,9 +1355,9 @@ export const useComposerController = (
     }
     if (item.kind === "skill") {
       replaceSelectedSkills(
-        selectedSkillsRef.current.some((skill) => skill.id === `${item.skill.path}:${item.skill.name}`)
-          ? selectedSkillsRef.current
-          : [...selectedSkillsRef.current, toComposerSkillReference(item.skill)]
+        getSelectedSkills().some((skill) => skill.id === `${item.skill.path}:${item.skill.name}`)
+          ? getSelectedSkills()
+          : [...getSelectedSkills(), toComposerSkillReference(item.skill)]
       );
       replaceRangeInDraft(
         suggestions.query.start,
@@ -1525,7 +1552,7 @@ export const useComposerController = (
 
   const onRemoveSkill = (skillId: string): void => {
     replaceSelectedSkills(
-      selectedSkillsRef.current.filter((skill) => skill.id !== skillId)
+      getSelectedSkills().filter((skill) => skill.id !== skillId)
     );
   };
 

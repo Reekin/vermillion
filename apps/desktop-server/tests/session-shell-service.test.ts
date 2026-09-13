@@ -210,6 +210,32 @@ const buildHistoryRefreshOpenHarness = (input: {
 };
 
 describe("SessionShellService", () => {
+  it("runs a rollout action against the session that owns the selected tree node", async () => {
+    const getNodeTarget = vi.fn().mockResolvedValue({ sessionId: "branch-session", canArchive: false });
+    const runAction = vi.fn().mockResolvedValue({
+      action: "open_rollout",
+      rolloutPath: "C:/rollouts/branch.jsonl",
+      rolloutDisplayPath: "branch.jsonl",
+      rolloutFileUrl: "file:///C:/rollouts/branch.jsonl"
+    });
+    const service = new SessionShellService({
+      runtimeService: {} as never,
+      wrapperChatTree: { getNodeTarget } as never,
+      sessionActions: { runAction } as never
+    });
+
+    await expect(service.runChatTreeNodeAction({
+      sessionId: "tree-root",
+      nodeId: "branch-turn",
+      action: "open_rollout"
+    })).resolves.toMatchObject({ action: "open_rollout", rolloutDisplayPath: "branch.jsonl" });
+    expect(getNodeTarget).toHaveBeenCalledWith("tree-root", "branch-turn");
+    expect(runAction).toHaveBeenCalledWith("branch-session", "open_rollout", {
+      sessionId: "branch-session",
+      action: "open_rollout"
+    });
+  });
+
   it("refreshes provider history before reopening a session", async () => {
     const harness = buildHistoryRefreshOpenHarness();
 

@@ -177,8 +177,8 @@ describe("composer content lifetime", () => {
     await pending;
     expect(h.render().draft).toBe("next draft");
   });
-  it("keeps text, skills and attachments through nodes, trees and the opening gap", async () => {
-    const h = setup({ draftKey: "a:node-1" });
+  it("keeps a complete draft within one tree and restores separate tree drafts", async () => {
+    const h = setup({ draftKey: "a:node-1", contentDraftKey: "tree-a" });
     let c = await h.flush();
     c.onDraftChange("$review");
     c = h.render();
@@ -191,14 +191,23 @@ describe("composer content lifetime", () => {
     expect(c.selectedSkills).toHaveLength(1);
     for (const patch of [
       { draftKey: "a:node-2" },
-      { draftKey: undefined, activeSessionId: undefined, activeSession: undefined, isOpeningSelectedSession: true },
-      { draftKey: "b:node-1", activeSessionId: "b", activeSession: session("b"), isOpeningSelectedSession: false }
+      { draftKey: undefined, activeSessionId: undefined, activeSession: undefined, isOpeningSelectedSession: true }
     ]) {
       c = h.render(patch);
       expect(c.draft).toBe("unfinished");
       expect(c.selectedSkills).toHaveLength(1);
       expect(c.attachments).toHaveLength(1);
     }
+    c = h.render({ contentDraftKey: "tree-b", draftKey: "b:node-1", activeSessionId: "b",
+      activeSession: session("b"), isOpeningSelectedSession: false });
+    expect({ draft: c.draft, skills: c.selectedSkills, attachments: c.attachments })
+      .toEqual({ draft: "", skills: [], attachments: [] });
+    c.onDraftChange("tree b");
+    c = h.render({ contentDraftKey: "tree-a", draftKey: "a:node-2", activeSessionId: "a",
+      activeSession: session("a") });
+    expect(c.draft).toBe("unfinished");
+    expect(c.selectedSkills).toHaveLength(1);
+    expect(c.attachments).toHaveLength(1);
     h.send.mockResolvedValueOnce({ accepted: false });
     await c.onPrimaryAction();
     c = h.render();
@@ -207,13 +216,32 @@ describe("composer content lifetime", () => {
     expect(c.attachments).toHaveLength(1);
     await c.onPrimaryAction();
     expect(h.send).toHaveBeenLastCalledWith(expect.objectContaining({
-      sessionId: "b", content: "[$review](/review)\n\nunfinished",
+      sessionId: "a", content: "[$review](/review)\n\nunfinished",
       attachments: [attachment.attachment]
     }));
     c = h.render();
     expect(c.draft).toBe("");
     expect(c.selectedSkills).toEqual([]);
     expect(c.attachments).toEqual([]);
+    c = h.render({ contentDraftKey: "tree-b", draftKey: "b:node-1", activeSessionId: "b",
+      activeSession: session("b") });
+    expect(c.draft).toBe("tree b");
+  });
+
+  it("clears only the submitted tree after an asynchronous send", async () => {
+    const h = setup({ contentDraftKey: "tree-a" });
+    let c = await h.flush();
+    c.onDraftChange("tree a");
+    c = h.render();
+    let accept!: (receipt: { accepted: boolean }) => void;
+    h.send.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
+    const pending = c.onPrimaryAction();
+    c = h.render({ contentDraftKey: "tree-b", activeSessionId: "b", activeSession: session("b") });
+    c.onDraftChange("tree b");
+    accept({ accepted: true });
+    await pending;
+    expect(h.render().draft).toBe("tree b");
+    expect(h.render({ contentDraftKey: "tree-a", activeSessionId: "a", activeSession: session("a") }).draft).toBe("");
   });
 
   it("retains per-session model selection and queues with a shared buffer", async () => {
