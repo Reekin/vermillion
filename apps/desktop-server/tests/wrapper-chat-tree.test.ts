@@ -193,6 +193,33 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
+  it("keeps published nodes navigable while an invalidated tree rebuilds", async () => {
+    const f = await fixture();
+    const published = await f.service.get("root");
+    expect(published.nodes.some((node) => node.nodeId === "c")).toBe(true);
+    let releaseReload!: () => void;
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    f.load.mockImplementation(async () => {
+      await reloadGate;
+      return true;
+    });
+
+    f.service.invalidate("root");
+    const duringReload = await f.service.get("root");
+    expect(duringReload.nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);
+    await expect(f.service.jump("root", "c")).resolves.toEqual({ jumped: true });
+    expect(f.index.getTreeView("root")).toEqual({
+      sessionId: "branch",
+      nodeId: "c",
+      followTip: false
+    });
+
+    releaseReload();
+    await vi.waitFor(() => expect(f.changed).toHaveBeenCalled());
+    expect((await f.service.get("root")).currentNodeId).toBe("c");
+    f.service.dispose();
+  });
+
   it("retries when the tree is invalidated immediately before projection", async () => {
     const f = await fixture();
     await f.service.get("root");

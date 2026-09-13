@@ -56,7 +56,11 @@ describe("execution release", () => {
     rpc.mockResolvedValue({ thread: { id: "thread-worker", turns: [{ id: "completed-turn" }] } });
     expect((await port.readThread("thread-worker", true)).turns).toEqual([{ id: "completed-turn" }]);
     await internals.ensureThreadForSession("worker");
-    expect(rpc).toHaveBeenLastCalledWith("thread/resume", expect.objectContaining({ threadId: "thread-worker" }), {});
+    expect(rpc).toHaveBeenLastCalledWith(
+      "thread/resume",
+      expect.objectContaining({ threadId: "thread-worker" }),
+      { timeoutMs: 120_000 }
+    );
   });
 
   it("observes thread/closed sent before the unsubscribe response", async () => {

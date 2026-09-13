@@ -106,6 +106,7 @@ const buildProjectedProviderOpenHarness = (
   };
   const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
   const markSessionRead = vi.fn().mockResolvedValue(undefined);
+  const updateSessionMetadata = vi.fn().mockResolvedValue(undefined);
   const service = new SessionShellService({
     runtimeService: {
       listSessions: () => [providerSession],
@@ -123,7 +124,8 @@ const buildProjectedProviderOpenHarness = (
           providerKind: "codex-thread",
           providerSessionId: "thread-1"
         })
-      })
+      }),
+      updateSessionMetadata
     } as never,
     sessionCatalog: {
       markSessionRead
@@ -144,7 +146,8 @@ const buildProjectedProviderOpenHarness = (
     service,
     ensureSessionExecutable,
     setLastActiveSelection,
-    markSessionRead
+    markSessionRead,
+    updateSessionMetadata
   };
 };
 
@@ -167,11 +170,13 @@ const buildHistoryRefreshOpenHarness = (input: {
   const invalidate = vi.fn();
   const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
   const markSessionRead = vi.fn().mockResolvedValue(undefined);
+  const updateSessionMetadata = vi.fn().mockResolvedValue(undefined);
   const service = new SessionShellService({
     runtimeService: {
       listSessions: () => [providerSession],
       getSnapshot: () => ({ ...snapshot, sessions: [providerSession] }),
       getWorkspaceRegistry: () => ({ setLastActiveSelection }),
+      updateSessionMetadata,
       getSessionIndexStore: () => ({
         getEntry: () => ({
           sessionId: "session-1",
@@ -205,7 +210,8 @@ const buildHistoryRefreshOpenHarness = (input: {
     clearSessionHistory,
     ensureSessionLoaded,
     ensureSessionExecutable,
-    invalidate
+    invalidate,
+    updateSessionMetadata
   };
 };
 
@@ -251,7 +257,9 @@ describe("SessionShellService", () => {
     expect(harness.ensureSessionLoaded).toHaveBeenCalledWith("session-1", {
       force: true,
       requireFull: true,
-      isCancelled: expect.any(Function)
+      isCancelled: expect.any(Function),
+      signal: expect.anything(),
+      retainExecution: true
     });
     expect(harness.invalidate).toHaveBeenCalledWith("session-1");
     expect(harness.releaseSessionExecution.mock.invocationCallOrder[0]).toBeLessThan(
@@ -890,12 +898,13 @@ describe("SessionShellService", () => {
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
-  it("ensures a fully projected provider session is executable before activating it", async () => {
+  it("activates projected history before recovering execution in the background", async () => {
     const {
       service,
       ensureSessionExecutable,
       setLastActiveSelection,
-      markSessionRead
+      markSessionRead,
+      updateSessionMetadata
     } = buildProjectedProviderOpenHarness();
 
     await expect(service.openSession("session-1")).resolves.toEqual({
@@ -903,15 +912,19 @@ describe("SessionShellService", () => {
         sessionId: "session-1"
       })
     });
-    expect(ensureSessionExecutable).toHaveBeenCalledWith("session-1");
-    expect(ensureSessionExecutable.mock.invocationCallOrder[0]).toBeLessThan(
-      setLastActiveSelection.mock.invocationCallOrder[0]!
-    );
     expect(setLastActiveSelection).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       sessionId: "session-1"
     });
     expect(markSessionRead).toHaveBeenCalledWith("session-1");
+    await vi.waitFor(() => expect(ensureSessionExecutable).toHaveBeenCalledWith("session-1"));
+    expect(setLastActiveSelection.mock.invocationCallOrder[0]).toBeLessThan(
+      ensureSessionExecutable.mock.invocationCallOrder[0]!
+    );
+    await vi.waitFor(() => expect(updateSessionMetadata).toHaveBeenLastCalledWith(
+      "session-1",
+      { executionRecovery: { status: "ready" } }
+    ));
   });
 
   it.each([
@@ -926,16 +939,19 @@ describe("SessionShellService", () => {
       error: "resume failed"
     }
   ])(
-    "does not activate a fully projected provider session when executable reconciliation $label",
+    "keeps projected history active and records execution recovery when reconciliation $label",
     async ({ ensure, error }) => {
       const ensureSessionExecutable = vi.fn(ensure);
-      const { service, setLastActiveSelection, markSessionRead } =
+      const { service, setLastActiveSelection, markSessionRead, updateSessionMetadata } =
         buildProjectedProviderOpenHarness(ensureSessionExecutable);
 
-      await expect(service.openSession("session-1")).rejects.toThrow(error);
-      expect(ensureSessionExecutable).toHaveBeenCalledWith("session-1");
-      expect(setLastActiveSelection).not.toHaveBeenCalled();
-      expect(markSessionRead).not.toHaveBeenCalled();
+      await expect(service.openSession("session-1")).resolves.toBeDefined();
+      expect(setLastActiveSelection).toHaveBeenCalled();
+      expect(markSessionRead).toHaveBeenCalled();
+      await vi.waitFor(() => expect(updateSessionMetadata).toHaveBeenLastCalledWith(
+        "session-1",
+        { executionRecovery: { status: "failed", message: error } }
+      ));
     }
   );
 
@@ -1129,12 +1145,12 @@ describe("SessionShellService", () => {
     );
     expect(getChatTree).toHaveBeenCalledWith("session-1");
     expect(ensureSessionLoaded).not.toHaveBeenCalled();
-    expect(ensureSessionExecutable).toHaveBeenCalledWith("session-1");
+    await vi.waitFor(() => expect(ensureSessionExecutable).toHaveBeenCalledWith("session-1"));
     expect(hydrateSessionWindow.mock.invocationCallOrder[0]).toBeLessThan(
       ensureSessionExecutable.mock.invocationCallOrder[0]!
     );
-    expect(ensureSessionExecutable.mock.invocationCallOrder[0]).toBeLessThan(
-      setLastActiveSelection.mock.invocationCallOrder[0]!
+    expect(setLastActiveSelection.mock.invocationCallOrder[0]).toBeLessThan(
+      ensureSessionExecutable.mock.invocationCallOrder[0]!
     );
     expect(setLastActiveSelection).toHaveBeenCalledWith({
       workspaceId: "workspace-1",

@@ -820,6 +820,36 @@ export const SessionPane = ({
     typeof displayedSession?.metadata?.cwd === "string"
       ? displayedSession.metadata.cwd
       : undefined;
+  const executionRecovery = displayedSession?.metadata?.executionRecovery;
+  const executionRecoveryStatus =
+    executionRecovery && typeof executionRecovery === "object" && "status" in executionRecovery
+      ? executionRecovery.status
+      : undefined;
+  const executionRecoveryMessage =
+    executionRecovery && typeof executionRecovery === "object" && "message" in executionRecovery &&
+      typeof executionRecovery.message === "string"
+      ? executionRecovery.message
+      : undefined;
+  useEffect(() => {
+    if (!viewSessionId) return;
+    if (executionRecoveryStatus === "failed") {
+      setStatusNotice((current) => current && current.source !== "session-browser"
+        ? current
+        : {
+            message: `Session reconnect failed: ${executionRecoveryMessage ?? "Unknown error"}. Use Resume to retry.`,
+            persistent: true,
+            source: "session-browser",
+            severity: "error",
+            context: { executionRecoverySessionId: viewSessionId }
+          });
+      return;
+    }
+    if (executionRecoveryStatus === "ready") {
+      setStatusNotice((current) =>
+        current?.context?.executionRecoverySessionId === viewSessionId ? undefined : current
+      );
+    }
+  }, [executionRecoveryMessage, executionRecoveryStatus, setStatusNotice, viewSessionId]);
 
   useRendererDiagnostics({
     transport,

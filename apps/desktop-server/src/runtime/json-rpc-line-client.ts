@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
+import { Worker } from "node:worker_threads";
 import {
   createRuntimeNotStartedError,
   createRuntimePortError,
@@ -93,9 +94,31 @@ type ActiveReadDiagnostics = {
   notificationCount: number;
   maxNotificationListenerSyncMs: number;
   methods: Record<string, number>;
+  pendingLines: number;
+  syncDurationMs: number;
+  bufferedBytesAfter: number;
+  completed: boolean;
+};
+
+type QueuedLine = {
+  line: string;
+  diagnostics?: ActiveReadDiagnostics;
+};
+
+type PendingLargeParse = {
+  resolve: (payload: JsonRpcLinePayload) => void;
+  reject: (error: Error) => void;
 };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const LARGE_JSON_PARSE_THRESHOLD = 256 * 1024;
+const JSON_PARSE_WORKER = `
+  const { parentPort } = require("node:worker_threads");
+  parentPort.on("message", ({ id, line }) => {
+    try { parentPort.postMessage({ id, payload: JSON.parse(line) }); }
+    catch (error) { parentPort.postMessage({ id, error: error instanceof Error ? error.message : String(error) }); }
+  });
+`;
 
 const localRequestId = (id: JsonRpcLineId): string => String(id);
 
@@ -112,46 +135,42 @@ export class JsonRpcLineClient {
   private readonly protocolErrorListeners = new Set<Listener<Error>>();
   private readonly pendingById = new Map<string, PendingRequest>();
   private readonly pendingWrites = new Set<PendingWrite>();
-  private buffer = "";
+  private readonly bufferedParts: string[] = [];
+  private bufferedBytes = 0;
+  private readonly queuedLines: QueuedLine[] = [];
+  private processingLargeLine = false;
+  private parseWorker: Worker | undefined;
+  private nextParseId = 0;
+  private readonly pendingLargeParses = new Map<number, PendingLargeParse>();
   private nextRequestId = 0;
   private nextReadSeq = 0;
   private activeReadDiagnostics: ActiveReadDiagnostics | undefined;
   private pendingReleaseProbe: PendingReleaseProbe | undefined;
 
   private readonly handleData = (chunk: Buffer | string): void => {
-    if (!this.diagnostics) {
-      this.consume(chunk);
-      return;
-    }
-
-    const readSeq = ++this.nextReadSeq;
     const startedAt = performance.now();
-    const activeRead: ActiveReadDiagnostics = {
-      readSeq,
+    const activeRead: ActiveReadDiagnostics | undefined = this.diagnostics ? {
+      readSeq: ++this.nextReadSeq,
       chunkBytes:
         typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length,
-      bufferedBytesBefore: Buffer.byteLength(this.buffer),
+      bufferedBytesBefore: this.bufferedBytes,
       parsedLineCount: 0,
       parseErrorCount: 0,
       notificationCount: 0,
       maxNotificationListenerSyncMs: 0,
-      methods: {}
-    };
-    this.activeReadDiagnostics = activeRead;
-    try {
-      this.consume(chunk);
-    } finally {
-      this.activeReadDiagnostics = undefined;
-      const completedAt = performance.now();
-      this.diagnostics({
-        type: "read-completed",
-        ...activeRead,
-        bufferedBytesAfter: Buffer.byteLength(this.buffer),
-        syncDurationMs: completedAt - startedAt,
-        pendingRequestCount: this.pendingById.size
-      });
-      this.scheduleReleaseProbe(readSeq, completedAt);
+      methods: {},
+      pendingLines: 0,
+      syncDurationMs: 0,
+      bufferedBytesAfter: 0,
+      completed: false
+    } : undefined;
+    this.consume(chunk, activeRead);
+    if (activeRead) {
+      activeRead.syncDurationMs += performance.now() - startedAt;
+      activeRead.bufferedBytesAfter = this.bufferedBytes;
+      this.completeReadIfReady(activeRead);
     }
+    this.drainQueuedLines();
   };
 
   private scheduleReleaseProbe(readSeq: number, completedAt: number): void {
@@ -181,6 +200,23 @@ export class JsonRpcLineClient {
         releaseDelayMs: performance.now() - probe.completedAt
       });
     });
+  }
+
+  private completeReadIfReady(read: ActiveReadDiagnostics): void {
+    if (read.completed || read.pendingLines > 0) return;
+    read.completed = true;
+    const completedAt = performance.now();
+    const {
+      pendingLines: _pendingLines,
+      completed: _completed,
+      ...diagnostic
+    } = read;
+    this.diagnostics?.({
+      type: "read-completed",
+      ...diagnostic,
+      pendingRequestCount: this.pendingById.size
+    });
+    this.scheduleReleaseProbe(read.readSeq, completedAt);
   }
 
   private readonly handleInputError = (error: Error): void => {
@@ -229,7 +265,8 @@ export class JsonRpcLineClient {
     this.detachStreams();
     this.input = inputOutput.input;
     this.output = inputOutput.output;
-    this.buffer = "";
+    this.bufferedParts.length = 0;
+    this.bufferedBytes = 0;
     this.input?.on("data", this.handleData);
     this.input?.on("error", this.handleInputError);
     this.output?.on("error", this.handleOutputError);
@@ -410,70 +447,183 @@ export class JsonRpcLineClient {
     this.output?.off("error", this.handleOutputError);
     this.input = undefined;
     this.output = undefined;
-    this.buffer = "";
+    this.bufferedParts.length = 0;
+    this.bufferedBytes = 0;
+    this.queuedLines.length = 0;
+    this.processingLargeLine = false;
+    void this.parseWorker?.terminate();
+    this.parseWorker = undefined;
+    for (const pending of this.pendingLargeParses.values()) {
+      pending.reject(new Error("Runtime line client was detached."));
+    }
+    this.pendingLargeParses.clear();
   }
 
-  private consume(chunk: Buffer | string): void {
-    this.buffer += typeof chunk === "string" ? chunk : String(chunk);
+  private consume(chunk: Buffer | string, diagnostics?: ActiveReadDiagnostics): void {
+    const text = typeof chunk === "string" ? chunk : String(chunk);
+    let start = 0;
     for (;;) {
-      const newlineIndex = this.buffer.indexOf("\n");
-      if (newlineIndex < 0) {
+      const newlineIndex = text.indexOf("\n", start);
+      if (newlineIndex < 0) break;
+      const tail = text.slice(start, newlineIndex);
+      const line = this.bufferedParts.length > 0
+        ? [...this.bufferedParts, tail].join("")
+        : tail;
+      this.bufferedParts.length = 0;
+      this.bufferedBytes = 0;
+      start = newlineIndex + 1;
+      if (!line.trim()) continue;
+      if (diagnostics) diagnostics.pendingLines += 1;
+      this.queuedLines.push({ line, diagnostics });
+    }
+    if (start < text.length) {
+      const remainder = text.slice(start);
+      this.bufferedParts.push(remainder);
+      this.bufferedBytes += Buffer.byteLength(remainder);
+    }
+  }
+
+  private drainQueuedLines(): void {
+    if (this.processingLargeLine) return;
+    for (;;) {
+      const queued = this.queuedLines.shift();
+      if (!queued) return;
+      if (Buffer.byteLength(queued.line) >= LARGE_JSON_PARSE_THRESHOLD) {
+        this.processingLargeLine = true;
+        void this.parseLargeLine(queued.line)
+          .then((payload) => {
+            const startedAt = performance.now();
+            this.dispatchParsedPayload(payload, queued.diagnostics);
+            if (queued.diagnostics) {
+              queued.diagnostics.syncDurationMs += performance.now() - startedAt;
+            }
+          })
+          .catch((error) => this.handleParseError(error, queued.line, queued.diagnostics))
+          .finally(() => {
+            this.finishQueuedLine(queued.diagnostics);
+            this.processingLargeLine = false;
+            this.drainQueuedLines();
+          });
         return;
       }
-      const line = this.buffer.slice(0, newlineIndex);
-      this.buffer = this.buffer.slice(newlineIndex + 1);
-      if (!line.trim()) {
-        continue;
-      }
-      this.handleLine(line);
+      const startedAt = performance.now();
+      this.handleLine(queued.line, queued.diagnostics);
+      if (queued.diagnostics) queued.diagnostics.syncDurationMs += performance.now() - startedAt;
+      this.finishQueuedLine(queued.diagnostics);
     }
   }
 
-  private handleLine(line: string): void {
-    if (this.activeReadDiagnostics) {
-      this.activeReadDiagnostics.parsedLineCount += 1;
-    }
+  private handleLine(line: string, diagnostics?: ActiveReadDiagnostics): void {
     let payload: JsonRpcLinePayload;
     try {
       payload = JSON.parse(line) as JsonRpcLinePayload;
     } catch (error) {
-      if (this.activeReadDiagnostics) {
-        this.activeReadDiagnostics.parseErrorCount += 1;
-        this.incrementActiveMethod("<parse-error>");
-      }
-      this.emitProtocolError(
-        createRuntimePortError({
-          code: "runtime_protocol_error",
-          message:
-            error instanceof Error ? error.message : "Failed to parse JSON line.",
-          retryable: true,
-          details: {
-            rawLine: line
-          },
-          cause: error
-        })
+      this.handleParseError(error, line, diagnostics);
+      return;
+    }
+    this.dispatchParsedPayload(payload, diagnostics);
+  }
+
+  private dispatchParsedPayload(
+    payload: JsonRpcLinePayload,
+    diagnostics?: ActiveReadDiagnostics
+  ): void {
+    const previousDiagnostics = this.activeReadDiagnostics;
+    this.activeReadDiagnostics = diagnostics;
+    try {
+      if (diagnostics) diagnostics.parsedLineCount += 1;
+      this.incrementActiveMethod(
+        typeof payload.method === "string" ? payload.method : "<response>"
       );
-      return;
-    }
-
-    this.incrementActiveMethod(
-      typeof payload.method === "string" ? payload.method : "<response>"
-    );
-
-    if (typeof payload.method === "string" && payload.id !== undefined) {
-      this.emitRequest(payload as JsonRpcLineRequestPayload);
-      return;
-    }
-    if (typeof payload.method === "string") {
-      if (this.activeReadDiagnostics) {
-        this.activeReadDiagnostics.notificationCount += 1;
+      if (typeof payload.method === "string" && payload.id !== undefined) {
+        this.emitRequest(payload as JsonRpcLineRequestPayload);
+      } else if (typeof payload.method === "string") {
+        if (this.activeReadDiagnostics) {
+          this.activeReadDiagnostics.notificationCount += 1;
+        }
+        this.emitNotification(payload as JsonRpcLineNotificationPayload);
+      } else if (payload.id !== undefined) {
+        this.handleResponse(payload);
       }
-      this.emitNotification(payload as JsonRpcLineNotificationPayload);
-      return;
+    } finally {
+      this.activeReadDiagnostics = previousDiagnostics;
     }
-    if (payload.id !== undefined) {
-      this.handleResponse(payload);
+  }
+
+  private handleParseError(
+    error: unknown,
+    line: string,
+    diagnostics?: ActiveReadDiagnostics
+  ): void {
+    const previousDiagnostics = this.activeReadDiagnostics;
+    this.activeReadDiagnostics = diagnostics;
+    if (diagnostics) {
+      diagnostics.parsedLineCount += 1;
+      diagnostics.parseErrorCount += 1;
+      this.incrementActiveMethod("<parse-error>");
     }
+    this.emitProtocolError(
+      createRuntimePortError({
+        code: "runtime_protocol_error",
+        message: error instanceof Error ? error.message : "Failed to parse JSON line.",
+        retryable: true,
+        details: {
+          rawLine: line.length > 4_096 ? `${line.slice(0, 4_096)}…` : line
+        },
+        cause: error
+      })
+    );
+    this.activeReadDiagnostics = previousDiagnostics;
+  }
+
+  private finishQueuedLine(diagnostics?: ActiveReadDiagnostics): void {
+    if (!diagnostics) return;
+    diagnostics.pendingLines -= 1;
+    this.completeReadIfReady(diagnostics);
+  }
+
+  private parseLargeLine(line: string): Promise<JsonRpcLinePayload> {
+    const worker = this.ensureParseWorker();
+    const id = ++this.nextParseId;
+    return new Promise((resolve, reject) => {
+      this.pendingLargeParses.set(id, { resolve, reject });
+      try {
+        worker.postMessage({ id, line });
+      } catch (error) {
+        this.pendingLargeParses.delete(id);
+        reject(error instanceof Error ? error : new Error("Failed to dispatch JSON parsing."));
+      }
+    });
+  }
+
+  private ensureParseWorker(): Worker {
+    if (this.parseWorker) return this.parseWorker;
+    const worker = new Worker(JSON_PARSE_WORKER, { eval: true });
+    worker.unref();
+    worker.on("message", (message: {
+      id: number;
+      payload?: JsonRpcLinePayload;
+      error?: string;
+    }) => {
+      const pending = this.pendingLargeParses.get(message.id);
+      if (!pending) return;
+      this.pendingLargeParses.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error));
+      else pending.resolve(message.payload ?? {});
+    });
+    worker.on("error", (error) => {
+      for (const pending of this.pendingLargeParses.values()) pending.reject(error);
+      this.pendingLargeParses.clear();
+      if (this.parseWorker === worker) this.parseWorker = undefined;
+    });
+    worker.on("exit", (code) => {
+      if (this.parseWorker === worker) this.parseWorker = undefined;
+      const error = new Error(`JSON parser worker exited with code ${code}.`);
+      for (const pending of this.pendingLargeParses.values()) pending.reject(error);
+      this.pendingLargeParses.clear();
+    });
+    this.parseWorker = worker;
+    return worker;
   }
 
   private handleResponse(payload: JsonRpcLinePayload): void {

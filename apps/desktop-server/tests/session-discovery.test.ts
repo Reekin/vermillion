@@ -188,7 +188,7 @@ describe("cold history hydration", () => {
     if (mode === "page") {
       expect(rpc).toHaveBeenCalledWith("thread/turns/list", {
         threadId: "thread-history", cursor: "page-cursor", limit: 1, sortDirection: "desc", itemsView: "full"
-      });
+      }, { timeoutMs: 120_000 });
     }
     expect(port.isThreadExecutionReleased("thread-history")).toBe(true);
   });
@@ -206,7 +206,11 @@ describe("cold history hydration", () => {
     const { port, rpc, hydrate, finishResume } = await setupHistory(mode);
     let cancelled = false;
     const pending = hydrate(() => cancelled);
-    await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith("thread/resume", expect.anything(), {}));
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith(
+      "thread/resume",
+      expect.anything(),
+      { timeoutMs: 120_000 }
+    ));
     cancelled = true;
     finishResume();
     await expect(pending).resolves.toBeUndefined();
