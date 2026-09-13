@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { writeClipboardImage } from "./clipboard.js";
 
@@ -10,11 +10,15 @@ export type ImageLightboxState = {
 export type ImageLightboxProps = {
   image?: ImageLightboxState;
   onClose: () => void;
+  renderContextMenu?: (props: {
+    x: number; y: number; onClose: () => void; onCopy: () => void;
+  }) => ReactNode;
 };
 
 export const ImageLightbox = ({
   image,
-  onClose
+  onClose,
+  renderContextMenu
 }: ImageLightboxProps): ReactElement | null => {
   const [menu, setMenu] = useState<{ x: number; y: number }>();
   const [notice, setNotice] = useState<{ message: string; error?: boolean }>();
@@ -29,9 +33,7 @@ export const ImageLightbox = ({
       return;
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && menu) {
-        setMenu(undefined);
-      } else if (event.key === "Escape") {
+      if (event.key === "Escape" && !menu) {
         onClose();
       }
     };
@@ -68,31 +70,24 @@ export const ImageLightbox = ({
           className="awb-lightbox__image"
           src={image.src}
           alt={image.alt}
-          onContextMenu={(event) => {
+          onContextMenu={renderContextMenu ? (event) => {
             event.preventDefault();
-            setMenu({
-              x: Math.min(event.clientX, window.innerWidth - 152),
-              y: Math.min(event.clientY, window.innerHeight - 44)
-            });
+            setMenu({ x: event.clientX, y: event.clientY });
             setNotice(undefined);
-          }}
+          } : undefined}
         />
-        {menu && <div
-          className="awb-lightbox__context-menu"
-          role="menu"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button type="button" role="menuitem" onClick={() => {
-            setMenu(undefined);
+        {menu && renderContextMenu?.({
+          ...menu,
+          onClose: () => setMenu(undefined),
+          onCopy: () => {
             void writeClipboardImage(image.src)
               .then(() => setNotice({ message: "图片已复制" }))
               .catch((error: unknown) => setNotice({
                 message: `复制图片失败：${error instanceof Error ? error.message : String(error)}`,
                 error: true
               }));
-          }}>复制图片</button>
-        </div>}
+          }
+        })}
         {notice && <div
           className={`awb-lightbox__notice${notice.error ? " is-error" : ""}`}
           role="status"

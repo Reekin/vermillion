@@ -479,7 +479,6 @@ export const useComposerController = (
   const detachedAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const queueRef = useRef<Record<string, QueuedComposerMessage[]>>({});
   const dragDepthRef = useRef(0);
-  const previousContentDraftKeyRef = useRef(contentDraftKey);
   const executionKey = draftKey ?? input.activeSessionId;
   const previousExecutionKeyRef = useRef(executionKey);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -679,13 +678,6 @@ export const useComposerController = (
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (previousContentDraftKeyRef.current === contentDraftKey) {
-      return;
-    }
-    previousContentDraftKeyRef.current = contentDraftKey;
-  }, [contentDraftKey]);
 
   useEffect(() => {
     if (!input.selectedEngineId || !supportsTurnConfiguration) {

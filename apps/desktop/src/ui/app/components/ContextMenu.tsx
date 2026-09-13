@@ -15,26 +15,28 @@ type ContextMenuProps = {
   y: number;
   items: ContextMenuItem[];
   onClose: () => void;
+  zIndex?: number;
 };
 
 /** Floating right-click menu anchored at a viewport point; closes on any outside click, key press or another context menu. */
-export const ContextMenu = ({ x, y, items, onClose }: ContextMenuProps) => {
+export const ContextMenu = ({ x, y, items, onClose, zIndex }: ContextMenuProps) => {
   useEffect(() => {
     const close = (event: Event) => {
-      if (event.type === "contextmenu" && (event.target as Element | null)?.closest?.("[data-context-menu]")) return;
+      if (event.type !== "keydown" && (event.target as Element | null)?.closest?.("[data-context-menu]")) return;
       onClose();
     };
-    window.addEventListener("click", close);
+    window.addEventListener("click", close, true);
     window.addEventListener("keydown", close);
     window.addEventListener("contextmenu", close, true);
     return () => {
-      window.removeEventListener("click", close);
+      window.removeEventListener("click", close, true);
       window.removeEventListener("keydown", close);
       window.removeEventListener("contextmenu", close, true);
     };
   }, [onClose]);
 
   const style = {
+    zIndex,
     left: Math.min(x, window.innerWidth - 200),
     top: Math.min(y, window.innerHeight - items.length * 30 - 12)
   };

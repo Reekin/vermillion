@@ -10,6 +10,7 @@ import { StartWorkButton } from "./components/StartWorkButton.js";
 import type { ComposerActions } from "../chat-shell/composer/composer-types.js";
 import { InboxPanel } from "./components/InboxPanel.js";
 import { Modal } from "./components/Modal.js";
+import { ContextMenu } from "./components/ContextMenu.js";
 import { Rail } from "./components/Rail.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
 import { SearchDialog } from "./components/SearchDialog.js";
@@ -258,6 +259,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   onComposerChange={setComposerActions}
                   renderTurnNavigation={renderSessionNavigation}
                   renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} transport={transport} />}
+                  renderImageContextMenu={({ onCopy, ...props }) => <ContextMenu {...props} zIndex={1001}
+                    items={[{ key: "copy-image", label: "复制图片", onSelect: onCopy }]} />}
                   composerExtras={<>
                     <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                     {discussionIssue && sessionWorkspaceId && <Button size="sm" variant="ghost" outlined onClick={() => store.getState().showIssue({ workspaceId: sessionWorkspaceId, issueId: discussionIssue.issueId })}>Issue</Button>}

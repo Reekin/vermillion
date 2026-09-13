@@ -41,7 +41,7 @@ import type {
 } from "../../transport/desktop-transport.js";
 import { connectDesktopTransportToStore } from "../../transport/store-bridge.js";
 import { renderTurnExtensions } from "../../features/engine-extensions/turn-extension-registry.js";
-import { ImageLightbox, type ImageLightboxState } from "./ImageLightbox.js";
+import { ImageLightbox, type ImageLightboxState, type ImageLightboxProps } from "./ImageLightbox.js";
 import { MessageMarkdownView } from "./MessageMarkdownView.js";
 import {
   resolveProcessExpanded,
@@ -98,6 +98,7 @@ const autoRefreshBacklogCooldownMs = 30_000;
 const autoRefreshBacklogStreamThreshold = 500;
 
 export type SessionPaneProps = {
+  renderImageContextMenu?: ImageLightboxProps["renderContextMenu"];
   renderTurnNavigation?: (position: { sessionId: string; turnId: string }) => ReactNode;
   renderChatTree?: (props: ChatTreePanelProps & {
     onSelectSession: (sessionId: string) => void;
@@ -631,6 +632,7 @@ export const SessionPane = ({
   onBeforeStop,
   onViewChange,
   renderChatTree,
+  renderImageContextMenu,
   renderTurnNavigation,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
@@ -1322,7 +1324,7 @@ export const SessionPane = ({
           onRespondInteraction={onRespondInteraction}
         />
       </div>
-      <ImageLightbox image={lightboxImage} onClose={() => setLightboxImage(undefined)} />
+      <ImageLightbox image={lightboxImage} onClose={() => setLightboxImage(undefined)} renderContextMenu={renderImageContextMenu} />
     </>
   );
 };
