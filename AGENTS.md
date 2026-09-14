@@ -16,6 +16,7 @@
 - 验收使用隔离实例。Worker / Verifier 的所有验收（包括 rebase 后验证和最终冷启动）只能通过 `app.start / app.stop` 启停；开发者最终冷启动用 `start.bat`。端口与隐藏桌面操作见[开发与验收](docs/development.md)。
 - CLI：先 `pnpm --filter @vermillion/workbench build`，再 `node packages/workbench/bin/vermillion.mjs <method> [json]`；参数使用 `<method> --help` 查询。
 - 打包：`pnpm package`，产物位于 `release/vermillion-<version>-<stamp>/`。
+- 如果要测试真实会话相关功能，必须在隔离环境中进行，并要将所有角色的模型信息都修改为`gpt-5.6-luna`/`max`/`standard`
 
 ## 修改约束
 
@@ -28,3 +29,9 @@
 
 ## git
 所有commit subject / description全部使用英文。
+
+## 经验积累
+
+- 用户要求处理当前数据或状态时，先通过已有服务与 CLI 完成操作；不要擅自把一次性处理扩展为产品开发或开单。只有用户明确要求开单才进入工单流程。
+
+- 统一编辑界面不等于统一存储边界；先区分用户操作模型与后端文件所有权，编辑目标携带归属并由对应服务读写，避免把某个存储服务的路径限制扩展成产品设计约束。

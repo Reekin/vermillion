@@ -1,7 +1,6 @@
 ---
 standards:
   - .vermillion/docs/Foundation/UIUX/Standards.md
-  - .vermillion/docs/Foundation/Acceptance/Standards.md
 ---
 # UI/UX
 

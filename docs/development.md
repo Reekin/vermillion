@@ -1,5 +1,7 @@
 # 开发与验收
 
+所有验收统一遵循[验收实例隔离与清理规范](../.vermillion/docs/Foundation/Acceptance/Standards.md)。
+
 启动、检查和打包命令见[AGENTS.md](../AGENTS.md#运行与验证)。`start.bat` 会在源码更新后自动构建。
 
 新 worktree 第一次运行检查前执行 `pnpm prepare:worktree -- --worktree "<worktree>"`，或执行 `prepare-worktree.bat "<worktree>"`。命令在目标目录使用 `pnpm install --frozen-lockfile`，清除上层 npm/pnpm 生命周期变量，不修改其他目录的依赖。
