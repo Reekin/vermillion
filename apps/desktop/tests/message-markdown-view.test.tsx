@@ -208,7 +208,7 @@ describe("MessageMarkdownView", () => {
           turnId: "turn-1",
           role: "assistant",
           kind: "markdown",
-          text: "[recovery](I:\\gpt-projects\\agent-wrappers\\vermillion\\recovery\\awb-session-index-20260830)",
+          text: "[recovery](I:\\repo\\recovery\\awb-session-index-20260830)",
           actor: {
             participantId: "participant-1",
             engineId: "agent-codex"
@@ -222,7 +222,7 @@ describe("MessageMarkdownView", () => {
     expect(html).not.toContain('class="awb-message__unsupported-link"');
     expect(html).toContain(">recovery<");
     expect(html).toContain(
-      'href="file:///I:/gpt-projects/agent-wrappers/vermillion/recovery/awb-session-index-20260830"'
+      'href="file:///I:/repo/recovery/awb-session-index-20260830"'
     );
   });
 
