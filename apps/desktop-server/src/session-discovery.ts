@@ -173,6 +173,40 @@ const buildDeterministicTurnTimestamp = (
   itemIndex = 0
 ): string => new Date((thread.createdAt + turnIndex * 60 + itemIndex) * 1_000).toISOString();
 
+const uuidV7Timestamp = (value: string): number | undefined => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    return undefined;
+  }
+  const timestamp = Number.parseInt(value.slice(0, 8) + value.slice(9, 13), 16);
+  return Number.isSafeInteger(timestamp) ? timestamp : undefined;
+};
+
+const isCodexTurnOwnedByThread = (
+  thread: Thread,
+  turn: Thread["turns"][number]
+): boolean => {
+  if (!thread.forkedFromId) return true;
+  if (typeof turn.startedAt === "number" && turn.startedAt < thread.createdAt) return false;
+  if (typeof turn.startedAt === "number" && turn.startedAt > thread.createdAt) return true;
+  const threadTimestamp = uuidV7Timestamp(thread.id);
+  const turnTimestamp = uuidV7Timestamp(turn.id);
+  return threadTimestamp === undefined || turnTimestamp === undefined ||
+    turnTimestamp >= threadTimestamp;
+};
+
+const resolveCodexForkSourceTurnId = (thread: Thread): string | undefined => {
+  if (!thread.forkedFromId) return undefined;
+  const firstOwnedTurn = thread.turns.findIndex((turn) =>
+    isCodexTurnOwnedByThread(thread, turn)
+  );
+  if (firstOwnedTurn <= 0) return undefined;
+  return thread.turns
+    .slice(0, firstOwnedTurn)
+    .every((turn) => !isCodexTurnOwnedByThread(thread, turn))
+      ? thread.turns[firstOwnedTurn - 1]?.id
+      : undefined;
+};
+
 const buildRelationId = (
   parentSessionId: string,
   childSessionId: string,
@@ -226,12 +260,20 @@ const resolveThreadTurnStartedAt = (
   itemStartedAts: readonly string[],
   rolloutTimestampGroup?: CodexRolloutTimestampGroup
 ): string => {
+  const turn = thread.turns[turnIndex]!;
   const fallbackStartedAt = buildDeterministicTurnTimestamp(thread, turnIndex);
+  const protocolStartedAt = typeof turn.startedAt === "number" &&
+      Number.isFinite(turn.startedAt)
+    ? isoFromUnixSeconds(turn.startedAt)
+    : undefined;
   const firstItemStartedAt = itemStartedAts[0];
   if (firstItemStartedAt && firstItemStartedAt !== fallbackStartedAt) {
     return firstItemStartedAt;
   }
-  return rolloutTimestampGroup?.startedAt ?? firstItemStartedAt ?? fallbackStartedAt;
+  return rolloutTimestampGroup?.startedAt ??
+    protocolStartedAt ??
+    firstItemStartedAt ??
+    fallbackStartedAt;
 };
 
 const resolveThreadTurnCompletedAt = (
@@ -246,6 +288,9 @@ const resolveThreadTurnCompletedAt = (
   }
   return (
     rolloutTimestampGroup?.completedAt ??
+    (typeof turn.completedAt === "number" && Number.isFinite(turn.completedAt)
+      ? isoFromUnixSeconds(turn.completedAt)
+      : undefined) ??
     lastTimestamp([...itemStartedAts]) ??
     buildDeterministicTurnTimestamp(thread, turnIndex, turn.items.length + 1)
   );
@@ -599,7 +644,10 @@ const hydrateCodexTurnEntities = async (input: {
     rolloutPath ?? thread.path
   );
 
-  for (const [turnIndex, turn] of thread.turns.entries()) {
+  const ownedThread = thread.forkedFromId
+    ? { ...thread, turns: thread.turns.filter((turn) => isCodexTurnOwnedByThread(thread, turn)) }
+    : thread;
+  for (const [turnIndex, turn] of ownedThread.turns.entries()) {
     if (isCancelled?.()) {
       return undefined;
     }
@@ -610,18 +658,18 @@ const hydrateCodexTurnEntities = async (input: {
       rolloutTimestampGroups
     );
     const itemStartedAts = resolveThreadTurnItemStartedAts(
-      thread,
+      ownedThread,
       turnIndex,
       rolloutTimestampGroups
     );
     const startedAt = resolveThreadTurnStartedAt(
-      thread,
+      ownedThread,
       turnIndex,
       itemStartedAts,
       rolloutTimestampGroup
     );
     const completedAt = resolveThreadTurnCompletedAt(
-      thread,
+      ownedThread,
       turnIndex,
       itemStartedAts,
       rolloutTimestampGroup
@@ -639,7 +687,7 @@ const hydrateCodexTurnEntities = async (input: {
       }
       const itemStartedAt =
         itemStartedAts[itemIndex] ??
-        buildDeterministicTurnTimestamp(thread, turnIndex, itemIndex);
+        buildDeterministicTurnTimestamp(ownedThread, turnIndex, itemIndex);
       const itemEntityId = hydratedItemId(entry.sessionId, item.id);
       if (isUserMessageItem(item)) {
         messageIds.push(itemEntityId);
@@ -1136,7 +1184,10 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       }
       const { turns, messageBlocks, toolCalls, terminalStreams } = hydratedTurns;
 
-      const sessionRelations = this.buildHydratedRelations(thread);
+      const sessionRelations = this.buildHydratedRelations(
+        thread,
+        resolveCodexForkSourceTurnId(thread)
+      );
 
       return {
         workspaceId,
@@ -1339,7 +1390,10 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     };
   }
 
-  private buildHydratedRelations(thread: Thread): SessionRelation[] {
+  private buildHydratedRelations(
+    thread: Thread,
+    forkSourceTurnId?: string
+  ): SessionRelation[] {
     const relations: SessionRelation[] = [];
     const subagentParentThreadId = toSubagentParentThreadId(thread.source);
     if (subagentParentThreadId) {
@@ -1363,6 +1417,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         parentSessionId,
         childSessionId,
         relationType: "fork",
+        sourceTurnId: forkSourceTurnId,
         createdAt: isoFromUnixSeconds(thread.createdAt)
       }));
     }
@@ -1788,6 +1843,11 @@ export class SessionReconciliationService {
         relation.parentSessionId === entry.sessionId ||
         relation.childSessionId === entry.sessionId
     );
+    const hydratedForkSourceTurnId = hydrated.sessionRelations.find(
+      (relation) =>
+        relation.relationType === "fork" &&
+        this.normalizeProviderSessionId(relation.childSessionId, entry) === entry.sessionId
+    )?.sourceTurnId;
     let normalizedHydrated = this.normalizeHydratedRelations(
       entry,
       hydrated,
@@ -1799,6 +1859,7 @@ export class SessionReconciliationService {
         .map((relation) => [relation.childSessionId, relation] as const)
     );
     const fork = forkByChild.get(entry.sessionId);
+    const knownForkSourceTurnId = fork?.sourceTurnId ?? hydratedForkSourceTurnId;
     const ancestorSessionIds = new Set<string>();
     for (
       let ancestor = fork;
@@ -1822,10 +1883,20 @@ export class SessionReconciliationService {
           .filter((turn) => ancestorSessionIds.has(turn.sessionId))
           .map((turn) => turn.turnId)
       );
+      const forkPointIndex = knownForkSourceTurnId
+        ? normalizedHydrated.turns.findIndex((turn) => turn.turnId === knownForkSourceTurnId)
+        : -1;
+      if (forkPointIndex >= 0) {
+        const inheritedTurns = input.partial
+          ? normalizedHydrated.turns.slice(forkPointIndex)
+          : normalizedHydrated.turns.slice(0, forkPointIndex + 1);
+        for (const turn of inheritedTurns) inheritedTurnIds.add(turn.turnId);
+      }
       const sharedTurns = hydrated.turns.filter((turn) => inheritedTurnIds.has(turn.turnId));
       // A newest-first window can identify the fork point only on its latest page.
       const includesLatest = !input.partial || input.atLatest;
-      const sourceTurnId = input.partial ? sharedTurns[0]?.turnId : sharedTurns.at(-1)?.turnId;
+      const sourceTurnId = knownForkSourceTurnId ??
+        (input.partial ? sharedTurns[0]?.turnId : sharedTurns.at(-1)?.turnId);
       if (!fork.sourceTurnId && includesLatest && sourceTurnId) {
         const repaired = await this.sessionIndexStore.upsertRelation({
           workspaceId: entry.workspaceId,

@@ -1704,6 +1704,7 @@ describe("Session discovery and reconciliation", () => {
       childHydrationReturned = true;
       return makeHydrated("child", [
         makeTurn("child", "parent-1", 0),
+        makeTurn("child", "compacted-parent-turn", 1),
         makeTurn("child", "parent-2", 2),
         makeTurn("child", "child-1", 4)
       ]);
@@ -1757,6 +1758,7 @@ describe("Session discovery and reconciliation", () => {
       ]);
       expect(tree.nodes.find((node) => node.nodeId === "parent-2")?.status).toBe("completed");
       expect(runtimeService.getSession("parent")?.status).toBe("running");
+      expect(tree.nodes.some((node) => node.nodeId === "compacted-parent-turn")).toBe(false);
     } finally {
       treeService.dispose();
     }
@@ -2091,6 +2093,242 @@ describe("Session discovery and reconciliation", () => {
         })
       ])
     );
+  });
+
+  it("keeps inherited Codex turns out of a fork session", async () => {
+    const baseDir = await createTempDir();
+    const rolloutPath = join(baseDir, "rollout-fork.jsonl");
+    const threadId = "0196d8ea-4d00-7000-8000-000000000000";
+    const ownTurnId = "0196d8ea-50e8-7000-8000-000000000000";
+    await writeFile(
+      rolloutPath,
+      [
+        {
+          timestamp: "2025-05-13T04:26:41.000Z",
+          type: "event_msg",
+          payload: { type: "task_started", turn_id: ownTurnId }
+        },
+        {
+          timestamp: "2025-05-13T04:26:42.000Z",
+          type: "event_msg",
+          payload: { type: "task_complete", turn_id: ownTurnId }
+        }
+      ].map((entry) => JSON.stringify(entry)).join("\n"),
+      "utf8"
+    );
+    const thread = {
+      ...createThread({ id: threadId, forkedFromId: "parent-thread" }),
+      createdAt: 1_747_110_400,
+      path: rolloutPath,
+      turns: [
+        {
+          id: "0196d8d0-f600-7000-8000-000000000000",
+          status: "completed" as const,
+          error: null,
+          itemsView: "full" as const,
+          startedAt: 1_747_110_400,
+          completedAt: 1_747_110_400,
+          durationMs: 1_000,
+          items: []
+        },
+        {
+          id: ownTurnId,
+          status: "completed" as const,
+          error: null,
+          itemsView: "full" as const,
+          startedAt: 1_747_110_401,
+          completedAt: 1_747_110_402,
+          durationMs: 1_000,
+          items: []
+        }
+      ]
+    };
+    const provider = new CodexSessionDiscoveryProvider({
+      codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue(thread),
+        attachThreadToSession: vi.fn()
+      } as never
+    });
+
+    const hydrated = await provider.hydrateSession({
+      workspaceId: "workspace-1",
+      sessionId: `codex-thread:${threadId}`,
+      conversationId: "conversation-1",
+      engineId: "codex",
+      providerKind: "codex-thread",
+      providerSessionId: threadId,
+      createdAt: "2025-05-13T04:26:40.000Z",
+      updatedAt: "2025-05-13T04:26:42.000Z"
+    });
+
+    expect(hydrated?.turns).toEqual([
+      expect.objectContaining({
+        turnId: ownTurnId,
+        startedAt: "2025-05-13T04:26:41.000Z",
+        completedAt: "2025-05-13T04:26:42.000Z"
+      })
+    ]);
+    expect(hydrated?.sessionRelations).toEqual([
+      expect.objectContaining({
+        parentSessionId: "codex-thread:parent-thread",
+        childSessionId: `codex-thread:${threadId}`,
+        sourceTurnId: "0196d8d0-f600-7000-8000-000000000000"
+      })
+    ]);
+
+    const index = new SessionIndexStore({ baseDir });
+    const runtimeService = new SessionRuntimeService({
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
+    });
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const parentSessionId = "codex-thread:parent-thread";
+    const childSessionId = `codex-thread:${threadId}`;
+    const parentSession = {
+      ...hydrated!.session,
+      sessionId: parentSessionId,
+      title: "Parent"
+    };
+    const parentHydrated = {
+      ...hydrated!,
+      conversation: {
+        ...hydrated!.conversation,
+        activeSessionId: childSessionId,
+        sessionIds: [parentSessionId, childSessionId]
+      },
+      session: parentSession,
+      turns: [{
+        ...hydrated!.turns[0]!,
+        turnId: "0196d8d0-f600-7000-8000-000000000000",
+        sessionId: parentSessionId,
+        startedAt: "2025-05-13T04:10:00.000Z",
+        completedAt: "2025-05-13T04:10:01.000Z"
+      }],
+      sessionRelations: []
+    };
+    for (const [session, providerSessionId] of [
+      [parentSession, "parent-thread"],
+      [hydrated!.session, threadId]
+    ] as const) {
+      await index.upsertSession({
+        workspaceId: "workspace-1",
+        session,
+        providerKind: "codex-thread",
+        providerSessionId
+      });
+    }
+    await index.upsertRelation({
+      workspaceId: "workspace-1",
+      parentSessionId,
+      childSessionId,
+      relationType: "fork",
+      createdAt: "2025-05-13T04:26:40.000Z"
+    });
+    const reconciliation = new SessionReconciliationService({
+      workspaceRegistry,
+      sessionIndexStore: index,
+      runtimeService,
+      providers: [{
+        engineId: "codex",
+        hydrateSession: vi.fn(async (entry: { sessionId: string }) =>
+          entry.sessionId === parentSessionId ? parentHydrated : hydrated
+        )
+      }] as never
+    });
+    const treeService = new WrapperChatTreeService({
+      runtimeService,
+      sessionIndexStore: index,
+      reconciliation,
+      fork: vi.fn()
+    });
+
+    try {
+      await reconciliation.ensureSessionLoaded(childSessionId);
+      const tree = await treeService.get(childSessionId);
+      expect(tree.nodes.map((node) => ({
+        nodeId: node.nodeId,
+        parentNodeId: node.parentNodeId,
+        sessionId: node.sessionId
+      }))).toEqual([
+        {
+          nodeId: "0196d8d0-f600-7000-8000-000000000000",
+          parentNodeId: undefined,
+          sessionId: parentSessionId
+        },
+        {
+          nodeId: ownTurnId,
+          parentNodeId: "0196d8d0-f600-7000-8000-000000000000",
+          sessionId: childSessionId
+        }
+      ]);
+      expect(index.listRelations("workspace-1")).toEqual([
+        expect.objectContaining({
+          childSessionId,
+          sourceTurnId: "0196d8d0-f600-7000-8000-000000000000"
+        })
+      ]);
+    } finally {
+      treeService.dispose();
+    }
+  });
+
+  it("filters inherited turns from a newest-first fork window", async () => {
+    const threadId = "0196d8ea-4d00-7000-8000-000000000000";
+    const inheritedTurn = {
+      id: "0196d8d0-f600-7000-8000-000000000000",
+      status: "completed" as const,
+      error: null,
+      itemsView: "full" as const,
+      startedAt: 1_747_110_400,
+      completedAt: 1_747_110_400,
+      durationMs: 1_000,
+      items: []
+    };
+    const ownTurn = {
+      id: "0196d8ea-50e8-7000-8000-000000000000",
+      status: "completed" as const,
+      error: null,
+      itemsView: "full" as const,
+      startedAt: 1_747_110_401,
+      completedAt: 1_747_110_402,
+      durationMs: 1_000,
+      items: []
+    };
+    const thread = {
+      ...createThread({ id: threadId, forkedFromId: "parent-thread" }),
+      createdAt: 1_747_110_400,
+      turns: []
+    };
+    const provider = new CodexSessionDiscoveryProvider({
+      codexRuntimePort: {
+        isThreadExecutionReleased: () => false,
+        readThread: vi.fn().mockResolvedValue(thread),
+        listThreadTurns: vi.fn().mockResolvedValue({
+          data: [ownTurn, inheritedTurn],
+          nextCursor: "older",
+          backwardsCursor: null
+        }),
+        attachThreadToSession: vi.fn()
+      } as never
+    });
+
+    const hydrated = await provider.hydrateSessionWindow?.(
+      {
+        sessionId: `codex-thread:${threadId}`,
+        workspaceId: "workspace-1",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        providerKind: "codex-thread",
+        providerSessionId: threadId,
+        createdAt: "2025-05-13T04:26:40.000Z",
+        updatedAt: "2025-05-13T04:26:42.000Z",
+        unreadState: "read",
+        source: "reconciled"
+      },
+      { limit: 20 }
+    );
+
+    expect(hydrated?.turns.map((turn) => turn.turnId)).toEqual([ownTurn.id]);
   });
 
   it("matches duplicate rollout message records by content", async () => {
