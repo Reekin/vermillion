@@ -194,6 +194,19 @@ const isCodexTurnOwnedByThread = (
     turnTimestamp >= threadTimestamp;
 };
 
+const resolveCodexForkSourceTurnId = (thread: Thread): string | undefined => {
+  if (!thread.forkedFromId) return undefined;
+  const firstOwnedTurn = thread.turns.findIndex((turn) =>
+    isCodexTurnOwnedByThread(thread, turn)
+  );
+  if (firstOwnedTurn <= 0) return undefined;
+  return thread.turns
+    .slice(0, firstOwnedTurn)
+    .every((turn) => !isCodexTurnOwnedByThread(thread, turn))
+      ? thread.turns[firstOwnedTurn - 1]?.id
+      : undefined;
+};
+
 const buildRelationId = (
   parentSessionId: string,
   childSessionId: string,
@@ -1171,7 +1184,10 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       }
       const { turns, messageBlocks, toolCalls, terminalStreams } = hydratedTurns;
 
-      const sessionRelations = this.buildHydratedRelations(thread);
+      const sessionRelations = this.buildHydratedRelations(
+        thread,
+        resolveCodexForkSourceTurnId(thread)
+      );
 
       return {
         workspaceId,
@@ -1374,7 +1390,10 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     };
   }
 
-  private buildHydratedRelations(thread: Thread): SessionRelation[] {
+  private buildHydratedRelations(
+    thread: Thread,
+    forkSourceTurnId?: string
+  ): SessionRelation[] {
     const relations: SessionRelation[] = [];
     const subagentParentThreadId = toSubagentParentThreadId(thread.source);
     if (subagentParentThreadId) {
@@ -1398,6 +1417,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         parentSessionId,
         childSessionId,
         relationType: "fork",
+        sourceTurnId: forkSourceTurnId,
         createdAt: isoFromUnixSeconds(thread.createdAt)
       }));
     }
@@ -1823,6 +1843,11 @@ export class SessionReconciliationService {
         relation.parentSessionId === entry.sessionId ||
         relation.childSessionId === entry.sessionId
     );
+    const hydratedForkSourceTurnId = hydrated.sessionRelations.find(
+      (relation) =>
+        relation.relationType === "fork" &&
+        this.normalizeProviderSessionId(relation.childSessionId, entry) === entry.sessionId
+    )?.sourceTurnId;
     let normalizedHydrated = this.normalizeHydratedRelations(
       entry,
       hydrated,
@@ -1834,6 +1859,7 @@ export class SessionReconciliationService {
         .map((relation) => [relation.childSessionId, relation] as const)
     );
     const fork = forkByChild.get(entry.sessionId);
+    const knownForkSourceTurnId = fork?.sourceTurnId ?? hydratedForkSourceTurnId;
     const ancestorSessionIds = new Set<string>();
     for (
       let ancestor = fork;
@@ -1857,8 +1883,8 @@ export class SessionReconciliationService {
           .filter((turn) => ancestorSessionIds.has(turn.sessionId))
           .map((turn) => turn.turnId)
       );
-      const forkPointIndex = fork.sourceTurnId
-        ? normalizedHydrated.turns.findIndex((turn) => turn.turnId === fork.sourceTurnId)
+      const forkPointIndex = knownForkSourceTurnId
+        ? normalizedHydrated.turns.findIndex((turn) => turn.turnId === knownForkSourceTurnId)
         : -1;
       if (forkPointIndex >= 0) {
         const inheritedTurns = input.partial
@@ -1869,7 +1895,8 @@ export class SessionReconciliationService {
       const sharedTurns = hydrated.turns.filter((turn) => inheritedTurnIds.has(turn.turnId));
       // A newest-first window can identify the fork point only on its latest page.
       const includesLatest = !input.partial || input.atLatest;
-      const sourceTurnId = input.partial ? sharedTurns[0]?.turnId : sharedTurns.at(-1)?.turnId;
+      const sourceTurnId = knownForkSourceTurnId ??
+        (input.partial ? sharedTurns[0]?.turnId : sharedTurns.at(-1)?.turnId);
       if (!fork.sourceTurnId && includesLatest && sourceTurnId) {
         const repaired = await this.sessionIndexStore.upsertRelation({
           workspaceId: entry.workspaceId,
