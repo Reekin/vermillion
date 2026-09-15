@@ -1124,6 +1124,55 @@ describe("Session discovery and reconciliation", () => {
     ]);
   });
 
+  it("starts a fresh window hydration after every consumer of a shared read cancelled", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const sessionIndexStore = new SessionIndexStore({ baseDir });
+    const runtimeService = new SessionRuntimeService({
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
+    });
+    await workspaceRegistry.registerWorkspace({
+      workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha"
+    });
+    await sessionIndexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1", conversationId: "conversation-1", engineId: "codex",
+        title: "Session", createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:00.000Z"
+      },
+      providerKind: "codex-thread", providerSessionId: "thread-1"
+    });
+
+    const gates: (() => void)[] = [];
+    const hydrateSessionWindow = vi.fn((_entry, input) => {
+      const aborted = input.signal.aborted;
+      return new Promise<ReturnType<typeof buildHydratedWindow>>((resolve) => {
+        gates.push(() => (aborted ? resolve(undefined as never) : resolve(buildHydratedWindow())));
+      });
+    });
+    const reconciliation = new SessionReconciliationService({
+      workspaceRegistry, sessionIndexStore, runtimeService,
+      providers: [{ engineId: "codex", discoverWorkspaces: vi.fn(), hydrateSession: vi.fn(), hydrateSessionWindow }] as never
+    });
+
+    const controller = new AbortController();
+    const cancelledOpen = reconciliation.hydrateSessionWindow("session-1", {
+      limit: 2, signal: controller.signal
+    });
+    await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(1));
+    controller.abort();
+    gates.shift()?.();
+    await expect(cancelledOpen).resolves.toBeUndefined();
+
+    // The cancelled read is still draining, but a new caller starts a usable read instead of joining it.
+    const retry = reconciliation.hydrateSessionWindow("session-1", { limit: 2 });
+    await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(2));
+    gates.shift()?.();
+    await expect(retry).resolves.toEqual(
+      expect.objectContaining({ olderCursor: "older-cursor" })
+    );
+  });
+
   it("discovers codex threads, derives subagent relations, and hydrates discovered sessions", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({

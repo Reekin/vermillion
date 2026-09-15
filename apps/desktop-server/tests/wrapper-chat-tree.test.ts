@@ -226,6 +226,33 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
+  it("keeps the published tree while a refresh is still committing members", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    let releaseReload!: () => void;
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    f.load.mockImplementation(async () => {
+      await reloadGate;
+      return true;
+    });
+
+    f.service.invalidate("root");
+    // A member commits new history while the refresh is still in flight.
+    f.snapshot.turns.push({
+      turnId: "d", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:02:00Z"
+    });
+    const duringReload = await f.service.get("root");
+    expect(duringReload.nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);
+
+    releaseReload();
+    await vi.waitFor(async () => {
+      expect((await f.service.get("root")).nodes.map((node) => node.nodeId)).toEqual([
+        "a", "b", "d", "c"
+      ]);
+    });
+    f.service.dispose();
+  });
+
   it("reports a failed rebuild without discarding or repeatedly reloading the published tree", async () => {
     const f = await fixture();
     await f.service.get("root");

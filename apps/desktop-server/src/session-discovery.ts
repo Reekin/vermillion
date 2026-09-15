@@ -542,6 +542,8 @@ const uncancellableSignal = new AbortController().signal;
 
 type SharedHydrationTask<T> = {
   promise: Promise<T>;
+  /** 共享任务自己的 signal；已取消的任务不再接受新消费者。 */
+  signal: AbortSignal;
   addConsumer: (signal: AbortSignal | undefined) => void;
 };
 
@@ -570,7 +572,18 @@ const shareHydration = <T>(
     consumer.addEventListener("abort", abortIfAllConsumersCancelled, { once: true });
   };
   addConsumer(signal);
-  return { promise: start(controller.signal), addConsumer };
+  return { promise: start(controller.signal), signal: controller.signal, addConsumer };
+};
+
+/** 任务收尾时只清理仍属于本次的登记，避免覆盖接管同一 key 的新任务。 */
+const clearSharedHydration = <T>(
+  registry: Map<string, SharedHydrationTask<T>>,
+  key: string,
+  task: SharedHydrationTask<T>
+): void => {
+  if (registry.get(key) === task) {
+    registry.delete(key);
+  }
 };
 
 const resolveHydratedLastCompletedTurnAt = (
@@ -1633,7 +1646,7 @@ export class SessionReconciliationService {
       !input.force &&
       (!input.requireFull || this.fullyHydratedSessionIds.has(sessionId))
     ) {
-      const existingHydration = this.hydrationBySessionId.get(sessionId);
+      const existingHydration = this.reusableHydration(sessionId);
       if (!existingHydration) {
         return true;
       }
@@ -1651,24 +1664,33 @@ export class SessionReconciliationService {
     if (!provider) {
       return false;
     }
-    const existingHydration = this.hydrationBySessionId.get(sessionId);
+    const existingHydration = this.reusableHydration(sessionId);
     if (existingHydration) {
       existingHydration.addConsumer(input.signal);
       const loadedByExisting = await existingHydration.promise;
       return input.signal?.aborted ? false : loadedByExisting;
     }
-    const hydration = shareHydration(
+    const hydration: SharedHydrationTask<boolean> = shareHydration(
       (signal) => this.hydrateSessionEntry(entry, provider, {
         signal,
         retainExecution: input.retainExecution
-      }).finally(() => {
-        this.hydrationBySessionId.delete(sessionId);
       }),
       input.signal
     );
     this.hydrationBySessionId.set(sessionId, hydration);
+    hydration.promise = hydration.promise.finally(() =>
+      clearSharedHydration(this.hydrationBySessionId, sessionId, hydration)
+    );
     const loadedByHydration = await hydration.promise;
     return input.signal?.aborted ? false : loadedByHydration;
+  }
+
+  /** 已经取消的共享任务不再复用：新调用方需要重新发起读取。 */
+  private reusableHydration(
+    sessionId: string
+  ): SharedHydrationTask<boolean> | undefined {
+    const existing = this.hydrationBySessionId.get(sessionId);
+    return existing && !existing.signal.aborted ? existing : undefined;
   }
 
   public async ensureSessionExecutable(
@@ -1710,13 +1732,15 @@ export class SessionReconciliationService {
     const hydrationKey = `${sessionId}\u0000${input.cursor ?? ""}\u0000${
       anchorTurnId ?? ""
     }\u0000${input.limit}`;
-    const existingHydration = this.windowHydrationByKey.get(hydrationKey);
+    const reusable = this.windowHydrationByKey.get(hydrationKey);
+    const existingHydration = reusable && !reusable.signal.aborted ? reusable : undefined;
     if (existingHydration) {
       existingHydration.addConsumer(input.signal);
       const hydrated = await existingHydration.promise;
       return input.signal?.aborted ? undefined : hydrated;
     }
-    const hydration = shareHydration(
+    const hydration: SharedHydrationTask<HydratedSessionWindowSnapshot | undefined> =
+      shareHydration(
       (signal) => provider
         .hydrateSessionWindow!(entry, {
           limit: input.limit,
@@ -1730,11 +1754,13 @@ export class SessionReconciliationService {
             return undefined;
           }
           return this.commitHydratedSession(entry, hydrated, { partial: true });
-        })
-        .finally(() => this.windowHydrationByKey.delete(hydrationKey)),
+        }),
       input.signal
     );
     this.windowHydrationByKey.set(hydrationKey, hydration);
+    hydration.promise = hydration.promise.finally(() =>
+      clearSharedHydration(this.windowHydrationByKey, hydrationKey, hydration)
+    );
     const hydrated = await hydration.promise;
     if (!hydrated || input.signal?.aborted) {
       return undefined;

@@ -336,17 +336,17 @@ export class WrapperChatTreeService {
   }
 
   /**
-   * 读取会话树：没有快照时等待本代加载完成，有快照时直接从已加载成员派生，
-   * 不等待进行中的刷新，每次返回新的投影值。
+   * 读取会话树：没有快照时等待本代加载完成；快照稳定时从已加载成员派生新投影；
+   * 刷新进行中或刷新失败时保持已发布快照，不让中间结果覆盖已显示的树。
    */
   public async get(sessionId: string): Promise<ChatTreeSnapshot> {
     await this.options.sessionIndexStore.ready();
     const state = this.treeState(sessionId);
     if (state.published) {
-      if (!state.load) {
+      if (!state.load && !state.error && !state.reload) {
         await this.loadNewMembers(sessionId, state);
+        state.published = this.buildProjection(sessionId, state.members);
       }
-      state.published = this.buildProjection(sessionId, state.members);
     } else {
       await this.awaitTreeLoad(sessionId, state);
     }
