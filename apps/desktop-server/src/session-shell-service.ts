@@ -369,6 +369,12 @@ export class SessionShellService {
     return this.runtimeService.updateSessionMetadata(sessionId, metadata);
   }
 
+  public setSessionRoleResolver(
+    resolver: (workspaceId: string, metadata: Record<string, unknown>) => Promise<string | undefined>
+  ): void {
+    this.runtimeService.setSessionRoleResolver(resolver);
+  }
+
   public listSessions(options: {
     conversationId?: string;
     includeArchived?: boolean;

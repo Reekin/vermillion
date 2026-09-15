@@ -54,7 +54,7 @@ const buildForkMetadata = (
   };
   // Forks inherit conversational context; ownership is supplied explicitly by the caller.
   const context = Object.fromEntries(Object.entries(parent).filter(([key]) =>
-    ["role", "sessionProfile", "developerInstructions", "turnExecutionProfiles"].includes(key)));
+    ["role", "sessionProfile", "turnExecutionProfiles"].includes(key)));
   return {
     ...context,
     providerKind: codexProviderKind,
@@ -194,22 +194,14 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         await this.codexRuntimePort.unsubscribeThread(threadId);
       }
       const cwd = input.cwd ?? input.session?.metadata?.cwd ?? input.indexEntry?.metadata?.cwd;
-      const storedInstructions = input.session?.metadata?.developerInstructions ?? input.indexEntry?.metadata?.developerInstructions;
-      const instructions = input.developerInstructions ?? storedInstructions;
-      const thread = typeof instructions === "string"
-        ? await this.codexRuntimePort.resumeThread(threadId, typeof cwd === "string" ? cwd : undefined, instructions)
-        : typeof cwd === "string"
+      const thread = typeof cwd === "string"
         ? await this.codexRuntimePort.resumeThread(threadId, cwd)
         : await this.codexRuntimePort.resumeThread(threadId);
-      if (input.developerInstructions !== undefined && input.developerInstructions !== storedInstructions) {
-        await this.codexRuntimePort.injectDeveloperInstructions(thread.id, input.developerInstructions);
-      }
       this.codexRuntimePort.attachThreadToSession(input.sessionId, thread.id);
       if (input.preserveExecution) this.codexRuntimePort.trackResumedTurn(input.sessionId, thread);
-      if (input.cwd || input.metadata || input.developerInstructions !== undefined) {
+      if (input.cwd || input.metadata) {
         await input.runtimeService.updateSessionMetadata(input.sessionId,
-          { ...input.metadata, ...(input.cwd ? { cwd: input.cwd } : {}),
-            ...(input.developerInstructions !== undefined ? { developerInstructions: input.developerInstructions } : {}) });
+          { ...input.metadata, ...(input.cwd ? { cwd: input.cwd } : {}) });
       }
       return {
         action: "resume",
@@ -225,9 +217,9 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
       if (!workspaceId) {
         throw new Error("Fork is unavailable without a workspace context.");
       }
-      const thread = input.cwd || input.developerInstructions
+      const thread = input.cwd
         ? await this.codexRuntimePort.forkThread(threadId, input.fromTurnId, {
-          cwd: input.cwd, developerInstructions: input.developerInstructions
+          cwd: input.cwd
         })
         : await this.codexRuntimePort.forkThread(threadId, input.fromTurnId);
       const childSessionId = discoveredCodexSessionId(thread.id);
@@ -243,8 +235,7 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         createdAt,
         updatedAt,
         metadata: {
-          ...buildForkMetadata(input, thread.id, thread), ...input.metadata,
-          ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {})
+          ...buildForkMetadata(input, thread.id, thread), ...input.metadata
         }
       };
       // A fork stays in its parent's conversation. Sessions created in-app carry their conversation id; only

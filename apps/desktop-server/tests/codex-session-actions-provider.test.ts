@@ -20,7 +20,7 @@ describe("CodexSessionActionsProvider", () => {
     expect(port.injectDeveloperInstructions).not.toHaveBeenCalled();
     expect(port.trackResumedTurn).toHaveBeenCalledWith("worker", expect.objectContaining({ id: "thread-1" }));
   });
-  it("switches explicit role instructions once and retains them on subsequent resumes", async () => {
+  it("resumes ownership without injecting or persisting role text", async () => {
     const session = { metadata: { cwd: "I:/workspace", developerInstructions: "PREPARATION_ROLE" } };
     const resumeThread = vi.fn().mockResolvedValue({ id: "thread-worker" });
     const injectDeveloperInstructions = vi.fn();
@@ -32,26 +32,13 @@ describe("CodexSessionActionsProvider", () => {
       providerHandle: codexProviderHandle("thread-worker"), session: session as never,
       sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata } as never };
     await provider.runAction({ ...input, developerInstructions: "WORKER_ROLE", metadata: { role: "worker" } });
-    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace", "WORKER_ROLE");
-    expect(injectDeveloperInstructions).toHaveBeenCalledExactlyOnceWith("thread-worker", "WORKER_ROLE");
-    expect(updateSessionMetadata).toHaveBeenLastCalledWith("worker", { role: "worker", developerInstructions: "WORKER_ROLE" });
+    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace");
+    expect(injectDeveloperInstructions).not.toHaveBeenCalled();
+    expect(updateSessionMetadata).toHaveBeenLastCalledWith("worker", { role: "worker" });
     await provider.runAction({ ...input, developerInstructions: "WORKER_ROLE" });
     await provider.runAction(input);
-    expect(injectDeveloperInstructions).toHaveBeenCalledTimes(1);
-    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace", "WORKER_ROLE");
-  });
-
-  it("does not persist role instructions if their injection fails", async () => {
-    const updateSessionMetadata = vi.fn();
-    const provider = new CodexSessionActionsProvider({ codexRuntimePort: {
-      resumeThread: vi.fn().mockResolvedValue({ id: "thread-worker" }),
-      injectDeveloperInstructions: vi.fn().mockRejectedValue(new Error("inject failed")),
-      interruptThread: vi.fn(), unsubscribeThread: vi.fn(), attachThreadToSession: vi.fn()
-    } as unknown as CodexAppServerRuntimePort });
-    await expect(provider.runAction({ sessionId: "worker", action: "resume", developerInstructions: "WORKER_ROLE",
-      providerHandle: codexProviderHandle("thread-worker"), sessionIndexStore: {} as never,
-      runtimeService: { updateSessionMetadata } as never })).rejects.toThrow("inject failed");
-    expect(updateSessionMetadata).not.toHaveBeenCalled();
+    expect(injectDeveloperInstructions).not.toHaveBeenCalled();
+    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace");
   });
 
   it("resumes a Worker in its allocated worktree and persists the cwd and work binding", async () => {
@@ -64,7 +51,7 @@ describe("CodexSessionActionsProvider", () => {
       metadata: { workItemId: "item" }, providerHandle: codexProviderHandle("thread-worker"),
       session: { metadata: { cwd: "I:/workspace", developerInstructions: "WORKER_ROLE" } } as never,
       sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata } as never });
-    expect(resumeThread).toHaveBeenCalledWith("thread-worker", "I:/worktree", "WORKER_ROLE");
+    expect(resumeThread).toHaveBeenCalledWith("thread-worker", "I:/worktree");
     expect(updateSessionMetadata).toHaveBeenCalledWith("worker", { cwd: "I:/worktree", workItemId: "item" });
   });
 
@@ -433,7 +420,8 @@ describe("CodexSessionActionsProvider", () => {
       } as never
     });
     expect(upsertSession.mock.calls[0]![0].session.metadata).toEqual({
-      ...context, providerKind: "codex-thread", providerSessionId: "thread-child", rolloutPath: "child.jsonl",
+      role: context.role, sessionProfile: context.sessionProfile, cwd: context.cwd,
+      providerKind: "codex-thread", providerSessionId: "thread-child", rolloutPath: "child.jsonl",
       ...(scheduler ? explicit : {})
     });
     expect(forkThread).toHaveBeenCalledWith("thread-parent", "source-turn");

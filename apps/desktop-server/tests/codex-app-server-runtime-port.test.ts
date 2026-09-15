@@ -185,6 +185,44 @@ describe("Codex app-server runtime port", () => {
     expect(rpc).toHaveBeenCalledWith("thread/inject_items", expect.objectContaining({ threadId: "child" }));
   });
 
+  it("uses current role instructions at first start and injects each later revision once", async () => {
+    const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1" });
+    vi.spyOn(port, "start").mockResolvedValue();
+    let turn = 0;
+    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockImplementation(async (method) => {
+        if (method === "config/read") return { config: { developer_instructions: "User configuration" } };
+        if (method === "thread/start") return { thread: { id: "thread-new" } };
+        if (method === "turn/start") return { turn: { id: `turn-${++turn}` } };
+        if (method === "thread/inject_items") return {};
+        throw new Error(`Unexpected RPC method: ${String(method)}`);
+      });
+    const roleInjections = () => rpc.mock.calls.filter(([method, params]) =>
+      method === "thread/inject_items" && JSON.stringify(params).includes("以下开发者指令定义当前角色"));
+
+    await port.request({ id: "first", method: "turn/start", params: {
+      sessionId: "new", content: "first", developerInstructions: "ROLE_V1"
+    } });
+    expect(rpc).toHaveBeenCalledWith("thread/start", expect.objectContaining({
+      developerInstructions: "User configuration\n\nROLE_V1"
+    }), {});
+    expect(roleInjections()).toHaveLength(0);
+
+    port.attachThreadToSession("existing", "thread-existing");
+    await port.request({ id: "changed", method: "turn/start", params: {
+      sessionId: "existing", content: "changed", developerInstructions: "ROLE_V2",
+      deliveredDeveloperInstructions: "ROLE_V1"
+    } });
+    expect(roleInjections()).toHaveLength(1);
+    expect(roleInjections()[0]?.[1]).toEqual(expect.objectContaining({ threadId: "thread-existing" }));
+
+    await port.request({ id: "same", method: "turn/start", params: {
+      sessionId: "existing", content: "same", developerInstructions: "ROLE_V2",
+      deliveredDeveloperInstructions: "ROLE_V2"
+    } });
+    expect(roleInjections()).toHaveLength(1);
+  });
+
   it("sends expected JSON-RPC payloads for resume and refresh helpers", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "awb-codex-rpc-"));
     const requestLogPath = join(tempDir, "requests.jsonl");

@@ -124,6 +124,12 @@ export class SessionRuntimeService {
     this.runtimeOrchestrator.registerAgentBinding(binding);
   }
 
+  public setSessionRoleResolver(
+    resolver: (workspaceId: string, metadata: Record<string, unknown>) => Promise<string | undefined>
+  ): void {
+    this.runtimeOrchestrator.setSessionRoleResolver(resolver);
+  }
+
   public selectEngine(input: EngineSelectionInput): { selectedEngineId: string } {
     return this.runtimeOrchestrator.selectEngine(input);
   }

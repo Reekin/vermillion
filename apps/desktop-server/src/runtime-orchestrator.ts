@@ -37,6 +37,8 @@ type SessionRelationSyncInput = Parameters<SessionIndexSyncService["syncRelation
 type PendingSendStart = {
   bufferedEvents: EventEnvelope[];
 };
+type SessionRoleResolver = (workspaceId: string, metadata: Record<string, unknown>) => Promise<string | undefined>;
+type ForwardedCommandResult = AdapterCommandResult & { developerInstructions?: string };
 
 export type RuntimeOrchestratorOptions = {
   domainService: DomainService;
@@ -100,6 +102,7 @@ export class RuntimeOrchestrator {
   private acceptingAdapterEvents = true;
   private indexSyncPump: Promise<void> | undefined;
   private selectedEngineId: string | undefined;
+  private sessionRoleResolver: SessionRoleResolver | undefined;
 
   public constructor(options: RuntimeOrchestratorOptions) {
     this.domainService = options.domainService;
@@ -127,6 +130,10 @@ export class RuntimeOrchestrator {
     this.selectedEngineId =
       options.agentBindings?.[0]?.descriptor.engineId ??
       options.engines?.[0]?.engineId;
+  }
+
+  public setSessionRoleResolver(resolver: SessionRoleResolver): void {
+    this.sessionRoleResolver = resolver;
   }
 
   public registerEngine(engine: SessionEngineDescriptor): void {
@@ -277,7 +284,7 @@ export class RuntimeOrchestrator {
             const binding = this.requireBinding(
               this.resolveSessionEngineId(session)
             );
-            let nextMetadata = session.metadata;
+            let nextMetadata = session.metadata ?? {};
             if (outcome.providerSessionId) {
               nextMetadata = {
                 ...nextMetadata,
@@ -299,6 +306,10 @@ export class RuntimeOrchestrator {
                   envelope.command.execution.reasoningOptionId,
                 serviceTierId: envelope.command.execution.serviceTierId
               });
+            }
+            if (result.developerInstructions !== undefined &&
+                nextMetadata.developerInstructions !== result.developerInstructions) {
+              nextMetadata = { ...nextMetadata, developerInstructions: result.developerInstructions };
             }
             if (nextMetadata !== session.metadata) {
               this.domainService.commitRuntimeEvent({
@@ -368,6 +379,12 @@ export class RuntimeOrchestrator {
             this.domainService.commitAcceptedUserMessage({ ...envelope.command, type: "sendUserMessage" }, outcome.turnId);
           } else {
             this.domainService.commitSteerUserMessage({ ...envelope.command, turnId: outcome.turnId });
+          }
+          if (result.developerInstructions !== undefined &&
+              session.metadata?.developerInstructions !== result.developerInstructions) {
+            this.domainService.commitRuntimeEvent({ type: "session.updated",
+              conversationId: session.conversationId, sessionId: session.sessionId,
+              status: session.status, metadata: { ...session.metadata, developerInstructions: result.developerInstructions } });
           }
           await this.sessionIndexSyncService.syncSession(session.sessionId);
           return this.accept(envelope, true, {
@@ -669,7 +686,7 @@ export class RuntimeOrchestrator {
     sessionId: string,
     envelope: CommandEnvelope,
     hooks: { before?: () => void } = {}
-  ): Promise<AdapterCommandResult> {
+  ): Promise<ForwardedCommandResult> {
     const session = this.domainService.requireSession(sessionId);
     const engineId = this.resolveSessionEngineId(session);
     const binding = this.requireBinding(engineId);
@@ -683,16 +700,22 @@ export class RuntimeOrchestrator {
 
     await this.ensureAdapterReady(engineId);
     hooks.before?.();
-    return binding.adapter.executeCommand(
-      this.withSessionRuntimeContext(envelope, session, binding)
-    );
+    const runtimeEnvelope = await this.withSessionRuntimeContext(envelope, session, binding);
+    const result = await binding.adapter.executeCommand(runtimeEnvelope);
+    return {
+      ...result,
+      ...((runtimeEnvelope.command.type === "sendUserMessage" || runtimeEnvelope.command.type === "steerTurn") &&
+        runtimeEnvelope.command.developerInstructions !== undefined
+        ? { developerInstructions: runtimeEnvelope.command.developerInstructions }
+        : {})
+    };
   }
 
-  private withSessionRuntimeContext(
+  private async withSessionRuntimeContext(
     envelope: CommandEnvelope,
     session: ReturnType<DomainService["requireSession"]>,
     binding: SessionAgentBinding
-  ): CommandEnvelope {
+  ): Promise<CommandEnvelope> {
     if (!("sessionId" in envelope.command)) {
       return envelope;
     }
@@ -713,7 +736,7 @@ export class RuntimeOrchestrator {
         : undefined;
     const providerSessionId =
       runtimeProviderSessionId ?? persistedProviderSessionId;
-    const developerInstructions =
+    const deliveredDeveloperInstructions =
       session.metadata && typeof session.metadata.developerInstructions === "string"
         ? session.metadata.developerInstructions
         : undefined;
@@ -728,6 +751,11 @@ export class RuntimeOrchestrator {
           })
         : undefined;
     const workspaceId = this.domainService.getConversation(session.conversationId)?.workspaceId;
+    const developerInstructions = workspaceId && this.sessionRoleResolver &&
+      (envelope.command.type === "sendUserMessage" || envelope.command.type === "steerTurn")
+      ? await this.sessionRoleResolver(workspaceId, session.metadata ?? {})
+      : deliveredDeveloperInstructions;
+    const resolvesRole = envelope.command.type === "sendUserMessage" || envelope.command.type === "steerTurn";
     return {
       ...envelope,
       command: {
@@ -735,7 +763,7 @@ export class RuntimeOrchestrator {
         ...(workspaceId ? { workspaceId } : {}),
         ...(cwd ? { cwd } : {}),
         ...(providerSessionId ? { providerSessionId } : {}),
-        ...(developerInstructions ? { developerInstructions } : {}),
+        ...(resolvesRole ? { developerInstructions, deliveredDeveloperInstructions } : {}),
         ...(execution ? { execution } : {})
       } as CommandEnvelope["command"]
     };

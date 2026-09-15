@@ -89,7 +89,8 @@ const zSendUserMessageCommand = z.object({
   attachments: z.array(zAttachmentSchema).default([]),
   execution: zTurnExecutionOptionsSchema.optional(),
   cwd: z.string().min(1).optional(),
-  developerInstructions: z.string().min(1).optional()
+  developerInstructions: z.string().min(1).optional(),
+  deliveredDeveloperInstructions: z.string().optional()
 });
 
 export const zChatTreeSendInputSchema = zSendUserMessageCommand.pick({
@@ -115,7 +116,9 @@ const zSteerTurnCommand = z.object({
   messageId: zMessageId,
   content: z.string(),
   attachments: z.array(zAttachmentSchema).default([]),
-  cwd: z.string().min(1).optional()
+  cwd: z.string().min(1).optional(),
+  developerInstructions: z.string().min(1).optional(),
+  deliveredDeveloperInstructions: z.string().optional()
 });
 
 const zInterruptTurnCommand = z.object({
