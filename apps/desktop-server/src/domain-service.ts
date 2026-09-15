@@ -18,16 +18,11 @@ import {
 import type { SessionRelationIndex } from "./session-index.js";
 import type { HydratedSessionSnapshot } from "./session-discovery.js";
 import { buildLocalEchoMessageText } from "./attachment-inputs.js";
+import { sessionItemId } from "./session-item-id.js";
 import type { SessionListOptions } from "./runtime-types.js";
 
 type Clock = () => string;
 type IdFactory = () => string;
-
-export type HydratedUserMessageReplacement = {
-  turnId: string;
-  replacedMessageId: string;
-  replacementMessageId: string;
-};
 
 export type DomainServiceOptions = {
   assertEngineRegistered: (engineId: string) => void;
@@ -75,9 +70,6 @@ const withConversationSession = (
 const participantIdFor = (conversationId: string, engineId: string): string =>
   `participant-${conversationId}-${engineId}`;
 
-const normalizeMessageText = (value: string | undefined): string =>
-  (value ?? "").replace(/\r\n/g, "\n").trim();
-
 export class DomainService {
   private readonly assertEngineRegistered: (engineId: string) => void;
   private readonly resolveEngineCapabilities: (engineId: string) => readonly string[];
@@ -106,9 +98,6 @@ export class DomainService {
     input: {
       relatedIndexRelations?: SessionRelationIndex[];
       replaceSessionHistory?: boolean;
-      onUserMessageReplaced?: (
-        replacement: HydratedUserMessageReplacement
-      ) => void;
     } = {}
   ): ChatSession {
     const existingConversation = this.domainReplica.getConversation(
@@ -123,15 +112,6 @@ export class DomainService {
         sourceTurnId: relation.sourceTurnId,
         createdAt: relation.createdAt
       })
-    );
-    const messageReplacements = this.resolveHydratedUserMessageReplacements(
-      snapshot
-    );
-    for (const replacement of messageReplacements) {
-      input.onUserMessageReplaced?.(replacement);
-    }
-    const replacedMessageIds = new Set(
-      messageReplacements.map((replacement) => replacement.replacedMessageId)
     );
     const projectedSnapshot = {
       conversations: [
@@ -150,12 +130,7 @@ export class DomainService {
         )
       ],
       sessions: [snapshot.session],
-      turns: snapshot.turns.map((turn) => ({
-        ...turn,
-        messageIds: turn.messageIds.filter(
-          (messageId) => !replacedMessageIds.has(messageId)
-        )
-      })),
+      turns: snapshot.turns,
       messageBlocks: snapshot.messageBlocks,
       toolCalls: snapshot.toolCalls,
       terminalStreams: snapshot.terminalStreams,
@@ -177,11 +152,7 @@ export class DomainService {
       this.domainReplica.mergeSnapshot(projectedSnapshot, {
         scope: {
           sessionId: snapshot.session.sessionId
-        },
-        replaceMessageIds: messageReplacements.map(
-          (replacement) => replacement.replacedMessageId
-        ),
-        replaceMessageIdMappings: messageReplacements
+        }
       });
     }
 
@@ -421,6 +392,7 @@ export class DomainService {
       command.content,
       command.attachments
     );
+    const messageId = sessionItemId(command.sessionId, command.messageId);
     this.commitRuntimeEvent({
       type: "turn.started",
       sessionId: command.sessionId,
@@ -430,7 +402,7 @@ export class DomainService {
       type: "message.started",
       sessionId: command.sessionId,
       turnId,
-      messageId: command.messageId,
+      messageId,
       role: "user"
     });
     if (renderedContent.length > 0) {
@@ -438,7 +410,7 @@ export class DomainService {
         type: "message.delta",
         sessionId: command.sessionId,
         turnId,
-        messageId: command.messageId,
+        messageId,
         delta: renderedContent
       });
     }
@@ -446,7 +418,7 @@ export class DomainService {
       type: "message.completed",
       sessionId: command.sessionId,
       turnId,
-      messageId: command.messageId,
+      messageId,
       finalText: renderedContent
     });
   }
@@ -458,11 +430,12 @@ export class DomainService {
       command.content,
       command.attachments
     );
+    const messageId = sessionItemId(command.sessionId, command.messageId);
     this.commitRuntimeEvent({
       type: "message.started",
       sessionId: command.sessionId,
       turnId: command.turnId,
-      messageId: command.messageId,
+      messageId,
       role: "user"
     });
     if (renderedContent.length > 0) {
@@ -470,7 +443,7 @@ export class DomainService {
         type: "message.delta",
         sessionId: command.sessionId,
         turnId: command.turnId,
-        messageId: command.messageId,
+        messageId,
         delta: renderedContent
       });
     }
@@ -478,7 +451,7 @@ export class DomainService {
       type: "message.completed",
       sessionId: command.sessionId,
       turnId: command.turnId,
-      messageId: command.messageId,
+      messageId,
       finalText: renderedContent
     });
   }
@@ -531,38 +504,6 @@ export class DomainService {
     if (event.type === "turn.completed") {
       this.markSessionUnreadCompleted?.(event.sessionId);
     }
-  }
-
-  private resolveHydratedUserMessageReplacements(
-    snapshot: HydratedSessionSnapshot
-  ): HydratedUserMessageReplacement[] {
-    const replacements = new Map<string, HydratedUserMessageReplacement>();
-    for (const hydratedBlock of snapshot.messageBlocks) {
-      if (
-        hydratedBlock.role !== "user" ||
-        this.domainReplica.listMessageBlocks({
-          messageId: hydratedBlock.messageId
-        }).length > 0
-      ) {
-        continue;
-      }
-      const duplicate = this.domainReplica
-        .listMessageBlocks({ turnId: hydratedBlock.turnId })
-        .find(
-          (block) =>
-            block.role === "user" &&
-            !replacements.has(block.messageId) &&
-            normalizeMessageText(block.text) === normalizeMessageText(hydratedBlock.text)
-        );
-      if (duplicate) {
-        replacements.set(duplicate.messageId, {
-          turnId: hydratedBlock.turnId,
-          replacedMessageId: duplicate.messageId,
-          replacementMessageId: hydratedBlock.messageId
-        });
-      }
-    }
-    return [...replacements.values()];
   }
 
   private createSessionRecord(input: {

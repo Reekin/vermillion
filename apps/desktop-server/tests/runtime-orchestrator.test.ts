@@ -1412,7 +1412,7 @@ describe("RuntimeOrchestrator", () => {
             type: "message.started",
             sessionId: "session-canonical",
             turnId: "turn-canonical",
-            messageId: "provider-user-canonical",
+            messageId: "session-canonical:message-canonical",
             role: "user",
             engineId: "codex"
           }
@@ -1424,7 +1424,7 @@ describe("RuntimeOrchestrator", () => {
             type: "message.completed",
             sessionId: "session-canonical",
             turnId: "turn-canonical",
-            messageId: "provider-user-canonical",
+            messageId: "session-canonical:message-canonical",
             role: "user",
             finalText: "hello",
             engineId: "codex"
@@ -1562,13 +1562,13 @@ describe("RuntimeOrchestrator", () => {
       expect(snapshot.turns).toHaveLength(1);
       expect(snapshot.turns[0]).toMatchObject({
         turnId: "turn-canonical",
-        messageIds: ["message-canonical", "assistant-canonical"]
+        messageIds: ["session-canonical:message-canonical", "assistant-canonical"]
       });
       expect(
         snapshot.messageBlocks.filter((block) => block.role === "user")
       ).toEqual([
         expect.objectContaining({
-          messageId: "message-canonical",
+          messageId: "session-canonical:message-canonical",
           text: "hello"
         })
       ]);
@@ -1599,8 +1599,8 @@ describe("RuntimeOrchestrator", () => {
           emit({ type: "turn.completed", sessionId: "worker", turnId: "old", finishReason: "completed" });
           if (delivery === "steered" || delivery === "start_or_steer") {
             emit({ type: "turn.started", sessionId: "worker", turnId: "actual" });
-            emit({ type: "message.started", sessionId: "worker", turnId: "actual", messageId: "native-echo", role: "user" });
-            emit({ type: "message.completed", sessionId: "worker", turnId: "actual", messageId: "native-echo", role: "user", finalText: "update" });
+            emit({ type: "message.started", sessionId: "worker", turnId: "actual", messageId: "worker:local-update", role: "user" });
+            emit({ type: "message.completed", sessionId: "worker", turnId: "actual", messageId: "worker:local-update", role: "user", finalText: "update" });
           }
           await gate.promise;
           if (delivery === "disconnected") throw new Error("connection lost");
@@ -1642,8 +1642,8 @@ describe("RuntimeOrchestrator", () => {
       const snapshot = domainService.getSnapshot();
       expect(snapshot.turns.find((turn) => turn.turnId === "old")).toMatchObject({ status: "completed", messageIds: [] });
       if (delivery === "steered" || delivery === "start_or_steer") {
-        expect(snapshot.messageBlocks).toEqual([expect.objectContaining({ messageId: "local-update", turnId: "actual", text: "update" })]);
-        expect(snapshot.turns.find((turn) => turn.turnId === "actual")?.messageIds).toEqual(["local-update"]);
+        expect(snapshot.messageBlocks).toEqual([expect.objectContaining({ messageId: "worker:local-update", turnId: "actual", text: "update" })]);
+        expect(snapshot.turns.find((turn) => turn.turnId === "actual")?.messageIds).toEqual(["worker:local-update"]);
       } else expect(snapshot.messageBlocks).toEqual([]);
       await orchestrator.dispose();
     }
@@ -1697,7 +1697,7 @@ describe("RuntimeOrchestrator", () => {
       releaseFallback.resolve();
       await expect(steering).resolves.toMatchObject({ accepted: true, turnId: "fallback", delivery: "start_or_steer" });
       expect(domainService.getSnapshot().messageBlocks).toEqual([
-        expect.objectContaining({ messageId: "update-message", turnId: "fallback", text: "update" })
+        expect.objectContaining({ messageId: "worker:update-message", turnId: "fallback", text: "update" })
       ]);
       expect(domainService.getSnapshot().turns.map((turn) => turn.turnId).sort()).toEqual(["fallback", "old"]);
       expect(starts).toBe(2);
@@ -2135,7 +2135,7 @@ describe("RuntimeOrchestrator", () => {
     }
   });
 
-  it("retargets late user lifecycle events after hydration replaces its echo", async () => {
+  it("merges late user lifecycle events into the hydrated user entity", async () => {
     let listener: Parameters<AgentAdapter["subscribe"]>[0] | undefined;
     let lifecycleState: ReturnType<AgentAdapter["getLifecycleState"]> = "idle";
     const adapter: AgentAdapter = {
@@ -2269,8 +2269,7 @@ describe("RuntimeOrchestrator", () => {
           completedAt: "2026-04-20T00:04:03Z",
           finalMessageId: "assistant-live-message",
           messageIds: [
-            "hydrated-user-message",
-            "local-user-message",
+            "session-hydrated-order:local-user-message",
             "assistant-live-message"
           ],
           toolCallIds: [],
@@ -2281,8 +2280,8 @@ describe("RuntimeOrchestrator", () => {
       ],
       messageBlocks: [
         {
-          blockId: "hydrated-user-message:md",
-          messageId: "hydrated-user-message",
+          blockId: "session-hydrated-order:local-user-message:md",
+          messageId: "session-hydrated-order:local-user-message",
           sessionId: "session-hydrated-order",
           turnId: "turn-hydrated-order",
           role: "user",
@@ -2303,7 +2302,7 @@ describe("RuntimeOrchestrator", () => {
         type: "message.completed",
         sessionId: "session-hydrated-order",
         turnId: "turn-hydrated-order",
-        messageId: "provider-user-message",
+        messageId: "session-hydrated-order:local-user-message",
         role: "user",
         finalText: "hello",
         engineId: "codex"
@@ -2312,12 +2311,12 @@ describe("RuntimeOrchestrator", () => {
 
     const snapshot = domainService.getSnapshot();
     expect(snapshot.turns[0]?.messageIds).toEqual([
-      "hydrated-user-message",
+      "session-hydrated-order:local-user-message",
       "assistant-live-message"
     ]);
     expect(snapshot.messageBlocks.filter((block) => block.role === "user")).toEqual([
       expect.objectContaining({
-        messageId: "hydrated-user-message",
+        messageId: "session-hydrated-order:local-user-message",
         text: "hello"
       })
     ]);

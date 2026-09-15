@@ -59,7 +59,6 @@ import type { ThreadResumeResponse } from "./codex-app-server-generated/v2/Threa
 import type { ThreadSettings } from "./codex-app-server-generated/v2/ThreadSettings.js";
 import type { ThreadUnsubscribeParams } from "./codex-app-server-generated/v2/ThreadUnsubscribeParams.js";
 import type { TurnInterruptParams } from "./codex-app-server-generated/v2/TurnInterruptParams.js";
-import type { TurnSteerParams } from "./codex-app-server-generated/v2/TurnSteerParams.js";
 import type { TurnStartResponse } from "./codex-app-server-generated/v2/TurnStartResponse.js";
 import type { Turn } from "./codex-app-server-generated/v2/Turn.js";
 import type { TurnItemsView } from "./codex-app-server-generated/v2/TurnItemsView.js";
@@ -104,6 +103,7 @@ import type {
   HostToolResult
 } from "./host-tools.js";
 import { discoveredCodexSessionId } from "./codex-session-identity.js";
+import { engineItemKey, sessionItemId } from "./session-item-id.js";
 import { ChildProcessSupervisor } from "./runtime/child-process-supervisor.js";
 import {
   JsonRpcLineClient,
@@ -118,6 +118,44 @@ import {
 import { createRuntimePortError } from "./runtime/runtime-lifecycle.js";
 
 type RuntimeListener = (event: CodexRuntimeEvent) => void;
+
+/**
+ * Engine item ids are published as session-scoped entity ids on the item events below, so the
+ * domain stores one entity per engine item no matter whether the live event or a later history
+ * hydration observed it. Hydration builds the same ids (see session-item-id.ts).
+ */
+const sessionScopedItemIdFields: Partial<Record<EventType, readonly string[]>> = {
+  "message.started": ["messageId"],
+  "message.delta": ["messageId"],
+  "message.completed": ["messageId"],
+  "tool.started": ["toolCallId"],
+  "tool.delta": ["toolCallId"],
+  "tool.completed": ["toolCallId"],
+  "terminal.started": ["terminalId", "toolCallId"],
+  "terminal.output": ["terminalId"],
+  "terminal.completed": ["terminalId"]
+};
+
+const scopeSessionItemIds = (
+  method: EventType,
+  params: Record<string, unknown>
+): Record<string, unknown> => {
+  const sessionId = typeof params.sessionId === "string" ? params.sessionId : "";
+  const fields = sessionScopedItemIdFields[method];
+  if (sessionId.length === 0 || !fields) {
+    return params;
+  }
+  let scoped: Record<string, unknown> | undefined;
+  for (const field of fields) {
+    const itemId = params[field];
+    if (typeof itemId !== "string" || itemId.length === 0) {
+      continue;
+    }
+    scoped ??= { ...params };
+    scoped[field] = sessionItemId(sessionId, itemId);
+  }
+  return scoped ?? params;
+};
 
 const isThreadNotFoundError = (error: unknown, threadId: string): boolean =>
   error instanceof Error &&
@@ -1893,6 +1931,7 @@ export class CodexAppServerRuntimePort
           ? execution.serviceTierId
           : undefined;
     const startsNewThread = !this.threadIdBySessionId.get(sessionId) && !providerSessionId;
+    const clientUserMessageId = optionalString(payload.params.messageId);
     let threadId = await this.ensureThreadForSession(
       sessionId,
       cwd,
@@ -1921,6 +1960,7 @@ export class CodexAppServerRuntimePort
         const params: Record<string, unknown> = {
           threadId: targetThreadId,
           input,
+          ...(clientUserMessageId ? { clientUserMessageId } : {}),
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
           ...(serviceTier !== undefined ? { serviceTier } : {})
@@ -2030,13 +2070,18 @@ export class CodexAppServerRuntimePort
     await this.deliverRoleInstructions(threadId, developerInstructions, deliveredDeveloperInstructions);
     await this.injectWorkbenchContext(threadId, payload.params, options);
     let targetTurnId = expectedTurnId;
+    const clientUserMessageId = optionalString(payload.params.messageId);
     // Only a provider precondition rejection proves this input was not delivered.
     // Retry a changed turn once; repeated handoffs must not create an unbounded loop.
     for (let attempt = 0; ; attempt++) {
       try {
-        const result = await this.rpc("turn/steer", {
-          threadId, input, expectedTurnId: targetTurnId
-        } satisfies TurnSteerParams, options) as { turnId: string };
+        const steerParams: Record<string, unknown> = {
+          threadId,
+          input,
+          expectedTurnId: targetTurnId,
+          ...(clientUserMessageId ? { clientUserMessageId } : {})
+        };
+        const result = await this.rpc("turn/steer", steerParams, options) as { turnId: string };
         return { sessionId, turnId: result.turnId, delivery: "steered" };
       } catch (error) {
         if (!(error instanceof Error) ||
@@ -3314,7 +3359,7 @@ export class CodexAppServerRuntimePort
       this.emitEvent(method === "item/started" ? "message.started" : "message.completed", {
         sessionId,
         turnId,
-        messageId: item.id,
+        messageId: engineItemKey(item),
         role: "user",
         ...(method === "item/completed"
           ? { finalText: summarizeUserMessage(item) }
@@ -4120,9 +4165,10 @@ export class CodexAppServerRuntimePort
 
   private emitEvent(method: EventType, params: Record<string, unknown>): void {
     this.sequence += 1;
+    const scopedParams = scopeSessionItemIds(method, params);
     const event: CodexRuntimeEvent = {
       method,
-      params,
+      params: scopedParams,
       eventId: `codex-runtime-${this.sequence}`,
       cursor: String(this.sequence),
       occurredAt: this.now()
@@ -4135,10 +4181,10 @@ export class CodexAppServerRuntimePort
     } finally {
       if (this.pipelineDiagnostics) {
         const text =
-          typeof params.delta === "string"
-            ? params.delta
-            : typeof params.chunk === "string"
-              ? params.chunk
+          typeof scopedParams.delta === "string"
+            ? scopedParams.delta
+            : typeof scopedParams.chunk === "string"
+              ? scopedParams.chunk
               : "";
         this.pipelineDiagnostics.recordRuntimeEvent(
           method,

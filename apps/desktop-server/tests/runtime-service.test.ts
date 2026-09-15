@@ -634,7 +634,9 @@ describe("SessionRuntimeService", () => {
     });
 
     const snapshot = service.getSnapshot();
-    const block = snapshot.messageBlocks.find((entry) => entry.messageId === "msg-1");
+    const block = snapshot.messageBlocks.find(
+      (entry) => entry.messageId === "session-1:msg-1"
+    );
     expect(block?.text).toBe(
       "Please review these files.\n\n![reference.png](file:///C:/Users/TestUser/Pictures/reference.png)\n[README.md](file:///D:/workspace/vermillion/README.md)"
     );

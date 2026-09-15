@@ -14,10 +14,7 @@ import {
   writeSessionExecutionProfile
 } from "@vermillion/shared";
 import type { HydratedSessionSnapshot } from "./session-discovery.js";
-import {
-  DomainService,
-  type HydratedUserMessageReplacement
-} from "./domain-service.js";
+import { DomainService } from "./domain-service.js";
 import { SessionIndexSyncService } from "./session-index-sync-service.js";
 import type { SessionRelationIndex } from "./session-index.js";
 import {
@@ -96,7 +93,6 @@ export class RuntimeOrchestrator {
   private readonly pendingSessionIndexSyncIds = new Set<string>();
   private readonly pendingRelationSyncs = new Map<string, SessionRelationSyncInput>();
   private readonly pendingSendStartBySessionId = new Map<string, PendingSendStart>();
-  private readonly localUserMessageIdByTurn = new Map<string, string>();
   private adapterEventQueueReadIndex = 0;
   private isDrainingAdapterEvents = false;
   private acceptingAdapterEvents = true;
@@ -229,22 +225,7 @@ export class RuntimeOrchestrator {
       replaceSessionHistory?: boolean;
     } = {}
   ) {
-    return this.domainService.hydrateDiscoveredSession(snapshot, {
-      ...input,
-      onUserMessageReplaced: (
-        replacement: HydratedUserMessageReplacement
-      ) => {
-        if (
-          this.localUserMessageIdByTurn.get(replacement.turnId) ===
-          replacement.replacedMessageId
-        ) {
-          this.localUserMessageIdByTurn.set(
-            replacement.turnId,
-            replacement.replacementMessageId
-          );
-        }
-      }
-    });
+    return this.domainService.hydrateDiscoveredSession(snapshot, input);
   }
 
   public async executeCommand(input: CommandEnvelope): Promise<CommandReceipt> {
@@ -347,10 +328,6 @@ export class RuntimeOrchestrator {
                 metadata: nextMetadata
               });
             }
-            this.localUserMessageIdByTurn.set(
-              outcome.turnId,
-              envelope.command.messageId
-            );
             this.domainService.commitAcceptedUserMessage(
               envelope.command,
               outcome.turnId
@@ -401,7 +378,6 @@ export class RuntimeOrchestrator {
           if (!result.accepted || outcome?.type !== "turn_delivered" || outcome.sessionId !== session.sessionId) {
             return { ...this.accept(envelope, false), ...(result.error ? { error: result.error } : {}) };
           }
-          this.localUserMessageIdByTurn.set(outcome.turnId, envelope.command.messageId);
           if (outcome.delivery === "start_or_steer") {
             this.domainService.commitAcceptedUserMessage({ ...envelope.command, type: "sendUserMessage" }, outcome.turnId);
           } else {
@@ -902,31 +878,12 @@ export class RuntimeOrchestrator {
   }
 
   private commitAdapterEvent(envelope: EventEnvelope): void {
-    const event = envelope.event;
-    const localMessageId =
-      (event.type === "message.started" || event.type === "message.completed") &&
-      event.role === "user"
-        ? this.localUserMessageIdByTurn.get(event.turnId)
-        : undefined;
-    const reconciledEnvelope =
-      localMessageId && localMessageId !== ("messageId" in event ? event.messageId : "")
-        ? {
-            ...envelope,
-            event: {
-              ...event,
-              messageId: localMessageId
-            }
-          }
-        : envelope;
     this.domainService.ingestRuntimeEvent(
-      reconciledEnvelope.event,
-      reconciledEnvelope.occurredAt
+      envelope.event,
+      envelope.occurredAt
     );
-    if (reconciledEnvelope.event.type === "turn.completed") {
-      this.localUserMessageIdByTurn.delete(reconciledEnvelope.event.turnId);
-    }
-    this.publishRuntimeEvent(reconciledEnvelope.event);
-    this.queueSessionIndexSync(reconciledEnvelope);
+    this.publishRuntimeEvent(envelope.event);
+    this.queueSessionIndexSync(envelope);
   }
 
   private eventSessionId(envelope: EventEnvelope): string | undefined {

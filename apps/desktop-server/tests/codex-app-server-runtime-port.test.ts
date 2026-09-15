@@ -1414,7 +1414,7 @@ describe("Codex app-server runtime port", () => {
       expect.arrayContaining([
         expect.objectContaining({
           params: expect.objectContaining({
-            toolCallId: expect.stringMatching(/^reason-empty-/)
+            toolCallId: expect.stringMatching(/^session-1:reason-empty-/)
           })
         })
       ])
@@ -1424,7 +1424,7 @@ describe("Codex app-server runtime port", () => {
         expect.objectContaining({
           method: "tool.started",
           params: expect.objectContaining({
-            toolCallId: expect.stringMatching(/^reason-/),
+            toolCallId: expect.stringMatching(/^session-1:reason-/),
             toolName: "reasoning",
             inputSummary: "Reasoning"
           })
@@ -1432,14 +1432,14 @@ describe("Codex app-server runtime port", () => {
         expect.objectContaining({
           method: "tool.delta",
           params: expect.objectContaining({
-            toolCallId: expect.stringMatching(/^reason-/),
+            toolCallId: expect.stringMatching(/^session-1:reason-/),
             delta: "Looking up current market data.\n"
           })
         }),
         expect.objectContaining({
           method: "tool.completed",
           params: expect.objectContaining({
-            toolCallId: expect.stringMatching(/^reason-/),
+            toolCallId: expect.stringMatching(/^session-1:reason-/),
             outputSummary: "Looking up current market data."
           })
         }),
@@ -1453,7 +1453,7 @@ describe("Codex app-server runtime port", () => {
         expect.objectContaining({
           method: "tool.started",
           params: expect.objectContaining({
-            toolCallId: expect.stringMatching(/^web-/),
+            toolCallId: expect.stringMatching(/^session-1:web-/),
             toolName: "webSearch",
             inputSummary: expect.stringContaining("mini PC low power CPUs")
           })
@@ -1468,7 +1468,7 @@ describe("Codex app-server runtime port", () => {
         expect.objectContaining({
           method: "tool.started",
           params: expect.objectContaining({
-            toolCallId: expect.stringMatching(/^compact-/),
+            toolCallId: expect.stringMatching(/^session-1:compact-/),
             toolName: "contextCompaction",
             inputSummary: "compacting..."
           })
@@ -1476,7 +1476,7 @@ describe("Codex app-server runtime port", () => {
         expect.objectContaining({
           method: "tool.completed",
           params: expect.objectContaining({
-            toolCallId: expect.stringMatching(/^compact-/),
+            toolCallId: expect.stringMatching(/^session-1:compact-/),
             outputSummary: "compaction finished"
           })
         })
@@ -1515,7 +1515,7 @@ describe("Codex app-server runtime port", () => {
     const turnId = String(
       events.find((event) => event.method === "turn.completed")?.params.turnId
     );
-    const toolCallId = `raw-custom-tool:${turnId}:apply-patch-${turnId}`;
+    const toolCallId = `session-1:raw-custom-tool:${turnId}:apply-patch-${turnId}`;
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1573,7 +1573,7 @@ describe("Codex app-server runtime port", () => {
     const turnId = String(
       events.find((event) => event.method === "turn.completed")?.params.turnId
     );
-    const toolCallId = `raw-custom-tool:${turnId}:notify-${turnId}`;
+    const toolCallId = `session-1:raw-custom-tool:${turnId}:notify-${turnId}`;
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1637,7 +1637,7 @@ describe("Codex app-server runtime port", () => {
           params: expect.objectContaining({
             sessionId: "session-1",
             turnId,
-            toolCallId: `image-view-${turnId}`,
+            toolCallId: `session-1:image-view-${turnId}`,
             toolName: "imageView",
             inputSummary: "D:/workspace/sample.png"
           })
@@ -1647,7 +1647,7 @@ describe("Codex app-server runtime port", () => {
           params: expect.objectContaining({
             sessionId: "session-1",
             turnId,
-            toolCallId: `image-view-${turnId}`,
+            toolCallId: `session-1:image-view-${turnId}`,
             status: "completed",
             outputSummary: expect.stringContaining(
               "![Viewed image](file:///D:/workspace/sample.png)"
@@ -1659,7 +1659,7 @@ describe("Codex app-server runtime port", () => {
           params: expect.objectContaining({
             sessionId: "session-1",
             turnId,
-            toolCallId: `image-generation-${turnId}`,
+            toolCallId: `session-1:image-generation-${turnId}`,
             toolName: "imageGeneration",
             inputSummary: "A quiet dashboard screenshot"
           })
@@ -1669,7 +1669,7 @@ describe("Codex app-server runtime port", () => {
           params: expect.objectContaining({
             sessionId: "session-1",
             turnId,
-            toolCallId: `image-generation-${turnId}`,
+            toolCallId: `session-1:image-generation-${turnId}`,
             status: "completed",
             outputSummary: expect.stringContaining(
               "![Generated image](file:///D:/workspace/generated.png)"
@@ -2627,6 +2627,7 @@ describe("Codex app-server runtime port", () => {
           params: expect.objectContaining({
             sessionId: "codex-thread:sub-thread-1",
             turnId: "child-turn-1",
+            messageId: "codex-thread:sub-thread-1:reviewer-task-1",
             role: "user",
             finalText: "Review this file"
           })
@@ -2643,7 +2644,7 @@ describe("Codex app-server runtime port", () => {
         expect.objectContaining({
           method: "tool.completed",
           params: expect.objectContaining({
-            toolCallId: "collab-turn-1",
+            toolCallId: "session-1:collab-turn-1",
             outputSummary: expect.stringContaining("sub-thread-1: completed")
           })
         })
