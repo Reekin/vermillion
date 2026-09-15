@@ -19,7 +19,7 @@ import { RoleEditor } from "./components/RoleEditor.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
-import { Button, EmptyState, InlineNotice, PanelHeader, Tabs } from "./components/ui.js";
+import { Button, InlineNotice, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";

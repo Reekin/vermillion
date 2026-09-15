@@ -92,14 +92,13 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
         kind="select"
         label="新会话引擎"
         className="max-w-md"
-        value={settings?.defaultNewSessionEngineId ?? ""}
+        value={settings?.defaultNewSessionEngineId ?? engines[0]?.engineId ?? ""}
         disabled={!settings}
         hint="之后新建的会话使用该引擎；已有会话树保持创建时的引擎。"
         onChange={(event) => {
           if (event.target.value) void save({ defaultNewSessionEngineId: event.target.value });
         }}
       >
-        <option value="">按注册顺序的第一个引擎</option>
         {engines.map((engine) => (
           <option key={engine.engineId} value={engine.engineId}>
             {engine.displayName}

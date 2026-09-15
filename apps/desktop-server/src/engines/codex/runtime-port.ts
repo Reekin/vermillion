@@ -115,6 +115,7 @@ import {
   resolveEngineProgramCommand,
   resolveEngineSpawnCommand
 } from "../../engine-program-resolution.js";
+import { codexProgram } from "./program.js";
 import { createRuntimePortError } from "../../runtime/runtime-lifecycle.js";
 
 type RuntimeListener = (event: CodexRuntimeEvent) => void;
@@ -1010,6 +1011,7 @@ export class CodexAppServerRuntimePort
   public constructor(options: CodexAppServerRuntimePortOptions = {}) {
     this.engineId = options.engineId ?? "codex";
     const defaultCommand = resolveEngineProgramCommand("codex", {
+      program: codexProgram,
       configuredPath: options.commandPath,
       configuredArgs: options.commandArgs
     });
