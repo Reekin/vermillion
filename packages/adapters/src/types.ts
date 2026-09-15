@@ -5,6 +5,7 @@ import type {
   EventType
 } from "@vermillion/shared";
 
+/** 引擎标识由装配单元提供，适配层不做枚举。 */
 export type AdapterKind = string;
 
 export type AdapterLifecycleState =
