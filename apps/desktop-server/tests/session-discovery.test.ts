@@ -1003,7 +1003,7 @@ describe("Session discovery and reconciliation", () => {
         startedAt: "2026-05-10T19:22:38.815Z",
         completedAt: "2026-05-10T19:27:08.629Z",
         finalMessageId:
-          "hydrated:codex-thread:thread-paged-compaction:agent-latest"
+          "codex-thread:thread-paged-compaction:agent-latest"
       }),
       expect.objectContaining({
         turnId: "turn-older",
@@ -1016,16 +1016,16 @@ describe("Session discovery and reconciliation", () => {
       startedAt: "2026-05-10T19:22:38.815Z",
       completedAt: "2026-05-10T19:27:08.629Z",
       finalMessageId:
-        "hydrated:codex-thread:thread-paged-compaction:agent-latest"
+        "codex-thread:thread-paged-compaction:agent-latest"
     });
     expect(hydrated?.toolCalls[0]).toMatchObject({
       toolCallId:
-        "hydrated:codex-thread:thread-paged-compaction:compact-latest-1",
+        "codex-thread:thread-paged-compaction:compact-latest-1",
       startedAt: "2026-05-10T19:22:38.815Z"
     });
     expect(hydrated?.toolCalls[1]).toMatchObject({
       toolCallId:
-        "hydrated:codex-thread:thread-paged-compaction:compact-latest-2",
+        "codex-thread:thread-paged-compaction:compact-latest-2",
       startedAt: "2026-05-10T19:24:00.000Z"
     });
   });
@@ -1374,12 +1374,12 @@ describe("Session discovery and reconciliation", () => {
     expect(runtimeService.getSnapshot().messageBlocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          blockId: "hydrated:codex-thread:thread-root:msg-user-1:md",
-          messageId: "hydrated:codex-thread:thread-root:msg-user-1"
+          blockId: "codex-thread:thread-root:msg-user-1:md",
+          messageId: "codex-thread:thread-root:msg-user-1"
         }),
         expect.objectContaining({
-          blockId: "hydrated:codex-thread:thread-root:msg-1:md",
-          messageId: "hydrated:codex-thread:thread-root:msg-1"
+          blockId: "codex-thread:thread-root:msg-1:md",
+          messageId: "codex-thread:thread-root:msg-1"
         })
       ])
     );
@@ -1951,21 +1951,21 @@ describe("Session discovery and reconciliation", () => {
     });
 
     expect(first?.turns[0]?.messageIds).toEqual([
-      "hydrated:codex-thread:thread-a:item-1",
-      "hydrated:codex-thread:thread-a:item-2"
+      "codex-thread:thread-a:item-1",
+      "codex-thread:thread-a:item-2"
     ]);
     expect(second?.turns[0]?.messageIds).toEqual([
-      "hydrated:codex-thread:thread-b:item-1",
-      "hydrated:codex-thread:thread-b:item-2"
+      "codex-thread:thread-b:item-1",
+      "codex-thread:thread-b:item-2"
     ]);
     expect(first?.messageBlocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          blockId: "hydrated:codex-thread:thread-a:item-1:md",
+          blockId: "codex-thread:thread-a:item-1:md",
           text: "Prompt thread-a"
         }),
         expect.objectContaining({
-          blockId: "hydrated:codex-thread:thread-a:item-2:md",
+          blockId: "codex-thread:thread-a:item-2:md",
           text: "Answer thread-a"
         })
       ])
@@ -1973,11 +1973,11 @@ describe("Session discovery and reconciliation", () => {
     expect(second?.messageBlocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          blockId: "hydrated:codex-thread:thread-b:item-1:md",
+          blockId: "codex-thread:thread-b:item-1:md",
           text: "Prompt thread-b"
         }),
         expect.objectContaining({
-          blockId: "hydrated:codex-thread:thread-b:item-2:md",
+          blockId: "codex-thread:thread-b:item-2:md",
           text: "Answer thread-b"
         })
       ])
@@ -2083,11 +2083,11 @@ describe("Session discovery and reconciliation", () => {
     expect(hydrated?.messageBlocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          messageId: "hydrated:codex-thread:thread-rollout-time:user-1",
+          messageId: "codex-thread:thread-rollout-time:user-1",
           startedAt: "2026-05-02T02:48:39.123Z"
         }),
         expect.objectContaining({
-          messageId: "hydrated:codex-thread:thread-rollout-time:agent-1",
+          messageId: "codex-thread:thread-rollout-time:agent-1",
           startedAt: "2026-05-02T02:48:51.597Z",
           completedAt: "2026-05-02T02:48:51.597Z"
         })
@@ -2507,17 +2507,17 @@ describe("Session discovery and reconciliation", () => {
     expect(hydrated?.turns[0]).toMatchObject({
       startedAt: "2026-05-03T17:50:32.031Z",
       completedAt: "2026-05-03T17:53:20.979Z",
-      finalMessageId: "hydrated:codex-thread:thread-repeated-prompt:agent-new"
+      finalMessageId: "codex-thread:thread-repeated-prompt:agent-new"
     });
     expect(hydrated?.messageBlocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          messageId: "hydrated:codex-thread:thread-repeated-prompt:user-new",
+          messageId: "codex-thread:thread-repeated-prompt:user-new",
           startedAt: "2026-05-03T17:50:32.031Z",
           text: "build个exe"
         }),
         expect.objectContaining({
-          messageId: "hydrated:codex-thread:thread-repeated-prompt:agent-new",
+          messageId: "codex-thread:thread-repeated-prompt:agent-new",
           role: "assistant",
           startedAt: "2026-05-03T17:53:20.979Z",
           text: "New build answer."
@@ -2783,7 +2783,7 @@ describe("Session discovery and reconciliation", () => {
     });
 
     expect(hydrated?.turns[0]?.messageIds).toEqual([
-      "hydrated:codex-thread:thread-compacted:user-compacted"
+      "codex-thread:thread-compacted:user-compacted"
     ]);
     expect(hydrated?.messageBlocks).not.toEqual(
       expect.arrayContaining([
@@ -2868,21 +2868,21 @@ describe("Session discovery and reconciliation", () => {
     });
 
     expect(hydrated?.turns[0]?.toolCallIds).toEqual([
-      "hydrated:codex-thread:thread-process:reason-1",
-      "hydrated:codex-thread:thread-process:search-1",
-      "hydrated:codex-thread:thread-process:compact-1"
+      "codex-thread:thread-process:reason-1",
+      "codex-thread:thread-process:search-1",
+      "codex-thread:thread-process:compact-1"
     ]);
     const reasoningTool = hydrated?.toolCalls.find(
       (toolCall) =>
-        toolCall.toolCallId === "hydrated:codex-thread:thread-process:reason-1"
+        toolCall.toolCallId === "codex-thread:thread-process:reason-1"
     );
     const webSearchTool = hydrated?.toolCalls.find(
       (toolCall) =>
-        toolCall.toolCallId === "hydrated:codex-thread:thread-process:search-1"
+        toolCall.toolCallId === "codex-thread:thread-process:search-1"
     );
     const compactionTool = hydrated?.toolCalls.find(
       (toolCall) =>
-        toolCall.toolCallId === "hydrated:codex-thread:thread-process:compact-1"
+        toolCall.toolCallId === "codex-thread:thread-process:compact-1"
     );
     expect(reasoningTool).toMatchObject({
       toolName: "reasoning",
@@ -2986,24 +2986,24 @@ describe("Session discovery and reconciliation", () => {
 
     expect(hydrated?.turns[0]).toMatchObject({
       turnId: "turn-final",
-      finalMessageId: "hydrated:codex-thread:thread-final-answer:msg-final",
+      finalMessageId: "codex-thread:thread-final-answer:msg-final",
       messageIds: [
-        "hydrated:codex-thread:thread-final-answer:msg-commentary",
-        "hydrated:codex-thread:thread-final-answer:msg-final"
+        "codex-thread:thread-final-answer:msg-commentary",
+        "codex-thread:thread-final-answer:msg-final"
       ]
     });
     expect(hydrated?.turns[1]).toMatchObject({
       turnId: "turn-legacy",
       finalMessageId:
-        "hydrated:codex-thread:thread-final-answer:msg-legacy-final",
+        "codex-thread:thread-final-answer:msg-legacy-final",
       messageIds: [
-        "hydrated:codex-thread:thread-final-answer:msg-legacy-progress",
-        "hydrated:codex-thread:thread-final-answer:msg-legacy-final"
+        "codex-thread:thread-final-answer:msg-legacy-progress",
+        "codex-thread:thread-final-answer:msg-legacy-final"
       ]
     });
     expect(hydrated?.turns[2]).toMatchObject({
       turnId: "turn-running",
-      messageIds: ["hydrated:codex-thread:thread-final-answer:msg-running"]
+      messageIds: ["codex-thread:thread-final-answer:msg-running"]
     });
     expect(hydrated?.turns[2]).not.toHaveProperty("finalMessageId");
   });

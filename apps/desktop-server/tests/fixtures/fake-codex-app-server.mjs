@@ -53,7 +53,7 @@ const getThreadGoal = (threadId) => {
   return goal;
 };
 
-const emitHappyPath = ({ threadId, turnId, prompt, messagePhase = null }) => {
+const emitHappyPath = ({ threadId, turnId, prompt, messagePhase = null, clientMessageId = null }) => {
   const messageId = `msg-${turnId}`;
   const commandId = `cmd-${turnId}`;
   const renderedPrompt =
@@ -76,6 +76,23 @@ const emitHappyPath = ({ threadId, turnId, prompt, messagePhase = null }) => {
       turn: { id: turnId }
     }
   });
+  // Mirror the engine: a client message id comes back on the user item next to the generated id.
+  if (typeof clientMessageId === "string" && clientMessageId.length > 0) {
+    const userItem = {
+      type: "userMessage",
+      id: `user-${turnId}`,
+      clientId: clientMessageId,
+      content: [{ type: "text", text: renderedPrompt, text_elements: [] }]
+    };
+    send({
+      method: "item/started",
+      params: { threadId, turnId, item: userItem }
+    });
+    send({
+      method: "item/completed",
+      params: { threadId, turnId, item: userItem }
+    });
+  }
   send({
     method: "item/started",
     params: {
@@ -257,6 +274,7 @@ const emitCollabPath = ({ threadId, turnId, keepRunning = false }) => {
   const childUserMessage = {
     type: "userMessage",
     id: `user-${childTurnId}`,
+    clientId: "reviewer-task-1",
     content: [
       {
         type: "text",
@@ -1910,6 +1928,7 @@ const handleRequest = (payload) => {
             threadId,
             turnId,
             prompt,
+            clientMessageId: payload.params.clientUserMessageId ?? null,
             messagePhase: prompt.includes("commentary")
               ? "commentary"
               : prompt.includes("final-answer")

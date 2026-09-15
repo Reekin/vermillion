@@ -169,7 +169,7 @@ describe("DomainService", () => {
           finishReason: "completed",
           startedAt: "2026-04-19T00:00:10Z",
           completedAt: "2026-04-19T00:00:20Z",
-          messageIds: ["hydrated:session-hydrated:provider-user-message"],
+          messageIds: ["session-hydrated:local-user-message"],
           toolCallIds: [],
           terminalIds: [],
           approvalRequestIds: [],
@@ -178,8 +178,8 @@ describe("DomainService", () => {
       ],
       messageBlocks: [
         {
-          blockId: "hydrated:session-hydrated:provider-user-message:md",
-          messageId: "hydrated:session-hydrated:provider-user-message",
+          blockId: "session-hydrated:local-user-message:md",
+          messageId: "session-hydrated:local-user-message",
           sessionId: "session-hydrated",
           turnId: "turn-hydrated",
           role: "user",
@@ -208,17 +208,17 @@ describe("DomainService", () => {
     ]);
     const snapshot = service.getSnapshot();
     expect(snapshot.turns[0]?.messageIds).toEqual([
-      "hydrated:session-hydrated:provider-user-message"
+      "session-hydrated:local-user-message"
     ]);
     expect(snapshot.messageBlocks.filter((block) => block.role === "user")).toEqual([
       expect.objectContaining({
-        messageId: "hydrated:session-hydrated:provider-user-message",
+        messageId: "session-hydrated:local-user-message",
         text: "hello"
       })
     ]);
   });
 
-  it("keeps a hydrated user message in the local turn order when replacing its echo", () => {
+  it("merges a hydrated user message into its local echo and keeps the local turn order", () => {
     const service = new DomainService({
       now: () => "2026-04-20T00:04:00Z",
       createSessionId: () => "session-hydrated-order",
@@ -295,7 +295,10 @@ describe("DomainService", () => {
           startedAt: "2026-04-20T00:04:00Z",
           completedAt: "2026-04-20T00:04:03Z",
           finalMessageId: "hydrated-assistant-message",
-          messageIds: ["hydrated-user-message", "hydrated-assistant-message"],
+          messageIds: [
+            "session-hydrated-order:local-user-message",
+            "hydrated-assistant-message"
+          ],
           toolCallIds: [],
           terminalIds: [],
           approvalRequestIds: [],
@@ -304,8 +307,8 @@ describe("DomainService", () => {
       ],
       messageBlocks: [
         {
-          blockId: "hydrated-user-message:md",
-          messageId: "hydrated-user-message",
+          blockId: "session-hydrated-order:local-user-message:md",
+          messageId: "session-hydrated-order:local-user-message",
           sessionId: "session-hydrated-order",
           turnId: "turn-hydrated-order",
           role: "user",
@@ -332,9 +335,183 @@ describe("DomainService", () => {
     });
 
     expect(service.getSnapshot().turns[0]?.messageIds).toEqual([
-      "hydrated-user-message",
+      "session-hydrated-order:local-user-message",
       "assistant-live-message",
       "hydrated-assistant-message"
+    ]);
+  });
+
+  it("keeps one entity per engine item when an active session merges its own hydrated turn", () => {
+    const sessionId = "session-live-merge";
+    const turnId = "turn-live-merge";
+    const service = new DomainService({
+      now: () => "2026-04-20T00:05:00Z",
+      createSessionId: () => sessionId,
+      assertEngineRegistered: vi.fn(),
+      resolveEngineCapabilities: () => ["chat", "terminal"],
+      publishRuntimeEvent: () => {}
+    });
+    service.createSession({
+      conversationId: "conversation-live-merge",
+      engineId: "codex",
+      workspaceId: "workspace-live-merge"
+    });
+    service.commitAcceptedUserMessage(
+      {
+        type: "sendUserMessage",
+        sessionId,
+        messageId: "client-message",
+        content: "hello",
+        attachments: []
+      },
+      turnId
+    );
+    service.ingestRuntimeEvent(
+      {
+        type: "message.completed",
+        sessionId,
+        turnId,
+        messageId: `${sessionId}:msg-assistant`,
+        role: "assistant",
+        finalText: "answer",
+        isFinalForTurn: true,
+        engineId: "codex"
+      },
+      "2026-04-20T00:05:01Z"
+    );
+    service.ingestRuntimeEvent(
+      {
+        type: "tool.completed",
+        sessionId,
+        turnId,
+        toolCallId: `${sessionId}:cmd-1`,
+        status: "completed",
+        outputSummary: "ok",
+        engineId: "codex"
+      },
+      "2026-04-20T00:05:02Z"
+    );
+    service.ingestRuntimeEvent(
+      {
+        type: "terminal.completed",
+        sessionId,
+        turnId,
+        terminalId: `${sessionId}:cmd-1`,
+        exitCode: 0,
+        engineId: "codex"
+      },
+      "2026-04-20T00:05:02Z"
+    );
+
+    service.hydrateDiscoveredSession({
+      workspaceId: "workspace-live-merge",
+      conversation: {
+        conversationId: "conversation-live-merge",
+        workspaceId: "workspace-live-merge",
+        participantEngineIds: ["codex"],
+        activeSessionId: sessionId,
+        sessionIds: [sessionId],
+        createdAt: "2026-04-20T00:05:00Z",
+        updatedAt: "2026-04-20T00:05:03Z"
+      },
+      session: {
+        sessionId,
+        conversationId: "conversation-live-merge",
+        engineId: "codex",
+        status: "running",
+        createdAt: "2026-04-20T00:05:00Z",
+        updatedAt: "2026-04-20T00:05:03Z",
+        metadata: {
+          providerSessionId: "thread-live-merge"
+        }
+      },
+      turns: [
+        {
+          turnId,
+          sessionId,
+          status: "completed",
+          finishReason: "completed",
+          startedAt: "2026-04-20T00:05:00Z",
+          completedAt: "2026-04-20T00:05:03Z",
+          finalMessageId: `${sessionId}:msg-assistant`,
+          messageIds: [
+            `${sessionId}:client-message`,
+            `${sessionId}:msg-assistant`
+          ],
+          toolCallIds: [`${sessionId}:cmd-1`],
+          terminalIds: [`${sessionId}:cmd-1`],
+          approvalRequestIds: [],
+          interactionRequestIds: []
+        }
+      ],
+      messageBlocks: [
+        {
+          blockId: `${sessionId}:client-message:md`,
+          messageId: `${sessionId}:client-message`,
+          sessionId,
+          turnId,
+          role: "user",
+          kind: "markdown",
+          text: "hello",
+          startedAt: "2026-04-20T00:05:00Z",
+          completedAt: "2026-04-20T00:05:00Z"
+        },
+        {
+          blockId: `${sessionId}:msg-assistant:md`,
+          messageId: `${sessionId}:msg-assistant`,
+          sessionId,
+          turnId,
+          role: "assistant",
+          kind: "markdown",
+          text: "answer",
+          startedAt: "2026-04-20T00:05:01Z",
+          completedAt: "2026-04-20T00:05:01Z"
+        }
+      ],
+      toolCalls: [
+        {
+          toolCallId: `${sessionId}:cmd-1`,
+          sessionId,
+          turnId,
+          toolName: "commandExecution",
+          status: "completed",
+          inputSummary: "pnpm test",
+          outputSummary: "ok",
+          startedAt: "2026-04-20T00:05:02Z",
+          completedAt: "2026-04-20T00:05:02Z"
+        }
+      ],
+      terminalStreams: [
+        {
+          terminalId: `${sessionId}:cmd-1`,
+          sessionId,
+          turnId,
+          toolCallId: `${sessionId}:cmd-1`,
+          status: "completed",
+          outputText: "ok\n",
+          exitCode: 0,
+          startedAt: "2026-04-20T00:05:02Z",
+          completedAt: "2026-04-20T00:05:02Z"
+        }
+      ],
+      sessionRelations: []
+    });
+
+    const snapshot = service.getSnapshot();
+    expect(snapshot.turns).toHaveLength(1);
+    expect(snapshot.turns[0]?.messageIds).toEqual([
+      `${sessionId}:client-message`,
+      `${sessionId}:msg-assistant`
+    ]);
+    expect(snapshot.messageBlocks.map((block) => block.messageId)).toEqual([
+      `${sessionId}:client-message`,
+      `${sessionId}:msg-assistant`
+    ]);
+    expect(snapshot.toolCalls.map((toolCall) => toolCall.toolCallId)).toEqual([
+      `${sessionId}:cmd-1`
+    ]);
+    expect(snapshot.terminalStreams.map((stream) => stream.terminalId)).toEqual([
+      `${sessionId}:cmd-1`
     ]);
   });
 
@@ -413,12 +590,12 @@ describe("DomainService", () => {
     expect(snapshot.turns).toEqual([
       expect.objectContaining({
         turnId: "turn-1",
-        messageIds: ["message-steer-1"]
+        messageIds: ["session-1:message-steer-1"]
       })
     ]);
     expect(snapshot.messageBlocks).toEqual([
       expect.objectContaining({
-        messageId: "message-steer-1",
+        messageId: "session-1:message-steer-1",
         text: "Please focus on the diagnostics failure."
       })
     ]);

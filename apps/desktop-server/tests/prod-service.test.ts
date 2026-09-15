@@ -150,7 +150,7 @@ describe("prod runtime service", () => {
     expect(joinedText).not.toContain("Codex response");
     expect(
       snapshot.messageBlocks.some((block) =>
-        block.messageId === "msg-1" && block.role === "user" && block.text.includes("hello real codex")
+        block.messageId === `${sessionId}:msg-1` && block.role === "user" && block.text.includes("hello real codex")
       )
     ).toBe(true);
     expect(snapshot.messageBlocks.some((block) =>

@@ -27,6 +27,7 @@ import type { ThreadItem } from "./codex-app-server-generated/v2/ThreadItem.js";
 import type { SessionSource } from "./codex-app-server-generated/v2/SessionSource.js";
 import type { UserInput } from "./codex-app-server-generated/v2/UserInput.js";
 import { pathToFileURL } from "node:url";
+import { engineItemKey, sessionItemId } from "./session-item-id.js";
 import type { CodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
 import type {
   SessionIndexEntry,
@@ -346,9 +347,6 @@ const isUserMessageItem = (
   item: ThreadItem
 ): item is Extract<ThreadItem, { type: "userMessage" }> =>
   item.type === "userMessage";
-
-const hydratedItemId = (sessionId: string, itemId: string): string =>
-  `hydrated:${sessionId}:${itemId}`;
 
 const mapCollabToolLabel = (
   tool: Extract<ThreadItem, { type: "collabAgentToolCall" }>["tool"]
@@ -688,7 +686,7 @@ const hydrateCodexTurnEntities = async (input: {
       const itemStartedAt =
         itemStartedAts[itemIndex] ??
         buildDeterministicTurnTimestamp(ownedThread, turnIndex, itemIndex);
-      const itemEntityId = hydratedItemId(entry.sessionId, item.id);
+      const itemEntityId = sessionItemId(entry.sessionId, engineItemKey(item));
       if (isUserMessageItem(item)) {
         messageIds.push(itemEntityId);
         messageBlocks.push(
