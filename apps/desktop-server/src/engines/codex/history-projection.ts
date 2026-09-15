@@ -49,7 +49,7 @@ export class CodexHistoryProjection {
     try {
       // Each transaction owns its thread; completion includes closing the database and exiting.
       const status = await new Promise<"cleared" | "missing">((resolve, reject) => {
-        const worker = new Worker(new URL("./codex-history-projection-worker.cjs", import.meta.url), {
+        const worker = new Worker(new URL("./history-projection-worker.cjs", import.meta.url), {
           workerData: { path, threadId }
         });
         let result: "cleared" | "missing" | undefined;

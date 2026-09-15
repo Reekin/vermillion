@@ -2,9 +2,9 @@ import type {
   CheckpointCapability,
   CheckpointSnapshot,
   SessionCapabilityContext
-} from "./capability-registry.js";
-import type { CodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
-import { resolveCodexThreadId } from "./codex-session-identity.js";
+} from "../../capability-registry.js";
+import type { CodexAppServerRuntimePort } from "./runtime-port.js";
+import { resolveCodexThreadId } from "./session-identity.js";
 
 const toSafeNumber = (value: number | bigint): number => Number(value);
 

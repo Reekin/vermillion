@@ -1,6 +1,6 @@
 import { parseUnifiedDiff } from "@vermillion/shared";
-import type { FileUpdateChange } from "../../codex-app-server-generated/v2/FileUpdateChange.js";
-import { mergeFileChangeDiffs, normalizeFileChangeDiff } from "../../file-change-diff.js";
+import type { FileUpdateChange } from "../../../codex-app-server-generated/v2/FileUpdateChange.js";
+import { mergeFileChangeDiffs, normalizeFileChangeDiff } from "../../../file-change-diff.js";
 
 export type CodexTurnChangeKind = "add" | "delete" | "update";
 

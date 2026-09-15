@@ -1,5 +1,5 @@
-import type { ResponseItem } from "../../codex-app-server-generated/ResponseItem.js";
-import type { ThreadItem } from "../../codex-app-server-generated/v2/ThreadItem.js";
+import type { ResponseItem } from "../../../codex-app-server-generated/ResponseItem.js";
+import type { ThreadItem } from "../../../codex-app-server-generated/v2/ThreadItem.js";
 import { statSync } from "node:fs";
 import { filePathToFileUri } from "@vermillion/shared";
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { CodexAdapter } from "@vermillion/adapters";
 import { DomainService } from "./domain-service.js";
 import { RuntimeOrchestrator } from "./runtime-orchestrator.js";
-import { createCodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
+import { createCodexAppServerRuntimePort } from "./engines/codex/runtime-port.js";
 
 it.each([undefined, "worker"])("delivers wrapper identity for role %s", async (role) => {
   const directory = mkdtempSync(join(tmpdir(), "vermillion-context-"));

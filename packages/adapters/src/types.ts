@@ -5,7 +5,7 @@ import type {
   EventType
 } from "@vermillion/shared";
 
-export type AdapterKind = "codex";
+export type AdapterKind = string;
 
 export type AdapterLifecycleState =
   | "idle"

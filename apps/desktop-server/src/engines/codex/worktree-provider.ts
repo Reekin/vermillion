@@ -2,9 +2,9 @@ import type {
   SessionCapabilityContext,
   WorktreeCapability,
   WorktreeSnapshot
-} from "./capability-registry.js";
-import type { CodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
-import { resolveCodexThreadId } from "./codex-session-identity.js";
+} from "../../capability-registry.js";
+import type { CodexAppServerRuntimePort } from "./runtime-port.js";
+import { resolveCodexThreadId } from "./session-identity.js";
 
 export class CodexWorktreeProvider implements WorktreeCapability {
   private readonly codexRuntimePort: CodexAppServerRuntimePort;

@@ -50,6 +50,7 @@ describe("AgentRunner recovery", () => {
     let emit: ((envelope: { event: Record<string, unknown> }) => void) | undefined;
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      listSessions: () => [{ sessionId: "design", engineId: "codex" }],
       getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
       runSessionAction: vi.fn().mockImplementation(async (input: { action: string }) =>
         input.action === "fork"
@@ -72,7 +73,7 @@ describe("AgentRunner recovery", () => {
     };
     const asker = createSourceAsker(
       shell as unknown as Parameters<typeof createSourceAsker>[0],
-      async () => ({ engineId: "codex", cwd: "I:/project", modelConfig: { modelId: "design-model", reasoningOptionId: "high", serviceTierId: null } })
+      async () => ({ cwd: "I:/project", modelConfig: { modelId: "design-model", reasoningOptionId: "high", serviceTierId: null } })
     );
 
     await expect(asker({ workspaceId: "workspace", workItemId: "item", sourceSessionId: "design", sourceTurnId: "source-turn", question: "Clarify the boundary." }))
@@ -93,6 +94,7 @@ describe("AgentRunner recovery", () => {
     const unsubscribe = vi.fn();
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      listSessions: () => [{ sessionId: "design", engineId: "codex" }],
       getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
       runSessionAction: vi.fn().mockImplementation(async (input: { action: string }) =>
         input.action === "fork" ? { action: "fork", status: "forked", forkedSessionId: "ask-session" } : { action: "archive", archived: true }),
@@ -102,7 +104,7 @@ describe("AgentRunner recovery", () => {
     };
     const asker = createSourceAsker(
       shell as unknown as Parameters<typeof createSourceAsker>[0],
-      async () => ({ engineId: "codex", cwd: "I:/project" })
+      async () => ({ cwd: "I:/project" })
     );
 
     await expect(asker({ workspaceId: "workspace", workItemId: "item", sourceSessionId: "design", sourceTurnId: "source-turn", question: "Clarify" }))
@@ -117,14 +119,14 @@ describe("AgentRunner recovery", () => {
   ])("uses confirmed shared delivery instead of the requested turn: $delivery", async ({ delivery, expected }) => {
     const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getActiveTurnId: () => "ended", executeCommand: vi.fn()
       .mockResolvedValueOnce({ accepted: true, turnId: "actual", delivery }) };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await expect(runner.steer("worker", "update")).resolves.toEqual(expected);
     expect(shell.executeCommand.mock.calls.map(([input]) => input.command.type)).toEqual(["steerTurn"]);
   });
 
   it.each(["connection lost", "no active turn to steer"])("leaves shared delivery failures to the caller without retrying: %s", async (message) => {
     const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getActiveTurnId: () => "running", executeCommand: vi.fn().mockRejectedValue(new Error(message)) };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await expect(runner.steer("worker", "update")).rejects.toThrow(message);
     expect(shell.executeCommand).toHaveBeenCalledOnce();
   });
@@ -133,14 +135,14 @@ describe("AgentRunner recovery", () => {
     const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getActiveTurnId: () => undefined,
       getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "old", status: "completed" }] }),
       executeCommand: vi.fn().mockResolvedValue({ accepted: true }) };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     expect(runner.isActive!("worker")).toBe(false);
     await runner.steer("worker", "continue");
     expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({ type: "sendUserMessage" }) }));
   });
   it("forwards attachments and selected execution with the first preparation message", async () => {
     const shell = { executeCommand: vi.fn().mockResolvedValue({ accepted: true, turnId: "started" }), getActiveTurnId: () => undefined };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     const options = { attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png" }],
       execution: { modelId: "selected", reasoningOptionId: "high", serviceTierId: null } };
     await expect(runner.send("worker", "User input\n\nPreparation prompt", options)).resolves.toEqual({ turnId: "started" });
@@ -152,7 +154,7 @@ describe("AgentRunner recovery", () => {
   it("distinguishes verified empty sources from paged history and unknown sessions", async () => {
     const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getChatTree: vi.fn(),
       getSnapshot: vi.fn().mockReturnValue({ sessions: [{ sessionId: "source" }], turns: [] }) };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await expect(runner.resolveSourceTurn!("source")).resolves.toBeUndefined();
     shell.getSnapshot.mockReturnValue({ sessions: [{ sessionId: "source", lastTurnId: "historical" }], turns: [] });
     await expect(runner.resolveSourceTurn!("source")).resolves.toBe("historical");
@@ -161,7 +163,7 @@ describe("AgentRunner recovery", () => {
   });
   it("releases the execution environment through the session facade", async () => {
     const shell = { releaseSessionExecution: vi.fn().mockResolvedValue(undefined) };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await runner.release("worker");
     expect(shell.releaseSessionExecution).toHaveBeenCalledWith("worker");
     shell.releaseSessionExecution.mockRejectedValue(new Error("turn is active"));
@@ -170,6 +172,8 @@ describe("AgentRunner recovery", () => {
   it.each([true, false])("forks a preparation session without replacing its inherited role instructions (cached=%s)", async (cached) => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      listSessions: () => [{ sessionId: "source", engineId: "codex" }],
+      listEngines: () => [{ engineId: "codex", displayName: "Codex" }],
       listWorkspaces: async () => ({ workspaces: [{ workspaceId: "workspace", absolutePath: "I:/workspace" }] }),
       getChatTree: async () => ({ treeId: "tree" }),
       getSettings: async () => ({ executionPreferencesByEngineId: {} }),
@@ -177,7 +181,7 @@ describe("AgentRunner recovery", () => {
       runSessionAction: vi.fn().mockResolvedValue({ action: "fork", status: "forked", forkedSessionId: "worker" }),
       setSessionTitle: vi.fn(), openSession: vi.fn()
     };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await expect(runner.fork({ sourceSessionId: "source", sourceTurnId: "turn", workspaceId: "workspace",
       title: "Work", metadata: { role: "work-preparation", workItemId: "item", treeSessionId: "tree" } }))
       .resolves.toEqual({ sessionId: "worker", treeId: "tree" });
@@ -189,10 +193,12 @@ describe("AgentRunner recovery", () => {
 
   it("rejects a running fork point before creating a provider thread", async () => {
     const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      listSessions: () => [{ sessionId: "source", engineId: "codex" }],
+      listEngines: () => [{ engineId: "codex", displayName: "Codex" }],
       listWorkspaces: async () => ({ workspaces: [{ workspaceId: "workspace", absolutePath: "I:/workspace" }] }),
       getChatTree: async () => ({ treeId: "tree" }),
       getSnapshot: () => ({ turns: [{ sessionId: "source", turnId: "turn", status: "running" }] }), runSessionAction: vi.fn() };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await expect(runner.fork({ sourceSessionId: "source", sourceTurnId: "turn", workspaceId: "workspace",
       title: "Work", metadata: {} })).rejects.toThrow("completed source turn");
     expect(shell.runSessionAction).not.toHaveBeenCalled();
@@ -201,7 +207,7 @@ describe("AgentRunner recovery", () => {
   it("forwards the failed turn's runtime reason without leaking it into later turns", () => {
     let emit: (envelope: { event: Record<string, unknown> }) => void = () => {};
     const shell = { subscribe: vi.fn((listener) => { emit = listener; return () => {}; }) };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     const completed = vi.fn();
     runner.onTurnCompleted(completed);
     emit({ event: { type: "runtime.error", sessionId: "worker", turnId: "t1", message: "quota exceeded", recoverable: false } });
@@ -215,12 +221,14 @@ describe("AgentRunner recovery", () => {
   const setup = () => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      listSessions: () => [{ sessionId: "worker", engineId: "codex" }],
+      listEngines: () => [{ engineId: "codex", displayName: "Codex" }],
       runSessionAction: vi.fn().mockResolvedValue({ action: "resume", resumed: true }),
       setSessionTitle: vi.fn().mockResolvedValue(undefined),
       getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
       openSession: vi.fn().mockRejectedValue(new Error("Open session cancelled."))
     };
-    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     return { shell, runner };
   };
 

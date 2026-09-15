@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveEngineProgramCommand,
-  resolveEngineSpawnCommand
+  resolveEngineSpawnCommand,
+  type EngineProgramRule
 } from "../src/engine-program-resolution.js";
+import { codexProgram } from "../src/engines/codex/program.js";
+
+const secondEngineProgram: EngineProgramRule = {
+  environmentVariables: ["VERMILLION_SECOND_BIN", "SECOND_BIN"],
+  windowsDefault: "second.cmd",
+  default: "second",
+  defaultArgs: ["serve"],
+  explicitArgs: ["serve", "--stdio"]
+};
 
 describe("resolveEngineProgramCommand", () => {
   it("prefers a custom path over configured and environment paths", () => {
     expect(
       resolveEngineProgramCommand("codex", {
+        program: codexProgram,
         customPath: "C:\\custom\\codex.exe",
         configuredPath: "C:\\configured\\codex.exe",
         env: {
@@ -25,6 +36,7 @@ describe("resolveEngineProgramCommand", () => {
   it("reports the first environment variable that resolved Codex", () => {
     expect(
       resolveEngineProgramCommand("codex", {
+        program: codexProgram,
         env: {
           CODEX_BIN: "C:\\tools\\codex.exe",
           CODEX_PATH: "C:\\older\\codex.exe"
@@ -42,6 +54,7 @@ describe("resolveEngineProgramCommand", () => {
   it("skips blank environment values and keeps Pi defaults for configured paths", () => {
     expect(
       resolveEngineProgramCommand("codex", {
+        program: codexProgram,
         env: {
           VERMILLION_CODEX_BIN: " ",
           CODEX_BIN: "C:\\tools\\codex.exe"
@@ -53,28 +66,29 @@ describe("resolveEngineProgramCommand", () => {
       environmentVariable: "CODEX_BIN"
     });
     expect(
-      resolveEngineProgramCommand("pi-acp", {
-        configuredPath: "npx.cmd",
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        configuredPath: "second.cmd",
         env: {},
         platform: "win32"
       })
     ).toEqual({
-      path: "npx.cmd",
+      path: "second.cmd",
       source: "configured",
-      args: ["-y", "pi-acp"]
+      args: ["serve"]
     });
   });
 
-  it("uses npx with package arguments only for the Pi default command", () => {
+  it("falls back to the engine id when no rule is registered", () => {
     expect(
-      resolveEngineProgramCommand("pi-acp", {
+      resolveEngineProgramCommand("second", {
         env: {},
         platform: "win32"
       })
     ).toEqual({
-      path: "npx.cmd",
+      path: "second",
       source: "default",
-      args: ["-y", "pi-acp"]
+      args: []
     });
   });
 

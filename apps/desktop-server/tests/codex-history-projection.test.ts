@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CodexHistoryProjection } from "../src/codex-history-projection.js";
+import { CodexHistoryProjection } from "../src/engines/codex/history-projection.js";
 
 const threadHistorySchema = [
   "CREATE TABLE thread_items (thread_id TEXT NOT NULL, item_id TEXT NOT NULL)",

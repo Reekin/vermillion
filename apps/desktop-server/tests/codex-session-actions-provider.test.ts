@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
-import { CodexSessionActionsProvider } from "../src/codex-session-actions-provider.js";
+import type { CodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
+import { CodexSessionActionsProvider } from "../src/engines/codex/session-actions-provider.js";
 
 const codexProviderHandle = (providerSessionId = "thread-1") => ({
   providerKind: "codex-thread",

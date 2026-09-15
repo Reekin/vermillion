@@ -1184,7 +1184,7 @@ describe("createWorkbenchRpcHandler", () => {
       listWorkspaces: vi.fn().mockResolvedValue({
         workspaces: []
       }),
-      getCodexHookActivity: vi.fn().mockResolvedValue({
+      runEngineMethod: vi.fn().mockImplementation(async (method: string) => method === "codex.hookActivity.get" ? ({
         engineId: "codex",
         sessionId: "session-1",
         turnId: "turn-2",
@@ -1211,8 +1211,7 @@ describe("createWorkbenchRpcHandler", () => {
             ]
           }
         ]
-      }),
-      getCodexTurnChanges: vi.fn().mockResolvedValue({
+      }) : method === "codex.turnChanges.get" ? ({
         engineId: "codex",
         sessionId: "session-1",
         turnId: "turn-2",
@@ -1236,14 +1235,13 @@ describe("createWorkbenchRpcHandler", () => {
           }
         ],
         canUndo: true
-      }),
-      undoCodexTurnChanges: vi.fn().mockResolvedValue({
+      }) : ({
         engineId: "codex",
         sessionId: "session-1",
         turnId: "turn-2",
         undone: true,
         displayPath: "I:\\repo"
-      }),
+      })),
       listAgents: vi.fn().mockReturnValue([]),
       selectAgent: vi.fn(),
       listSessions: vi.fn().mockReturnValue([]),
@@ -1335,15 +1333,15 @@ describe("createWorkbenchRpcHandler", () => {
         displayPath: "I:\\repo"
       }
     });
-    expect(shellService.getCodexTurnChanges).toHaveBeenCalledWith({
+    expect(shellService.runEngineMethod).toHaveBeenCalledWith("codex.turnChanges.get", {
       sessionId: "session-1",
       turnId: "turn-2"
     });
-    expect(shellService.getCodexHookActivity).toHaveBeenCalledWith({
+    expect(shellService.runEngineMethod).toHaveBeenCalledWith("codex.hookActivity.get", {
       sessionId: "session-1",
       turnId: "turn-2"
     });
-    expect(shellService.undoCodexTurnChanges).toHaveBeenCalledWith({
+    expect(shellService.runEngineMethod).toHaveBeenCalledWith("codex.turnChanges.undo", {
       sessionId: "session-1",
       turnId: "turn-2"
     });

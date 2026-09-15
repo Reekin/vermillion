@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
-import { CodexChatTreeAgentProvider } from "../src/codex-chat-tree-provider.js";
+import type { CodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
+import { CodexChatTreeAgentProvider } from "../src/engines/codex/chat-tree-provider.js";
 
 describe("CodexChatTreeAgentProvider", () => {
   it("maps codex chat tree nodes into the shared snapshot shape", async () => {

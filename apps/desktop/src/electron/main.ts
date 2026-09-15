@@ -748,14 +748,13 @@ const boot = async (): Promise<void> => {
   );
   const roleService = new RoleService({ globalDir: join(persistenceBaseDir, "roles"), defaultsDir: roleDefaultsDir });
   await roleService.ensureGlobal();
-  const agentRunner = createAgentRunner(service, "codex");
+  const agentRunner = createAgentRunner(service);
   const sessionSteerer = createSessionSteerer(service);
   const sourceAsker = createSourceAsker(service, async (workspaceId) => {
     const workspace = (await service.listWorkspaces()).workspaces.find((entry) => entry.workspaceId === workspaceId);
     if (!workspace) throw new Error("Workspace not found: " + workspaceId);
     const role = await roleService.resolve(workspace.absolutePath, "design-partner");
     return {
-      engineId: "codex",
       cwd: workspace.absolutePath,
       modelConfig: role.modelConfig
     };

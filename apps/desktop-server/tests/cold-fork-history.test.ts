@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
+import { CodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
 import { createSessionRuntimeService } from "../src/prod-service.js";
 import { SessionIndexStore } from "../src/session-index.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";

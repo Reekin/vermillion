@@ -16,10 +16,11 @@ it.each([
   const createBrowserSession = vi.fn().mockResolvedValue({ sessionId: "role-session" });
   const shell = {
     getSettings: async () => ({ executionPreferencesByEngineId: { codex: preferences } }),
+    listEngines: () => [{ engineId: "codex", displayName: "Codex" }],
     createBrowserSession,
     setSessionTitle: vi.fn()
   };
-  const runner = createAgentRunner(shell as never, "codex");
+  const runner = createAgentRunner(shell as never);
   await runner.open({ workspaceId: "workspace", cwd: "I:/repo", title: "Role", metadata: { role: "worker" }, modelConfig });
   expect(createBrowserSession).toHaveBeenCalledWith({
     workspaceId: "workspace", engineId: "codex", sessionProfile: { modeId: "code", ...expected },

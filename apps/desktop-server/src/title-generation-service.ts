@@ -17,6 +17,8 @@ export type OpenAiSessionTitleAuth = {
 export type SessionTitleGeneratorInput = {
   content: string;
   attachments: Attachment[];
+  /** 本次会话所属引擎；凭据解析按它优先。 */
+  engineId?: string;
 };
 
 export type SessionTitleGenerator = {
@@ -26,7 +28,7 @@ export type SessionTitleGenerator = {
 export type OpenAiSessionTitleGeneratorOptions = {
   apiKey?: string;
   baseUrl?: string;
-  resolveAuth?: () => MaybePromise<OpenAiSessionTitleAuth | undefined>;
+  resolveAuth?: (engineId?: string) => MaybePromise<OpenAiSessionTitleAuth | undefined>;
   model?: string;
   fetch?: FetchLike;
   timeoutMs?: number;
@@ -45,7 +47,7 @@ export const createOpenAiSessionTitleGenerator = (
     async generateTitle(input) {
       const resolvedAuth = staticApiKey
         ? undefined
-        : await options.resolveAuth?.();
+        : await options.resolveAuth?.(input.engineId);
       const apiKey = staticApiKey || resolvedAuth?.apiKey?.trim();
       if (!apiKey || !fetchImpl) {
         return undefined;

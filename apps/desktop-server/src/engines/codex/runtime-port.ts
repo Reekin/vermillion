@@ -22,62 +22,62 @@ import type {
   EventType
 } from "@vermillion/shared";
 import type { TurnExecutionProfile } from "@vermillion/shared";
-import { RuntimePipelineDiagnostics } from "./runtime/runtime-pipeline-diagnostics.js";
-import type { GetAuthStatusParams } from "./codex-app-server-generated/GetAuthStatusParams.js";
-import type { GetAuthStatusResponse } from "./codex-app-server-generated/GetAuthStatusResponse.js";
-import type { GitDiffToRemoteParams } from "./codex-app-server-generated/GitDiffToRemoteParams.js";
-import type { GitDiffToRemoteResponse } from "./codex-app-server-generated/GitDiffToRemoteResponse.js";
-import type { AskForApproval } from "./codex-app-server-generated/v2/AskForApproval.js";
-import type { Config } from "./codex-app-server-generated/v2/Config.js";
-import type { ConfigBatchWriteParams } from "./codex-app-server-generated/v2/ConfigBatchWriteParams.js";
-import type { ConfigReadParams } from "./codex-app-server-generated/v2/ConfigReadParams.js";
-import type { ConfigReadResponse } from "./codex-app-server-generated/v2/ConfigReadResponse.js";
-import type { SandboxMode } from "./codex-app-server-generated/v2/SandboxMode.js";
-import type { ReasoningEffort } from "./codex-app-server-generated/ReasoningEffort.js";
-import type { ThreadStartResponse } from "./codex-app-server-generated/v2/ThreadStartResponse.js";
-import type { Thread } from "./codex-app-server-generated/v2/Thread.js";
-import type { ThreadArchiveParams } from "./codex-app-server-generated/v2/ThreadArchiveParams.js";
-import type { ChatTreeReadParams } from "./codex-app-server-generated/v2/ChatTreeReadParams.js";
-import type { ChatTreeReadResponse } from "./codex-app-server-generated/v2/ChatTreeReadResponse.js";
-import type { ChatTreeSetCurrentParams } from "./codex-app-server-generated/v2/ChatTreeSetCurrentParams.js";
-import type { ChatTreeSetCurrentResponse } from "./codex-app-server-generated/v2/ChatTreeSetCurrentResponse.js";
-import type { ThreadListParams } from "./codex-app-server-generated/v2/ThreadListParams.js";
-import type { ThreadListResponse } from "./codex-app-server-generated/v2/ThreadListResponse.js";
-import type { ThreadLoadedListParams } from "./codex-app-server-generated/v2/ThreadLoadedListParams.js";
-import type { ThreadLoadedListResponse } from "./codex-app-server-generated/v2/ThreadLoadedListResponse.js";
-import type { ThreadForkParams } from "./codex-app-server-generated/v2/ThreadForkParams.js";
-import type { ThreadForkResponse } from "./codex-app-server-generated/v2/ThreadForkResponse.js";
-import type { ThreadGoal } from "./codex-app-server-generated/v2/ThreadGoal.js";
-import type { ThreadGoalClearParams } from "./codex-app-server-generated/v2/ThreadGoalClearParams.js";
-import type { ThreadGoalGetParams } from "./codex-app-server-generated/v2/ThreadGoalGetParams.js";
-import type { ThreadGoalGetResponse } from "./codex-app-server-generated/v2/ThreadGoalGetResponse.js";
-import type { ThreadGoalSetParams } from "./codex-app-server-generated/v2/ThreadGoalSetParams.js";
-import type { ThreadReadParams } from "./codex-app-server-generated/v2/ThreadReadParams.js";
-import type { ThreadReadResponse } from "./codex-app-server-generated/v2/ThreadReadResponse.js";
-import type { ThreadResumeParams } from "./codex-app-server-generated/v2/ThreadResumeParams.js";
-import type { ThreadResumeResponse } from "./codex-app-server-generated/v2/ThreadResumeResponse.js";
-import type { ThreadSettings } from "./codex-app-server-generated/v2/ThreadSettings.js";
-import type { ThreadUnsubscribeParams } from "./codex-app-server-generated/v2/ThreadUnsubscribeParams.js";
-import type { TurnInterruptParams } from "./codex-app-server-generated/v2/TurnInterruptParams.js";
-import type { TurnStartResponse } from "./codex-app-server-generated/v2/TurnStartResponse.js";
-import type { Turn } from "./codex-app-server-generated/v2/Turn.js";
-import type { TurnItemsView } from "./codex-app-server-generated/v2/TurnItemsView.js";
-import type { ThreadItem } from "./codex-app-server-generated/v2/ThreadItem.js";
-import type { ResponseItem } from "./codex-app-server-generated/ResponseItem.js";
-import type { InitializeResponse } from "./codex-app-server-generated/InitializeResponse.js";
-import type { SkillsListParams } from "./codex-app-server-generated/v2/SkillsListParams.js";
-import type { SkillsListResponse } from "./codex-app-server-generated/v2/SkillsListResponse.js";
-import type { ModelListParams } from "./codex-app-server-generated/v2/ModelListParams.js";
-import type { ModelListResponse } from "./codex-app-server-generated/v2/ModelListResponse.js";
-import type { JsonValue } from "./codex-app-server-generated/serde_json/JsonValue.js";
-import { buildCodexTurnInput } from "./attachment-inputs.js";
+import { RuntimePipelineDiagnostics } from "../../runtime/runtime-pipeline-diagnostics.js";
+import type { GetAuthStatusParams } from "../../codex-app-server-generated/GetAuthStatusParams.js";
+import type { GetAuthStatusResponse } from "../../codex-app-server-generated/GetAuthStatusResponse.js";
+import type { GitDiffToRemoteParams } from "../../codex-app-server-generated/GitDiffToRemoteParams.js";
+import type { GitDiffToRemoteResponse } from "../../codex-app-server-generated/GitDiffToRemoteResponse.js";
+import type { AskForApproval } from "../../codex-app-server-generated/v2/AskForApproval.js";
+import type { Config } from "../../codex-app-server-generated/v2/Config.js";
+import type { ConfigBatchWriteParams } from "../../codex-app-server-generated/v2/ConfigBatchWriteParams.js";
+import type { ConfigReadParams } from "../../codex-app-server-generated/v2/ConfigReadParams.js";
+import type { ConfigReadResponse } from "../../codex-app-server-generated/v2/ConfigReadResponse.js";
+import type { SandboxMode } from "../../codex-app-server-generated/v2/SandboxMode.js";
+import type { ReasoningEffort } from "../../codex-app-server-generated/ReasoningEffort.js";
+import type { ThreadStartResponse } from "../../codex-app-server-generated/v2/ThreadStartResponse.js";
+import type { Thread } from "../../codex-app-server-generated/v2/Thread.js";
+import type { ThreadArchiveParams } from "../../codex-app-server-generated/v2/ThreadArchiveParams.js";
+import type { ChatTreeReadParams } from "../../codex-app-server-generated/v2/ChatTreeReadParams.js";
+import type { ChatTreeReadResponse } from "../../codex-app-server-generated/v2/ChatTreeReadResponse.js";
+import type { ChatTreeSetCurrentParams } from "../../codex-app-server-generated/v2/ChatTreeSetCurrentParams.js";
+import type { ChatTreeSetCurrentResponse } from "../../codex-app-server-generated/v2/ChatTreeSetCurrentResponse.js";
+import type { ThreadListParams } from "../../codex-app-server-generated/v2/ThreadListParams.js";
+import type { ThreadListResponse } from "../../codex-app-server-generated/v2/ThreadListResponse.js";
+import type { ThreadLoadedListParams } from "../../codex-app-server-generated/v2/ThreadLoadedListParams.js";
+import type { ThreadLoadedListResponse } from "../../codex-app-server-generated/v2/ThreadLoadedListResponse.js";
+import type { ThreadForkParams } from "../../codex-app-server-generated/v2/ThreadForkParams.js";
+import type { ThreadForkResponse } from "../../codex-app-server-generated/v2/ThreadForkResponse.js";
+import type { ThreadGoal } from "../../codex-app-server-generated/v2/ThreadGoal.js";
+import type { ThreadGoalClearParams } from "../../codex-app-server-generated/v2/ThreadGoalClearParams.js";
+import type { ThreadGoalGetParams } from "../../codex-app-server-generated/v2/ThreadGoalGetParams.js";
+import type { ThreadGoalGetResponse } from "../../codex-app-server-generated/v2/ThreadGoalGetResponse.js";
+import type { ThreadGoalSetParams } from "../../codex-app-server-generated/v2/ThreadGoalSetParams.js";
+import type { ThreadReadParams } from "../../codex-app-server-generated/v2/ThreadReadParams.js";
+import type { ThreadReadResponse } from "../../codex-app-server-generated/v2/ThreadReadResponse.js";
+import type { ThreadResumeParams } from "../../codex-app-server-generated/v2/ThreadResumeParams.js";
+import type { ThreadResumeResponse } from "../../codex-app-server-generated/v2/ThreadResumeResponse.js";
+import type { ThreadSettings } from "../../codex-app-server-generated/v2/ThreadSettings.js";
+import type { ThreadUnsubscribeParams } from "../../codex-app-server-generated/v2/ThreadUnsubscribeParams.js";
+import type { TurnInterruptParams } from "../../codex-app-server-generated/v2/TurnInterruptParams.js";
+import type { TurnStartResponse } from "../../codex-app-server-generated/v2/TurnStartResponse.js";
+import type { Turn } from "../../codex-app-server-generated/v2/Turn.js";
+import type { TurnItemsView } from "../../codex-app-server-generated/v2/TurnItemsView.js";
+import type { ThreadItem } from "../../codex-app-server-generated/v2/ThreadItem.js";
+import type { ResponseItem } from "../../codex-app-server-generated/ResponseItem.js";
+import type { InitializeResponse } from "../../codex-app-server-generated/InitializeResponse.js";
+import type { SkillsListParams } from "../../codex-app-server-generated/v2/SkillsListParams.js";
+import type { SkillsListResponse } from "../../codex-app-server-generated/v2/SkillsListResponse.js";
+import type { ModelListParams } from "../../codex-app-server-generated/v2/ModelListParams.js";
+import type { ModelListResponse } from "../../codex-app-server-generated/v2/ModelListResponse.js";
+import type { JsonValue } from "../../codex-app-server-generated/serde_json/JsonValue.js";
+import { buildCodexTurnInput } from "../../attachment-inputs.js";
 import {
   type RecordedCodexTurnChanges,
   getRecordedCodexTurnChanges,
   recordCodexTurnChangesFromFileUpdate,
   recordCodexTurnChangesFromUnifiedDiff
-} from "./engine-extensions/codex/turn-changes-store.js";
-import { recordCodexHookRun } from "./engine-extensions/codex/hook-activity-store.js";
+} from "./extensions/turn-changes-store.js";
+import { recordCodexHookRun } from "./extensions/hook-activity-store.js";
 import {
   codexRawCustomToolCallId,
   codexRawResponseToolCallId,
@@ -95,27 +95,27 @@ import {
   summarizeCodexRawReasoningItem,
   summarizeCodexReasoningThreadItem,
   summarizeCodexWebSearchAction
-} from "./engine-extensions/codex/process-activity.js";
-import { resolveHostToolDefinition } from "./host-tools.js";
+} from "./extensions/process-activity.js";
+import { resolveHostToolDefinition } from "../../host-tools.js";
 import type {
   HostToolContentItem,
   HostToolRegistry,
   HostToolResult
-} from "./host-tools.js";
-import { discoveredCodexSessionId } from "./codex-session-identity.js";
-import { engineItemKey, sessionItemId } from "./session-item-id.js";
-import { ChildProcessSupervisor } from "./runtime/child-process-supervisor.js";
+} from "../../host-tools.js";
+import { discoveredCodexSessionId } from "./session-identity.js";
+import { engineItemKey, sessionItemId } from "../../session-item-id.js";
+import { ChildProcessSupervisor } from "../../runtime/child-process-supervisor.js";
 import {
   JsonRpcLineClient,
   type JsonRpcLinePayload,
   type JsonRpcLineRequestPayload
-} from "./runtime/json-rpc-line-client.js";
-import { LifecycleGate } from "./runtime/lifecycle-gate.js";
+} from "../../runtime/json-rpc-line-client.js";
+import { LifecycleGate } from "../../runtime/lifecycle-gate.js";
 import {
   resolveEngineProgramCommand,
   resolveEngineSpawnCommand
-} from "./engine-program-resolution.js";
-import { createRuntimePortError } from "./runtime/runtime-lifecycle.js";
+} from "../../engine-program-resolution.js";
+import { createRuntimePortError } from "../../runtime/runtime-lifecycle.js";
 
 type RuntimeListener = (event: CodexRuntimeEvent) => void;
 

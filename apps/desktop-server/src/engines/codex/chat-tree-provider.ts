@@ -1,10 +1,10 @@
-import type { CodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
+import type { CodexAppServerRuntimePort } from "./runtime-port.js";
 import type {
   ChatTreeAgentProvider,
   ChatTreeProviderContext,
   ChatTreeSnapshot
-} from "./chat-tree-provider.js";
-import { resolveCodexThreadId } from "./codex-session-identity.js";
+} from "../../chat-tree-provider.js";
+import { resolveCodexThreadId } from "./session-identity.js";
 
 const toSafeNumber = (value: number | bigint): number => Number(value);
 

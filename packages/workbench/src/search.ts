@@ -501,7 +501,6 @@ export const searchWorkbench = async (input: {
   if (!accumulator.truncated && input.sessionSearch) {
     const entries = (await input.sessionSearch()).filter((entry) =>
       workspaceLabelById.has(entry.workspaceId) &&
-      entry.engineId === "codex" &&
       entry.providerKind === "codex-thread"
     );
     for (const entry of entries) {

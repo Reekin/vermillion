@@ -1,41 +1,35 @@
-import { createCodexAdapter } from "@vermillion/adapters";
-import { createCodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
 import { SessionRuntimeService } from "./runtime-service.js";
 import { SessionIndexStore } from "./session-index.js";
 import { SessionCatalogService } from "./session-catalog.js";
 import { CapabilityRegistry } from "./capability-registry.js";
-import {
-  CodexSessionDiscoveryProvider,
-  SessionReconciliationService
-} from "./session-discovery.js";
+import { SessionReconciliationService } from "./session-discovery.js";
 import { SessionShellService } from "./session-shell-service.js";
 import { WorkspaceRegistryService } from "./workspace-registry.js";
-import { CodexSessionActionsProvider } from "./codex-session-actions-provider.js";
 import { WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import { SessionIdentityRegistry } from "./session-identity-registry.js";
-import { CodexDelegationProvider } from "./codex-delegation-provider.js";
-import { CodexWorktreeProvider } from "./codex-worktree-provider.js";
-import { CodexCheckpointProvider } from "./codex-checkpoint-provider.js";
-import { CodexDiagnosticsProvider } from "./codex-diagnostics-provider.js";
 import { EngineRegistryService } from "./engine-control/engine-registry.js";
 import { EngineCapabilitySurfaceService } from "./engine-control/capability-surface.js";
-import { CodexTurnChangesStore } from "./engine-extensions/codex/turn-changes-store.js";
+import type { EngineIntegration } from "./engine-control/engine-integration.js";
+import { engineIntegrations } from "./engines/index.js";
 import { FileActionService } from "./file-action-service.js";
 import { ErrorLogService } from "./error-log-service.js";
 import { DiagnosticLogService } from "./diagnostic-log-service.js";
-import { CodexHistoryProjection } from "./codex-history-projection.js";
 import { HostToolRegistry } from "./host-tools.js";
 import { createReadSessionHostTool } from "./read-session-host-tool.js";
+import { createSessionWorkingDirectoryResolver } from "./session-working-directory.js";
+import { TurnChangeService } from "./turn-change-service.js";
+import {
+  resolveEngineProgramCommand,
+  type EngineProgramRule
+} from "./engine-program-resolution.js";
 import {
   createOpenAiSessionTitleGenerator,
   type SessionTitleGenerator
 } from "./title-generation-service.js";
-import type { SkillDescriptorRpc } from "@vermillion/shared";
-import { resolveEngineProgramCommand } from "./engine-program-resolution.js";
 
 export type CreateWorkbenchRuntimeServiceOptions = {
-  codexCommandPath?: string;
-  codexCommandArgs?: string[];
+  /** 装配期覆盖引擎启动命令；用户侧的程序路径仍由 workspace 注册表设置提供。 */
+  engineCommands?: Record<string, { path: string; args?: string[] }>;
   persistenceBaseDir?: string;
   pickWorkspaceDirectory?: () => Promise<{
     canceled: boolean;
@@ -47,11 +41,12 @@ export type CreateWorkbenchRuntimeServiceOptions = {
   now?: () => string;
 };
 
+/** 生产装配：按引擎装配单元列表接线，其余由各 `EngineIntegration` 与能力分发完成。 */
 export const createSessionRuntimeService = (
   options: CreateWorkbenchRuntimeServiceOptions = {}
 ) => {
-  const codexAgentId = "codex";
   let service: SessionRuntimeService | undefined;
+  let sessionIdentity: SessionIdentityRegistry | undefined;
   const workspaceRegistry = new WorkspaceRegistryService({
     baseDir: options.persistenceBaseDir,
     now: options.now
@@ -60,104 +55,66 @@ export const createSessionRuntimeService = (
     baseDir: options.persistenceBaseDir,
     now: options.now
   });
-  const codexTurnChangesStore = new CodexTurnChangesStore({
-    now: options.now
-  });
   const hostTools = new HostToolRegistry();
   const diagnosticLogService = new DiagnosticLogService({
     baseDir: options.persistenceBaseDir,
     now: options.now
   });
-  const configuredPrograms = {
-    [codexAgentId]: {
-      path: options.codexCommandPath,
-      args: options.codexCommandArgs
-    }
+  const now = options.now ?? (() => new Date().toISOString());
+  const turnChangeService = new TurnChangeService();
+  const writeDiagnostic = (input: Parameters<DiagnosticLogService["write"]>[0]) => {
+    void diagnosticLogService.write(input).catch(() => undefined);
   };
-  const resolveProgram = (engineId: string, customPath?: string) => {
-    const configured = configuredPrograms[engineId as keyof typeof configuredPrograms];
+  const resolveProgram = (engineId: string, program: EngineProgramRule) => {
+    const override = options.engineCommands?.[engineId];
+    if (override) {
+      return {
+        path: override.path,
+        source: "custom" as const,
+        args: override.args ?? program.defaultArgs
+      };
+    }
     return resolveEngineProgramCommand(engineId, {
-      customPath,
-      configuredPath: configured?.path,
-      configuredArgs: configured?.args
+      program,
+      configuredPath:
+        workspaceRegistry.getState().engineProgramPathsByEngineId[engineId]
     });
   };
-  const resolveRuntimeCommand = async (engineId: string) => {
-    await workspaceRegistry.ready();
-    const command = resolveProgram(
-      engineId,
-      workspaceRegistry.getState().engineProgramPathsByEngineId[engineId]
-    );
-    return { commandPath: command.path, commandArgs: command.args };
-  };
-  const codexRuntimePort = createCodexAppServerRuntimePort({
-    engineId: codexAgentId,
-    resolveCommand: () => resolveRuntimeCommand(codexAgentId),
-    resolveConversationIdBySessionId: (sessionId: string) =>
-      service?.resolveConversationIdForSession(sessionId),
-    recordTurnChanges: (input) => codexTurnChangesStore.record(input),
-    recordRoleContextRebuilt: (sessionId, developerInstructions) => {
-      void service?.updateSessionMetadata(sessionId, { developerInstructions }).catch(() => undefined);
-    },
-    hostTools,
-    now: options.now,
-    writeDiagnostic: (input) => {
-      void diagnosticLogService.write(input).catch(() => undefined);
+  const resolveSessionEngineId = (sessionId: string): string | undefined => {
+    try {
+      return sessionIdentity?.resolveContext(sessionId).engineId;
+    } catch {
+      return undefined;
     }
-  });
-  const codexAdapter = createCodexAdapter(codexRuntimePort, {
-    id: codexAgentId,
-    fallbackAgentId: codexAgentId,
-    resolveConversationIdBySessionId: (sessionId: string) =>
-      service?.resolveConversationIdForSession(sessionId)
-  });
+  };
+  const integrations: EngineIntegration[] = engineIntegrations.map((factory) =>
+    factory({
+      workspaceRegistry,
+      sessionIndexStore,
+      hostTools,
+      now,
+      writeDiagnostic,
+      resolveEngineProgram: resolveProgram,
+      resolveSessionEngineId,
+      resolveSessionWorkingDirectory: createSessionWorkingDirectoryResolver({
+        resolveContext: (sessionId) => {
+          if (!sessionIdentity) {
+            throw new Error("Session identity is unavailable.");
+          }
+          return sessionIdentity.resolveContext(sessionId);
+        },
+        workspaceRegistry,
+        runtimeService: () => service
+      }),
+      undoTurnChanges: (input) => turnChangeService.undoTurnChanges(input),
+      runtimeService: () => service
+    })
+  );
   const engineRegistry = new EngineRegistryService({
-    engines: [
-      {
-        engineId: codexAgentId,
-        displayName: "Codex",
-        integrationTier: "native",
-        transportKind: "codex"
-      }
-    ]
+    engines: integrations.map((integration) => integration.definition)
   });
   const engineCapabilitySurface = new EngineCapabilitySurfaceService({
-    surfaces: [
-      {
-        engineId: codexAgentId,
-        sharedCapabilities: [
-          "chat",
-          "turnConfiguration",
-          "steer",
-          "tool",
-          "terminal",
-          "approval",
-          "attachments",
-          "conversationGraph",
-          "goal",
-          "delegation",
-          "checkpoint",
-          "worktree",
-          "diagnostics"
-        ],
-        extensions: [
-          {
-            engineId: codexAgentId,
-            key: "changed-files",
-            displayName: "Changed Files",
-            description: "Codex turn-level file changes and local undo actions.",
-            available: true
-          },
-          {
-            engineId: codexAgentId,
-            key: "hook-activity",
-            displayName: "Hook Activity",
-            description: "Codex hook runs, statuses, and hook output entries.",
-            available: true
-          }
-        ]
-      }
-    ]
+    surfaces: integrations.map((integration) => integration.surface)
   });
 
   const runtimeService = new SessionRuntimeService({
@@ -167,35 +124,25 @@ export const createSessionRuntimeService = (
     titleGenerator:
       options.titleGenerator ??
       createOpenAiSessionTitleGenerator({
-        resolveAuth: () => codexRuntimePort.readOpenAiCompatibleAuth()
+        resolveAuth: async (engineId) => {
+          const ordered = [
+            ...integrations.filter((integration) => integration.engineId === engineId),
+            ...integrations.filter((integration) => integration.engineId !== engineId)
+          ];
+          for (const integration of ordered) {
+            const auth = await integration.resolveTitleAuth?.();
+            if (auth?.apiKey?.trim()) {
+              return auth;
+            }
+          }
+          return undefined;
+        }
       }),
-    agentBindings: [
-      {
-        descriptor: {
-          engineId: codexAgentId,
-          displayName: "Codex",
-          capabilities: ["chat", "tool", "terminal", "approval"]
-        },
-        integrationTier: "native",
-        transportKind: "codex",
-        adapter: codexAdapter,
-        providerKind: "codex-thread",
-        sharedCapabilities: engineCapabilitySurface.get(codexAgentId).sharedCapabilities,
-        extensions: engineCapabilitySurface.get(codexAgentId).extensions,
-        modelCatalog: () => codexRuntimePort.listModelCatalog(),
-        resolveProviderSessionId: (sessionId: string) =>
-          codexRuntimePort.getThreadIdForSession(sessionId)
-      }
-    ]
+    agentBindings: integrations.map((integration) => integration.binding)
   });
 
   service = runtimeService;
-  const sessionCatalog = new SessionCatalogService({
-    runtimeService,
-    workspaceRegistry,
-    sessionIndexStore
-  });
-  const sessionIdentity = new SessionIdentityRegistry({
+  sessionIdentity = new SessionIdentityRegistry({
     runtimeService,
     sessionIndexStore
   });
@@ -203,35 +150,13 @@ export const createSessionRuntimeService = (
     runtimeService,
     sessionIndexStore,
     sessionIdentity,
-    capabilities: [
-      {
-        engineId: codexAgentId,
-        sessionDiscovery: new CodexSessionDiscoveryProvider({
-          codexRuntimePort,
-          turnChangesStore: codexTurnChangesStore,
-          resolveHistoryCwd: (workspaceId) => workspaceRegistry.getWorkspace(workspaceId)?.absolutePath,
-          resolveRoleInstructions: (workspaceId, metadata) =>
-            service?.resolveRoleInstructions(workspaceId, metadata) ?? Promise.resolve(undefined)
-        }),
-        sessionActions: new CodexSessionActionsProvider({
-          codexRuntimePort
-        }),
-        delegation: new CodexDelegationProvider(),
-        worktree: new CodexWorktreeProvider({
-          codexRuntimePort,
-          now: options.now
-        }),
-        checkpoint: new CodexCheckpointProvider({
-          codexRuntimePort,
-          now: options.now
-        }),
-        diagnostics: new CodexDiagnosticsProvider({
-          codexRuntimePort,
-          now: options.now
-        })
-      }
-    ],
+    capabilities: integrations.map((integration) => integration.capabilities),
     now: options.now
+  });
+  const sessionCatalog = new SessionCatalogService({
+    runtimeService,
+    workspaceRegistry,
+    sessionIndexStore
   });
   const sessionReconciliation = new SessionReconciliationService({
     runtimeService,
@@ -240,84 +165,40 @@ export const createSessionRuntimeService = (
     sessionIdentity,
     capabilityRegistry: capabilities
   });
-  const codexHistoryProjection = new CodexHistoryProjection({
-    resolveSqliteHome: () => codexRuntimePort.getCodexSqliteHome(),
-    onWarning: (message, details) => {
-      void diagnosticLogService.write({
-        kind: "runtime-pipeline",
-        severity: "warning",
-        source: "codex-history-projection",
-        message,
-        context: details
-      }).catch(() => undefined);
-    }
-  });
-  const clearSessionHistory = async (sessionId: string): Promise<boolean> => {
-    await sessionIndexStore.ready();
-    const entry = sessionIndexStore.getEntry(sessionId);
-    const threadId = codexRuntimePort.getThreadIdForSession(sessionId) ?? entry?.providerSessionId;
-    if (!threadId) return false;
-    const result = await codexHistoryProjection.clearThread(threadId);
-    return result.status !== "failed" && result.status !== "unavailable";
-  };
-
   const shellService = new SessionShellService({
     runtimeService,
-    releaseSessionExecution: (sessionId) => codexRuntimePort.releaseSessionExecutionAndWait(sessionId),
-    clearSessionHistory,
-    getActiveTurnId: (sessionId) => codexRuntimePort.getActiveTurnId(sessionId),
     wrapperChatTree: new WrapperChatTreeService({
       runtimeService,
       sessionIndexStore,
       reconciliation: sessionReconciliation,
+      capabilities,
       logDiagnostic: ({ message, sessionId, context }) => {
-        void diagnosticLogService.write({
+        writeDiagnostic({
           kind: "runtime-pipeline",
           severity: "info",
           source: "chat-tree",
           message,
           sessionId,
           context
-        }).catch(() => undefined);
-      },
-      fork: async (sessionId, fromTurnId) => {
-        const result = await new CodexSessionActionsProvider({ codexRuntimePort }).runAction({
-          ...capabilities.resolveContext(sessionId), action: "fork", fromTurnId, activateFork: false
         });
-        if (result?.action !== "fork" || result.status !== "forked") {
-          throw new Error("Unable to fork this turn.");
-        }
-        return result.forkedSessionId;
       }
     }),
     sessionCatalog,
     capabilities,
-    skillsProvider: {
-      listSkills: async (input): Promise<SkillDescriptorRpc[]> => {
-        const result = await codexRuntimePort.listSkills({
-          cwds: input?.cwds,
-          forceReload: input?.forceReload
-        });
-        return result.data.flatMap((entry) =>
-          entry.skills.map((skill) => ({
-            cwd: entry.cwd,
-            name: skill.name,
-            description: skill.description,
-            shortDescription: skill.shortDescription ?? undefined,
-            path: skill.path,
-            scope: String(skill.scope),
-            enabled: skill.enabled
-          }))
-        );
-      }
-    },
+    engineMethods: integrations.flatMap(
+      (integration) => integration.engineMethods ?? []
+    ),
     sessionIdentity,
     sessionReconciliation,
     engineRegistry,
     engineCapabilitySurface,
     pickWorkspaceDirectory: options.pickWorkspaceDirectory,
-    resolveEngineProgram: (engineId, customPath) => {
-      const { args: _args, ...resolution } = resolveProgram(engineId, customPath);
+    resolveEngineProgram: (engineId) => {
+      const integration = integrations.find((entry) => entry.engineId === engineId);
+      if (!integration) {
+        throw new Error(`Unknown engine: ${engineId}`);
+      }
+      const { args: _args, ...resolution } = resolveProgram(engineId, integration.program);
       return resolution;
     },
     fileActionService: new FileActionService({
@@ -342,7 +223,3 @@ export const createSessionRuntimeService = (
   );
   return shellService;
 };
-
-export const createCodexSessionRuntimeService = (
-  options: CreateWorkbenchRuntimeServiceOptions = {}
-) => createSessionRuntimeService(options);

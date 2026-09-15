@@ -4,15 +4,8 @@ export type EngineProgramCommand = EngineProgramResolutionRpc & {
   args: string[];
 };
 
-type ResolveEngineProgramCommandOptions = {
-  customPath?: string;
-  configuredPath?: string;
-  configuredArgs?: string[];
-  env?: NodeJS.ProcessEnv;
-  platform?: NodeJS.Platform;
-};
-
-type ProgramDefinition = {
+/** 引擎声明的默认启动方式；由各引擎装配单元提供。 */
+export type EngineProgramRule = {
   environmentVariables: string[];
   windowsDefault: string;
   default: string;
@@ -20,28 +13,20 @@ type ProgramDefinition = {
   explicitArgs: string[];
 };
 
-const programs: Record<string, ProgramDefinition> = {
-  codex: {
-    environmentVariables: ["VERMILLION_CODEX_BIN", "CODEX_BIN", "CODEX_PATH"],
-    windowsDefault: "codex.exe",
-    default: "codex",
-    defaultArgs: ["app-server"],
-    explicitArgs: ["app-server"]
-  },
-  "pi-acp": {
-    environmentVariables: ["VERMILLION_PI_ACP_BIN", "PI_ACP_BIN"],
-    windowsDefault: "npx.cmd",
-    default: "npx",
-    defaultArgs: ["-y", "pi-acp"],
-    explicitArgs: []
-  }
+type ResolveEngineProgramCommandOptions = {
+  program?: EngineProgramRule;
+  customPath?: string;
+  configuredPath?: string;
+  configuredArgs?: string[];
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 };
 
 export const resolveEngineProgramCommand = (
   engineId: string,
   options: ResolveEngineProgramCommandOptions = {}
 ): EngineProgramCommand => {
-  const program = programs[engineId];
+  const program = options.program;
   const customPath = options.customPath?.trim();
   if (customPath) {
     return {

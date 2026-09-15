@@ -16,6 +16,7 @@ import { SessionSidebar } from "./components/SessionSidebar.js";
 import { SearchDialog } from "./components/SearchDialog.js";
 import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
+import { SettingsPage } from "./components/SettingsPage.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { Button, EmptyState, InlineNotice, PanelHeader, Tabs } from "./components/ui.js";
@@ -137,22 +138,38 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   }, [workspaces, workspaceFilterId]);
 
   const [draftRevision, setDraftRevision] = useState(0);
+  const resolveNewSessionEngineId = useCallback(async (): Promise<string> => {
+    const [settings, engines] = await Promise.all([
+      transport.settings.get(),
+      transport.engine.list()
+    ]);
+    const preferred = settings.defaultNewSessionEngineId;
+    if (preferred && engines.some((engine) => engine.engineId === preferred)) {
+      return preferred;
+    }
+    const fallback = engines[0]?.engineId;
+    if (!fallback) {
+      throw new Error("没有可用的会话引擎。");
+    }
+    return fallback;
+  }, [transport]);
   const initializeDraftExecution = useCallback(async () => {
     const settings = await transport.settings.get();
+    const engineId = await resolveNewSessionEngineId();
     const role = draftWorkspaceId
       ? await store.getState().client.request("role.resolve", { workspaceId: draftWorkspaceId, roleId: "design-partner" })
       : undefined;
     return mergeSessionExecutionProfile(
-      resolveEngineExecutionPreference(settings.executionPreferencesByEngineId.codex),
+      resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]),
       role?.modelConfig
     );
-  }, [draftWorkspaceId, draftRevision, transport, store]);
+  }, [draftWorkspaceId, draftRevision, transport, store, resolveNewSessionEngineId]);
 
   const createSession = useCallback(
     async ({ execution }: { execution?: SessionExecutionProfileInput }) => {
       const workspace = draftWorkspaceId ? workspaceById.get(draftWorkspaceId) : undefined;
       if (!workspace) throw new Error("请先在 Composer 里选择一个 workspace。");
-      const engineId = (await transport.engine.list()).find((e) => e.engineId === "codex")?.engineId ?? "codex";
+      const engineId = await resolveNewSessionEngineId();
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
         engineId,
@@ -166,7 +183,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       if (workspaceFilterId && workspaceFilterId !== workspace.workspaceId) setWorkspaceFilterId(workspace.workspaceId);
       return created.sessionId;
     },
-    [draftWorkspaceId, workspaceById, transport, store, workspaceFilterId, sessionStore]
+    [draftWorkspaceId, workspaceById, transport, store, workspaceFilterId, sessionStore, resolveNewSessionEngineId]
   );
 
   const onSelect = useCallback(
@@ -289,8 +306,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
           <InboxPanel store={store} includeProcessed={overlay !== "inbox" && panel === "inbox"} />
         </Modal>
         {panel === "settings" && <section className="h-full" aria-label="设置">
-          <PanelHeader title="设置" />
-          <EmptyState title="暂无设置项" />
+          <SettingsPage transport={transport} />
         </section>}
       </div>
       </div>

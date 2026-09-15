@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CodexTurnChangesService } from "../src/engine-extensions/codex/turn-changes-service.js";
+import { CodexTurnChangesService } from "../src/engines/codex/extensions/turn-changes-service.js";
 import {
   clearCodexTurnChangesStore,
   recordCodexTurnChanges
-} from "../src/engine-extensions/codex/turn-changes-store.js";
+} from "../src/engines/codex/extensions/turn-changes-store.js";
 
 describe("CodexTurnChangesService", () => {
   afterEach(() => {

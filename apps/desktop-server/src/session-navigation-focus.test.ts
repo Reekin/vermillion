@@ -19,7 +19,7 @@ it("explicit activation selects the requested member tip and emits a refresh, wh
   const tree = new WrapperChatTreeService({
     runtimeService: runtime, sessionIndexStore: index,
     reconciliation: { ensureSessionLoaded: async () => true } as never,
-    fork: vi.fn()
+    capabilities: { forkSessionFromTurn: vi.fn() } as never
   });
   try {
     const workspace = await registry.registerWorkspace({ absolutePath: baseDir });

@@ -3,7 +3,7 @@ import {
   codexProviderKind,
   discoveredCodexSessionId,
   resolveCodexThreadId
-} from "../src/codex-session-identity.js";
+} from "../src/engines/codex/session-identity.js";
 
 describe("codex session identity helpers", () => {
   it("keeps discovered session ids canonical", () => {

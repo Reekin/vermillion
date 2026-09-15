@@ -7,12 +7,37 @@ type SessionShell = ReturnType<typeof createSessionRuntimeService>;
 const createId = (): string => "cmd-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
 type SourceAskRole = {
-  engineId: string;
   cwd: string;
   modelConfig?: RoleExecutionOverrides;
 };
 
 type SourceAskRoleResolver = (workspaceId: string) => Promise<SourceAskRole>;
+
+/** 新建会话使用设置里的默认引擎；未设置时取注册顺序的第一个。 */
+const resolveDefaultEngineId = async (shell: SessionShell): Promise<string> => {
+  const settings = await shell.getSettings();
+  const engines = shell.listEngines();
+  const preferred = settings.defaultNewSessionEngineId;
+  if (preferred && engines.some((engine) => engine.engineId === preferred)) {
+    return preferred;
+  }
+  const fallback = engines[0]?.engineId;
+  if (!fallback) {
+    throw new Error("No session engine is available.");
+  }
+  return fallback;
+};
+
+/** 已有会话树的引擎在创建时定死，fork、恢复与投递沿着该引擎进行。 */
+const resolveSessionEngineId = async (
+  shell: SessionShell,
+  sessionId: string
+): Promise<string> => {
+  const engineId = shell
+    .listSessions({ includeArchived: true })
+    .find((session) => session.sessionId === sessionId)?.engineId;
+  return engineId ?? (await resolveDefaultEngineId(shell));
+};
 
 const resolveActiveTurnId = (shell: SessionShell, sessionId: string): string | undefined =>
   shell.getActiveTurnId(sessionId) ?? shell.getSnapshot().turns
@@ -58,9 +83,10 @@ export const createSourceAsker = (
     throw new Error("Source session not found: " + input.sourceSessionId);
   }
   const role = await resolveRole(input.workspaceId);
+  const engineId = await resolveSessionEngineId(shell, input.sourceSessionId);
   const settings = await shell.getSettings();
   const execution = mergeSessionExecutionProfile(
-    resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[role.engineId]),
+    resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]),
     role.modelConfig
   );
   const sessionProfile = writeSessionExecutionProfile({
@@ -69,7 +95,7 @@ export const createSourceAsker = (
     sourceTurnId: input.sourceTurnId,
     workItemId: input.workItemId,
     asksource: true
-  }, { engineId: role.engineId, ...execution });
+  }, { engineId, ...execution });
   const forked = await shell.runSessionAction({
     sessionId: input.sourceSessionId,
     action: "fork",
@@ -149,8 +175,9 @@ export const createSourceAsker = (
 };
 
 /** Background agent sessions for the orchestrator: same engine and session list as the UI, opened headlessly. */
-export const createAgentRunner = (shell: SessionShell, engineId: string): AgentRunner => ({
+export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
   open: async (input) => {
+    const engineId = await resolveDefaultEngineId(shell);
     const settings = await shell.getSettings();
     const { sessionId } = await shell.createBrowserSession({
       workspaceId: input.workspaceId,
@@ -166,6 +193,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
   },
   fork: async (input) => {
     if (!await shell.ensureSessionLoadedForRead(input.sourceSessionId)) throw new Error("Source session not found");
+    const engineId = await resolveSessionEngineId(shell, input.sourceSessionId);
     const workspace = (await shell.listWorkspaces()).workspaces.find((entry) => entry.workspaceId === input.workspaceId);
     if (!workspace) throw new Error("Workspace not found");
     const tree = await shell.getChatTree(input.sourceSessionId);
@@ -231,6 +259,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     if (!await shell.ensureSessionLoadedForRead(sessionId)) return false;
     const { title, modelConfig, ...resumeOptions } = options ?? {};
     if (modelConfig) {
+      const engineId = await resolveSessionEngineId(shell, sessionId);
       const settings = await shell.getSettings();
       resumeOptions.metadata = writeSessionExecutionProfile(resumeOptions.metadata, {
         engineId,

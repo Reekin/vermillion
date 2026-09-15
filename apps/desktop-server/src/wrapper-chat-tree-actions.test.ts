@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parseDomainSnapshot } from "@vermillion/shared";
 import { SessionIndexStore } from "./session-index.js";
 import { WrapperChatTreeService } from "./wrapper-chat-tree.js";
-import { CodexSessionDiscoveryProvider } from "./session-discovery.js";
+import { CodexSessionDiscoveryProvider } from "./engines/codex/session-discovery.js";
 
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -30,7 +30,8 @@ const setup = async () => {
   const create = (store: SessionIndexStore) => new WrapperChatTreeService({ sessionIndexStore: store,
     reconciliation: { ensureSessionLoaded: load } as never,
     runtimeService: { getSnapshot: () => snapshot, getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
-      getRevision: () => "initial", subscribe: () => () => {}, notifyChatTreeChanged: vi.fn() } as never, fork });
+      getRevision: () => "initial", subscribe: () => () => {}, notifyChatTreeChanged: vi.fn() } as never,
+    capabilities: { forkSessionFromTurn: fork } as never });
   return { baseDir, index, load, create };
 };
 
