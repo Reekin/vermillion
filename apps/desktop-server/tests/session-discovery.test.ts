@@ -1169,10 +1169,16 @@ describe("Session discovery and reconciliation", () => {
     // Draining the cancelled task must not clear the registry entry of the new read.
     gates.shift()?.();
     await expect(cancelledOpen).resolves.toBeUndefined();
+    const joined = reconciliation.hydrateSessionWindow("session-1", { limit: 2 });
+    await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(2));
     gates.shift()?.();
     await expect(retry).resolves.toEqual(
       expect.objectContaining({ olderCursor: "older-cursor" })
     );
+    await expect(joined).resolves.toEqual(
+      expect.objectContaining({ olderCursor: "older-cursor" })
+    );
+    expect(hydrateSessionWindow).toHaveBeenCalledTimes(2);
   });
 
   it("discovers codex threads, derives subagent relations, and hydrates discovered sessions", async () => {
