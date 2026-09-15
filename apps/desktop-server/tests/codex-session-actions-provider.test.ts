@@ -20,25 +20,27 @@ describe("CodexSessionActionsProvider", () => {
     expect(port.injectDeveloperInstructions).not.toHaveBeenCalled();
     expect(port.trackResumedTurn).toHaveBeenCalledWith("worker", expect.objectContaining({ id: "thread-1" }));
   });
-  it("resumes ownership without injecting or persisting role text", async () => {
+  it("resolves the current role for resume without injecting or persisting role text", async () => {
     const session = { metadata: { cwd: "I:/workspace", developerInstructions: "PREPARATION_ROLE" } };
     const resumeThread = vi.fn().mockResolvedValue({ id: "thread-worker" });
     const injectDeveloperInstructions = vi.fn();
     const updateSessionMetadata = vi.fn(async (_id, metadata) => { Object.assign(session.metadata, metadata); });
+    const resolveSessionRoleInstructions = vi.fn().mockResolvedValue("WORKER_ROLE");
     const provider = new CodexSessionActionsProvider({ codexRuntimePort: {
       resumeThread, injectDeveloperInstructions, interruptThread: vi.fn(), unsubscribeThread: vi.fn(), attachThreadToSession: vi.fn()
     } as unknown as CodexAppServerRuntimePort });
     const input = { sessionId: "worker", action: "resume" as const,
       providerHandle: codexProviderHandle("thread-worker"), session: session as never,
-      sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata } as never };
-    await provider.runAction({ ...input, developerInstructions: "WORKER_ROLE", metadata: { role: "worker" } });
-    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace");
+      sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata, resolveSessionRoleInstructions } as never };
+    await provider.runAction({ ...input, metadata: { role: "worker" } });
+    expect(resolveSessionRoleInstructions).toHaveBeenLastCalledWith("worker", { role: "worker" });
+    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace", "WORKER_ROLE");
     expect(injectDeveloperInstructions).not.toHaveBeenCalled();
     expect(updateSessionMetadata).toHaveBeenLastCalledWith("worker", { role: "worker" });
-    await provider.runAction({ ...input, developerInstructions: "WORKER_ROLE" });
+    await provider.runAction(input);
     await provider.runAction(input);
     expect(injectDeveloperInstructions).not.toHaveBeenCalled();
-    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace");
+    expect(resumeThread).toHaveBeenLastCalledWith("thread-worker", "I:/workspace", "WORKER_ROLE");
   });
 
   it("resumes a Worker in its allocated worktree and persists the cwd and work binding", async () => {

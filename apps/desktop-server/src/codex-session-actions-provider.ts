@@ -194,7 +194,13 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         await this.codexRuntimePort.unsubscribeThread(threadId);
       }
       const cwd = input.cwd ?? input.session?.metadata?.cwd ?? input.indexEntry?.metadata?.cwd;
-      const thread = typeof cwd === "string"
+      const resolver = input.runtimeService.resolveSessionRoleInstructions?.bind(input.runtimeService);
+      const developerInstructions = resolver
+        ? await resolver(input.sessionId, input.metadata ?? {})
+        : input.developerInstructions;
+      const thread = typeof developerInstructions === "string"
+        ? await this.codexRuntimePort.resumeThread(threadId, typeof cwd === "string" ? cwd : undefined, developerInstructions)
+        : typeof cwd === "string"
         ? await this.codexRuntimePort.resumeThread(threadId, cwd)
         : await this.codexRuntimePort.resumeThread(threadId);
       this.codexRuntimePort.attachThreadToSession(input.sessionId, thread.id);

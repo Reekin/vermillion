@@ -136,6 +136,17 @@ export class RuntimeOrchestrator {
     this.sessionRoleResolver = resolver;
   }
 
+  public async resolveSessionRoleInstructions(
+    sessionId: string,
+    metadata: Record<string, unknown> = {}
+  ): Promise<string | undefined> {
+    const session = this.domainService.requireSession(sessionId);
+    const workspaceId = this.domainService.getConversation(session.conversationId)?.workspaceId;
+    return workspaceId && this.sessionRoleResolver
+      ? this.sessionRoleResolver(workspaceId, { ...session.metadata, ...metadata })
+      : undefined;
+  }
+
   public registerEngine(engine: SessionEngineDescriptor): void {
     const existing = this.bindings.get(engine.engineId);
     this.bindings.set(engine.engineId, {
