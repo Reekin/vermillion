@@ -113,6 +113,14 @@ it("records the patrol session on both new and updated issues", async () => {
   expect(updated.sourceSessionId).toBe("patrol-session");
   expect(updated.activities.at(-1)).toMatchObject({ kind: "evidence", sessionId: "patrol-session" });
 
+  // A supplement records its own patrol session on the new activity, without rewriting where the issue came from.
+  const reported = await f.client.request("issue.create", { workspaceId: f.workspaceId, title: "Reported by the user", summary: "Observed mismatch",
+    domainId: "ui-ux" });
+  const supplemented = await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: reported.issueId, patrolRunId: run.patrolRunId,
+    appendEvidence: [{ kind: "static", text: "Confirmed against the standard" }] });
+  expect(supplemented.sourceSessionId).toBeUndefined();
+  expect(supplemented.activities.at(-1)).toMatchObject({ kind: "evidence", sessionId: "patrol-session" });
+
   const manual = await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "closed", resolutionReason: "Handled" });
   expect(manual.activities.at(-1)).toMatchObject({ kind: "resolved", sessionId: undefined });
   await expect(f.client.request("issue.create", { workspaceId: f.workspaceId, title: "Unknown patrol", summary: "Bad link",

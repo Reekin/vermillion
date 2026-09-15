@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocsService } from "../src/docs.js";
@@ -182,6 +182,9 @@ describe("domain owner patrols", () => {
     expect(await fixture.client.request("domain.list", { workspaceId: fixture.workspaceId })).toEqual([]);
     await expect(fixture.client.request("domain.instruction.read", { workspaceId: fixture.workspaceId, domainId: "ui-ux" }))
       .rejects.toThrow("Unknown domain");
+    for (const path of [".vermillion/roles/maintainer/ui-ux.md", ".vermillion/domains/ui-ux.json"]) {
+      await expect(stat(join(fixture.root, path))).rejects.toMatchObject({ code: "ENOENT" });
+    }
     expect(await fixture.client.request("issue.get", { workspaceId: fixture.workspaceId, issueId: issue.issueId })).toMatchObject({ domainId: "ui-ux" });
     expect(await fixture.client.request("domain.patrol.list", { workspaceId: fixture.workspaceId })).toMatchObject([{ patrolRunId: run.patrolRunId }]);
     expect((await fixture.client.request("docs.pending", { workspaceId: fixture.workspaceId }))

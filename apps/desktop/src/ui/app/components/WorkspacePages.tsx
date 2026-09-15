@@ -157,7 +157,6 @@ const ManageSection = ({ client, workspace }: { client: WorkbenchClient; workspa
       </div>
       <Button size="sm" className="ml-auto shrink-0" onClick={() => setConfirming(true)}>移除 workspace</Button>
     </div>
-    {error && <InlineNotice tone="error">{error}</InlineNotice>}
     {confirming && <Modal title={"移除 " + workspace.label} onClose={() => setConfirming(false)} width={460}>
       <div className="space-y-3 p-4">
         <p className="text-caption text-muted-foreground">移除后工作台不再列出这个项目，磁盘上的文件不会被删除。之后可以重新添加。</p>
@@ -252,11 +251,11 @@ const DomainsSection = ({ client, workspaceId, domains, patrolRuns, onOpenDoc, o
     {creating && <form className="flex items-center gap-1 px-4 pb-2" onSubmit={(event) => { event.preventDefault(); void create(); }}>
       <Field value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="领域 id" className="w-28" /><Button type="submit" size="sm" disabled={!draft.trim()}>创建</Button>
     </form>}
-    {domains.length ? <ul className="min-h-0 flex-1 overflow-auto">{domains.map((domain) => <li key={domain.domainId}>
+    <ul className="min-h-0 flex-1 overflow-auto">{domains.map((domain) => <li key={domain.domainId}>
       <ListRow title={domain.title} meta={domain.domainId} selected={domain.domainId === selected?.domainId}
         onClick={() => setSelectedId(domain.domainId)}
         hoverActions={<IconButton icon={X} size={12} label={"删除领域：" + domain.title} onClick={() => setRemoving(domain.domainId)} />} />
-    </li>)}</ul> : <InlineNotice>还没有领域定义。</InlineNotice>}
+    </li>)}</ul>
   </div>;
   if (!selected) return <div className="flex min-h-0 flex-1">
     {listed}
