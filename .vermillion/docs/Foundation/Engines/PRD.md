@@ -6,7 +6,7 @@ Vermillion 通过引擎运行会话。当前支持 Codex（`codex`，Codex app-s
 
 设置页提供两项：
 
-- **新会话引擎**：下拉选择 `codex` 或 `pi`。之后所有新建会话使用该引擎，包括 New Chat、开工准备分支、Worker、Maintainer、`asksource` 临时会话及工作台自动发起的其他会话。从已有会话 fork 出的分支仍沿用原树引擎。
+- **新会话引擎**：下拉选择已注册的引擎。之后从零创建的会话使用该引擎，包括 New Chat、Maintainer 巡检会话、Issue 讨论会话及其他由工作台自动发起的新会话。从已有会话 fork 出的会话沿用源会话树的引擎：开工准备分支、Worker、`asksource` 临时会话与普通分支都是在某个位置上 fork 出来的，因此跟随源会话引擎而不跟随本设置。
 - **引擎程序路径**：每个引擎一行，可填自定义可执行文件路径；留空时按各引擎默认命令名在 PATH 中解析。行内回显解析结果与是否找到。
 
 两项保存在全局注册表（`~/.vermillion/workspace-registry.json` 的 `defaultNewSessionEngineId`、`engineProgramPathsByEngineId`），修改立即生效，不重启应用。会话列表与输入器按会话的 `engineId` 展示对应引擎的能力面。
