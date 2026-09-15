@@ -72,14 +72,14 @@ describe("AgentRunner recovery", () => {
     };
     const asker = createSourceAsker(
       shell as unknown as Parameters<typeof createSourceAsker>[0],
-      async () => ({ engineId: "codex", cwd: "I:/project", developerInstructions: "# Design", modelConfig: { modelId: "design-model", reasoningOptionId: "high", serviceTierId: null } })
+      async () => ({ engineId: "codex", cwd: "I:/project", modelConfig: { modelId: "design-model", reasoningOptionId: "high", serviceTierId: null } })
     );
 
     await expect(asker({ workspaceId: "workspace", workItemId: "item", sourceSessionId: "design", sourceTurnId: "source-turn", question: "Clarify the boundary." }))
       .resolves.toMatchObject({ answer: "Use the original design.", askSessionId: "ask-session", askTurnId: "ask-turn", archived: true });
     expect(shell.runSessionAction).toHaveBeenNthCalledWith(1, expect.objectContaining({
       sessionId: "design", action: "fork", fromTurnId: "source-turn", activateFork: false,
-      cwd: "I:/project", developerInstructions: "# Design",
+      cwd: "I:/project",
       metadata: expect.objectContaining({ role: "design-partner", workItemId: "item", sourceTurnId: "source-turn", asksource: true })
     }));
     expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
@@ -102,7 +102,7 @@ describe("AgentRunner recovery", () => {
     };
     const asker = createSourceAsker(
       shell as unknown as Parameters<typeof createSourceAsker>[0],
-      async () => ({ engineId: "codex", cwd: "I:/project", developerInstructions: "# Design" })
+      async () => ({ engineId: "codex", cwd: "I:/project" })
     );
 
     await expect(asker({ workspaceId: "workspace", workItemId: "item", sourceSessionId: "design", sourceTurnId: "source-turn", question: "Clarify" }))
@@ -182,7 +182,7 @@ describe("AgentRunner recovery", () => {
       title: "Work", metadata: { role: "work-preparation", workItemId: "item", treeSessionId: "tree" } }))
       .resolves.toEqual({ sessionId: "worker", treeId: "tree" });
     expect(shell.runSessionAction).toHaveBeenCalledWith(expect.objectContaining({ action: "fork", fromTurnId: "turn",
-      activateFork: false, developerInstructions: undefined,
+      activateFork: false,
       metadata: expect.objectContaining({ role: "work-preparation", workItemId: "item", sourceSessionId: "source", treeSessionId: "tree" }) }));
     expect(shell.openSession).not.toHaveBeenCalled();
   });
@@ -194,7 +194,7 @@ describe("AgentRunner recovery", () => {
       getSnapshot: () => ({ turns: [{ sessionId: "source", turnId: "turn", status: "running" }] }), runSessionAction: vi.fn() };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0], "codex");
     await expect(runner.fork({ sourceSessionId: "source", sourceTurnId: "turn", workspaceId: "workspace",
-      title: "Work", developerInstructions: "Worker role", metadata: {} })).rejects.toThrow("completed source turn");
+      title: "Work", metadata: {} })).rejects.toThrow("completed source turn");
     expect(shell.runSessionAction).not.toHaveBeenCalled();
   });
 
@@ -235,10 +235,10 @@ describe("AgentRunner recovery", () => {
 
   it("applies the execution role and model profile when resuming a prepared session", async () => {
     const { shell, runner } = setup();
-    await expect(runner.resume("worker", { developerInstructions: "Worker role",
+    await expect(runner.resume("worker", {
       modelConfig: { modelId: "execution-model" }, metadata: { role: "worker", workItemId: "item" } })).resolves.toBe(true);
     expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume", preserveExecution: true,
-      developerInstructions: "Worker role", metadata: expect.objectContaining({ role: "worker", workItemId: "item",
+      metadata: expect.objectContaining({ role: "worker", workItemId: "item",
         sessionProfile: expect.objectContaining({ engineId: "codex", modelId: "execution-model" }) }) });
   });
 

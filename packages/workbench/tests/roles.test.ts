@@ -64,4 +64,28 @@ describe("role prompt composition", () => {
       service.dispose();
     }
   });
+
+  it("resolves current session instructions from role metadata without storing role text", async () => {
+    const { root, globalDir, roles } = await setup();
+    await Promise.all([
+      writeFile(join(globalDir, "design-partner.md"), "# Design\nCurrent design role.\n"),
+      writeFile(join(globalDir, "reviewer.md"), "# Reviewer\nReview current work.\n"),
+      writeFile(join(globalDir, "verifier.md"), "# Verifier\nVerify current work.\n")
+    ]);
+    const service = new WorkbenchService({ workspaces: createMemoryWorkspaceSource(), roles });
+    try {
+      const { workspaceId } = await service.addWorkspace({ rootPath: root, label: "Roles" });
+      const design = await service.resolveSessionInstructions(workspaceId, {});
+      expect(design).toContain("Current design role.");
+      expect(design).toContain(`当前 workspaceId: ${workspaceId}`);
+      const worker = await service.resolveSessionInstructions(workspaceId, { role: "worker" });
+      expect(worker).toContain("Global instructions.");
+      expect(worker).toContain("## reviewer subagent prompt");
+      expect(worker).toContain("Review current work.");
+      expect(worker).toContain("## verifier subagent prompt");
+      expect(worker).toContain("Verify current work.");
+    } finally {
+      service.dispose();
+    }
+  });
 });

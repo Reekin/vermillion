@@ -757,7 +757,6 @@ const boot = async (): Promise<void> => {
     return {
       engineId: "codex",
       cwd: workspace.absolutePath,
-      developerInstructions: role.content,
       modelConfig: role.modelConfig
     };
   });
@@ -769,7 +768,7 @@ const boot = async (): Promise<void> => {
       if (!workspace) throw new Error("Workspace not found: " + workspaceId);
       const role = await roleService.resolve(workspace.absolutePath, "design-partner");
       const opened = await agentRunner.open({ workspaceId, cwd: workspace.absolutePath,
-        developerInstructions: role.content, modelConfig: role.modelConfig, title: "Issue · " + title,
+        modelConfig: role.modelConfig, title: "Issue · " + title,
         metadata: { role: "design-partner", issueId } });
       const sent = await agentRunner.send(opened.sessionId, content);
       return { sessionId: opened.sessionId, ...(sent?.turnId ? { turnId: sent.turnId } : {}) };
@@ -836,6 +835,8 @@ const boot = async (): Promise<void> => {
       }
     }
   });
+  service.setSessionRoleResolver((workspaceId, metadata) =>
+    workbenchService.resolveSessionInstructions(workspaceId, metadata));
   const workbenchRpc = createWorkbenchRpcHandler(workbenchService);
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     workbenchRpc(payload as { method: string; params: unknown })

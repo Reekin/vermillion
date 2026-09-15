@@ -130,12 +130,14 @@ describe("domain owner patrols", () => {
     const sent: string[] = [];
     let completed: ((event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed"; failure?: string }) => void) | undefined;
     const runner: AgentRunner = {
-      open: vi.fn(async (input) => { expect(input.developerInstructions).toContain("Check UI draft retention."); return { sessionId: "patrol-session" }; }),
+      open: vi.fn(async (input) => { expect(input.metadata).toEqual(expect.objectContaining({ role: "maintainer", domainId: "ui-ux" })); return { sessionId: "patrol-session" }; }),
       fork: vi.fn(), resume: vi.fn(async () => true), steer: vi.fn(), interrupt: vi.fn(), release: vi.fn(),
       send: vi.fn(async (_sessionId, content) => { sent.push(content); return { turnId: "turn-1" }; }),
       isActive: vi.fn(() => false), onTurnCompleted: (listener) => { completed = listener; return () => { completed = undefined; }; }
     };
     const orchestrator = new Orchestrator({ service: fixture.service, roles: fixture.roles, runner, patrolIntervalMs: 60_000 });
+    expect(await fixture.service.resolveSessionInstructions(fixture.workspaceId, { role: "maintainer", domainId: "ui-ux" }))
+      .toContain("Check UI draft retention.");
     orchestrator.start();
     const run = await fixture.client.request("domain.patrol.run", { workspaceId: fixture.workspaceId, domainId: "ui-ux" });
     await vi.waitFor(() => expect(sent[0]).toContain("domain.patrol.complete"));

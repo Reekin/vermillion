@@ -1838,7 +1838,8 @@ export class CodexAppServerRuntimePort
   private async handleTurnStart(
     payload: CodexRuntimeRequest,
     options: RuntimeOperationOptions,
-    injectContext = true
+    injectContext = true,
+    injectRoleContext = true
   ): Promise<{ sessionId: string; turnId: string; threadId: string }> {
     const sessionId = String(payload.params.sessionId ?? "");
     const content = String(payload.params.content ?? "");
@@ -1858,6 +1859,10 @@ export class CodexAppServerRuntimePort
       typeof payload.params.developerInstructions === "string" &&
       payload.params.developerInstructions.trim().length > 0
         ? payload.params.developerInstructions
+        : undefined;
+    const deliveredDeveloperInstructions =
+      typeof payload.params.deliveredDeveloperInstructions === "string"
+        ? payload.params.deliveredDeveloperInstructions
         : undefined;
     const execution =
       typeof payload.params.execution === "object" &&
@@ -1880,6 +1885,7 @@ export class CodexAppServerRuntimePort
             execution.serviceTierId.trim()
           ? execution.serviceTierId
           : undefined;
+    const startsNewThread = !this.threadIdBySessionId.get(sessionId) && !providerSessionId;
     let threadId = await this.ensureThreadForSession(
       sessionId,
       cwd,
@@ -1887,6 +1893,10 @@ export class CodexAppServerRuntimePort
       providerSessionId,
       developerInstructions
     );
+    if (injectRoleContext && !startsNewThread && developerInstructions !== undefined &&
+        developerInstructions !== deliveredDeveloperInstructions) {
+      await this.injectDeveloperInstructions(threadId, developerInstructions);
+    }
     const input = buildCodexTurnInput(content, attachments);
     let startInfoForTurn:
       | { settingsRevision: number; hasExplicitExecution: boolean }
@@ -2003,6 +2013,17 @@ export class CodexAppServerRuntimePort
       throw new Error("Cannot steer before session and active turn are attached.");
     }
     const input = buildCodexTurnInput(content, attachments);
+    const developerInstructions =
+      typeof payload.params.developerInstructions === "string" && payload.params.developerInstructions.trim()
+        ? payload.params.developerInstructions
+        : undefined;
+    const deliveredDeveloperInstructions =
+      typeof payload.params.deliveredDeveloperInstructions === "string"
+        ? payload.params.deliveredDeveloperInstructions
+        : undefined;
+    if (developerInstructions !== undefined && developerInstructions !== deliveredDeveloperInstructions) {
+      await this.injectDeveloperInstructions(threadId, developerInstructions);
+    }
     await this.injectWorkbenchContext(threadId, payload.params, options);
     let targetTurnId = expectedTurnId;
     // Only a provider precondition rejection proves this input was not delivered.
@@ -2025,7 +2046,7 @@ export class CodexAppServerRuntimePort
         if (error.message !== "no active turn to steer") throw error;
         // Native turn/start is StartOrSteer: a concurrent new turn receives the
         // input atomically. Its response does not distinguish start from steer.
-        const started = await this.handleTurnStart(payload, options, false);
+        const started = await this.handleTurnStart(payload, options, false, false);
         return { sessionId, turnId: started.turnId, delivery: "start_or_steer" };
       }
     }

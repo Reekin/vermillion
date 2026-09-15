@@ -9,7 +9,6 @@ const createId = (): string => "cmd-" + Date.now().toString(36) + "-" + Math.ran
 type SourceAskRole = {
   engineId: string;
   cwd: string;
-  developerInstructions: string;
   modelConfig?: RoleExecutionOverrides;
 };
 
@@ -77,7 +76,6 @@ export const createSourceAsker = (
     fromTurnId: input.sourceTurnId,
     activateFork: false,
     cwd: role.cwd,
-    developerInstructions: role.developerInstructions,
     metadata: sessionProfile
   });
   if (forked.action !== "fork" || forked.status !== "forked") {
@@ -161,7 +159,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
         resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]),
         input.modelConfig
       ),
-      metadata: { ...input.metadata, cwd: input.cwd, developerInstructions: input.developerInstructions }
+      metadata: { ...input.metadata, cwd: input.cwd }
     });
     await shell.setSessionTitle(sessionId, input.title);
     return { sessionId };
@@ -183,7 +181,7 @@ export const createAgentRunner = (shell: SessionShell, engineId: string): AgentR
     });
     const result = await shell.runSessionAction({
       sessionId: input.sourceSessionId, action: "fork", fromTurnId: input.sourceTurnId, activateFork: false,
-      cwd: workspace.absolutePath, developerInstructions: input.developerInstructions,
+      cwd: workspace.absolutePath,
       metadata
     });
     if (result.action !== "fork" || result.status !== "forked") throw new Error("Worker fork unavailable");

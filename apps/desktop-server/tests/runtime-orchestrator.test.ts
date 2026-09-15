@@ -25,6 +25,43 @@ const createDeferred = <T = void>() => {
 };
 
 describe("RuntimeOrchestrator", () => {
+  it("resolves current role text for every message and records it only after delivery", async () => {
+    const commands: Array<Record<string, unknown>> = [];
+    const adapter: AgentAdapter = {
+      id: "role-adapter", kind: "codex", getLifecycleState: () => "ready",
+      initialize: async () => {}, dispose: async () => {}, subscribe: () => () => {},
+      executeCommand: async (envelope) => {
+        commands.push(envelope.command as unknown as Record<string, unknown>);
+        return { commandId: envelope.commandId, commandType: envelope.command.type, accepted: true,
+          outcome: { type: "turn_started", sessionId: "role-session", turnId: `turn-${commands.length}` } };
+      }
+    };
+    let orchestrator: RuntimeOrchestrator | undefined;
+    const domainService = new DomainService({ now: () => "2026-09-15T00:00:00Z",
+      createSessionId: () => "role-session", assertEngineRegistered: (id) => orchestrator?.assertEngineRegistered(id),
+      resolveEngineCapabilities: () => ["chat"], publishRuntimeEvent: () => {} });
+    orchestrator = new RuntimeOrchestrator({ domainService,
+      sessionIndexSyncService: { syncSession: async () => {}, syncRelation: async () => {}, markSessionUnreadCompleted: async () => {} } as never,
+      workspaceSelectionService: { activateSelection: async () => {}, selectWorkspace: async () => ({ workspaceId: "workspace" }) } as never,
+      publishRuntimeEvent: () => {}, agentBindings: [{ descriptor: { engineId: "codex", displayName: "Codex", capabilities: ["chat"] }, adapter }] });
+    const resolveRole = vi.fn().mockResolvedValue("ROLE_V2");
+    orchestrator.setSessionRoleResolver(resolveRole);
+    await orchestrator.createSession({ engineId: "codex", workspaceId: "workspace",
+      metadata: { role: "design-partner", developerInstructions: "ROLE_V1" } });
+
+    await orchestrator.executeCommand({ commandId: "send-1", command: { type: "sendUserMessage",
+      sessionId: "role-session", messageId: "message-1", content: "first", attachments: [] } });
+    expect(commands[0]).toEqual(expect.objectContaining({ developerInstructions: "ROLE_V2",
+      deliveredDeveloperInstructions: "ROLE_V1" }));
+    expect(domainService.requireSession("role-session").metadata?.developerInstructions).toBe("ROLE_V2");
+
+    await orchestrator.executeCommand({ commandId: "send-2", command: { type: "sendUserMessage",
+      sessionId: "role-session", messageId: "message-2", content: "second", attachments: [] } });
+    expect(commands[1]).toEqual(expect.objectContaining({ developerInstructions: "ROLE_V2",
+      deliveredDeveloperInstructions: "ROLE_V2" }));
+    expect(resolveRole).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves full agent binding metadata and shared capability surface", () => {
     let orchestrator: RuntimeOrchestrator | undefined;
     const domainService = new DomainService({

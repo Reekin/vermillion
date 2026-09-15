@@ -6,14 +6,14 @@ import type { WorkbenchService } from "./workbench-service.js";
 export type AgentRunner = {
   /** Resolves the session's latest turn; undefined means a verified empty session. */
   resolveSourceTurn?: (sessionId: string) => Promise<string | undefined>;
-  fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; developerInstructions?: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
-  open: (input: { workspaceId: string; cwd: string; developerInstructions: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
+  fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
+  open: (input: { workspaceId: string; cwd: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
   send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content">) => Promise<void | { turnId?: string }>;
   /** Delivers into the running turn when there is one (returns its id), otherwise starts the next message. */
   steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
-  resume: (sessionId: string, options?: { cwd?: string; developerInstructions?: string; modelConfig?: RoleExecutionOverrides; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
+  resume: (sessionId: string, options?: { cwd?: string; modelConfig?: RoleExecutionOverrides; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
   /** Requests unsubscribe of an idle worker; preserves its history and permits native idle unloading. */
   release: (sessionId: string) => Promise<void>;
   /** True while the runtime is executing a turn, including tool/model waits. */
@@ -39,12 +39,6 @@ type WorkerTurn = { turnId?: string; scheduled: boolean; settled?: boolean; boun
 type PatrolBinding = { workspaceId: string; patrolRunId: string; sessionId: string };
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
-/** Maps the role resolver's names to the native multi-agent tool's top-level parameters. */
-const subagentSpawnArguments = (config: RoleExecutionOverrides | undefined): Record<string, string | boolean> => ({
-  fork_context: false,
-  ...(config?.modelId ? { model: config.modelId } : {}),
-  ...(config?.reasoningOptionId ? { reasoning_effort: config.reasoningOptionId } : {})
-});
 // A replacement orchestrator takes ownership only after the previous generation's in-flight task drains.
 const workspaceQueues = new Map<string, Promise<void>>();
 
@@ -279,7 +273,7 @@ export class Orchestrator {
       if (current.status === "running") {
         if (!sessionId) throw new Error("运行中的巡检缺少会话。");
         if (this.patrolsBySession.has(sessionId)) return;
-        if (!await this.runner.resume(sessionId, { cwd: root, developerInstructions: role.content, modelConfig: role.modelConfig,
+        if (!await this.runner.resume(sessionId, { cwd: root, modelConfig: role.modelConfig,
           title: "Maintainer · " + current.domainId, metadata })) throw new Error("无法恢复巡检会话：" + sessionId);
         this.patrolsBySession.set(sessionId, { workspaceId, patrolRunId: current.patrolRunId, sessionId });
         if (this.runner.isActive?.(sessionId)) return;
@@ -287,7 +281,7 @@ export class Orchestrator {
         await this.service.setPatrolTurn(workspaceId, current.patrolRunId, receipt?.turnId);
         return;
       }
-      const opened = await this.runner.open({ workspaceId, cwd: root, developerInstructions: role.content, modelConfig: role.modelConfig,
+      const opened = await this.runner.open({ workspaceId, cwd: root, modelConfig: role.modelConfig,
         title: "Maintainer · " + current.domainId, metadata });
       sessionId = opened.sessionId;
       await this.service.startPatrolRun(workspaceId, current.patrolRunId, sessionId);
@@ -337,19 +331,18 @@ export class Orchestrator {
       if (bound?.run.status === "running" && priorTurn?.scheduled && !priorTurn.settled &&
           (item.status === "queued" || (priorTurn.turnId && !this.runner.isActive?.(sessionId!)))) return;
       if (sessionId && (!bound || bound.run.status !== "running")) {
-        const role = await this.workerRole(root);
-        if (!await this.runner.resume(sessionId, { cwd, developerInstructions: role.content, modelConfig: role.modelConfig, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
+        const role = await this.service.resolveWorkerRole(workspaceId);
+        if (!await this.runner.resume(sessionId, { cwd, modelConfig: role.modelConfig, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
       }
       if (!sessionId) {
         if (action.stage !== "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "open" }));
-        const role = await this.workerRole(root);
-        const developerInstructions = role.content;
+        const role = await this.service.resolveWorkerRole(workspaceId);
         if (action.forkSessionId && action.forkTurnId) {
           ({ sessionId } = await this.runner.fork({ workspaceId, sourceSessionId: action.forkSessionId, sourceTurnId: action.forkTurnId,
-            developerInstructions, modelConfig: role.modelConfig, title: "Worker · " + item.title,
+            modelConfig: role.modelConfig, title: "Worker · " + item.title,
             metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId } }));
           if (!await this.runner.resume(sessionId, { cwd })) throw new Error("无法恢复工单分支");
-        } else ({ sessionId } = await this.runner.open({ workspaceId, cwd, developerInstructions, modelConfig: role.modelConfig,
+        } else ({ sessionId } = await this.runner.open({ workspaceId, cwd, modelConfig: role.modelConfig,
           title: "Worker · " + item.title,
           metadata: { role: "worker", actionId: action.actionId, workItemId: item.workItemId } }));
         action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, sessionId, stage: "deliver", status: "running" }));
@@ -476,19 +469,6 @@ export class Orchestrator {
       workspaceId, workItemId: action.workItemId, actionId: action.integrationActionId, sessionId: action.sessionId
     }) + "；需要用户取舍时调用 decision.create。";
     return "完成后重新读取 workItem.get，将当前 contractRevision 传给 workItem.submit，并提交证据、review 和逐条验收；需要用户取舍时调用 decision.create。";
-  }
-
-  private async workerRole(root: string) {
-    const [worker, reviewer, verifier] = await Promise.all(["worker", "reviewer", "verifier"].map((role) => this.roles.resolve(root, role)));
-    const roleBlock = (role: "reviewer" | "verifier", resolved: typeof reviewer): string => [
-      `## ${role} subagent prompt（spawn 时原样传入，并附工单与 diff）`,
-      resolved.content,
-      `## ${role} subagent model configuration（JSON；仅用于核对）`,
-      JSON.stringify(resolved.modelConfig ?? {}),
-      `## ${role} spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）`,
-      JSON.stringify(subagentSpawnArguments(resolved.modelConfig))
-    ].join("\n");
-    return { ...worker!, content: [worker!.content, roleBlock("reviewer", reviewer), roleBlock("verifier", verifier)].join("\n\n") };
   }
 
   private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {

@@ -12,6 +12,7 @@ import type {
   InboxItem,
   Issue,
   PatrolRun,
+  RoleExecutionOverrides,
   WorkRequest,
   RoleFile,
   WorkItem,
@@ -33,6 +34,11 @@ const RETRY_MINUTES = [1, 5, 30, 300];
 
 const createId = (prefix: string): string =>
   prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+const subagentSpawnArguments = (config: RoleExecutionOverrides | undefined): Record<string, string | boolean> => ({
+  fork_context: false,
+  ...(config?.modelId ? { model: config.modelId } : {}),
+  ...(config?.reasoningOptionId ? { reasoning_effort: config.reasoningOptionId } : {})
+});
 const issueStatusText: Record<Issue["status"], string> = {
   open: "待处理", investigating: "调查中", decision: "待决策", started: "已开工", closed: "关闭", duplicate: "重复"
 };
@@ -386,6 +392,33 @@ export class WorkbenchService {
 
   async resolveRole(workspaceId: string, roleId: string) {
     return this.roles.resolve((await this.context(workspaceId)).rootPath, roleId);
+  }
+
+  async resolveWorkerRole(workspaceId: string) {
+    const root = (await this.context(workspaceId)).rootPath;
+    const [worker, reviewer, verifier] = await Promise.all(
+      ["worker", "reviewer", "verifier"].map((role) => this.roles.resolve(root, role))
+    );
+    const roleBlock = (role: "reviewer" | "verifier", resolved: typeof reviewer): string => [
+      `## ${role} subagent prompt（spawn 时原样传入，并附工单与 diff）`,
+      resolved.content,
+      `## ${role} subagent model configuration（JSON；仅用于核对）`,
+      JSON.stringify(resolved.modelConfig ?? {}),
+      `## ${role} spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）`,
+      JSON.stringify(subagentSpawnArguments(resolved.modelConfig))
+    ].join("\n");
+    return { ...worker, content: [worker.content, roleBlock("reviewer", reviewer), roleBlock("verifier", verifier)].join("\n\n") };
+  }
+
+  async resolveSessionInstructions(workspaceId: string, metadata: Record<string, unknown>): Promise<string> {
+    const role = typeof metadata.role === "string" ? metadata.role : "design-partner";
+    if (role === "worker") return (await this.resolveWorkerRole(workspaceId)).content;
+    if (role === "maintainer" && typeof metadata.domainId === "string") {
+      return (await this.resolveMaintainer(workspaceId, metadata.domainId)).content;
+    }
+    const resolved = await this.resolveRole(workspaceId, "design-partner");
+    return resolved.content + "\n\n当前 workspaceId: " + workspaceId
+      + "\n工作台 CLI: vermillion <method> [json]（PATH 中可用）\n";
   }
 
   async writeRoleOverride(workspaceId: string, roleId: string, content: string): Promise<void> {

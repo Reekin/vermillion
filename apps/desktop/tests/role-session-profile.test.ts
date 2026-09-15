@@ -20,10 +20,10 @@ it.each([
     setSessionTitle: vi.fn()
   };
   const runner = createAgentRunner(shell as never, "codex");
-  await runner.open({ workspaceId: "workspace", cwd: "I:/repo", developerInstructions: "Role", title: "Role", metadata: { role: "worker" }, modelConfig });
+  await runner.open({ workspaceId: "workspace", cwd: "I:/repo", title: "Role", metadata: { role: "worker" }, modelConfig });
   expect(createBrowserSession).toHaveBeenCalledWith({
     workspaceId: "workspace", engineId: "codex", sessionProfile: { modeId: "code", ...expected },
-    metadata: { role: "worker", cwd: "I:/repo", developerInstructions: "Role" }
+    metadata: { role: "worker", cwd: "I:/repo" }
   });
   expect(preferences.modelPreferences["composer-model"].reasoningOptionId).toBe("high");
 });
