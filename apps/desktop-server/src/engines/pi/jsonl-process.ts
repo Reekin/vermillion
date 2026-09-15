@@ -43,6 +43,7 @@ export const spawnPiJsonlProcess = (
   let buffer = "";
   let stderr = "";
   let running = true;
+  let spawnError: Error | undefined;
 
   const emitLine = (line: string): void => {
     const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line;
@@ -90,6 +91,16 @@ export const spawnPiJsonlProcess = (
       listener(code);
     }
   });
+  // Node 只对已解析的可执行文件查找 PATH，解析失败的 pi 会以 error 事件结束；
+  // 不接住它会让整个工作台进程退出。
+  child.on("error", (error: Error) => {
+    spawnError = error;
+    running = false;
+    for (const listener of exitListeners) {
+      listener(null);
+    }
+    exitListeners.clear();
+  });
 
   return {
     get pid() {
@@ -117,7 +128,9 @@ export const spawnPiJsonlProcess = (
       };
     },
     stderrText() {
-      return stderr.trim();
+      return spawnError
+        ? `${spawnError.message}${stderr.trim() ? `\n${stderr.trim()}` : ""}`
+        : stderr.trim();
     },
     async stop() {
       if (!running) {

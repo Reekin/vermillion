@@ -18,8 +18,6 @@ export type PiTurnEntities = {
   messageBlocks: MessageBlock[];
   toolCalls: ToolCall[];
   terminalStreams: TerminalStream[];
-  /** 被判定为继承前缀的轮次 id；fork 成员的 fork 点即最后一个继承轮。 */
-  inheritedTurnIds: string[];
 };
 
 type TurnDraft = {
@@ -294,8 +292,7 @@ export const buildPiTurnEntities = (input: {
     toolCalls: toolCalls.filter((call) => ownedTurnIds.has(call.turnId)),
     terminalStreams: terminalStreams.filter((stream) =>
       ownedTurnIds.has(stream.turnId)
-    ),
-    inheritedTurnIds: turns.slice(0, forkIndex + 1).map((turn) => turn.turnId)
+    )
   };
 };
 

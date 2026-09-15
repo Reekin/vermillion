@@ -34,11 +34,33 @@ const RETRY_MINUTES = [1, 5, 30, 300];
 
 const createId = (prefix: string): string =>
   prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-const subagentSpawnArguments = (config: RoleExecutionOverrides | undefined): Record<string, string | boolean> => ({
-  fork_context: false,
-  ...(config?.modelId ? { model: config.modelId } : {}),
-  ...(config?.reasoningOptionId ? { reasoning_effort: config.reasoningOptionId } : {})
-});
+/** 子代理参数按会话引擎生成：Codex 用 spawn_agent，pi 用 subagent 工具。 */
+const subagentArguments = (
+  config: RoleExecutionOverrides | undefined,
+  engineId: string
+): Record<string, string | boolean> =>
+  engineId === "codex"
+    ? {
+        fork_context: false,
+        ...(config?.modelId ? { model: config.modelId } : {}),
+        ...(config?.reasoningOptionId ? { reasoning_effort: config.reasoningOptionId } : {})
+      }
+    : {
+        agent: "delegate",
+        context: "fresh",
+        ...(config?.modelId
+          ? {
+              model: config.reasoningOptionId
+                ? `${config.modelId}:${config.reasoningOptionId}`
+                : config.modelId
+            }
+          : {})
+      };
+
+const subagentToolLabel = (engineId: string): string =>
+  engineId === "codex"
+    ? "spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）"
+    : "subagent tool parameters（JSON；作为 subagent 工具参数传入）";
 const issueStatusText: Record<Issue["status"], string> = {
   open: "待处理", investigating: "调查中", decision: "待决策", started: "已开工", closed: "关闭", duplicate: "重复"
 };
@@ -403,7 +425,7 @@ export class WorkbenchService {
     return this.roles.resolve((await this.context(workspaceId)).rootPath, roleId);
   }
 
-  async resolveWorkerRole(workspaceId: string) {
+  async resolveWorkerRole(workspaceId: string, engineId = "codex") {
     const root = (await this.context(workspaceId)).rootPath;
     const [worker, reviewer, verifier] = await Promise.all(
       ["worker", "reviewer", "verifier"].map((role) => this.roles.resolve(root, role))
@@ -413,15 +435,19 @@ export class WorkbenchService {
       resolved.content,
       `## ${role} subagent model configuration（JSON；仅用于核对）`,
       JSON.stringify(resolved.modelConfig ?? {}),
-      `## ${role} spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）`,
-      JSON.stringify(subagentSpawnArguments(resolved.modelConfig))
+      `## ${role} ${subagentToolLabel(engineId)}`,
+      JSON.stringify(subagentArguments(resolved.modelConfig, engineId))
     ].join("\n");
     return { ...worker, content: [worker.content, roleBlock("reviewer", reviewer), roleBlock("verifier", verifier)].join("\n\n") };
   }
 
   async resolveSessionInstructions(workspaceId: string, metadata: Record<string, unknown>): Promise<string> {
     const role = typeof metadata.role === "string" ? metadata.role : "design-partner";
-    if (role === "worker") return (await this.resolveWorkerRole(workspaceId)).content;
+    const engineId =
+      typeof metadata.engineId === "string" && metadata.engineId
+        ? metadata.engineId
+        : "codex";
+    if (role === "worker") return (await this.resolveWorkerRole(workspaceId, engineId)).content;
     if (role === "maintainer" && typeof metadata.domainId === "string") {
       return (await this.resolveMaintainer(workspaceId, metadata.domainId)).content;
     }

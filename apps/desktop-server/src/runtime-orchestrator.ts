@@ -138,7 +138,13 @@ export class RuntimeOrchestrator {
   ): Promise<string | undefined> {
     const session = this.domainService.requireSession(sessionId);
     const workspaceId = this.domainService.getConversation(session.conversationId)?.workspaceId;
-    return workspaceId ? this.resolveRoleInstructions(workspaceId, { ...session.metadata, ...metadata }) : undefined;
+    return workspaceId
+      ? this.resolveRoleInstructions(workspaceId, {
+          ...session.metadata,
+          ...metadata,
+          engineId: this.resolveSessionEngineId(session)
+        })
+      : undefined;
   }
 
   public async resolveRoleInstructions(
@@ -752,7 +758,10 @@ export class RuntimeOrchestrator {
     const workspaceId = this.domainService.getConversation(session.conversationId)?.workspaceId;
     const resolvesRole = envelope.command.type === "sendUserMessage" || envelope.command.type === "steerTurn";
     const developerInstructions = resolvesRole && workspaceId
-      ? await this.resolveRoleInstructions(workspaceId, session.metadata ?? {})
+      ? await this.resolveRoleInstructions(workspaceId, {
+          ...(session.metadata ?? {}),
+          engineId: this.resolveSessionEngineId(session)
+        })
       : deliveredDeveloperInstructions;
     return {
       ...envelope,

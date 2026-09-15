@@ -12,6 +12,18 @@ export type PiHostBridge = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+const respond = (
+  response: { statusCode: number; setHeader(name: string, value: string): void; end(payload?: string): void },
+  statusCode: number,
+  payload?: string
+): void => {
+  response.statusCode = statusCode;
+  if (payload !== undefined) {
+    response.setHeader("content-type", "application/json");
+  }
+  response.end(payload);
+};
+
 /**
  * pi 进程里的扩展要调用工作台宿主工具，而它不在工作台进程内，
  * 因此装配单元开一个只绑定回环地址、带一次性令牌的入口。
@@ -23,7 +35,7 @@ export const startPiHostBridge = async (options: {
   const token = randomUUID();
   const server: Server = createServer((request, response) => {
     if (request.method !== "POST") {
-      response.writeHead(405).end();
+      respond(response, 405);
       return;
     }
     let body = "";
@@ -36,11 +48,11 @@ export const startPiHostBridge = async (options: {
         try {
           payload = JSON.parse(body);
         } catch {
-          response.writeHead(400).end(JSON.stringify({ ok: false, error: "invalid json" }));
+          respond(response, 400, JSON.stringify({ ok: false, error: "invalid json" }));
           return;
         }
         if (!isRecord(payload) || payload.token !== token) {
-          response.writeHead(403).end(JSON.stringify({ ok: false, error: "invalid token" }));
+          respond(response, 403, JSON.stringify({ ok: false, error: "invalid token" }));
           return;
         }
         const name = typeof payload.name === "string" ? payload.name : "";
@@ -54,9 +66,11 @@ export const startPiHostBridge = async (options: {
           context: { engineId: options.engineId, sessionId }
         });
         if (!tool) {
-          response
-            .writeHead(404)
-            .end(JSON.stringify({ ok: false, error: `unknown host tool ${name}` }));
+          respond(
+            response,
+            404,
+            JSON.stringify({ ok: false, error: `unknown host tool ${name}` })
+          );
           return;
         }
         try {
@@ -75,11 +89,11 @@ export const startPiHostBridge = async (options: {
               providerSessionId
             }
           });
-          response
-            .writeHead(200)
-            .end(JSON.stringify({ ok: true, result }));
+          respond(response, 200, JSON.stringify({ ok: true, result }));
         } catch (error) {
-          response.writeHead(200).end(
+          respond(
+            response,
+            200,
             JSON.stringify({
               ok: false,
               error: error instanceof Error ? error.message : String(error)
@@ -90,7 +104,9 @@ export const startPiHostBridge = async (options: {
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
+  const address = (
+    server as unknown as { address(): { port?: number } | string | null }
+  ).address();
   const port = typeof address === "object" && address ? address.port : 0;
   return {
     url: `http://127.0.0.1:${port}`,

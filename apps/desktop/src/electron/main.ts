@@ -61,6 +61,11 @@ const roleDefaultsDir = [join(appRoot, "roles"), resolve(appRoot, "../../package
 const cliEntryPath = [join(appRoot, "cli", "vermillion.mjs"), resolve(appRoot, "../../packages/workbench/bin/vermillion.mjs")].find((path) => existsSync(path));
 // Launcher script: resources/app/scripts in a release, packages/workbench in the repo.
 const launcherPackageRoot = [appRoot, resolve(appRoot, "../../packages/workbench")].find((dir) => existsSync(join(dir, "scripts", "start-on-hidden-desktop.ps1")));
+// pi host extension: resources/app/pi-extension in a release, apps/desktop-server/resources in the repo.
+const piExtensionPath = process.env.VERMILLION_PI_EXTENSION?.trim() || [
+  join(appRoot, "pi-extension", "index.mjs"),
+  resolve(appRoot, "../../apps/desktop-server/resources/pi-extension/index.mjs")
+].find((path) => existsSync(path));
 
 /** Puts a `vermillion` command on PATH for every agent process spawned from here. */
 const exposeCliOnPath = (baseDir: string): void => {
@@ -633,6 +638,7 @@ const boot = async (): Promise<void> => {
   let window = createMainWindow();
   const service = createSessionRuntimeService({
     persistenceBaseDir,
+    ...(piExtensionPath ? { piExtensionPath } : {}),
     pickWorkspaceDirectory: async () => {
       const result = await dialog.showOpenDialog(window, {
         title: "Add workspace",

@@ -34,6 +34,7 @@ export type AppStartResult = {
   projectPath?: string;
   workspaceId?: string;
   codexHome?: string;
+  piAgentDir?: string;
 };
 
 export type AppWindowAction = "status" | "minimize" | "restore";
@@ -226,6 +227,7 @@ export class AppLauncher {
         kind: "vermillion-acceptance", pid, desktop: process.platform === "win32" ? this.desktop : "", token: launchToken
       } satisfies AcceptanceLaunchRecord) + "\n", "utf8");
       const codexHome = fixture && "codexHome" in fixture ? (fixture as RealSessionFixture).codexHome : undefined;
+      const piAgentDir = fixture && "piAgentDir" in fixture ? (fixture as RealSessionFixture).piAgentDir : undefined;
       return {
         pid,
         cdpUrl,
@@ -234,6 +236,8 @@ export class AppLauncher {
         ...(fixture ? { projectPath: fixture.projectPath } : {}),
         ...(workspaceId ? { workspaceId } : {}),
         ...(codexHome ? { codexHome } : {})
+        ,
+        ...(piAgentDir ? { piAgentDir } : {})
       };
     } catch (error) {
       await this.stop(pid);

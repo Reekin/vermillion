@@ -26,6 +26,7 @@ import { resolveEngineSpawnCommand } from "../../engine-program-resolution.js";
 import { sessionItemId } from "../../session-item-id.js";
 import { spawnPiJsonlProcess, type PiJsonlProcess } from "./jsonl-process.js";
 import { PiModelCatalog, type PiModelChoice } from "./model-catalog.js";
+import type { PiHostBridge } from "./host-bridge.js";
 import { listPiSkills } from "./skills.js";
 import { piTurnEntryType } from "./session-identity.js";
 
@@ -35,7 +36,11 @@ const dataUriPattern = /^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,(.*)$/isu;
 
 export type PiRuntimePortOptions = {
   engineId: string;
-  resolveCommand: () => Promise<{ commandPath: string; commandArgs: string[] }>;
+  resolveCommand: () => Promise<{
+    commandPath: string;
+    commandArgs: string[];
+    found: boolean;
+  }>;
   /** 每个工作台会话一个 pi 会话目录；会话文件与本次运行的辅助文件都在其下。 */
   resolveSessionDirectory: (sessionId: string) => string;
   resolvePiSessionId: (sessionId: string) => string;
@@ -47,11 +52,7 @@ export type PiRuntimePortOptions = {
   writeDiagnostic?: (input: DiagnosticsWriteInputRpc) => void;
 };
 
-export type PiHostBridgeHandle = {
-  url: string;
-  token: string;
-  close: () => Promise<void>;
-};
+export type PiHostBridgeHandle = PiHostBridge;
 
 type PendingCommand = {
   resolve: (message: Record<string, unknown>) => void;
@@ -75,9 +76,7 @@ type PiSessionRuntime = {
   streaming: boolean;
   currentTurnId?: string;
   assistantCount: number;
-  deferred: Array<{ method: PiRuntimeEventMethod; params: Record<string, unknown> }>;
   awaitingTurn?: {
-    promise: Promise<string>;
     resolve: (turnId: string) => void;
     timer: NodeJS.Timeout;
   };
@@ -85,6 +84,7 @@ type PiSessionRuntime = {
   appliedModel?: { provider: string; modelId: string };
   appliedThinking?: string;
   lastStopReason?: string;
+  toolText: Map<string, string>;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -297,13 +297,12 @@ export class PiRuntimePort
     summaryText?: string;
   }> {
     const command = await this.options.resolveCommand();
-    const resolved = resolveEngineProgramCommandPath(command);
     return {
-      authenticated: resolved.found,
+      authenticated: command.found,
       authMethod: "pi models.json",
-      summaryText: resolved.found
-        ? `pi ${resolved.resolvedPath ?? resolved.path}`
-        : `pi not found: ${resolved.path}`
+      summaryText: command.found
+        ? `pi ${command.commandPath}`
+        : `pi not found: ${command.commandPath}`
     };
   }
 
@@ -325,7 +324,7 @@ export class PiRuntimePort
       runtime,
       payload.params
     );
-    await this.applyExecution(runtime, execution, payload.params);
+    await this.applyExecution(runtime, execution);
     const images = await this.buildImages(payload.params.attachments);
     const turnPromise = this.armTurn(runtime);
     await this.writePendingTurn(runtime, {
@@ -492,7 +491,7 @@ export class PiRuntimePort
       pending: new Map(),
       streaming: false,
       assistantCount: 0,
-      deferred: []
+      toolText: new Map()
     };
     runtime.teardown.push(
       process.subscribe((message) => this.handleMessage(runtime, message))
@@ -540,8 +539,7 @@ export class PiRuntimePort
   /** 模型与推理档位按引擎无关的标识传入，这里解析成唯一的 pi provider/id 与档位。 */
   private async applyExecution(
     runtime: PiSessionRuntime,
-    execution: TurnExecution | undefined,
-    params: Record<string, unknown>
+    execution: TurnExecution | undefined
   ): Promise<void> {
     const modelId = execution?.modelId;
     if (modelId) {
@@ -602,7 +600,6 @@ export class PiRuntimePort
         context: { serviceTierId: execution.serviceTierId }
       });
     }
-    void params;
   }
 
   /** 角色指令写在会话目录里，由随包扩展在每轮开始时读入系统提示。 */
@@ -693,11 +690,9 @@ export class PiRuntimePort
     this.disarmTurn(runtime);
     runtime.currentTurnId = undefined;
     runtime.assistantCount = 0;
-    runtime.deferred = [];
-    let resolveTurn: (turnId: string) => void = () => undefined;
-    const promise = new Promise<string>((resolve, reject) => {
-      resolveTurn = resolve;
+    return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
+        runtime.awaitingTurn = undefined;
         reject(
           new RuntimePortError({
             code: "runtime_request_timeout",
@@ -707,10 +702,8 @@ export class PiRuntimePort
         );
       }, turnStartTimeoutMs);
       timer.unref?.();
-      runtime.awaitingTurn = { promise, resolve, timer };
+      runtime.awaitingTurn = { resolve, timer };
     });
-    runtime.awaitingTurn = { promise, resolve: resolveTurn, timer: undefined as never };
-    return promise;
   }
 
   private disarmTurn(runtime: PiSessionRuntime): void {
@@ -767,11 +760,12 @@ export class PiRuntimePort
         finishReason: "failed"
       });
     }
-    if (code !== 0 && code !== null) {
+    if (code !== 0) {
+      const stderr = runtime.process?.stderrText() ?? "";
       this.emit("runtime.error", {
         sessionId: runtime.sessionId,
         code: "pi_process_exited",
-        message: `pi exited with code ${code}. ${runtime.process?.stderrText() ?? ""}`.trim(),
+        message: `pi exited ${code === null ? "before starting" : `with code ${code}`}.${stderr ? ` ${stderr}` : ""}`,
         recoverable: true
       });
     }
@@ -941,11 +935,6 @@ export class PiRuntimePort
         : {})
     });
     void entry;
-    const deferred = runtime.deferred;
-    runtime.deferred = [];
-    for (const event of deferred) {
-      this.emit(event.method, event.params);
-    }
     if (runtime.awaitingTurn) {
       const awaiting = runtime.awaitingTurn;
       runtime.awaitingTurn = undefined;
@@ -959,6 +948,28 @@ export class PiRuntimePort
     type: string,
     message: Record<string, unknown>
   ): void {
+    // `message_update` 只带增量块，没有 message 字段；其余两种事件带完整消息。
+    if (type === "message_update") {
+      const turnId = runtime.currentTurnId;
+      const event = isRecord(message.assistantMessageEvent)
+        ? message.assistantMessageEvent
+        : undefined;
+      const delta = event?.type === "text_delta" ? asString(event.delta) : undefined;
+      if (!turnId || !delta) {
+        return;
+      }
+      this.emit("message.delta", {
+        sessionId: runtime.sessionId,
+        turnId,
+        messageId: sessionItemId(
+          runtime.sessionId,
+          `${turnId}:a${Math.max(runtime.assistantCount - 1, 0)}`
+        ),
+        delta,
+        engineId: this.engineId
+      });
+      return;
+    }
     const payload = isRecord(message.message) ? message.message : undefined;
     const role = payload ? asString(payload.role) : undefined;
     if (role !== "assistant") {
@@ -983,26 +994,6 @@ export class PiRuntimePort
       });
       return;
     }
-    const messageId = sessionItemId(
-      runtime.sessionId,
-      `${turnId}:a${Math.max(runtime.assistantCount - 1, 0)}`
-    );
-    if (type === "message_update") {
-      const event = isRecord(message.assistantMessageEvent)
-        ? message.assistantMessageEvent
-        : undefined;
-      const delta = event ? asString(event.delta) : undefined;
-      if (event?.type === "text_delta" && delta) {
-        this.emit("message.delta", {
-          sessionId: runtime.sessionId,
-          turnId,
-          messageId,
-          delta,
-          engineId: this.engineId
-        });
-      }
-      return;
-    }
     if (type === "message_end") {
       if (payload?.stopReason) {
         runtime.lastStopReason = asString(payload.stopReason);
@@ -1011,10 +1002,12 @@ export class PiRuntimePort
       this.emit("message.completed", {
         sessionId: runtime.sessionId,
         turnId,
-        messageId,
+        messageId: sessionItemId(
+          runtime.sessionId,
+          `${turnId}:a${Math.max(runtime.assistantCount - 1, 0)}`
+        ),
         role: "assistant",
         finalText: text,
-        ...(runtime.lastStopReason === "error" ? { isFinalForTurn: true } : {}),
         engineId: this.engineId
       });
       if (runtime.lastStopReason === "error") {
@@ -1168,14 +1161,3 @@ export type PiModelCatalogChoiceList = Awaited<
 
 const createId = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-
-const resolveEngineProgramCommandPath = (command: {
-  commandPath: string;
-  commandArgs: string[];
-}): { found: boolean; path: string; resolvedPath?: string } => {
-  const resolved = resolveEngineSpawnCommand(command.commandPath, command.commandArgs);
-  return {
-    found: resolved.command.length > 0,
-    path: command.commandPath
-  };
-};
