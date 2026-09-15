@@ -71,6 +71,13 @@ import { resolveEngineProgramCommand } from "./engine-program-resolution.js";
 const defaultSessionWindowLimit = 8;
 const completeSessionWindowLimit = Number.MAX_SAFE_INTEGER;
 
+/** 新的一次打开或激活会中止上一次；被中止的一代不再继续提交状态。 */
+const throwIfOpenCancelled = (signal: AbortSignal): void => {
+  if (signal.aborted) {
+    throw new Error("Open session cancelled.");
+  }
+};
+
 const baseComposerSlashSuggestions: readonly ComposerSlashSuggestionRpc[] = [
   {
     id: "status",
@@ -210,7 +217,6 @@ export class SessionShellService {
   private readonly turnChangeService: TurnChangeService;
   private readonly codexHookActivityService: CodexHookActivityService;
   private readonly codexTurnChangesService: CodexTurnChangesService;
-  private openSessionGeneration = 0;
   private openSessionAbortController: AbortController | undefined;
   private activationQueue: Promise<void> = Promise.resolve();
   private readonly partiallyHydratedSessionIds = new Set<string>();
@@ -425,10 +431,8 @@ export class SessionShellService {
       if (this.releaseSessionExecutionImpl) {
         await this.releaseSessionExecutionImpl(sessionId);
       }
-      const members = this.sessionTreeMembers(sessionId);
       const refreshed = await this.clearSessionHistoryForTree(sessionId);
       if (refreshed) {
-        this.sessionReconciliation?.invalidateSessions?.(members);
         this.wrapperChatTree?.invalidate(sessionId);
       }
       return refreshed;
@@ -703,12 +707,7 @@ export class SessionShellService {
       forceProviderHydration?: boolean;
     } = {}
   ): Promise<{ page: SessionWindowSnapshot }> {
-    this.openSessionAbortController?.abort();
-    const abortController = new AbortController();
-    this.openSessionAbortController = abortController;
-    const generation = ++this.openSessionGeneration;
-    const isCancelled = () =>
-      generation !== this.openSessionGeneration || abortController.signal.aborted;
+    const signal = this.beginOpenSession();
     const refreshedHistory = await this.refreshSessionHistoryBeforeOpen(sessionId);
     const loadedSession = this.runtimeService
       .listSessions({ includeArchived: true })
@@ -733,26 +732,21 @@ export class SessionShellService {
       !refreshedHistory &&
       !isUncoveredProviderSession &&
       !this.partiallyHydratedSessionIds.has(sessionId);
-    if (isCancelled()) {
-      throw new Error("Open session cancelled.");
-    }
+    throwIfOpenCancelled(signal);
     if (refreshedHistory && this.sessionReconciliation) {
       const loadedByFullHydration =
         (await this.sessionReconciliation.ensureSessionLoaded(sessionId, {
-          isCancelled,
           force: true,
           requireFull: true,
-          signal: abortController.signal,
+          signal,
           retainExecution: true
         })) ?? false;
-      if (isCancelled()) {
-        throw new Error("Open session cancelled.");
-      }
+      throwIfOpenCancelled(signal);
       if (!loadedByFullHydration) {
         throw new Error("This session could not be fully loaded.");
       }
       this.partiallyHydratedSessionIds.delete(sessionId);
-      await this.activateOpenedSession(sessionId, { isCancelled });
+      await this.activateOpenedSession(sessionId, { signal });
       this.startSessionExecutionRecovery(sessionId);
       return {
         page: this.buildSessionWindow(sessionId, {
@@ -764,20 +758,17 @@ export class SessionShellService {
     if (input.forceProviderHydration) {
       const loadedByFullHydration =
         (await this.sessionReconciliation?.ensureSessionLoaded(sessionId, {
-          isCancelled,
           force: true,
-          signal: abortController.signal,
+          signal,
           retainExecution: true
         })) ?? false;
-      if (isCancelled()) {
-        throw new Error("Open session cancelled.");
-      }
+      throwIfOpenCancelled(signal);
       if (isProviderSession && !loadedByFullHydration) {
         throw new Error("This session could not be fully loaded.");
       }
       if (loadedByFullHydration) {
         this.partiallyHydratedSessionIds.delete(sessionId);
-        await this.activateOpenedSession(sessionId, { isCancelled });
+        await this.activateOpenedSession(sessionId, { signal });
         this.startSessionExecutionRecovery(sessionId);
         return {
           page: this.buildSessionWindow(sessionId, {
@@ -790,15 +781,12 @@ export class SessionShellService {
       const hydratedPage = await this.hydrateSessionWindow(sessionId, {
         limit: defaultSessionWindowLimit,
         anchorTurnId,
-        isCancelled,
-        signal: abortController.signal,
+        signal,
         retainExecution: true
       });
-      if (isCancelled()) {
-        throw new Error("Open session cancelled.");
-      }
+      throwIfOpenCancelled(signal);
       if (hydratedPage) {
-        await this.activateOpenedSession(sessionId, { isCancelled });
+        await this.activateOpenedSession(sessionId, { signal });
         this.startSessionExecutionRecovery(sessionId);
         return {
           page: hydratedPage
@@ -808,14 +796,11 @@ export class SessionShellService {
     if (!input.forceProviderHydration && !alreadyFullyLoaded) {
       const loadedByFullHydration =
         (await this.sessionReconciliation?.ensureSessionLoaded(sessionId, {
-          isCancelled,
           force: alreadyLoaded,
-          signal: abortController.signal,
+          signal,
           retainExecution: true
         })) ?? false;
-      if (isCancelled()) {
-        throw new Error("Open session cancelled.");
-      }
+      throwIfOpenCancelled(signal);
       if (alreadyLoaded && !loadedByFullHydration) {
         throw new Error("This session could not be fully loaded.");
       }
@@ -829,10 +814,8 @@ export class SessionShellService {
         "This session does not expose a loadable provider session id. It was likely created by an older build and can no longer be reopened."
       );
     }
-    if (isCancelled()) {
-      throw new Error("Open session cancelled.");
-    }
-    await this.activateOpenedSession(sessionId, { isCancelled });
+    throwIfOpenCancelled(signal);
+    await this.activateOpenedSession(sessionId, { signal });
     this.startSessionExecutionRecovery(sessionId);
     return {
       page: this.buildSessionWindow(sessionId, {
@@ -843,17 +826,23 @@ export class SessionShellService {
   }
 
   public async activateSession(sessionId: string, options?: { focusTree?: boolean }): Promise<{ sessionId: string }> {
-    const generation = ++this.openSessionGeneration;
-    const isCancelled = () => generation !== this.openSessionGeneration;
+    const signal = this.beginOpenSession();
     const context = this.sessionIdentity.resolveContext(sessionId);
     if (!context.session && !context.indexEntry && !context.providerHandle) {
       throw new Error(`Session not found: ${sessionId}`);
     }
     if (options?.focusTree) await this.wrapperChatTree?.selectSession(sessionId);
-    await this.activateOpenedSession(sessionId, { isCancelled });
+    await this.activateOpenedSession(sessionId, { signal });
     return {
       sessionId
     };
+  }
+
+  private beginOpenSession(): AbortSignal {
+    this.openSessionAbortController?.abort();
+    const controller = new AbortController();
+    this.openSessionAbortController = controller;
+    return controller.signal;
   }
 
   public async loadOlderSessionTurns(input: {
@@ -1184,27 +1173,21 @@ export class SessionShellService {
   private async activateOpenedSession(
     sessionId: string,
     input: {
-      isCancelled?: () => boolean;
+      signal?: AbortSignal;
     } = {}
   ): Promise<void> {
     const run = this.activationQueue
       .catch(() => undefined)
       .then(async () => {
         const context = this.sessionIdentity.resolveContext(sessionId);
-        if (input.isCancelled?.()) {
-          throw new Error("Open session cancelled.");
-        }
+        if (input.signal) throwIfOpenCancelled(input.signal);
         await this.createWorkspaceSelectionService().activateSelection({
           workspaceId: context.indexEntry?.workspaceId,
           sessionId
         });
-        if (input.isCancelled?.()) {
-          throw new Error("Open session cancelled.");
-        }
+        if (input.signal) throwIfOpenCancelled(input.signal);
         await this.sessionCatalog.markSessionRead(sessionId);
-        if (input.isCancelled?.()) {
-          throw new Error("Open session cancelled.");
-        }
+        if (input.signal) throwIfOpenCancelled(input.signal);
       });
     this.activationQueue = run.catch(() => undefined);
     await run;
@@ -1263,10 +1246,7 @@ export class SessionShellService {
     }
   }
 
-  private async ensureOpenedSessionExecutable(
-    sessionId: string,
-    input: { isCancelled?: () => boolean } = {}
-  ): Promise<void> {
+  private async ensureOpenedSessionExecutable(sessionId: string): Promise<void> {
     const context = this.sessionIdentity.resolveContext(sessionId);
     if (!context.providerHandle || !this.sessionReconciliation) {
       return;
@@ -1274,9 +1254,6 @@ export class SessionShellService {
     const executable = await this.sessionReconciliation.ensureSessionExecutable(
       sessionId
     );
-    if (input.isCancelled?.()) {
-      throw new Error("Open session cancelled.");
-    }
     if (!executable) {
       throw new Error("This session could not be resumed for sending.");
     }
@@ -1330,7 +1307,6 @@ export class SessionShellService {
       limit: number;
       cursor?: string;
       anchorTurnId?: string;
-      isCancelled?: () => boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
@@ -1340,7 +1316,7 @@ export class SessionShellService {
       input
     );
     const hydrated = await hydration?.catch(() => undefined);
-    if (!hydrated || input.isCancelled?.()) {
+    if (!hydrated || input.signal?.aborted) {
       return undefined;
     }
     this.partiallyHydratedSessionIds.add(sessionId);

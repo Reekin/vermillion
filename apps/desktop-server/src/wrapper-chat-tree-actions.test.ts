@@ -85,7 +85,10 @@ it("waits for unloaded tree members before deciding whether a node is terminal",
   try {
     const archive = vi.fn();
     const pending = expect(cold.archiveBranch("root", "branch-2", archive)).rejects.toThrow("Only a terminal fork");
-    await vi.waitFor(() => expect(load).toHaveBeenCalledWith("descendant", { force: false }));
+    await vi.waitFor(() => expect(load).toHaveBeenCalledWith(
+      "descendant",
+      expect.objectContaining({ force: false })
+    ));
     expect(archive).not.toHaveBeenCalled();
     finish();
     await pending;

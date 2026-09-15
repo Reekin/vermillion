@@ -257,8 +257,7 @@ describe("SessionShellService", () => {
     expect(harness.ensureSessionLoaded).toHaveBeenCalledWith("session-1", {
       force: true,
       requireFull: true,
-      isCancelled: expect.any(Function),
-      signal: expect.anything(),
+      signal: expect.any(AbortSignal),
       retainExecution: true
     });
     expect(harness.invalidate).toHaveBeenCalledWith("session-1");
@@ -1141,7 +1140,7 @@ describe("SessionShellService", () => {
       expect.objectContaining({
         limit: expect.any(Number),
         anchorTurnId: "turn-2",
-        isCancelled: expect.any(Function)
+        signal: expect.any(AbortSignal)
       })
     );
     expect(getChatTree).toHaveBeenCalledWith("session-1");
@@ -1227,7 +1226,7 @@ describe("SessionShellService", () => {
       "session-1",
       expect.objectContaining({
         force: true,
-        isCancelled: expect.any(Function)
+        signal: expect.any(AbortSignal)
       })
     );
     expect(getChatTree).toHaveBeenCalledWith("session-1");

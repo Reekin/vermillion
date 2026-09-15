@@ -19,19 +19,25 @@ type TreeProjection = {
   turnsById: Map<string, Turn>;
 };
 
-type TreeLoadState = {
-  generation: number;
-  publishedGeneration?: number;
+type TreeLoad = {
+  controller: AbortController;
+  promise: Promise<void>;
+  /** 本代加载完成的成员，完成后整体成为当前投影的成员集合。 */
+  members: Set<string>;
+};
+
+type TreeState = {
+  /** 当前投影使用的成员集合，刷新期间保持上一代结果可读。 */
+  members: Set<string>;
+  load?: TreeLoad;
   published?: TreeProjection;
-  loading?: Promise<void>;
-  loadError?: unknown;
+  reload: boolean;
+  error?: unknown;
 };
 
 /** Fork membership and the viewing cursor belong to the wrapper, independently of running turns. */
 export class WrapperChatTreeService {
-  private readonly loaded = new Set<string>();
-  private readonly loading = new Map<string, Promise<void>>();
-  private readonly trees = new Map<string, TreeLoadState>();
+  private readonly trees = new Map<string, TreeState>();
   private readonly operations = new Map<string, SendOperationState>();
   private readonly unsubscribe: () => void;
 
@@ -56,119 +62,119 @@ export class WrapperChatTreeService {
     });
   }
 
-  public dispose(): void { this.unsubscribe(); }
+  public dispose(): void {
+    this.unsubscribe();
+    for (const state of this.trees.values()) state.load?.controller.abort();
+  }
 
-  private treeState(sessionId: string): TreeLoadState {
+  private treeState(sessionId: string): TreeState {
     const treeId = this.options.sessionIndexStore.getTreeId(sessionId);
     let state = this.trees.get(treeId);
     if (!state) {
-      state = { generation: 0 };
+      state = { members: new Set(), reload: false };
       this.trees.set(treeId, state);
     }
     return state;
   }
 
+  /** 历史失效：中止本代加载，保留已发布结果，并立即以新一代重建。 */
   public invalidate(sessionId: string): void {
-    const index = this.options.sessionIndexStore;
     const state = this.treeState(sessionId);
-    state.generation += 1;
-    state.loadError = undefined;
-    for (const memberId of index.getTreeMembers(sessionId)) {
-      this.loaded.delete(memberId);
+    state.reload = true;
+    state.error = undefined;
+    const previous = state.load;
+    state.load = undefined;
+    previous?.controller.abort();
+    if (state.published) {
+      void this.startTreeLoad(sessionId, state).promise.catch(() => undefined);
     }
   }
 
-  private async loadMember(sessionId: string): Promise<void> {
-    while (!this.loaded.has(sessionId)) {
-      const existing = this.loading.get(sessionId);
-      if (existing) {
-        await existing;
-        continue;
-      }
-      const state = this.treeState(sessionId);
-      const generation = state.generation;
-      const task = (async () => {
-        const entry = this.options.sessionIndexStore.getEntry(sessionId);
-        const loaded = await this.options.reconciliation.ensureSessionLoaded(
-          sessionId,
-          entry?.providerSessionId
-            ? {
-                force: false,
-                requireFull: true,
-                isCancelled: () => state.generation !== generation
-              }
-            : { force: false }
-        );
-        if (!loaded) {
-          if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt) return;
-          throw new Error(`Unable to load tree member: ${sessionId}`);
-        }
-        if (this.treeState(sessionId) === state && state.generation === generation) {
-          this.loaded.add(sessionId);
-        }
-      })();
-      this.loading.set(sessionId, task);
-      try {
-        await task;
-      } finally {
-        if (this.loading.get(sessionId) === task) this.loading.delete(sessionId);
-      }
-      if (this.options.sessionIndexStore.getEntry(sessionId)?.archivedAt && !this.loaded.has(sessionId) &&
-        this.treeState(sessionId) === state && state.generation === generation) return;
-    }
+  private startTreeLoad(sessionId: string, state: TreeState): TreeLoad {
+    const force = state.reload;
+    state.reload = false;
+    state.error = undefined;
+    const load: TreeLoad = {
+      controller: new AbortController(),
+      promise: Promise.resolve(),
+      members: new Set()
+    };
+    state.load = load;
+    load.promise = this.runTreeLoad(sessionId, state, load, force).finally(() => {
+      if (state.load === load) state.load = undefined;
+    });
+    return load;
   }
 
-  private async loadTree(sessionId: string, generation: number): Promise<TreeProjection | undefined> {
-    const index = this.options.sessionIndexStore;
-    while (true) {
-      if (this.treeState(sessionId).generation !== generation) return undefined;
-      const members = index.getTreeMembers(sessionId);
-      if (members.some((id) => index.getEntry(id)?.archivedAt)) {
-        // Ancestors borrow surviving histories before those members load themselves.
-        for (const id of members) await this.loadMember(id);
-      } else {
-        await Promise.all(members.map((id) => this.loadMember(id)));
+  private async runTreeLoad(
+    sessionId: string,
+    state: TreeState,
+    load: TreeLoad,
+    force: boolean
+  ): Promise<void> {
+    try {
+      await this.loadMembers(sessionId, load, force);
+    } catch (error) {
+      if (load.controller.signal.aborted) return;
+      state.error = error;
+      if (state.published) {
+        await this.reportTreeRefresh(sessionId, {
+          status: "failed",
+          message: error instanceof Error ? error.message : String(error)
+        });
+        this.changed(sessionId);
       }
-      if (this.treeState(sessionId).generation !== generation) return undefined;
-      const current = index.getTreeMembers(sessionId);
-      if (current.every((id) => this.loaded.has(id) || index.getEntry(id)?.archivedAt)) {
-        return this.buildProjection(sessionId);
-      }
+      return;
     }
-  }
-
-  private startTreeLoad(sessionId: string, state: TreeLoadState): Promise<void> {
-    if (state.loading) return state.loading;
-    const generation = state.generation;
+    if (load.controller.signal.aborted) return;
     const hadPublished = Boolean(state.published);
-    state.loading = this.loadTree(sessionId, generation)
-      .then(async (projection) => {
-        if (!projection || state.generation !== generation) return;
-        state.published = projection;
-        state.publishedGeneration = generation;
-        state.loadError = undefined;
-        if (hadPublished) {
-          await this.reportTreeRefresh(sessionId, { status: "ready" });
-          this.changed(sessionId);
-        }
-      })
-      .catch(async (error) => {
-        if (state.generation === generation) {
-          state.loadError = error;
-          if (state.published) {
-            await this.reportTreeRefresh(sessionId, {
-              status: "failed",
-              message: error instanceof Error ? error.message : String(error)
-            });
-            this.changed(sessionId);
-          }
-        }
-      })
-      .finally(() => {
-        state.loading = undefined;
-        if (state.generation !== generation) void this.startTreeLoad(sessionId, state);
-      });
-    return state.loading;
+    state.members = load.members;
+    state.published = this.buildProjection(sessionId, state.members);
+    if (hadPublished) {
+      await this.reportTreeRefresh(sessionId, { status: "ready" });
+      this.changed(sessionId);
+    }
+  }
+
+  private async loadMembers(
+    sessionId: string,
+    load: TreeLoad,
+    force: boolean
+  ): Promise<void> {
+    const index = this.options.sessionIndexStore;
+    const members = index.getTreeMembers(sessionId);
+    if (members.some((id) => index.getEntry(id)?.archivedAt)) {
+      // 归档成员的历史借用依赖祖先先就绪，按顺序加载。
+      for (const memberId of members) {
+        await this.loadMember(load.members, memberId, load.controller.signal, force);
+      }
+      return;
+    }
+    await Promise.all(members.map((memberId) =>
+      this.loadMember(load.members, memberId, load.controller.signal, force)
+    ));
+  }
+
+  private async loadMember(
+    members: Set<string>,
+    sessionId: string,
+    signal: AbortSignal | undefined,
+    force: boolean
+  ): Promise<void> {
+    if (members.has(sessionId)) return;
+    const index = this.options.sessionIndexStore;
+    const isProviderSession = Boolean(index.getEntry(sessionId)?.providerSessionId);
+    const loaded = await this.options.reconciliation.ensureSessionLoaded(sessionId, {
+      force: force && isProviderSession,
+      requireFull: isProviderSession,
+      signal
+    });
+    if (loaded) {
+      if (!signal?.aborted) members.add(sessionId);
+      return;
+    }
+    if (index.getEntry(sessionId)?.archivedAt) return;
+    throw new Error(`Unable to load tree member: ${sessionId}`);
   }
 
   private async reportTreeRefresh(
@@ -188,26 +194,11 @@ export class WrapperChatTreeService {
     }));
   }
 
-  private async loadPublishedTreeChanges(sessionId: string): Promise<void> {
-    const index = this.options.sessionIndexStore;
-    while (true) {
-      const pendingTargets = new Set([...this.operations.values()]
-        .map((state) => state.operation)
-        .filter((operation) => operation.status !== "sent" && operation.targetSessionId)
-        .map((operation) => operation.targetSessionId!));
-      const members = index.getTreeMembers(sessionId);
-      const missing = members.filter((id) =>
-        !this.loaded.has(id) && !pendingTargets.has(id) && !index.getEntry(id)?.archivedAt);
-      if (missing.length === 0) return;
-      await Promise.all(missing.map((id) => this.loadMember(id)));
-    }
-  }
-
-  private buildProjection(sessionId: string): TreeProjection {
+  private buildProjection(sessionId: string, loaded: ReadonlySet<string>): TreeProjection {
     const { runtimeService, sessionIndexStore: index } = this.options;
     const treeId = index.getTreeId(sessionId);
     const treeMembers = index.getTreeMembers(sessionId);
-    const members = treeMembers.filter((id) => this.loaded.has(id));
+    const members = treeMembers.filter((id) => loaded.has(id));
     const snapshot = runtimeService.getSnapshot();
     const relations = index.listRelations();
     const paths = new Map<string, string[]>();
@@ -268,7 +259,7 @@ export class WrapperChatTreeService {
     const parentIds = new Set(visibleNodes.map((node) => node.parentNodeId));
     const forkIds = new Set(relations.filter((relation) => relation.relationType === "fork")
       .map((relation) => relation.childSessionId));
-    const complete = treeMembers.every((id) => this.loaded.has(id));
+    const complete = treeMembers.every((id) => loaded.has(id));
     for (const node of visibleNodes) {
       const owner = turnsById.get(node.nodeId)!.sessionId;
       Object.assign(node, { sessionId: owner, canArchive: complete && !parentIds.has(node.nodeId) &&
@@ -317,6 +308,7 @@ export class WrapperChatTreeService {
     return published;
   }
 
+  /** 查看位置变更产生新的投影，已发布投影本身不被就地改写。 */
   private applyPublishedView(
     sessionId: string,
     view: { sessionId: string; nodeId?: string; followTip?: boolean }
@@ -327,52 +319,76 @@ export class WrapperChatTreeService {
     const visibleTurnIds = currentNodeId
       ? path.slice(0, path.indexOf(currentNodeId) + 1)
       : [];
-    projection.tree = {
-      ...projection.tree,
-      currentSessionId: view.sessionId,
-      currentNodeId,
-      visibleTurnIds,
-      visibleNodeIds: visibleTurnIds,
-      nodes: projection.tree.nodes.map((node) => ({
-        ...node,
-        isCurrent: node.nodeId === currentNodeId
-      }))
+    this.treeState(sessionId).published = {
+      ...projection,
+      tree: {
+        ...projection.tree,
+        currentSessionId: view.sessionId,
+        currentNodeId,
+        visibleTurnIds,
+        visibleNodeIds: visibleTurnIds,
+        nodes: projection.tree.nodes.map((node) => ({
+          ...node,
+          isCurrent: node.nodeId === currentNodeId
+        }))
+      }
     };
   }
 
+  /**
+   * 读取会话树：没有快照时等待本代加载完成，有快照时直接从已加载成员派生，
+   * 不等待进行中的刷新，每次返回新的投影值。
+   */
   public async get(sessionId: string): Promise<ChatTreeSnapshot> {
     await this.options.sessionIndexStore.ready();
-    const index = this.options.sessionIndexStore;
-    while (true) {
-      const state = this.treeState(sessionId);
-      if (state.publishedGeneration !== state.generation) {
-        if (state.loadError && !state.loading && state.published) return state.published.tree;
-        const loading = this.startTreeLoad(sessionId, state);
-        if (!state.published) {
-          await loading;
-          if (!state.published) throw state.loadError ?? new Error(`Unable to load tree: ${sessionId}`);
-        } else {
-          return state.published.tree;
-        }
+    const state = this.treeState(sessionId);
+    if (state.published) {
+      if (!state.load) {
+        await this.loadNewMembers(sessionId, state);
       }
-      await this.loadPublishedTreeChanges(sessionId);
-      if (this.treeState(sessionId) !== state || state.publishedGeneration !== state.generation) continue;
-      const members = index.getTreeMembers(sessionId);
-      for (const id of members.filter((id) => !this.loaded.has(id) && !this.loading.has(id))) {
-        void this.loadMember(id).then(() => this.changed(sessionId)).catch(() => {});
-      }
-      const projection = this.buildProjection(sessionId);
-      state.published = projection;
-      const tree = projection.tree;
-      if (!this.options.sessionIndexStore.getTreeView(sessionId)) {
-        const view = {
-          sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true
-        };
-        await this.options.sessionIndexStore.setTreeView(sessionId, view);
-        this.applyPublishedView(sessionId, view);
-      }
-      return state.published.tree;
+      state.published = this.buildProjection(sessionId, state.members);
+    } else {
+      await this.awaitTreeLoad(sessionId, state);
     }
+    if (!state.published) {
+      throw state.error ?? new Error(`Unable to load tree: ${sessionId}`);
+    }
+    if (!this.options.sessionIndexStore.getTreeView(sessionId)) {
+      const tree = this.publishedProjection(sessionId).tree;
+      const view = { sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true };
+      await this.options.sessionIndexStore.setTreeView(sessionId, view);
+      this.applyPublishedView(sessionId, view);
+    }
+    return this.publishedProjection(sessionId).tree;
+  }
+
+  /** 索引中新出现的成员在投影前补齐；进行中的加载与本次发送目标不在这里等待。 */
+  private async loadNewMembers(sessionId: string, state: TreeState): Promise<void> {
+    const index = this.options.sessionIndexStore;
+    const pendingTargets = new Set([...this.operations.values()]
+      .map((entry) => entry.operation)
+      .filter((operation) => operation.status !== "sent" && operation.targetSessionId)
+      .map((operation) => operation.targetSessionId!));
+    const missing = index.getTreeMembers(sessionId).filter((memberId) =>
+      !state.members.has(memberId) &&
+      !pendingTargets.has(memberId) &&
+      !index.getEntry(memberId)?.archivedAt);
+    await Promise.all(missing.map((memberId) =>
+      this.loadMember(state.members, memberId, undefined, false)
+    ));
+  }
+
+  /** 失效会打断本代加载，本次读取接续新一代，直到有发布结果或确定失败。 */
+  private async awaitTreeLoad(
+    sessionId: string,
+    state: TreeState
+  ): Promise<TreeProjection | undefined> {
+    const load = state.load ?? this.startTreeLoad(sessionId, state);
+    await load.promise;
+    if (state.load || state.reload) {
+      return this.awaitTreeLoad(sessionId, state);
+    }
+    return state.published;
   }
 
   public async selectSession(sessionId: string): Promise<void> {
@@ -442,10 +458,9 @@ export class WrapperChatTreeService {
     }
     if (target && paths.get(member)?.at(-1) !== target) {
       member = await this.options.fork(member, target);
-      await this.loadMember(member);
       const state = this.treeState(sessionId);
-      state.published = this.buildProjection(sessionId);
-      state.publishedGeneration = state.generation;
+      await this.loadMember(state.members, member, undefined, false);
+      state.published = this.buildProjection(sessionId, state.members);
     }
     const view = { sessionId: member, nodeId: target, followTip: true };
     await this.options.sessionIndexStore.setTreeView(sessionId, view);
@@ -572,7 +587,12 @@ export class WrapperChatTreeService {
         this.changed(operation.sessionId);
       }
       if (state.cancelRequested) return;
-      await this.loadMember(operation.targetSessionId);
+      await this.loadMember(
+        this.treeState(operation.sessionId).members,
+        operation.targetSessionId,
+        undefined,
+        false
+      );
       if (state.cancelRequested) return;
       operation.status = "sending";
       this.changed(operation.sessionId);

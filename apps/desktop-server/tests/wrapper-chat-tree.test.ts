@@ -161,7 +161,10 @@ describe("wrapper session trees", () => {
       return true;
     });
     const first = f.service.get("root");
-    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith("branch", { force: false }));
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith(
+      "branch",
+      expect.objectContaining({ force: false })
+    ));
     let secondResolved = false;
     const second = f.service.get("root").then((tree) => {
       secondResolved = true;
@@ -245,26 +248,23 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
-  it("retries when the tree is invalidated immediately before projection", async () => {
+  it("returns a new projection for a new viewing position instead of rewriting the previous one", async () => {
     const f = await fixture();
-    await f.service.get("root");
-    const internals = f.service as unknown as {
-      loadPublishedTreeChanges: (sessionId: string) => Promise<void>;
-    };
-    const loadChanges = internals.loadPublishedTreeChanges.bind(f.service);
-    let invalidateBeforeProjection = true;
-    internals.loadPublishedTreeChanges = async (sessionId) => {
-      await loadChanges(sessionId);
-      if (invalidateBeforeProjection) {
-        invalidateBeforeProjection = false;
-        f.service.invalidate(sessionId);
-      }
-    };
-    const tree = await f.service.get("root");
-    expect(tree.nodes.map((node) => [node.nodeId, node.parentNodeId])).toEqual([
+    const opened = await f.service.get("root");
+    expect(opened.nodes.map((node) => [node.nodeId, node.parentNodeId])).toEqual([
       ["a", undefined], ["b", "a"], ["c", "a"]
     ]);
-    expect(f.load).toHaveBeenCalledTimes(4);
+    expect(opened.currentNodeId).toBe("b");
+
+    await f.service.jump("root", "a");
+    const jumped = await f.service.get("root");
+    expect(jumped.currentNodeId).toBe("a");
+    expect(jumped.visibleTurnIds).toEqual(["a"]);
+    expect(jumped).not.toBe(opened);
+    expect(opened.currentNodeId).toBe("b");
+    expect(opened.visibleTurnIds).toEqual(["a", "b"]);
+    expect(opened.nodes.filter((node) => node.isCurrent).map((node) => node.nodeId)).toEqual(["b"]);
+    expect(f.load).toHaveBeenCalledTimes(2);
     f.service.dispose();
   });
 
