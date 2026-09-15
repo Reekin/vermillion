@@ -4,7 +4,7 @@
 
 - 产品行为从[产品总览](.vermillion/docs/Overview/PRD.md)进入；改实现前读取对应 PRD 与领域规范。
 - 模块边界、状态所有权与持久化见[架构](.vermillion/docs/Foundation/Architecture.md)；执行约束见[执行循环规范](.vermillion/docs/Workbench/Missions/Standards.md)。
-- 主导航为工作台、Inbox 与底部同级设置；工作台左侧会话列表常驻，右侧按会话、工单、Docs、Domain、角色、Issues、Automation 分页。会话筛选与 workspace 编辑范围分别管理；会话页切换时保留挂载和草稿。
+- 主导航为工作台、Inbox 与底部同级设置；工作台左侧会话列表常驻，右侧按会话、工单、Docs、Domain、角色、Issues、Automation、管理 分页。会话筛选与 workspace 编辑范围分别管理；会话页切换时保留挂载和草稿。
 - 界面改动先读[UI/UX 规范](.vermillion/docs/Foundation/UIUX/Standards.md)，复用 `apps/desktop/src/ui/app/components/ui.tsx` 和 `app.css` 的主题变量。
 - 领域定义位于 `.vermillion/docs/domains/`；按[Domain 规则](.vermillion/docs/Workbench/Domains/PRD.md)选取规范。
 
