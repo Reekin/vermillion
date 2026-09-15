@@ -1,6 +1,6 @@
 # 工作台
 
-工作台是主页，用于讨论需求、修改文档并查看执行。左侧会话列表常驻，右侧顶部依次为会话、工单、Docs、Domain、角色、Issues、Automation，默认打开会话。会话页包含 SessionPane 和 Docs Explorer；切换分页时保持挂载，保留查看位置与未发送草稿。其他分页使用标题栏的 workspace 选择器指定当前浏览和编辑范围。
+工作台是主页，用于讨论需求、修改文档并查看执行。左侧会话列表常驻，右侧顶部依次为会话、工单、Docs、Domain、角色、Issues、Automation、管理，默认打开会话。会话页包含 SessionPane 和 Docs Explorer；切换分页时保持挂载，保留查看位置与未发送草稿。其他分页使用标题栏的 workspace 选择器指定当前浏览和编辑范围。
 
 点击 New Chat 进入草稿态，在输入器选择 workspace，发送首条消息时创建会话。列表筛选选中具体 workspace 时，新草稿使用它；All 下默认上次使用的 workspace。
 
@@ -131,6 +131,10 @@ Agent 建议用户前往其他会话继续讨论时，可调用工作台 CLI，�
 ## 右侧 Explorer
 
 浏览和编辑当前 workspace 的 `.vermillion/docs`，见 [文档管理](../Documents/PRD.md)。设计伙伴的职责与边界见 [角色与执行](../Roles/PRD.md)。
+
+## 管理
+
+工作台 → 管理 展示标题栏选择的 workspace 的根路径，提供「移除 workspace」按钮。移除前弹窗确认，确认后从工作台注销该 workspace，不删除磁盘文件。
 
 ## 桌面提醒
 

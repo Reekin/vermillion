@@ -17,7 +17,7 @@ Vermillion（朱砂）是个人 agent 工作台：通过讨论明确需求，把
 
 主导航上方是 **工作台** 和 **Inbox**，底部是同级的 **设置**。工作台是主页，用于讨论、修改文档、开工和查看执行，见 [工作台](../Workbench/Think/PRD.md)。Inbox 集中展示待决策和已合入内容。设置直接打开完整空白页面，当前没有配置项。
 
-工作台左侧会话列表常驻。New Chat 旁的 All / workspace 下拉只筛选列表，不切换当前阅读的会话；选择具体 workspace 后点击 New Chat，草稿使用该 workspace。右侧顶部依次为会话、工单、Docs、Domain、角色、Issues、Automation，默认进入会话。会话页包含阅读区和右侧 Docs Explorer，切换分页时保留挂载和未发送草稿。其他分页通过标题栏的 workspace 选择器明确浏览和编辑范围；列表中的 All 不代表全局编辑范围。
+工作台左侧会话列表常驻。New Chat 旁的 All / workspace 下拉只筛选列表，不切换当前阅读的会话；选择具体 workspace 后点击 New Chat，草稿使用该 workspace。右侧顶部依次为会话、工单、Docs、Domain、角色、Issues、Automation、管理，默认进入会话。会话页包含阅读区和右侧 Docs Explorer，切换分页时保留挂载和未发送草稿。其他分页通过标题栏的 workspace 选择器明确浏览和编辑范围；列表中的 All 不代表全局编辑范围。选择器只做切换；workspace 的添加在会话输入器与管理分页进行，移除只在管理分页进行。
 
 Inbox 单击以弹窗打开，可展开为页面；双击主导航入口直接以页面打开。弹窗遮罩不覆盖主导航，单击 Inbox 入口关闭弹窗；展开时保留当前选中项和已展开详情。Automation 用于用户自定义定时或触发任务，不承载内部 Worker 调度。
 
