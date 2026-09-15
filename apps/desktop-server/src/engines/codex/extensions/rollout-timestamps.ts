@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import type { ThreadItem } from "../../codex-app-server-generated/v2/ThreadItem.js";
+import type { ThreadItem } from "../../../codex-app-server-generated/v2/ThreadItem.js";
 
 export type CodexRolloutTimestampedItem = {
   type: ThreadItem["type"];

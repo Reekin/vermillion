@@ -1,16 +1,16 @@
-import type { CodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
-import { createFilePathTarget } from "./file-path-target.js";
+import type { CodexAppServerRuntimePort } from "./runtime-port.js";
+import { createFilePathTarget } from "../../file-path-target.js";
 import {
   codexProviderKind,
   discoveredCodexSessionId,
   resolveCodexThreadId
-} from "./codex-session-identity.js";
+} from "./session-identity.js";
 import {
   buildConversationMap,
   discoveredConversationId,
   type DiscoveredSessionRelation,
   type DiscoveredSessionRecord
-} from "./session-discovery.js";
+} from "../../session-discovery.js";
 import type {
   SessionAgentActionsProvider,
   SessionActionDescriptor,
@@ -18,7 +18,7 @@ import type {
   SessionActionProviderContext,
   SessionActionResult,
   SessionActionOptions
-} from "./session-actions.js";
+} from "../../session-actions.js";
 
 const isoFromUnixSeconds = (value: number): string =>
   new Date(value * 1_000).toISOString();

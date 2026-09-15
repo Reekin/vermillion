@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
+import { createCodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
 
 const setup = () => {
   const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [] });

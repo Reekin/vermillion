@@ -52,7 +52,7 @@ it("excludes archived forks from loading and projection while keeping live forks
       getSession: (id: string) => snapshot.sessions.find((session) => session.sessionId === id),
       getRevision: () => "initial", subscribe: () => () => {}
     } as never,
-    fork: vi.fn()
+    capabilities: { forkSessionFromTurn: vi.fn() } as never
   });
   try {
     expect(reloaded.getTreeMembers("root")).toEqual(["root", "branch"]);
@@ -93,9 +93,15 @@ it("repairs a missing archive marker from the provider without breaking the firs
   const hydrate = vi.fn(async () => { throw new Error("session archived-provider is archived. Run `codex unarchive archived-provider` to unarchive it first."); });
   const reconciliation = new SessionReconciliationService({
     workspaceRegistry: {} as never, sessionIndexStore: index, runtimeService,
-    providers: [{ engineId: "codex", hydrateSession: hydrate } as never]
+    providers: [{
+      engineId: "codex",
+      hydrateSession: hydrate,
+      isSessionArchivedError: (entry: { providerSessionId?: string }, error: unknown) =>
+        Boolean(entry.providerSessionId) && error instanceof Error &&
+        error.message.includes("is archived.")
+    } as never]
   });
-  const service = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index, reconciliation, fork: vi.fn() });
+  const service = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index, reconciliation, capabilities: { forkSessionFromTurn: vi.fn() } as never });
   try {
     expect((await service.get("root")).memberSessionIds).toEqual(["root"]);
     expect(index.getEntry("clarification")?.archivedAt).toBeTruthy();
@@ -108,7 +114,7 @@ it("repairs a missing archive marker from the provider without breaking the firs
       session: { ...snapshot.sessions[0]!, sessionId: "live" } });
     await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "root", childSessionId: "live", relationType: "fork", sourceTurnId: "root-turn" });
     hydrate.mockRejectedValueOnce(new Error("connection lost"));
-    const cold = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index, reconciliation, fork: vi.fn() });
+    const cold = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index, reconciliation, capabilities: { forkSessionFromTurn: vi.fn() } as never });
     try {
       await expect(cold.get("root")).rejects.toThrow("connection lost");
       expect(index.getEntry("live")?.archivedAt).toBeUndefined();

@@ -15,6 +15,13 @@ import { SessionBrowserCursorStaleError } from "./session-browser-read-model.js"
 type Clock = () => string;
 type IdFactory = () => string;
 
+/** 引擎扩展 RPC 不可用时的错误码；引擎自身的失败沿用同一码。 */
+const engineMethodErrorCodes: Record<string, string> = {
+  "codex.hookActivity.get": "CODEX_HOOK_ACTIVITY_UNAVAILABLE",
+  "codex.turnChanges.get": "CODEX_TURN_CHANGES_UNAVAILABLE",
+  "codex.turnChanges.undo": "CODEX_TURN_CHANGES_UNAVAILABLE"
+};
+
 export type SessionRpcHandlerOptions = {
   now?: Clock;
   createSubscriptionId?: IdFactory;
@@ -581,47 +588,33 @@ export const createWorkbenchRpcHandler = (
               result: await shellService.runFileAction(request.params)
             });
           case "codex.hookActivity.get":
-            if (!shellService) {
-              return toErrorResponse(
-                request,
-                "CODEX_HOOK_ACTIVITY_UNAVAILABLE",
-                "Codex hook activity APIs are unavailable for this runtime service."
-              );
-            }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.getCodexHookActivity(request.params)
-            });
           case "codex.turnChanges.get":
+          case "codex.turnChanges.undo": {
             if (!shellService) {
               return toErrorResponse(
                 request,
-                "CODEX_TURN_CHANGES_UNAVAILABLE",
-                "Codex turn-change APIs are unavailable for this runtime service."
+                engineMethodErrorCodes[request.method],
+                "Engine extension APIs are unavailable for this runtime service."
               );
             }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.getCodexTurnChanges(request.params)
-            });
-          case "codex.turnChanges.undo":
-            if (!shellService) {
+            try {
+              return parseSessionRpcResponse({
+                id: request.id,
+                method: request.method,
+                ok: true,
+                result: await shellService.runEngineMethod(
+                  request.method,
+                  request.params
+                )
+              });
+            } catch (error) {
               return toErrorResponse(
                 request,
-                "CODEX_TURN_CHANGES_UNAVAILABLE",
-                "Codex turn-change APIs are unavailable for this runtime service."
+                engineMethodErrorCodes[request.method],
+                error instanceof Error ? error.message : String(error)
               );
             }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: await shellService.undoCodexTurnChanges(request.params)
-            });
+          }
           case "runtime.command": {
             const receipt = await service.executeCommand(request.params.envelope);
             return parseSessionRpcResponse({

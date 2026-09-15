@@ -37,8 +37,9 @@ const preloadBuildOptions = {
 const historyWorkerBuildOptions = {
   ...sharedOptions,
   format: "cjs",
-  entryPoints: [resolve(desktopRoot, "../desktop-server/src/codex-history-projection-worker.cjs")],
-  outfile: resolve(outputDir, "codex-history-projection-worker.cjs")
+  entryPoints: [resolve(desktopRoot, "../desktop-server/src/engines/codex/history-projection-worker.cjs")],
+  // The bundled runtime resolves this worker relative to dist-electron/main.js.
+  outfile: resolve(outputDir, "history-projection-worker.cjs")
 };
 
 await rm(outputDir, { recursive: true, force: true });

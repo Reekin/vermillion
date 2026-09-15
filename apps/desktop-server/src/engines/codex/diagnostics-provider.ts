@@ -2,9 +2,9 @@ import type {
   DiagnosticsCapability,
   DiagnosticsSnapshot,
   SessionCapabilityContext
-} from "./capability-registry.js";
-import type { CodexAppServerRuntimePort } from "./codex-app-server-runtime-port.js";
-import { resolveCodexThreadId } from "./codex-session-identity.js";
+} from "../../capability-registry.js";
+import type { CodexAppServerRuntimePort } from "./runtime-port.js";
+import { resolveCodexThreadId } from "./session-identity.js";
 
 export class CodexDiagnosticsProvider implements DiagnosticsCapability {
   private readonly codexRuntimePort: CodexAppServerRuntimePort;

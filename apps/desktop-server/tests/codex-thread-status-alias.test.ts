@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
-import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
+import { createCodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
 
 const fixturePath = fileURLToPath(
   new URL("./fixtures/fake-codex-app-server.mjs", import.meta.url)

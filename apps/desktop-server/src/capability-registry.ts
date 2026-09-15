@@ -1,4 +1,4 @@
-import type { ProviderSessionHandle } from "@vermillion/shared";
+import type { ProviderSessionHandle, SkillDescriptorRpc } from "@vermillion/shared";
 import type { SessionIndexStore } from "./session-index.js";
 import {
   SessionIdentityRegistry,
@@ -235,6 +235,20 @@ export type BackgroundRunCapability = {
   get: (input: SessionCapabilityContext) => Promise<BackgroundRunSnapshot>;
 };
 
+/**
+ * 会话级运行时操作：不产出快照，直接作用于某个会话的执行环境或历史。
+ * 未实现的操作按调用点各自的默认行为处理，不伪造成功。
+ */
+export type SessionRuntimeCapability = {
+  releaseSessionExecution?: (sessionId: string) => Promise<void>;
+  clearSessionHistory?: (sessionId: string) => Promise<boolean>;
+  getActiveTurnId?: (sessionId: string) => string | undefined;
+  listSkills?: (input?: {
+    cwds?: string[];
+    forceReload?: boolean;
+  }) => Promise<SkillDescriptorRpc[]>;
+};
+
 export type AgentWorkbenchCapabilities = {
   readonly engineId: string;
   readonly operationGuards?: CapabilityOperationGuards;
@@ -246,6 +260,7 @@ export type AgentWorkbenchCapabilities = {
   readonly diagnostics?: DiagnosticsCapability;
   readonly backgroundRun?: BackgroundRunCapability;
   readonly sessionDiscovery?: SessionDiscoveryProvider;
+  readonly sessionRuntime?: SessionRuntimeCapability;
 };
 
 type CapabilityRegistryOptions = {
@@ -366,6 +381,67 @@ export class CapabilityRegistry {
     engineId: string | undefined
   ): SessionDiscoveryProvider | undefined {
     return this.getEngineCapabilities(engineId)?.sessionDiscovery;
+  }
+
+  public getSessionRuntime(
+    engineId: string | undefined
+  ): SessionRuntimeCapability | undefined {
+    return this.getEngineCapabilities(engineId)?.sessionRuntime;
+  }
+
+  private sessionRuntime(sessionId: string): SessionRuntimeCapability | undefined {
+    return this.getSessionRuntime(this.resolveContext(sessionId).engineId);
+  }
+
+  public async releaseSessionExecution(sessionId: string): Promise<void> {
+    const capability = this.sessionRuntime(sessionId)?.releaseSessionExecution;
+    if (!capability) {
+      throw new Error("Execution release is unavailable for this runtime.");
+    }
+    await capability(sessionId);
+  }
+
+  public async clearSessionHistory(sessionId: string): Promise<boolean> {
+    return (await this.sessionRuntime(sessionId)?.clearSessionHistory?.(sessionId)) ?? false;
+  }
+
+  public getActiveTurnId(sessionId: string): string | undefined {
+    return this.sessionRuntime(sessionId)?.getActiveTurnId?.(sessionId);
+  }
+
+  /** 技能是用户级资源，按引擎聚合后去重，界面不区分来源引擎。 */
+  public async listSkills(input?: {
+    cwds?: string[];
+    forceReload?: boolean;
+  }): Promise<SkillDescriptorRpc[]> {
+    const skills = await Promise.all(
+      [...this.capabilitiesByEngineId.values()].map(
+        (entry) => entry.sessionRuntime?.listSkills?.(input) ?? []
+      )
+    );
+    const seen = new Set<string>();
+    return skills.flat().filter((skill) => {
+      const key = `${skill.cwd}::${skill.name}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  public async forkSessionFromTurn(
+    sessionId: string,
+    turnId: string
+  ): Promise<string> {
+    const result = await this.runSessionAction(sessionId, "fork", {
+      fromTurnId: turnId,
+      activateFork: false
+    });
+    if (result.action !== "fork" || result.status !== "forked") {
+      throw new Error("Unable to fork this turn.");
+    }
+    return result.forkedSessionId;
   }
 
   public getOperationGuards(

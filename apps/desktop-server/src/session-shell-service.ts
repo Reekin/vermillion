@@ -5,9 +5,6 @@ import type {
   ChatInteractionCapabilitiesRpc,
   ChatSession,
   ComposerSlashSuggestionRpc,
-  CodexHookActivityResultRpc,
-  CodexTurnChangesResultRpc,
-  CodexTurnChangesUndoResultRpc,
   CommandEnvelope,
   DomainSnapshot,
   DiagnosticsWriteInputRpc,
@@ -61,12 +58,10 @@ import {
   type SessionWindowSnapshot
 } from "./session-window.js";
 import { FileActionService } from "./file-action-service.js";
-import { TurnChangeService } from "./turn-change-service.js";
-import { CodexHookActivityService } from "./engine-extensions/codex/hook-activity-service.js";
-import { CodexTurnChangesService } from "./engine-extensions/codex/turn-changes-service.js";
 import { ErrorLogService } from "./error-log-service.js";
 import { DiagnosticLogService } from "./diagnostic-log-service.js";
 import { resolveEngineProgramCommand } from "./engine-program-resolution.js";
+import type { EngineMethodHandler } from "./engine-control/engine-integration.js";
 
 const defaultSessionWindowLimit = 8;
 const completeSessionWindowLimit = Number.MAX_SAFE_INTEGER;
@@ -154,18 +149,10 @@ const resolveComposerSlashSuggestions = (
 
 export type SessionShellServiceOptions = {
   runtimeService: SessionRuntimeService;
-  releaseSessionExecution?: (sessionId: string) => Promise<void>;
-  clearSessionHistory?: (sessionId: string) => Promise<boolean>;
-  getActiveTurnId?: (sessionId: string) => string | undefined;
   wrapperChatTree?: WrapperChatTreeService;
   sessionCatalog: SessionCatalogService;
   capabilities?: CapabilityRegistry;
-  skillsProvider?: {
-    listSkills: (input?: {
-      cwds?: string[];
-      forceReload?: boolean;
-    }) => Promise<SkillDescriptorRpc[]>;
-  };
+  engineMethods?: readonly EngineMethodHandler[];
   sessionIdentity?: SessionIdentityRegistry;
   sessionActions?: SessionActionsProvider;
   chatTreeProvider?: ChatTreeProvider;
@@ -176,29 +163,18 @@ export type SessionShellServiceOptions = {
     canceled: boolean;
     rootPath?: string;
   }>;
-  resolveEngineProgram?: (
-    engineId: string,
-    customPath?: string
-  ) => EngineProgramResolutionRpc;
+  resolveEngineProgram?: (engineId: string) => EngineProgramResolutionRpc;
   fileActionService?: FileActionService;
   errorLogService?: ErrorLogService;
   diagnosticLogService?: DiagnosticLogService;
-  turnChangeService?: TurnChangeService;
-  codexHookActivityService?: CodexHookActivityService;
-  codexTurnChangesService?: CodexTurnChangesService;
 };
 
 export class SessionShellService {
   private readonly wrapperChatTree: WrapperChatTreeService | undefined;
   private readonly runtimeService: SessionRuntimeService;
-  private readonly releaseSessionExecutionImpl: SessionShellServiceOptions["releaseSessionExecution"];
-  private readonly clearSessionHistoryImpl: SessionShellServiceOptions["clearSessionHistory"];
-  private readonly getActiveTurnIdImpl: SessionShellServiceOptions["getActiveTurnId"];
   private readonly sessionCatalog: SessionCatalogService;
   private readonly capabilities: CapabilityRegistry | undefined;
-  private readonly skillsProvider:
-    | SessionShellServiceOptions["skillsProvider"]
-    | undefined;
+  private readonly engineMethods: Map<string, EngineMethodHandler["handle"]>;
   private readonly sessionActions: SessionActionsProvider | undefined;
   private readonly chatTreeProvider: ChatTreeProvider | undefined;
   private readonly sessionIdentity: SessionIdentityRegistry;
@@ -214,9 +190,6 @@ export class SessionShellService {
   private readonly fileActionService: FileActionService;
   private readonly errorLogService: ErrorLogService;
   private readonly diagnosticLogService: DiagnosticLogService;
-  private readonly turnChangeService: TurnChangeService;
-  private readonly codexHookActivityService: CodexHookActivityService;
-  private readonly codexTurnChangesService: CodexTurnChangesService;
   private openSessionAbortController: AbortController | undefined;
   private activationQueue: Promise<void> = Promise.resolve();
   private readonly partiallyHydratedSessionIds = new Set<string>();
@@ -225,12 +198,11 @@ export class SessionShellService {
   public constructor(options: SessionShellServiceOptions) {
     this.wrapperChatTree = options.wrapperChatTree;
     this.runtimeService = options.runtimeService;
-    this.releaseSessionExecutionImpl = options.releaseSessionExecution;
-    this.clearSessionHistoryImpl = options.clearSessionHistory;
-    this.getActiveTurnIdImpl = options.getActiveTurnId;
     this.sessionCatalog = options.sessionCatalog;
     this.capabilities = options.capabilities;
-    this.skillsProvider = options.skillsProvider;
+    this.engineMethods = new Map(
+      (options.engineMethods ?? []).map((handler) => [handler.method, handler.handle])
+    );
     this.sessionActions = options.sessionActions;
     this.chatTreeProvider = options.chatTreeProvider;
     const sessionIndexStore = options.runtimeService.getSessionIndexStore?.();
@@ -251,10 +223,8 @@ export class SessionShellService {
     this.pickWorkspaceDirectoryImpl = options.pickWorkspaceDirectory;
     this.resolveEngineProgram =
       options.resolveEngineProgram ??
-      ((engineId, customPath) => {
-        const { args: _args, ...resolution } = resolveEngineProgramCommand(engineId, {
-          customPath
-        });
+      ((engineId) => {
+        const { args: _args, ...resolution } = resolveEngineProgramCommand(engineId);
         return resolution;
       });
     this.fileActionService =
@@ -263,23 +233,6 @@ export class SessionShellService {
       options.errorLogService ?? new ErrorLogService();
     this.diagnosticLogService =
       options.diagnosticLogService ?? new DiagnosticLogService();
-    this.turnChangeService =
-      options.turnChangeService ?? new TurnChangeService();
-    this.codexHookActivityService =
-      options.codexHookActivityService ??
-      new CodexHookActivityService({
-        resolveSessionEngineId: (sessionId) =>
-          this.sessionIdentity.resolveContext(sessionId).engineId
-      });
-    this.codexTurnChangesService =
-      options.codexTurnChangesService ??
-      new CodexTurnChangesService({
-        resolveSessionEngineId: (sessionId) =>
-          this.sessionIdentity.resolveContext(sessionId).engineId,
-        resolveWorkingDirectory: (sessionId) =>
-          this.resolveTurnChangeWorkingDirectoryBySessionId(sessionId),
-        undoTurnChanges: (input) => this.turnChangeService.undoTurnChanges(input)
-      });
   }
 
   public listEngines(): EngineDefinitionRpc[] {
@@ -309,17 +262,6 @@ export class SessionShellService {
     return this.runtimeService.getSelectedEngineId();
   }
 
-  private async resolveDefaultNewSessionEngineId(): Promise<string | undefined> {
-    const registry = this.runtimeService.getWorkspaceRegistry?.();
-    await registry?.ready();
-    const workspaceState =
-      typeof registry?.getState === "function" ? registry.getState() : undefined;
-    return (
-      workspaceState?.defaultNewSessionEngineId ??
-      this.runtimeService.getSelectedEngineId?.()
-    );
-  }
-
   public async getSettings(): Promise<SessionSettingsRpc> {
     const registry = this.requireWorkspaceRegistry();
     await registry.ready();
@@ -330,10 +272,7 @@ export class SessionShellService {
       engineProgramResolutionsByEngineId: Object.fromEntries(
         this.listEngines().map((engine) => [
           engine.engineId,
-          this.resolveEngineProgram(
-            engine.engineId,
-            state.engineProgramPathsByEngineId[engine.engineId]
-          )
+          this.resolveEngineProgram(engine.engineId)
         ])
       ),
       ...cloneModelSettings(state)
@@ -397,14 +336,14 @@ export class SessionShellService {
   }
 
   private async clearSessionHistoryForTree(sessionId: string): Promise<boolean> {
-    if (!this.clearSessionHistoryImpl) return false;
+    if (!this.capabilities) return false;
     let succeeded = true;
     for (const memberId of this.sessionTreeMembers(sessionId)) {
       try {
-        succeeded = (await this.clearSessionHistoryImpl(memberId)) && succeeded;
+        succeeded = (await this.capabilities.clearSessionHistory(memberId)) && succeeded;
       } catch (error) {
         succeeded = false;
-        console.warn("[vermillion] Failed to clear Codex session history", {
+        console.warn("[vermillion] Failed to clear session history", {
           sessionId: memberId,
           error: error instanceof Error ? error.message : String(error)
         });
@@ -417,7 +356,7 @@ export class SessionShellService {
     try {
       return await this.clearSessionHistoryForTree(sessionId);
     } catch (error) {
-      console.warn("[vermillion] Failed to clear Codex session history", {
+      console.warn("[vermillion] Failed to clear session history", {
         sessionId,
         error: error instanceof Error ? error.message : String(error)
       });
@@ -426,18 +365,16 @@ export class SessionShellService {
   }
 
   private async refreshSessionHistoryBeforeOpen(sessionId: string): Promise<boolean> {
-    if (!this.clearSessionHistoryImpl || this.getActiveTurnIdImpl?.(sessionId)) return false;
+    if (!this.capabilities || this.getActiveTurnId(sessionId)) return false;
     try {
-      if (this.releaseSessionExecutionImpl) {
-        await this.releaseSessionExecutionImpl(sessionId);
-      }
+      await this.releaseSessionExecutionIfSupported(sessionId);
       const refreshed = await this.clearSessionHistoryForTree(sessionId);
       if (refreshed) {
         this.wrapperChatTree?.invalidate(sessionId);
       }
       return refreshed;
     } catch (error) {
-      console.warn("[vermillion] Failed to refresh Codex session history", {
+      console.warn("[vermillion] Failed to refresh session history", {
         sessionId,
         error: error instanceof Error ? error.message : String(error)
       });
@@ -445,17 +382,25 @@ export class SessionShellService {
     }
   }
 
+  private async releaseSessionExecutionIfSupported(sessionId: string): Promise<void> {
+    const engineId = this.sessionIdentity.resolveContext(sessionId).engineId;
+    const release = this.capabilities?.getSessionRuntime(engineId)?.releaseSessionExecution;
+    if (release) {
+      await release(sessionId);
+    }
+  }
+
   public async releaseSessionExecution(sessionId: string): Promise<void> {
     if (this.getSnapshot().turns.some((turn) => turn.sessionId === sessionId && turn.status !== "completed")) {
       throw new Error(`Cannot release session ${sessionId}: a turn is active.`);
     }
-    if (!this.releaseSessionExecutionImpl) throw new Error("Execution release is unavailable for this runtime.");
-    await this.releaseSessionExecutionImpl(sessionId);
+    if (!this.capabilities) throw new Error("Execution release is unavailable for this runtime.");
+    await this.capabilities.releaseSessionExecution(sessionId);
     await this.tryClearSessionHistory(sessionId);
   }
 
   public getActiveTurnId(sessionId: string): string | undefined {
-    return this.getActiveTurnIdImpl?.(sessionId);
+    return this.capabilities?.getActiveTurnId(sessionId);
   }
 
   public isSessionPartiallyHydrated(sessionId: string): boolean {
@@ -695,10 +640,7 @@ export class SessionShellService {
     cwds?: string[];
     forceReload?: boolean;
   }): Promise<SkillDescriptorRpc[]> {
-    if (!this.skillsProvider) {
-      return [];
-    }
-    return this.skillsProvider.listSkills(input);
+    return (await this.capabilities?.listSkills(input)) ?? [];
   }
 
   public async openSession(
@@ -1121,25 +1063,13 @@ export class SessionShellService {
     };
   }
 
-  public async getCodexTurnChanges(input: {
-    sessionId: string;
-    turnId: string;
-  }): Promise<CodexTurnChangesResultRpc> {
-    return this.codexTurnChangesService.getTurnChanges(input);
-  }
-
-  public async getCodexHookActivity(input: {
-    sessionId: string;
-    turnId: string;
-  }): Promise<CodexHookActivityResultRpc> {
-    return this.codexHookActivityService.getHookActivity(input);
-  }
-
-  public async undoCodexTurnChanges(input: {
-    sessionId: string;
-    turnId: string;
-  }): Promise<CodexTurnChangesUndoResultRpc> {
-    return this.codexTurnChangesService.undoTurnChanges(input);
+  /** 引擎自有的扩展 RPC（如 `codex.turnChanges.*`）：方法名由装配单元声明。 */
+  public async runEngineMethod(method: string, params: unknown): Promise<unknown> {
+    const handler = this.engineMethods.get(method);
+    if (!handler) {
+      throw new Error(`Engine method is unavailable for this runtime: ${method}`);
+    }
+    return handler(params as never);
   }
 
   private requireWorkspaceRegistry() {
@@ -1354,45 +1284,6 @@ export class SessionShellService {
       olderCursor: hydrated.olderCursor,
       newerCursor: hydrated.newerCursor
     });
-  }
-
-  private async resolveTurnChangeWorkingDirectoryBySessionId(
-    sessionId: string
-  ): Promise<string> {
-    const context = this.sessionIdentity.resolveContext(sessionId);
-    const session = context.session;
-    const metadataCwd =
-      (session?.metadata && typeof session.metadata.cwd === "string"
-        ? session.metadata.cwd
-        : undefined) ??
-      (context.indexEntry?.metadata && typeof context.indexEntry.metadata.cwd === "string"
-        ? context.indexEntry.metadata.cwd
-        : undefined);
-    if (metadataCwd) {
-      return metadataCwd;
-    }
-
-    const workspaceId =
-      context.indexEntry?.workspaceId ??
-      (session
-        ? this.runtimeService
-            .getSnapshot()
-            .conversations.find(
-              (item) => item.conversationId === session.conversationId
-            )?.workspaceId
-        : undefined);
-    if (workspaceId) {
-      const registry = this.requireWorkspaceRegistry();
-      await registry.ready();
-      const workspace = registry
-        .getState()
-        .workspaces.find((item) => item.workspaceId === workspaceId);
-      if (workspace) {
-        return workspace.absolutePath;
-      }
-    }
-
-    throw new Error("Unable to resolve a working directory for this turn.");
   }
 
   private async resolveProviderAnchorTurnId(

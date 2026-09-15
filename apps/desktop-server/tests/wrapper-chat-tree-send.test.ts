@@ -45,7 +45,7 @@ async function fixture() {
     sessionIndexStore: index, reconciliation: { ensureSessionLoaded: load } as never,
     runtimeService: { getSnapshot: () => snapshot, getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
       getRevision: () => "initial", subscribe: () => () => {}, notifyChatTreeChanged: changed } as never,
-    fork
+    capabilities: { forkSessionFromTurn: fork } as never
   });
   cleanups.push(async () => { service.dispose(); await rm(baseDir, { recursive: true, force: true }); });
   await service.get("root");

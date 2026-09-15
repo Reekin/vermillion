@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CodexDelegationProvider } from "../src/codex-delegation-provider.js";
+import { CodexDelegationProvider } from "../src/engines/codex/delegation-provider.js";
 
 describe("CodexDelegationProvider", () => {
   it("builds a delegation graph from subagent relations in the session index", async () => {

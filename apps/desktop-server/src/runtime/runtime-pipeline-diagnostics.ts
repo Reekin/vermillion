@@ -185,7 +185,7 @@ export class RuntimePipelineDiagnostics {
           this.runtimeEventMaxListenerSyncMs >= this.stallThresholdMs
             ? "warning"
             : "info",
-        source: "codex-app-server-runtime-port",
+        source: "codex-runtime-port",
         message: "Runtime event fan-out activity window.",
         metrics: {
           count: this.runtimeEventCount,

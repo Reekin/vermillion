@@ -41,6 +41,107 @@ const createRuntimeService = () =>
   }) as unknown as SessionRuntimeService;
 
 describe("CapabilityRegistry", () => {
+  it("dispatches session-level runtime operations by the session's engine", async () => {
+    const runtimeService = createRuntimeService();
+    const sessionIndexStore = {
+      getEntry: vi.fn().mockImplementation((sessionId: string) => ({
+        sessionId,
+        workspaceId: "workspace-1",
+        conversationId: `conversation-for-${sessionId}`,
+        engineId: sessionId === "session-pi" ? "pi-acp" : "codex",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        updatedAt: "2026-04-20T00:00:00.000Z",
+        source: "registry"
+      })),
+      listEntries: vi.fn().mockReturnValue([])
+    } as never;
+    const sessionIdentity = new SessionIdentityRegistry({
+      runtimeService,
+      sessionIndexStore
+    });
+    const releaseCodex = vi.fn().mockResolvedValue(undefined);
+    const releasePi = vi.fn().mockResolvedValue(undefined);
+    const registry = new CapabilityRegistry({
+      runtimeService,
+      sessionIndexStore,
+      sessionIdentity,
+      capabilities: [
+        {
+          engineId: "codex",
+          sessionActions: {
+            runAction: async () => ({
+              action: "fork",
+              status: "forked",
+              forkedSessionId: "forked-codex",
+              providerSessionId: "thread-fork"
+            })
+          },
+          sessionRuntime: {
+            releaseSessionExecution: releaseCodex,
+            clearSessionHistory: async () => true,
+            getActiveTurnId: (sessionId: string) =>
+              sessionId === "session-codex" ? "turn-codex" : undefined,
+            listSkills: async () => [
+              {
+                cwd: "I:/repo",
+                name: "codex-skill",
+                description: "Codex skill",
+                path: "I:/repo/.codex/skills/codex-skill/SKILL.md",
+                scope: "project",
+                enabled: true
+              }
+            ]
+          }
+        },
+        {
+          engineId: "pi-acp",
+          sessionActions: {
+            runAction: async () => ({
+              action: "fork",
+              status: "forked",
+              forkedSessionId: "forked-pi",
+              providerSessionId: "pi-session-fork"
+            })
+          },
+          sessionRuntime: {
+            releaseSessionExecution: releasePi,
+            clearSessionHistory: async () => false,
+            getActiveTurnId: (sessionId: string) =>
+              sessionId === "session-pi" ? "turn-pi" : undefined,
+            listSkills: async () => [
+              {
+                cwd: "I:/repo",
+                name: "codex-skill",
+                description: "Codex skill",
+                path: "I:/repo/.codex/skills/codex-skill/SKILL.md",
+                scope: "project",
+                enabled: true
+              }
+            ]
+          }
+        }
+      ]
+    });
+
+    await registry.releaseSessionExecution("session-codex");
+    await registry.releaseSessionExecution("session-pi");
+    expect(releaseCodex).toHaveBeenCalledWith("session-codex");
+    expect(releasePi).toHaveBeenCalledWith("session-pi");
+    expect(registry.getActiveTurnId("session-codex")).toBe("turn-codex");
+    expect(registry.getActiveTurnId("session-pi")).toBe("turn-pi");
+    await expect(registry.clearSessionHistory("session-codex")).resolves.toBe(true);
+    await expect(registry.clearSessionHistory("session-pi")).resolves.toBe(false);
+    await expect(registry.forkSessionFromTurn("session-codex", "turn-1")).resolves.toBe(
+      "forked-codex"
+    );
+    await expect(registry.forkSessionFromTurn("session-pi", "turn-1")).resolves.toBe(
+      "forked-pi"
+    );
+    await expect(registry.listSkills()).resolves.toEqual([
+      expect.objectContaining({ name: "codex-skill" })
+    ]);
+  });
+
   it("returns unsupported snapshots for agents without optional capabilities", async () => {
     const runtimeService = createRuntimeService();
     const sessionIndexStore = {

@@ -3,15 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "../src/codex-app-server-generated/v2/Thread.js";
-import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
+import { createCodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
 import {
-  CodexSessionDiscoveryProvider,
   SessionReconciliationService
 } from "../src/session-discovery.js";
+import { CodexSessionDiscoveryProvider } from "../src/engines/codex/session-discovery.js";
 import {
   clearCodexTurnChangesStore,
   getRecordedCodexTurnChanges
-} from "../src/engine-extensions/codex/turn-changes-store.js";
+} from "../src/engines/codex/extensions/turn-changes-store.js";
 import { SessionIndexStore } from "../src/session-index.js";
 import { SessionRuntimeService } from "../src/runtime-service.js";
 import { WrapperChatTreeService } from "../src/wrapper-chat-tree.js";
@@ -19,11 +19,11 @@ import { WorkspaceRegistryService } from "../src/workspace-registry.js";
 import {
   consumeCodexRolloutTimestampForItem,
   readCodexRolloutTimestampGroups
-} from "../src/engine-extensions/codex/rollout-timestamps.js";
+} from "../src/engines/codex/extensions/rollout-timestamps.js";
 
-vi.mock("../src/engine-extensions/codex/rollout-timestamps.js", async (importOriginal) => {
+vi.mock("../src/engines/codex/extensions/rollout-timestamps.js", async (importOriginal) => {
   const actual = await importOriginal<
-    typeof import("../src/engine-extensions/codex/rollout-timestamps.js")
+    typeof import("../src/engines/codex/extensions/rollout-timestamps.js")
   >();
   return {
     ...actual,

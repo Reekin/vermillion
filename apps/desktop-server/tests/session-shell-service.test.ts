@@ -187,9 +187,12 @@ const buildHistoryRefreshOpenHarness = (input: {
         getTreeMembers: () => ["session-1"]
       })
     } as never,
-    releaseSessionExecution,
-    clearSessionHistory,
-    getActiveTurnId: () => input.activeTurnId,
+    capabilities: {
+      releaseSessionExecution,
+      clearSessionHistory,
+      getActiveTurnId: () => input.activeTurnId,
+      getSessionRuntime: () => ({ releaseSessionExecution, clearSessionHistory })
+    } as never,
     wrapperChatTree: { invalidate } as never,
     sessionCatalog: { markSessionRead } as never,
     sessionActions: {} as never,
@@ -437,9 +440,9 @@ describe("SessionShellService", () => {
           extensions: []
         })
       } as never,
-      skillsProvider: {
+      capabilities: {
         listSkills
-      }
+      } as never
     });
 
     await expect(service.getChatCapabilities("session-1")).resolves.toEqual({
@@ -1428,7 +1431,10 @@ describe("SessionShellService", () => {
       } as never,
       capabilities: {
         getOperationGuards: vi.fn().mockReturnValue(["interactive-session"]),
-        jumpConversationGraph
+        jumpConversationGraph,
+        getActiveTurnId: () => undefined,
+        getSessionRuntime: () => undefined,
+        clearSessionHistory: async () => false
       } as never,
       sessionActions: {} as never,
       chatTreeProvider: {} as never,
@@ -2039,14 +2045,14 @@ describe("SessionShellService", () => {
       sessionCatalog: {} as never,
       sessionActions: {} as never,
       chatTreeProvider: {} as never,
-      codexTurnChangesService: {
-        getTurnChanges,
-        undoTurnChanges
-      } as never
+      engineMethods: [
+        { method: "codex.turnChanges.get", handle: getTurnChanges },
+        { method: "codex.turnChanges.undo", handle: undoTurnChanges }
+      ]
     });
 
     await expect(
-      service.getCodexTurnChanges({
+      service.runEngineMethod("codex.turnChanges.get", {
         sessionId: "session-1",
         turnId: "turn-2"
       })
@@ -2063,7 +2069,7 @@ describe("SessionShellService", () => {
       canUndo: true
     });
     await expect(
-      service.undoCodexTurnChanges({
+      service.runEngineMethod("codex.turnChanges.undo", {
         sessionId: "session-1",
         turnId: "turn-2"
       })

@@ -4,7 +4,7 @@ import type {
   DelegationNodeSnapshot,
   DelegationSnapshot,
   SessionCapabilityContext
-} from "./capability-registry.js";
+} from "../../capability-registry.js";
 
 const mapSessionStatus = (
   session: ChatSession | undefined,

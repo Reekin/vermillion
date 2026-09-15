@@ -48,7 +48,7 @@ const fixture = async (
       notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
-    fork,
+    capabilities: { forkSessionFromTurn: fork } as never,
     ...(logDiagnostic ? { logDiagnostic } : {})
   });
   return { service, index, snapshot, load, fork, baseDir, changed, updateSessionMetadata,

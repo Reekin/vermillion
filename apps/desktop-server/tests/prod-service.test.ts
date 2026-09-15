@@ -56,20 +56,17 @@ describe("prod runtime service", () => {
     }
   });
 
-  it("reports the same configured program path used by the runtime", async () => {
+  it("reports the program path the runtime resolves for each engine", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "awb-program-resolution-"));
     tempDirs.push(baseDir);
-    const service = createSessionRuntimeService({
-      codexCommandPath: "C:\\configured\\codex.exe",
-      persistenceBaseDir: baseDir
-    });
+    const service = createSessionRuntimeService({ persistenceBaseDir: baseDir });
     disposers.push(() => service.dispose());
 
     await expect(service.getSettings()).resolves.toMatchObject({
       engineProgramResolutionsByEngineId: {
         codex: {
-          path: "C:\\configured\\codex.exe",
-          source: "configured"
+          path: process.platform === "win32" ? "codex.exe" : "codex",
+          source: "default"
         }
       }
     });
@@ -83,7 +80,7 @@ describe("prod runtime service", () => {
       engineProgramResolutionsByEngineId: {
         codex: {
           path: "C:\\custom\\codex.exe",
-          source: "custom"
+          source: "configured"
         }
       }
     });
@@ -91,8 +88,7 @@ describe("prod runtime service", () => {
 
   it("uses the real Codex runtime composition instead of demo placeholder text", async () => {
     const service = createSessionRuntimeService({
-      codexCommandPath: process.execPath,
-      codexCommandArgs: [codexFixturePath],
+      engineCommands: { codex: { path: process.execPath, args: [codexFixturePath] } }
     });
     disposers.push(() => service.dispose());
 
@@ -174,8 +170,7 @@ describe("prod runtime service", () => {
     const requestLogPath = join(baseDir, "requests.jsonl");
     vi.stubEnv("FAKE_CODEX_REQUEST_LOG", requestLogPath);
     const service = createSessionRuntimeService({
-      codexCommandPath: process.execPath,
-      codexCommandArgs: [codexFixturePath],
+      engineCommands: { codex: { path: process.execPath, args: [codexFixturePath] } },
       persistenceBaseDir: baseDir
     });
     disposers.push(() => service.dispose());
@@ -241,8 +236,7 @@ describe("prod runtime service", () => {
 
     try {
       const service = createSessionRuntimeService({
-        codexCommandPath: process.execPath,
-        codexCommandArgs: [codexFixturePath],
+        engineCommands: { codex: { path: process.execPath, args: [codexFixturePath] } }
       });
       disposers.push(() => service.dispose());
 
@@ -307,8 +301,7 @@ describe("prod runtime service", () => {
     const requestLogPath = join(tempDir, "requests.jsonl");
     vi.stubEnv("FAKE_CODEX_REQUEST_LOG", requestLogPath);
     const service = createSessionRuntimeService({
-      codexCommandPath: process.execPath,
-      codexCommandArgs: [codexFixturePath],
+      engineCommands: { codex: { path: process.execPath, args: [codexFixturePath] } }
     });
     disposers.push(() => service.dispose());
 

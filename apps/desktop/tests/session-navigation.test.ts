@@ -15,8 +15,12 @@ it("binds RPC navigation to the latest real shell turn and retains it across reo
   disposers.push(() => rm(baseDir, { recursive: true, force: true }));
   const shell = createSessionRuntimeService({
     persistenceBaseDir: baseDir,
-    codexCommandPath: process.execPath,
-    codexCommandArgs: [fileURLToPath(new URL("../../desktop-server/tests/fixtures/fake-codex-app-server.mjs", import.meta.url))]
+    engineCommands: {
+      codex: {
+        path: process.execPath,
+        args: [fileURLToPath(new URL("../../desktop-server/tests/fixtures/fake-codex-app-server.mjs", import.meta.url))]
+      }
+    }
   });
   disposers.push(() => shell.dispose());
   const sourceWorkspace = await shell.addWorkspace({ rootPath: baseDir });

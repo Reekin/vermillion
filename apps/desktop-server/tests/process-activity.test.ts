@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   summarizeCodexImageGenerationOutput,
   summarizeCodexImageViewOutput
-} from "../src/engine-extensions/codex/process-activity.js";
+} from "../src/engines/codex/extensions/process-activity.js";
 
 const tempDirs: string[] = [];
 

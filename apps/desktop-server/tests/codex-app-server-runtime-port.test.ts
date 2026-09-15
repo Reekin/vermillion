@@ -3,16 +3,16 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
+import { createCodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
 import type { DomainSnapshot } from "@vermillion/shared";
 import {
   clearCodexTurnChangesStore,
   getRecordedCodexTurnChanges
-} from "../src/engine-extensions/codex/turn-changes-store.js";
+} from "../src/engines/codex/extensions/turn-changes-store.js";
 import {
   clearCodexHookActivityStore,
   getRecordedCodexHookActivity
-} from "../src/engine-extensions/codex/hook-activity-store.js";
+} from "../src/engines/codex/extensions/hook-activity-store.js";
 import { HostToolRegistry } from "../src/host-tools.js";
 import { createReadSessionHostTool } from "../src/read-session-host-tool.js";
 

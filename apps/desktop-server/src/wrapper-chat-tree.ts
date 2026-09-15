@@ -4,6 +4,7 @@ import type { ChatTreeSnapshot, ChatTreeNodeSnapshot } from "./chat-tree-provide
 import type { SessionIndexStore } from "./session-index.js";
 import type { SessionRuntimeService } from "./runtime-service.js";
 import type { SessionReconciliationService } from "./session-discovery.js";
+import type { CapabilityRegistry } from "./capability-registry.js";
 import { buildSessionWindowSnapshotFromPage } from "./session-window.js";
 
 type SendOperationState = {
@@ -45,7 +46,7 @@ export class WrapperChatTreeService {
     runtimeService: SessionRuntimeService;
     sessionIndexStore: SessionIndexStore;
     reconciliation: SessionReconciliationService;
-    fork: (sessionId: string, turnId: string) => Promise<string>;
+    capabilities: CapabilityRegistry;
     /** 诊断通道：记录被失效中止的一代树加载。 */
     logDiagnostic?: (input: {
       message: string;
@@ -480,7 +481,7 @@ export class WrapperChatTreeService {
       member = this.resolveSendSource(sessionId, target, paths, turnsById);
     }
     if (target && paths.get(member)?.at(-1) !== target) {
-      member = await this.options.fork(member, target);
+      member = await this.options.capabilities.forkSessionFromTurn(member, target);
       const state = this.treeState(sessionId);
       await this.loadMember(state.members, member, undefined, false);
       state.published = this.buildProjection(sessionId, state.members);
@@ -606,7 +607,10 @@ export class WrapperChatTreeService {
           throw new Error("Wait for this turn to finish before branching.");
         }
         const source = this.resolveSendSource(operation.sessionId, operation.nodeId, paths, turnsById);
-        operation.targetSessionId = await this.options.fork(source, operation.nodeId);
+        operation.targetSessionId = await this.options.capabilities.forkSessionFromTurn(
+          source,
+          operation.nodeId
+        );
         this.changed(operation.sessionId);
       }
       if (state.cancelRequested) return;

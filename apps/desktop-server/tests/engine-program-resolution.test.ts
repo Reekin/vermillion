@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveEngineProgramCommand,
-  resolveEngineSpawnCommand
+  resolveEngineSpawnCommand,
+  type EngineProgramRule
 } from "../src/engine-program-resolution.js";
+import { codexProgram } from "../src/engines/codex/program.js";
+
+const secondEngineProgram: EngineProgramRule = {
+  environmentVariables: ["VERMILLION_SECOND_BIN", "SECOND_BIN"],
+  windowsDefault: "second.cmd",
+  default: "second",
+  defaultArgs: ["serve"],
+  explicitArgs: ["serve", "--stdio"]
+};
 
 describe("resolveEngineProgramCommand", () => {
   it("prefers a custom path over configured and environment paths", () => {
     expect(
       resolveEngineProgramCommand("codex", {
+        program: codexProgram,
         customPath: "C:\\custom\\codex.exe",
         configuredPath: "C:\\configured\\codex.exe",
         env: {
@@ -18,13 +29,15 @@ describe("resolveEngineProgramCommand", () => {
     ).toEqual({
       path: "C:\\custom\\codex.exe",
       source: "custom",
-      args: ["app-server"]
+      args: ["app-server"],
+      found: false
     });
   });
 
   it("reports the first environment variable that resolved Codex", () => {
     expect(
       resolveEngineProgramCommand("codex", {
+        program: codexProgram,
         env: {
           CODEX_BIN: "C:\\tools\\codex.exe",
           CODEX_PATH: "C:\\older\\codex.exe"
@@ -35,13 +48,15 @@ describe("resolveEngineProgramCommand", () => {
       path: "C:\\tools\\codex.exe",
       source: "environment",
       environmentVariable: "CODEX_BIN",
-      args: ["app-server"]
+      args: ["app-server"],
+      found: false
     });
   });
 
   it("skips blank environment values and keeps Pi defaults for configured paths", () => {
     expect(
       resolveEngineProgramCommand("codex", {
+        program: codexProgram,
         env: {
           VERMILLION_CODEX_BIN: " ",
           CODEX_BIN: "C:\\tools\\codex.exe"
@@ -53,28 +68,31 @@ describe("resolveEngineProgramCommand", () => {
       environmentVariable: "CODEX_BIN"
     });
     expect(
-      resolveEngineProgramCommand("pi-acp", {
-        configuredPath: "npx.cmd",
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        configuredPath: "second.cmd",
         env: {},
         platform: "win32"
       })
     ).toEqual({
-      path: "npx.cmd",
+      path: "second.cmd",
       source: "configured",
-      args: ["-y", "pi-acp"]
+      args: ["serve"],
+      found: false
     });
   });
 
-  it("uses npx with package arguments only for the Pi default command", () => {
+  it("falls back to the engine id when no rule is registered", () => {
     expect(
-      resolveEngineProgramCommand("pi-acp", {
+      resolveEngineProgramCommand("second", {
         env: {},
         platform: "win32"
       })
     ).toEqual({
-      path: "npx.cmd",
+      path: "second",
       source: "default",
-      args: ["-y", "pi-acp"]
+      args: [],
+      found: false
     });
   });
 
@@ -97,5 +115,37 @@ describe("resolveEngineProgramCommand", () => {
         "\"C:\\Program Files\\Codex\\codex.cmd\" app-server"
       ]
     });
+  });
+
+  it("reports whether the resolved program exists", () => {
+    const env = { PATH: "C:\\tools", PATHEXT: ".EXE;.CMD" };
+    expect(
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        customPath: process.execPath,
+        env,
+        platform: "win32"
+      })
+    ).toMatchObject({ found: true, resolvedPath: process.execPath });
+    expect(
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        configuredPath: "C:\\tools\\missing.cmd",
+        env,
+        platform: "win32"
+      })
+    ).toEqual({
+      path: "C:\\tools\\missing.cmd",
+      source: "configured",
+      args: ["serve"],
+      found: false
+    });
+    expect(
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        env: { PATH: "C:\\tools", PATHEXT: ".EXE" },
+        platform: "win32"
+      })
+    ).toMatchObject({ path: "second.cmd", source: "default", found: false });
   });
 });

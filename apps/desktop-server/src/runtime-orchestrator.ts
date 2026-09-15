@@ -622,7 +622,8 @@ export class RuntimeOrchestrator {
     try {
       const title = await this.titleGenerator?.generateTitle({
         content: command.content,
-        attachments: command.attachments
+        attachments: command.attachments,
+        engineId: this.domainService.getSession(command.sessionId)?.engineId
       });
       if (!title) {
         return;

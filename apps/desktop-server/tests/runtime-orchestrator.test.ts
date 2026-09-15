@@ -4,7 +4,7 @@ import { CodexAdapter } from "@vermillion/adapters";
 import type { RuntimeEvent } from "@vermillion/shared";
 import { parseSessionRpcResponse, readSessionExecutionProfile } from "@vermillion/shared";
 import { DomainService } from "../src/domain-service.js";
-import { createCodexAppServerRuntimePort } from "../src/codex-app-server-runtime-port.js";
+import { createCodexAppServerRuntimePort } from "../src/engines/codex/runtime-port.js";
 import { RuntimeOrchestrator } from "../src/runtime-orchestrator.js";
 import type { SessionAgentBinding } from "../src/runtime-types.js";
 
@@ -967,7 +967,8 @@ describe("RuntimeOrchestrator", () => {
     expect(executeCommand).toHaveBeenCalled();
     expect(generateTitle).toHaveBeenCalledWith({
       content: "帮我调研低功耗迷你主机 CPU",
-      attachments: []
+      attachments: [],
+      engineId: "codex"
     });
     expect(domainService.getSession(session.sessionId)).toMatchObject({
       title: "Mini PC research"

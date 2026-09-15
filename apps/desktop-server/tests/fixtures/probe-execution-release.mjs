@@ -18,7 +18,7 @@ for (const name of ["config.toml", "auth.json"]) {
   catch (error) { if (error.code !== "ENOENT") throw error; }
 }
 const modulePath = join(root, "runtime.mjs");
-await build({ entryPoints: [fileURLToPath(new URL("../../src/codex-app-server-runtime-port.ts", import.meta.url))],
+await build({ entryPoints: [fileURLToPath(new URL("../../src/engines/codex/runtime-port.ts", import.meta.url))],
   outfile: modulePath, bundle: true, platform: "node", format: "esm", packages: "bundle", logLevel: "silent" });
 const { createCodexAppServerRuntimePort } = await import(pathToFileURL(modulePath).href);
 const port = createCodexAppServerRuntimePort({ commandPath: resolve(commandPath), commandArgs: ["app-server"] });
