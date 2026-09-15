@@ -137,6 +137,13 @@ export class SessionRuntimeService {
     return this.runtimeOrchestrator.resolveSessionRoleInstructions(sessionId, metadata);
   }
 
+  public resolveRoleInstructions(
+    workspaceId: string,
+    metadata: Record<string, unknown>
+  ): Promise<string | undefined> {
+    return this.runtimeOrchestrator.resolveRoleInstructions(workspaceId, metadata);
+  }
+
   public selectEngine(input: EngineSelectionInput): { selectedEngineId: string } {
     return this.runtimeOrchestrator.selectEngine(input);
   }

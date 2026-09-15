@@ -14,7 +14,7 @@ describe("CodexSessionActionsProvider", () => {
     const provider = new CodexSessionActionsProvider({ codexRuntimePort: port as unknown as CodexAppServerRuntimePort });
     await provider.runAction({ sessionId: "worker", action: "resume", preserveExecution: true,
       providerHandle: codexProviderHandle(), session: { metadata: { developerInstructions: "WORKER" } } as never,
-      sessionIndexStore: {} as never, runtimeService: {} as never });
+      sessionIndexStore: {} as never, runtimeService: { resolveSessionRoleInstructions: async () => "WORKER" } as never });
     expect(port.interruptThread).not.toHaveBeenCalled();
     expect(port.unsubscribeThread).not.toHaveBeenCalled();
     expect(port.injectDeveloperInstructions).not.toHaveBeenCalled();
@@ -52,8 +52,9 @@ describe("CodexSessionActionsProvider", () => {
     await provider.runAction({ sessionId: "worker", action: "resume", cwd: "I:/worktree",
       metadata: { workItemId: "item" }, providerHandle: codexProviderHandle("thread-worker"),
       session: { metadata: { cwd: "I:/workspace", developerInstructions: "WORKER_ROLE" } } as never,
-      sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata } as never });
-    expect(resumeThread).toHaveBeenCalledWith("thread-worker", "I:/worktree");
+      sessionIndexStore: {} as never,
+      runtimeService: { updateSessionMetadata, resolveSessionRoleInstructions: async () => "WORKER_ROLE" } as never });
+    expect(resumeThread).toHaveBeenCalledWith("thread-worker", "I:/worktree", "WORKER_ROLE");
     expect(updateSessionMetadata).toHaveBeenCalledWith("worker", { cwd: "I:/worktree", workItemId: "item" });
   });
 
@@ -270,7 +271,7 @@ describe("CodexSessionActionsProvider", () => {
         sessionId: "session-1",
         engineId: "codex",
         action: "resume",
-        runtimeService: {} as never,
+        runtimeService: { resolveSessionRoleInstructions: async () => undefined } as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle()
       })
@@ -283,7 +284,7 @@ describe("CodexSessionActionsProvider", () => {
       bestEffort: true
     });
     expect(unsubscribeThread).toHaveBeenCalledWith("thread-1");
-    expect(resumeThread).toHaveBeenCalledWith("thread-1");
+    expect(resumeThread).toHaveBeenCalledWith("thread-1", undefined, undefined);
     expect(attachThreadToSession).toHaveBeenCalledWith("session-1", "thread-2");
   });
 
@@ -423,6 +424,7 @@ describe("CodexSessionActionsProvider", () => {
     });
     expect(upsertSession.mock.calls[0]![0].session.metadata).toEqual({
       role: context.role, sessionProfile: context.sessionProfile, cwd: context.cwd,
+      developerInstructions: context.developerInstructions,
       providerKind: "codex-thread", providerSessionId: "thread-child", rolloutPath: "child.jsonl",
       ...(scheduler ? explicit : {})
     });

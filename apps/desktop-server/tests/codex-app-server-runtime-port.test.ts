@@ -158,7 +158,7 @@ describe("Codex app-server runtime port", () => {
     );
   });
 
-  it("preserves configured instructions and injects a generic role tail only when requested", async () => {
+  it("forks without role parameters and appends configured instructions on resume", async () => {
     const port = createCodexAppServerRuntimePort({ commandPath: process.execPath,
       commandArgs: [fixturePath], resolveConversationIdBySessionId: () => "conversation-1" });
     vi.spyOn(port, "start").mockResolvedValue();
@@ -169,13 +169,6 @@ describe("Codex app-server runtime port", () => {
     expect(rpc).toHaveBeenCalledWith("thread/fork", { threadId: "source", lastTurnId: "completed-turn",
       cwd: "I:/workspace", threadSource: "user" });
     expect(rpc.mock.calls.some(([method]) => method === "thread/inject_items")).toBe(false);
-
-    await port.forkThread("source", "completed-turn", { developerInstructions: "Review role" });
-    expect(rpc).toHaveBeenCalledWith("thread/fork", expect.objectContaining({
-      developerInstructions: "User configuration\n\nReview role", deferGoalContinuation: true }));
-    const injected = rpc.mock.calls.find(([method]) => method === "thread/inject_items")?.[1];
-    expect(injected).toEqual({ threadId: "child", items: [{ type: "message", role: "developer",
-      content: [{ type: "input_text", text: "以下开发者指令定义当前角色，并取代此前角色的指令：\n\nReview role" }] }] });
     rpc.mockClear();
     await port.resumeThread("child", "I:/workspace", "Execution role");
     expect(rpc).toHaveBeenCalledWith("thread/resume", expect.objectContaining({
@@ -186,7 +179,9 @@ describe("Codex app-server runtime port", () => {
   });
 
   it("uses current role instructions at first start and injects each later revision once", async () => {
-    const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1" });
+    const rebuilt = vi.fn();
+    const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1",
+      recordRoleContextRebuilt: rebuilt });
     vi.spyOn(port, "start").mockResolvedValue();
     let turn = 0;
     const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
@@ -221,6 +216,21 @@ describe("Codex app-server runtime port", () => {
       deliveredDeveloperInstructions: "ROLE_V2"
     } });
     expect(roleInjections()).toHaveLength(1);
+
+    const notify = (port as unknown as { handleNotification: (method: string, params: Record<string, unknown>) => void })
+      .handleNotification.bind(port);
+    const compacted = (threadId: string, turnId: string) => notify("item/completed", { threadId, turnId,
+      item: { type: "contextCompaction", id: `${turnId}-item` } });
+    // Compaction re-renders history from the role the thread was loaded with; the host records it as delivered.
+    compacted("thread-existing", "turn-2");
+    expect(rebuilt).toHaveBeenLastCalledWith("existing", "");
+    compacted("thread-new", "turn-1");
+    expect(rebuilt).toHaveBeenLastCalledWith("new", "ROLE_V1");
+    await port.request({ id: "after-compact", method: "turn/start", params: {
+      sessionId: "existing", content: "after compact", developerInstructions: "ROLE_V2",
+      deliveredDeveloperInstructions: ""
+    } });
+    expect(roleInjections()).toHaveLength(2);
   });
 
   it("sends expected JSON-RPC payloads for resume and refresh helpers", async () => {

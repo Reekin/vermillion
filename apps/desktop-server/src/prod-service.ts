@@ -96,6 +96,9 @@ export const createSessionRuntimeService = (
     resolveConversationIdBySessionId: (sessionId: string) =>
       service?.resolveConversationIdForSession(sessionId),
     recordTurnChanges: (input) => codexTurnChangesStore.record(input),
+    recordRoleContextRebuilt: (sessionId, developerInstructions) => {
+      void service?.updateSessionMetadata(sessionId, { developerInstructions }).catch(() => undefined);
+    },
     hostTools,
     now: options.now,
     writeDiagnostic: (input) => {
@@ -206,7 +209,9 @@ export const createSessionRuntimeService = (
         sessionDiscovery: new CodexSessionDiscoveryProvider({
           codexRuntimePort,
           turnChangesStore: codexTurnChangesStore,
-          resolveHistoryCwd: (workspaceId) => workspaceRegistry.getWorkspace(workspaceId)?.absolutePath
+          resolveHistoryCwd: (workspaceId) => workspaceRegistry.getWorkspace(workspaceId)?.absolutePath,
+          resolveRoleInstructions: (workspaceId, metadata) =>
+            service?.resolveRoleInstructions(workspaceId, metadata) ?? Promise.resolve(undefined)
         }),
         sessionActions: new CodexSessionActionsProvider({
           codexRuntimePort

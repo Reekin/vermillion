@@ -919,7 +919,6 @@ export class SessionShellService {
     fromTurnId?: string;
     activateFork?: boolean;
     cwd?: string;
-    developerInstructions?: string;
     metadata?: Record<string, unknown>;
   }): Promise<SessionActionResult> {
     if (input.action === "pin" || input.action === "unpin") {

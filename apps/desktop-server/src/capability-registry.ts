@@ -192,7 +192,6 @@ export type SessionActionOptions = {
   fromTurnId?: string;
   activateFork?: boolean;
   cwd?: string;
-  developerInstructions?: string;
   metadata?: Record<string, unknown>;
 };
 

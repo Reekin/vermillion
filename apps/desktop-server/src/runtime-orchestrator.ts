@@ -142,9 +142,25 @@ export class RuntimeOrchestrator {
   ): Promise<string | undefined> {
     const session = this.domainService.requireSession(sessionId);
     const workspaceId = this.domainService.getConversation(session.conversationId)?.workspaceId;
-    return workspaceId && this.sessionRoleResolver
-      ? this.sessionRoleResolver(workspaceId, { ...session.metadata, ...metadata })
-      : undefined;
+    return workspaceId ? this.resolveRoleInstructions(workspaceId, { ...session.metadata, ...metadata }) : undefined;
+  }
+
+  public async resolveRoleInstructions(
+    workspaceId: string,
+    metadata: Record<string, unknown>
+  ): Promise<string | undefined> {
+    return this.sessionRoleResolver?.(workspaceId, metadata);
+  }
+
+  /** Records the role text the engine has now seen so later turns only inject on change. */
+  private recordDeliveredRoleInstructions(
+    session: ReturnType<DomainService["requireSession"]>,
+    delivered: string | undefined
+  ): void {
+    if (delivered === undefined || session.metadata?.developerInstructions === delivered) return;
+    this.domainService.commitRuntimeEvent({ type: "session.updated",
+      conversationId: session.conversationId, sessionId: session.sessionId,
+      status: session.status, metadata: { ...session.metadata, developerInstructions: delivered } });
   }
 
   public registerEngine(engine: SessionEngineDescriptor): void {
@@ -391,12 +407,7 @@ export class RuntimeOrchestrator {
           } else {
             this.domainService.commitSteerUserMessage({ ...envelope.command, turnId: outcome.turnId });
           }
-          if (result.developerInstructions !== undefined &&
-              session.metadata?.developerInstructions !== result.developerInstructions) {
-            this.domainService.commitRuntimeEvent({ type: "session.updated",
-              conversationId: session.conversationId, sessionId: session.sessionId,
-              status: session.status, metadata: { ...session.metadata, developerInstructions: result.developerInstructions } });
-          }
+          this.recordDeliveredRoleInstructions(session, result.developerInstructions);
           await this.sessionIndexSyncService.syncSession(session.sessionId);
           return this.accept(envelope, true, {
             sessionId: outcome.sessionId, turnId: outcome.turnId, delivery: outcome.delivery
@@ -762,11 +773,10 @@ export class RuntimeOrchestrator {
           })
         : undefined;
     const workspaceId = this.domainService.getConversation(session.conversationId)?.workspaceId;
-    const developerInstructions = workspaceId && this.sessionRoleResolver &&
-      (envelope.command.type === "sendUserMessage" || envelope.command.type === "steerTurn")
-      ? await this.sessionRoleResolver(workspaceId, session.metadata ?? {})
-      : deliveredDeveloperInstructions;
     const resolvesRole = envelope.command.type === "sendUserMessage" || envelope.command.type === "steerTurn";
+    const developerInstructions = resolvesRole && workspaceId
+      ? await this.resolveRoleInstructions(workspaceId, session.metadata ?? {})
+      : deliveredDeveloperInstructions;
     return {
       ...envelope,
       command: {

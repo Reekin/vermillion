@@ -208,6 +208,8 @@ export type CodexAppServerRuntimePortOptions = {
     | Promise<{ commandPath: string; commandArgs: string[] }>;
   resolveConversationIdBySessionId?: (sessionId: string) => string | undefined;
   recordTurnChanges?: (input: RecordedCodexTurnChanges) => void;
+  /** Compaction rebuilt the thread history; only `developerInstructions` (possibly empty) remains delivered. */
+  recordRoleContextRebuilt?: (sessionId: string, developerInstructions: string) => void;
   hostTools?: HostToolRegistry;
   now?: () => string;
   writeDiagnostic?: (input: DiagnosticsWriteInputRpc) => void;
@@ -921,6 +923,8 @@ export class CodexAppServerRuntimePort
   private readonly closedThreadIds = new Set<string>();
   private readonly resumeByThreadId = new Map<string, Promise<Thread>>();
   private readonly uncertainResumeThreadIds = new Set<string>();
+  /** Role text each thread was started or resumed with; compaction re-renders history from it. */
+  private readonly configuredRoleByThreadId = new Map<string, string>();
   private readonly sessionIdByThreadId = new Map<string, string>();
   private readonly sessionIdsByThreadId = new Map<string, Set<string>>();
   private readonly pendingTurnSessionIdByThreadId = new Map<string, string>();
@@ -963,6 +967,7 @@ export class CodexAppServerRuntimePort
   private sqliteHome: string | undefined;
   private startConfig: AgentAdapterRuntimeConfig = {};
   private readonly recordTurnChanges: ((input: RecordedCodexTurnChanges) => void) | undefined;
+  private readonly recordRoleContextRebuilt: ((sessionId: string, developerInstructions: string) => void) | undefined;
 
   public constructor(options: CodexAppServerRuntimePortOptions = {}) {
     this.engineId = options.engineId ?? "codex";
@@ -979,6 +984,7 @@ export class CodexAppServerRuntimePort
     this.resolveConversationIdBySessionId =
       options.resolveConversationIdBySessionId;
     this.recordTurnChanges = options.recordTurnChanges;
+    this.recordRoleContextRebuilt = options.recordRoleContextRebuilt;
     this.hostTools = options.hostTools;
     this.now = options.now ?? (() => new Date().toISOString());
     this.pipelineDiagnostics = options.writeDiagnostic
@@ -1486,6 +1492,7 @@ export class CodexAppServerRuntimePort
       result.thread.id,
       mapCodexExecutionProfile(result)
     );
+    if (developerInstructions) this.configuredRoleByThreadId.set(result.thread.id, developerInstructions);
     this.detachedThreadIds.delete(result.thread.id);
     this.uncertainResumeThreadIds.delete(result.thread.id);
     return result.thread;
@@ -1508,29 +1515,29 @@ export class CodexAppServerRuntimePort
     return false;
   }
 
-  public async forkThread(threadId: string, lastTurnId?: string, options: {
-    cwd?: string; developerInstructions?: string;
-  } = {}): Promise<Thread> {
+  public async forkThread(threadId: string, lastTurnId?: string, options: { cwd?: string } = {}): Promise<Thread> {
     await this.start(this.startConfig);
-    const developerInstructions = options.developerInstructions
-      ? await this.appendDeveloperInstructions(options.developerInstructions, options.cwd, {})
-      : undefined;
     const result = (await this.rpc("thread/fork", {
       threadId,
       ...(lastTurnId ? { lastTurnId } : {}),
       ...(options.cwd ? { cwd: options.cwd } : {}),
-      ...(developerInstructions ? { developerInstructions, deferGoalContinuation: true } : {}),
       threadSource: "user"
-    } satisfies ThreadForkParams & { lastTurnId?: string; deferGoalContinuation?: boolean })) as ThreadForkResponse;
+    } satisfies ThreadForkParams & { lastTurnId?: string })) as ThreadForkResponse;
     this.rememberThreadExecutionProfile(
       result.thread.id,
       mapCodexExecutionProfile(result)
     );
-    if (options.developerInstructions) {
-      // Fork config governs future compaction; this same-priority tail switches the inherited history now.
-      await this.injectDeveloperInstructions(result.thread.id, options.developerInstructions);
-    }
     return result.thread;
+  }
+
+  /** Appends the role tail when the resolved text differs from what the thread history holds. */
+  private async deliverRoleInstructions(
+    threadId: string,
+    developerInstructions: string | undefined,
+    deliveredDeveloperInstructions: string | undefined
+  ): Promise<void> {
+    if (developerInstructions === undefined || developerInstructions === deliveredDeveloperInstructions) return;
+    await this.injectDeveloperInstructions(threadId, developerInstructions);
   }
 
   public async injectDeveloperInstructions(threadId: string, text: string): Promise<void> {
@@ -1893,9 +1900,8 @@ export class CodexAppServerRuntimePort
       providerSessionId,
       developerInstructions
     );
-    if (injectRoleContext && !startsNewThread && developerInstructions !== undefined &&
-        developerInstructions !== deliveredDeveloperInstructions) {
-      await this.injectDeveloperInstructions(threadId, developerInstructions);
+    if (injectRoleContext && !startsNewThread) {
+      await this.deliverRoleInstructions(threadId, developerInstructions, deliveredDeveloperInstructions);
     }
     const input = buildCodexTurnInput(content, attachments);
     let startInfoForTurn:
@@ -2021,9 +2027,7 @@ export class CodexAppServerRuntimePort
       typeof payload.params.deliveredDeveloperInstructions === "string"
         ? payload.params.deliveredDeveloperInstructions
         : undefined;
-    if (developerInstructions !== undefined && developerInstructions !== deliveredDeveloperInstructions) {
-      await this.injectDeveloperInstructions(threadId, developerInstructions);
-    }
+    await this.deliverRoleInstructions(threadId, developerInstructions, deliveredDeveloperInstructions);
     await this.injectWorkbenchContext(threadId, payload.params, options);
     let targetTurnId = expectedTurnId;
     // Only a provider precondition rejection proves this input was not delivered.
@@ -2406,6 +2410,7 @@ export class CodexAppServerRuntimePort
       threadId,
       mapCodexExecutionProfile(result)
     );
+    if (developerInstructions) this.configuredRoleByThreadId.set(threadId, developerInstructions);
     this.attachThreadToSession(sessionId, threadId);
     return threadId;
   }
@@ -3103,6 +3108,10 @@ export class CodexAppServerRuntimePort
         const item = isRecord(params.item) ? (params.item as ThreadItem) : undefined;
         if (!sessionId || !turnId || !item) {
           return;
+        }
+        if (method === "item/completed" && isCodexContextCompactionThreadItem(item)) {
+          // Compaction re-renders history from the thread's configured instructions; any injected role tail is gone.
+          this.recordRoleContextRebuilt?.(sessionId, this.configuredRoleByThreadId.get(String(params.threadId)) ?? "");
         }
         this.handleItemLifecycle(method, sessionId, turnId, item);
         return;

@@ -973,21 +973,31 @@ const hydrateCodexTurnEntities = async (input: {
   };
 };
 
+type SessionRoleInstructionsResolver = (workspaceId: string, metadata: Record<string, unknown>) => Promise<string | undefined>;
+
 export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
   public readonly engineId = codexAgentId;
 
   private readonly codexRuntimePort: CodexAppServerRuntimePort;
   private readonly turnChangesStore: CodexTurnChangesStore | undefined;
   private readonly resolveHistoryCwd: ((workspaceId: string) => string | undefined) | undefined;
+  private readonly resolveRoleInstructions: SessionRoleInstructionsResolver | undefined;
 
   public constructor(options: {
     codexRuntimePort: CodexAppServerRuntimePort;
     turnChangesStore?: CodexTurnChangesStore;
     resolveHistoryCwd?: (workspaceId: string) => string | undefined;
+    resolveRoleInstructions?: SessionRoleInstructionsResolver;
   }) {
     this.codexRuntimePort = options.codexRuntimePort;
     this.turnChangesStore = options.turnChangesStore;
     this.resolveHistoryCwd = options.resolveHistoryCwd;
+    this.resolveRoleInstructions = options.resolveRoleInstructions;
+  }
+
+  /** Loading a thread fixes the instructions Codex re-renders after compaction, so they must be current. */
+  private roleInstructionsFor(entry: SessionIndexEntry): Promise<string | undefined> {
+    return this.resolveRoleInstructions?.(entry.workspaceId, entry.metadata ?? {}) ?? Promise.resolve(undefined);
   }
 
   private async withHistory<T>(
@@ -1002,7 +1012,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       ? await this.codexRuntimePort.resumeThread(
           header.id,
           this.resolveHistoryCwd?.(entry.workspaceId) ?? header.cwd,
-          undefined,
+          await this.roleInstructionsFor(entry),
           { signal }
         )
       : header;
@@ -1094,7 +1104,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     const thread = await this.codexRuntimePort.resumeThread(
       threadId,
       this.resolveHistoryCwd?.(entry.workspaceId),
-      undefined,
+      await this.roleInstructionsFor(entry),
       { signal: input.signal }
     );
     this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id);

@@ -52,9 +52,10 @@ const buildForkMetadata = (
     ...(input.indexEntry?.metadata ?? {}),
     ...(input.session?.metadata ?? {})
   };
-  // Forks inherit conversational context; ownership is supplied explicitly by the caller.
+  // Forks inherit conversational context, including the role tail already delivered in the copied history;
+  // ownership is supplied explicitly by the caller.
   const context = Object.fromEntries(Object.entries(parent).filter(([key]) =>
-    ["role", "sessionProfile", "turnExecutionProfiles"].includes(key)));
+    ["role", "sessionProfile", "developerInstructions", "turnExecutionProfiles"].includes(key)));
   return {
     ...context,
     providerKind: codexProviderKind,
@@ -194,15 +195,8 @@ export class CodexSessionActionsProvider implements SessionAgentActionsProvider 
         await this.codexRuntimePort.unsubscribeThread(threadId);
       }
       const cwd = input.cwd ?? input.session?.metadata?.cwd ?? input.indexEntry?.metadata?.cwd;
-      const resolver = input.runtimeService.resolveSessionRoleInstructions?.bind(input.runtimeService);
-      const developerInstructions = resolver
-        ? await resolver(input.sessionId, input.metadata ?? {})
-        : input.developerInstructions;
-      const thread = typeof developerInstructions === "string"
-        ? await this.codexRuntimePort.resumeThread(threadId, typeof cwd === "string" ? cwd : undefined, developerInstructions)
-        : typeof cwd === "string"
-        ? await this.codexRuntimePort.resumeThread(threadId, cwd)
-        : await this.codexRuntimePort.resumeThread(threadId);
+      const thread = await this.codexRuntimePort.resumeThread(threadId, typeof cwd === "string" ? cwd : undefined,
+        await input.runtimeService.resolveSessionRoleInstructions(input.sessionId, input.metadata ?? {}));
       this.codexRuntimePort.attachThreadToSession(input.sessionId, thread.id);
       if (input.preserveExecution) this.codexRuntimePort.trackResumedTurn(input.sessionId, thread);
       if (input.cwd || input.metadata) {
