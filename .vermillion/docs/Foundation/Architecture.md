@@ -4,7 +4,7 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `packages/shared`、`core`、`adapters`、`apps/desktop-server` | 会话引擎契约、会话与 turn 投影、Codex app-server 适配、会话浏览 |
+| `packages/shared`、`core`、`adapters`、`apps/desktop-server` | 会话引擎契约、会话与 turn 投影、引擎适配（Codex app-server、pi RPC）、会话浏览 |
 | `packages/workbench` | Workspace、Doc、开工请求、工单、决策和 Inbox 的领域操作与持久化 |
 | `apps/desktop/src/ui/chat-shell` | `SessionPane` 的消息阅读、输入、会话切换和审批 |
 | `apps/desktop/src/ui/app` | 导航、Docs、工作区面板、工单与 Worker 分支的展示和查询 |
@@ -28,6 +28,13 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 每张工单持久化为一份 `WorkItemRecord`，包含合同与业务进度 `item`、当前执行过程 `execution`、合入检查点 `integrations` 和回收候选 `cleanup`。执行过程保存当前会话、消息投递、失败和重试状态，是恢复执行的唯一依据。工单查询中的 `run` 由 execution 投影，不单独持久化；`runs/` 中的历史记录只用于追溯。
 
 `WorkspaceStore` 只负责记录查询和按工单串行的读改写事务；`WorkbenchService` 在事务内完成状态转换。持久化成功后统一发布工单和动作事件。取消事件先于通用更新事件送达，使本次取消触发的中断先于后续调度入队。查询投影不提供写入入口。
+
+## 会话引擎接入
+
+引擎产品行为见[会话引擎](Engines/PRD.md)。每个引擎是一个装配单元 `EngineIntegration`（`apps/desktop-server/src/engines/<engineId>/`），包含引擎定义、能力面声明、`AgentAdapter` 与 runtime port、`AgentWorkbenchCapabilities`、程序解析规则和可选的 turn 扩展；`prod-service` 只持有装配单元列表，不直接引用任何引擎实现。会话级操作（释放执行、清理历史、活动 turn、技能列表、fork、凭据）都属于 `AgentWorkbenchCapabilities`，由 `CapabilityRegistry` 按会话 `engineId` 分发；shell 层不接收面向单一引擎的函数。入口（New Chat、AgentRunner、asksource）从设置读取新会话引擎，不写死引擎 ID。
+
+pi 的 runtime port 每会话启动一个 `pi --mode rpc` 进程，使用只按 `
+` 切分的 JSONL 客户端；宿主工具与角色指令注入由随包附带的 pi extension 提供。
 
 ## 会话与执行环境
 
@@ -59,4 +66,4 @@ Vermillion 将逐轮生效配置作为节点执行记录持久化，并通过已
 
 桌面与 CLI 使用同一工作台服务。桌面在 `<baseDir>/endpoint.json` 发布 loopback 端口，CLI 优先调用桌面服务；桌面未运行时在进程内运行同一个服务。
 
-桌面启动时将 `vermillion` CLI 放入 `<baseDir>/bin` 并加入本进程 PATH，Codex 子进程继承该路径。角色文件解析与 developer 指令注入见[角色](../Workbench/Roles/PRD.md)。
+桌面启动时将 `vermillion` CLI 放入 `<baseDir>/bin` 并加入本进程 PATH，引擎子进程继承该路径。角色文件解析与 developer 指令注入见[角色](../Workbench/Roles/PRD.md)。

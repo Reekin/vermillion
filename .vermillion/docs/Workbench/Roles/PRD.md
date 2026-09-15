@@ -6,9 +6,9 @@
 
 会话 metadata 只保存角色标识 `role`（`design-partner`、`work-preparation`、`worker`、`maintainer`），不保存角色正文；fork 只继承 `role`。设计伙伴会话使用 `design-partner` 角色，其指令正文附带当前 workspaceId 与工作台 CLI 说明。
 
-每次向会话发送消息时，工作台按 `role` 和当前 workspace 现场解析该会话此刻应有的指令（设计伙伴与开工准备用设计伙伴正文，Worker 用含 Reviewer、Verifier 交接说明的完整 Worker 指令，Maintainer 按领域附加专属指令），角色文件的修改在下一条消息生效，不需要重建会话。解析结果作为 Codex 线程启动与恢复的 developer 指令，runtime 通过 `config/read` 读取用户的 `developer_instructions` 再追加角色正文，不修改用户 `config.toml`；与上次已送达正文不同时，在本轮开始前以 developer 级消息追加到历史末尾并声明取代此前角色指令，然后记录为已送达。已送达正文保存在会话 metadata 的 `developerInstructions`，只由运行时在送达后回写。
+每次向会话发送消息时，工作台按 `role` 和当前 workspace 现场解析该会话此刻应有的指令（设计伙伴与开工准备用设计伙伴正文，Worker 用含 Reviewer、Verifier 交接说明的完整 Worker 指令，Maintainer 按领域附加专属指令），角色文件的修改在下一条消息生效，不需要重建会话。解析结果作为会话启动与恢复的角色指令：Codex 由 runtime 通过 `config/read` 读取用户的 `developer_instructions` 再追加角色正文作为 developer 指令，不修改用户 `config.toml`；pi 由 Vermillion 附带的 extension 在轮次开始前注入；与上次已送达正文不同时，在本轮开始前以 developer 级消息追加到历史末尾并声明取代此前角色指令，然后记录为已送达。已送达正文保存在会话 metadata 的 `developerInstructions`，只由运行时在送达后回写。
 
-角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在 New Chat 草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent，创建时使用各自角色解析后的模型配置，未指定的字段沿用引擎的 subagent 默认值；正文与配置均遵循全局和项目的覆盖、追加规则。引擎不支持的显式配置应明确反馈，不能静默忽略。
+角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在 New Chat 草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent（Codex 用 `spawn_agent`，pi 用 `subagent` 工具），创建时使用各自角色解析后的模型配置，未指定的字段沿用引擎的 subagent 默认值；正文与配置均遵循全局和项目的覆盖、追加规则。引擎不支持的显式配置应明确反馈，不能静默忽略。
 
 - **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/design-partner.md)。
 - **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/worker.md)。
