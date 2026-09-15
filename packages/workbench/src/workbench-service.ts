@@ -21,7 +21,7 @@ import type {
 } from "./contracts.js";
 import { effectiveNeeds, actionIsOpen, projectWorkItem, type WorkflowAction, type Execution, type Integration, type VerifySubmission, type WorkItemRecord } from "./contracts.js";
 import type { SessionNavigationPort } from "./session-navigation.js";
-import { DocsService, WorktreeMergeConflict, WorktreeNotReady } from "./docs.js";
+import { DocsService, WorktreeMergeConflict, WorktreeNotReady, listTrackedDirectories } from "./docs.js";
 import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult, AppWindowInput, AppWindowResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -87,6 +87,11 @@ export type IssueDiscussionStarter = (input: {
 type IssueUpdateInput = Partial<Pick<Issue, "title" | "summary" | "domainId" | "type" | "status" | "requirement" | "suggestion" | "decisionQuestion" | "resolutionReason" | "duplicateOf">> & {
   appendEvidence?: Issue["evidence"];
   unread?: boolean;
+  patrolRunId?: string;
+};
+
+type IssueCreateInput = Pick<Issue, "title" | "summary" | "domainId"> & Partial<Pick<Issue, "source" | "type" | "status" | "requirement" | "evidence" | "suggestion" | "decisionQuestion">> & {
+  patrolRunId?: string;
 };
 
 type DomainConfigInput = Pick<DomainConfig, "enabled" | "changeTrigger" | "intervalHours" | "triggerPaths" | "autoWorkEnabled" | "authorizationScope">;
@@ -236,6 +241,10 @@ export class WorkbenchService {
     this.contexts.get(workspaceId)?.watcher?.close();
     this.contexts.delete(workspaceId);
     this.emit({ type: "workspaces.changed" });
+  }
+
+  async listWorkspaceDirectories(workspaceId: string): Promise<string[]> {
+    return listTrackedDirectories((await this.context(workspaceId)).rootPath);
   }
 
   private async context(workspaceId: string): Promise<WorkspaceContext> {
@@ -483,6 +492,17 @@ export class WorkbenchService {
     this.emit({ type: "domains.changed", workspaceId });
   }
 
+  /** Drops the definition, the patrol instruction and the patrol configuration; history stays queryable. */
+  async removeDomain(workspaceId: string, domainId: string): Promise<void> {
+    const context = await this.context(workspaceId);
+    const domain = (await this.listDomains(workspaceId)).find((entry) => entry.domainId === domainId);
+    if (!domain) throw new Error("Unknown domain: " + domainId);
+    await context.docs.remove(domain.path);
+    await this.roles.removeMaintainerInstruction(context.rootPath, domainId);
+    await context.store.domainConfigs.remove(domainId);
+    this.emit({ type: "domains.changed", workspaceId });
+  }
+
   async resolveMaintainer(workspaceId: string, domainId: string) {
     await this.getDomainConfig(workspaceId, domainId);
     return this.roles.resolveMaintainer((await this.context(workspaceId)).rootPath, domainId);
@@ -662,7 +682,7 @@ export class WorkbenchService {
       `检查依据:\n${run.requirementRefs.map((ref) => `- ${ref.path} @ ${ref.commit}`).join("\n")}`,
       `当前自动开单: ${domain.config.autoWorkEnabled ? "启用" : "关闭"}\n授权范围:\n${domain.config.authorizationScope.length ? domain.config.authorizationScope.map((entry) => "- " + entry).join("\n") : "- 未授权"}`,
       `已有 Issue 摘要:\n${issues.length ? issues.map((issue) => `- ${issue.issueId} [${issue.status}] ${issue.title}`).join("\n") : "- 无"}`,
-      `先通过 docs.read、issue.list / issue.get 核对材料。新问题用 issue.create，并传 source=maintainer、sourceSessionId=${run.sessionId ?? "<sessionId>"}；重复发现用 issue.update 补充证据。证据不足标为 investigating，需要取舍标为 decision 并提供 decisionQuestion，优化想法使用 suggestion 类型。`,
+      `先通过 docs.read、issue.list / issue.get 核对材料。新问题用 issue.create，并传 source=maintainer、patrolRunId=${run.patrolRunId}；已有议题用 issue.update 补充证据，同样传 patrolRunId=${run.patrolRunId}，让记录回链到本轮巡检会话。证据不足标为 investigating，需要取舍标为 decision 并提供 decisionQuestion，优化想法使用 suggestion 类型。`,
       "只有满足领域授权时才调用 domain.issue.workItem.create；该入口会再次核对巡检会话、授权、固定要求引用和证据。不要直接修改代码、文档或规范。",
       `完成后必须调用：vermillion domain.patrol.complete '${JSON.stringify({ workspaceId, patrolRunId: run.patrolRunId, sessionId: run.sessionId ?? "<sessionId>", issueIds: ["<issueId>"], summary: "<本轮结果>" })}'。没有 Issue 时传空数组。`
     ].join("\n\n");
@@ -670,8 +690,11 @@ export class WorkbenchService {
 
   // ---- issues ----
 
-  async listIssues(workspaceId: string): Promise<Issue[]> {
-    return (await this.context(workspaceId)).store.issues.list().then((list) => list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+  async listIssues(workspaceId: string, filter: { domainId?: string; status?: Issue["status"] } = {}): Promise<Issue[]> {
+    const issues = await (await this.context(workspaceId)).store.issues.list();
+    return issues
+      .filter((issue) => (!filter.domainId || issue.domainId === filter.domainId) && (!filter.status || issue.status === filter.status))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async getIssue(workspaceId: string, issueId: string): Promise<Issue> {
@@ -680,15 +703,16 @@ export class WorkbenchService {
     return issue;
   }
 
-  async createIssue(workspaceId: string, input: Pick<Issue, "title" | "summary" | "domainId"> & Partial<Pick<Issue, "source" | "type" | "status" | "requirement" | "evidence" | "suggestion" | "decisionQuestion" | "sourceSessionId" | "sourceTurnId">>): Promise<Issue> {
+  async createIssue(workspaceId: string, input: IssueCreateInput): Promise<Issue> {
     const now = this.now();
     const source = input.source ?? "user";
+    const patrol = input.patrolRunId ? await this.getPatrolRun(workspaceId, input.patrolRunId) : undefined;
     const issue: Issue = {
       issueId: createId("issue"), title: input.title.trim(), summary: input.summary, domainId: input.domainId.trim(),
       source, type: input.type ?? "problem", status: input.status ?? "open", requirement: input.requirement,
       evidence: input.evidence ?? [], suggestion: input.suggestion, decisionQuestion: input.decisionQuestion,
-      sourceSessionId: input.sourceSessionId, sourceTurnId: input.sourceTurnId, workItemIds: [], unread: source !== "user",
-      activities: [{ at: now, kind: "created", message: source === "user" ? "用户创建议题" : source === "maintainer" ? "Maintainer 创建议题" : "Liaison 创建议题", sessionId: input.sourceSessionId }],
+      sourceSessionId: patrol?.sessionId, sourceTurnId: patrol?.turnId, workItemIds: [], unread: source !== "user",
+      activities: [{ at: now, kind: "created", message: source === "user" ? "用户创建议题" : source === "maintainer" ? "Maintainer 创建议题" : "Liaison 创建议题", sessionId: patrol?.sessionId }],
       createdAt: now, updatedAt: now
     };
     this.validateIssue(issue);
@@ -704,15 +728,16 @@ export class WorkbenchService {
     if (changes.duplicateOf === issueId) throw new Error("Issue 不能标记为自身的重复项。");
     if (changes.duplicateOf) await this.getIssue(workspaceId, changes.duplicateOf);
     const now = this.now();
+    const patrol = changes.patrolRunId ? await this.getPatrolRun(workspaceId, changes.patrolRunId) : undefined;
     const saved = await (await this.context(workspaceId)).store.transactIssue(issueId, (current) => {
       if (!current) throw new Error("Unknown issue: " + issueId);
-      const { appendEvidence = [], ...fields } = changes;
+      const { appendEvidence = [], patrolRunId: _patrolRunId, ...fields } = changes;
       const status = fields.status ?? current.status;
       const message = appendEvidence.length ? `补充 ${appendEvidence.length} 条证据` : status !== current.status ? `状态变为 ${issueStatusText[status]}` : "更新议题";
       const issue: Issue = { ...current, ...fields,
         evidence: [...current.evidence, ...appendEvidence],
         activities: [...current.activities, { at: now, kind: appendEvidence.length ? "evidence" : status === "closed" || status === "duplicate" ? "resolved" : "updated", message,
-          issueId: fields.duplicateOf }], updatedAt: now };
+          issueId: fields.duplicateOf, sessionId: patrol?.sessionId }], updatedAt: now };
       this.validateIssue(issue);
       return { record: issue, result: issue };
     });

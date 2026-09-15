@@ -6,7 +6,7 @@
  *
  * Buttons       Button, IconButton
  * Text          Badge, SectionLabel, InlineNotice, StatusDot
- * Fields        Field (input / textarea / select / number), Toggle, Stepper
+ * Fields        Field (input / textarea / select / number), Toggle, Checkbox, Stepper
  * Structure     PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
@@ -212,6 +212,23 @@ export const Toggle = ({ label, checked, disabled, onChange }: { label: string; 
   </button>
 );
 
+/** Multi-select control; `indeterminate` marks a parent whose children are only partly selected. */
+export const Checkbox = ({ label, checked, indeterminate, disabled, onChange }: {
+  label: string; checked: boolean; indeterminate?: boolean; disabled?: boolean; onChange: (checked: boolean) => void;
+}) => (
+  <label className="vm-checkbox">
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      ref={(node) => { if (node) node.indeterminate = Boolean(indeterminate); }}
+      onChange={(event) => onChange(event.target.checked)}
+    />
+    <span>{label}</span>
+  </label>
+);
+
 export const Stepper = ({ label, value, min, max, disabled, onChange }: { label: string; value: number; min: number; max: number; disabled?: boolean; onChange: (value: number) => void }) => (
   <span className="vm-stepper">
     {label}<span className="vm-stepper-control">
@@ -248,11 +265,11 @@ export const HoverCard = ({ children, content }: { children: ReactNode; content:
   </Tooltip.Root>
 );
 
-/** Panel top line: section label on the left, optional actions on the right. */
-export const PanelHeader = ({ title, children, className }: { title: ReactNode; children?: ReactNode; className?: string }) => (
+/** Panel top line: section label plus optional actions, pushed right unless `align="start"` keeps them adjacent. */
+export const PanelHeader = ({ title, children, className, align = "end" }: { title: ReactNode; children?: ReactNode; className?: string; align?: "end" | "start" }) => (
   <div className={cn("flex items-center pr-2", className)}>
     <SectionLabel>{title}</SectionLabel>
-    {children && <div className="ml-auto flex items-center gap-1">{children}</div>}
+    {children && <div className={cn("flex items-center gap-1", align === "end" && "ml-auto")}>{children}</div>}
   </div>
 );
 

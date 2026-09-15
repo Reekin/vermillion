@@ -13,6 +13,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workspace.list": () => service.listWorkspaces(),
     "workspace.add": (p) => service.addWorkspace(p),
     "workspace.remove": async (p) => { await service.removeWorkspace(p.workspaceId); return {}; },
+    "workspace.directories": (p) => service.listWorkspaceDirectories(p.workspaceId),
 
     "docs.list": (p) => service.listDocs(p.workspaceId),
     "docs.read": async (p) => ({ content: await service.readDoc(p.workspaceId, p.path, p.commit) }),
@@ -45,7 +46,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "role.write": async (p) => { await service.writeRoleOverride(p.workspaceId, p.roleId, p.content); return {}; },
     "role.reset": async (p) => { await service.resetRoleOverride(p.workspaceId, p.roleId); return {}; },
 
-    "issue.list": (p) => service.listIssues(p.workspaceId),
+    "issue.list": (p) => service.listIssues(p.workspaceId, { domainId: p.domainId, status: p.status }),
     "issue.get": (p) => service.getIssue(p.workspaceId, p.issueId),
     "issue.create": ({ workspaceId, ...p }) => service.createIssue(workspaceId, p),
     "issue.update": ({ workspaceId, issueId, ...p }) => service.updateIssue(workspaceId, issueId, p),
@@ -57,6 +58,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "domain.config.set": (p) => service.setDomainConfig(p.workspaceId, p.domainId, p.value),
     "domain.instruction.read": async (p) => ({ content: await service.readMaintainerInstruction(p.workspaceId, p.domainId) }),
     "domain.instruction.write": async (p) => { await service.writeMaintainerInstruction(p.workspaceId, p.domainId, p.content); return {}; },
+    "domain.remove": async (p) => { await service.removeDomain(p.workspaceId, p.domainId); return {}; },
     "domain.patrol.list": async (p) => (await service.listPatrolRuns(p.workspaceId)).filter((run) => !p.domainId || run.domainId === p.domainId),
     "domain.patrol.get": (p) => service.getPatrolRun(p.workspaceId, p.patrolRunId),
     "domain.patrol.run": (p) => service.queuePatrol(p.workspaceId, p.domainId),

@@ -30,6 +30,8 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "issue.update": "更新议题分诊、证据或处理结果；关闭和重复需要处理原因。",
   "domain.config.set": "用户管理领域巡检与自动开单授权；按领域独立保存。",
   "domain.instruction.write": "编辑领域专属 Maintainer developer instruction；保存到当前 workspace。",
+  "domain.remove": "删除领域定义、领域巡检指令与巡检配置；历史 Issue 和巡检记录保留。",
+  "workspace.directories": "只读查询；返回 workspace 中 Git 已跟踪文件所在的目录，供触发目录勾选。",
   "domain.patrol.run": "手动排入一次真实领域巡检；桌面调度在线时启动 Maintainer 会话。",
   "domain.patrol.scan": "扫描目录变更和定时到期条件；无事可查时记录跳过，不启动模型。",
   "domain.patrol.complete": "当前 Maintainer 巡检会话登记结果和关联 Issue。",

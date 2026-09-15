@@ -171,7 +171,7 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
         footer={<>
           {issue.sourceSessionId && <Button variant="ghost" outlined onClick={() => {
             onClose(); onOpenSession(issue.sourceSessionId!, issue.sourceTurnId);
-          }}>来源</Button>}
+          }}>巡检会话</Button>}
           {issue.duplicateOf && <Button variant="ghost" outlined onClick={() => onOpenIssue(issue.duplicateOf!)}>原议题</Button>}
           {linked.map((item) => <Button key={item.workItemId} variant="ghost" outlined onClick={() => {
             onClose(); onOpenWorkItem(item.workItemId);
@@ -202,7 +202,14 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
           {issue.resolutionReason}{issue.duplicateOf ? "\n原议题：" + issue.duplicateOf : ""}
         </DetailSection>}
         <DetailSection title="活动">
-          {issue.activities.map((entry) => `${new Date(entry.at).toLocaleString("zh-CN")} · ${entry.message}${entry.workItemId ? " · " + entry.workItemId : ""}`).join("\n")}
+          <div className="space-y-1">
+            {issue.activities.map((entry, index) => <div key={index} className="flex items-center gap-2">
+              <span className="min-w-0 flex-1">{new Date(entry.at).toLocaleString("zh-CN")} · {entry.message}{entry.workItemId ? " · " + entry.workItemId : ""}</span>
+              {entry.sessionId && <Button size="sm" variant="ghost" outlined className="shrink-0" onClick={() => {
+                onClose(); onOpenSession(entry.sessionId!);
+              }}>巡检会话</Button>}
+            </div>)}
+          </div>
         </DetailSection>
         {handling && <div className="mt-3 space-y-3 border-t border-border pt-3">
           <Field kind="select" label="处理方式" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}>

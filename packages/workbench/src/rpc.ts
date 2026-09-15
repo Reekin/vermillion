@@ -82,6 +82,7 @@ export const workbenchRpc = {
   "workspace.list": { params: zEmpty, result: z.array(zWorkspace) },
   "workspace.add": { params: z.object({ rootPath: z.string().min(1), label: z.string().optional() }), result: zWorkspace },
   "workspace.remove": { params: zWs, result: zEmpty },
+  "workspace.directories": { params: zWs, result: z.array(z.string().min(1)) },
 
   "docs.list": { params: zWs, result: z.array(zDocFile) },
   "docs.read": { params: zWs.extend({ path: z.string().min(1), commit: z.string().min(1).optional() }), result: z.object({ content: z.string() }) },
@@ -104,14 +105,14 @@ export const workbenchRpc = {
   "role.write": { params: zWs.extend({ roleId: z.string().min(1), content: z.string() }), result: zEmpty },
   "role.reset": { params: zWs.extend({ roleId: z.string().min(1) }), result: zEmpty },
 
-  "issue.list": { params: zWs, result: z.array(zIssue) },
+  "issue.list": { params: zWs.extend({ domainId: z.string().min(1).optional(), status: zIssueStatus.optional() }), result: z.array(zIssue) },
   "issue.get": { params: zWs.extend({ issueId: z.string().min(1) }), result: zIssue },
   "issue.create": {
     params: zWs.extend({
       title: z.string().trim().min(1), summary: z.string(), domainId: z.string().trim().min(1),
       source: zIssueSource.optional(), type: zIssueType.optional(), status: zIssueStatus.optional(),
       requirement: zIssue.shape.requirement, evidence: z.array(zIssueEvidence).optional(), suggestion: z.string().optional(),
-      decisionQuestion: z.string().trim().min(1).optional(), sourceSessionId: z.string().min(1).optional(), sourceTurnId: z.string().min(1).optional()
+      decisionQuestion: z.string().trim().min(1).optional(), patrolRunId: z.string().min(1).optional()
     }),
     result: zIssue
   },
@@ -121,7 +122,7 @@ export const workbenchRpc = {
       type: zIssueType.optional(), status: zIssueStatus.optional(), requirement: zIssue.shape.requirement,
       suggestion: z.string().optional(), decisionQuestion: z.string().trim().min(1).optional(),
       resolutionReason: z.string().trim().min(1).optional(), duplicateOf: z.string().min(1).optional(),
-      appendEvidence: z.array(zIssueEvidence).optional(), unread: z.boolean().optional()
+      appendEvidence: z.array(zIssueEvidence).optional(), unread: z.boolean().optional(), patrolRunId: z.string().min(1).optional()
     }), result: zIssue
   },
   "issue.read": { params: zWs.extend({ issueId: z.string().min(1) }), result: zIssue },
@@ -134,6 +135,7 @@ export const workbenchRpc = {
   }) }), result: zDomainConfig },
   "domain.instruction.read": { params: zWs.extend({ domainId: z.string().min(1) }), result: z.object({ content: z.string() }) },
   "domain.instruction.write": { params: zWs.extend({ domainId: z.string().min(1), content: z.string() }), result: zEmpty },
+  "domain.remove": { params: zWs.extend({ domainId: z.string().min(1) }), result: zEmpty },
   "domain.patrol.list": { params: zWs.extend({ domainId: z.string().min(1).optional() }), result: z.array(zPatrolRun) },
   "domain.patrol.get": { params: zWs.extend({ patrolRunId: z.string().min(1) }), result: zPatrolRun },
   "domain.patrol.run": { params: zWs.extend({ domainId: z.string().min(1) }), result: zPatrolRun },
