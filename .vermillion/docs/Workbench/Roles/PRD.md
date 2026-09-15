@@ -4,7 +4,9 @@
 
 默认角色随源码保存在 `packages/workbench/roles/`，打包后位于 `resources/app/roles/`。启动时 `RoleService.ensureGlobal` 只补齐 `~/.vermillion/roles/` 中缺失的文件，不覆盖已有全局版本。读取角色时优先采用 workspace 文件：`override` 用项目正文替换全局正文，`append` 将项目正文追加到全局正文；没有项目文件时使用全局版本。
 
-会话 metadata 保存 `developerInstructions`。runtime 在启动、fork 或恢复会话时，通过 Codex `config/read` 读取用户的 `developer_instructions`，再追加解析后的角色文本作为 developer 指令，不修改用户 `config.toml`。设计伙伴会话使用 `design-partner` 角色。
+会话 metadata 只保存角色标识 `role`（`design-partner`、`work-preparation`、`worker`、`maintainer`），不保存角色正文；fork 只继承 `role`。设计伙伴会话使用 `design-partner` 角色，其指令正文附带当前 workspaceId 与工作台 CLI 说明。
+
+每次向会话发送消息时，工作台按 `role` 和当前 workspace 现场解析该会话此刻应有的指令（设计伙伴与开工准备用设计伙伴正文，Worker 用含 Reviewer、Verifier 交接说明的完整 Worker 指令，Maintainer 按领域附加专属指令），角色文件的修改在下一条消息生效，不需要重建会话。解析结果作为 Codex 线程启动与恢复的 developer 指令，runtime 通过 `config/read` 读取用户的 `developer_instructions` 再追加角色正文，不修改用户 `config.toml`；与上次已送达正文不同时，在本轮开始前以 developer 级消息追加到历史末尾并声明取代此前角色指令，然后记录为已送达。已送达正文保存在会话 metadata 的 `developerInstructions`，只由运行时在送达后回写。
 
 角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在 New Chat 草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent，创建时使用各自角色解析后的模型配置，未指定的字段沿用引擎的 subagent 默认值；正文与配置均遵循全局和项目的覆盖、追加规则。引擎不支持的显式配置应明确反馈，不能静默忽略。
 
@@ -17,7 +19,7 @@ Maintainer 和 IM 接入属于扩展能力，不是基本执行循环的前提�
 
 开工准备使用独立的 [work-preparation.md](../../../../packages/workbench/roles/work-preparation.md)，沿用角色文件的全局、项目覆盖与追加规则，可通过角色编辑器及 role CLI 编辑。正文作为准备轮消息发送，附上本次范围及工单关联信息；准备分支继承原角色，不注入 Worker 指令。开工流程见[工作台 · 开工](../Think/PRD.md)。
 
-调度器排到工单时，Worker 角色通过 developer 级消息追加到分支历史末尾，并保存为会话指令和模型配置；随后发送执行合同。保留继承的历史前缀，后续恢复与压缩后仍使用 Worker 角色。`worker.md` 只描述执行已建立工单的职责。
+调度器排到工单时，将分支的角色标识改为 `worker` 并应用其模型配置，随后发送执行合同；Worker 指令按上述送达规则在合同轮开始前追加。保留继承的历史前缀，后续恢复与压缩后仍使用 Worker 角色。`worker.md` 只描述执行已建立工单的职责。
 
 ## 编辑器
 
