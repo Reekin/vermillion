@@ -147,6 +147,16 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
                   保存
                 </Button>
               </div>
+              {resolution && resolution.found && resolution.resolvedPath && (
+                <span className="text-caption text-muted-foreground">
+                  {`已找到：${resolution.resolvedPath}`}
+                </span>
+              )}
+              {resolution && !resolution.found && (
+                <InlineNotice tone="error">
+                  {`未找到 ${resolution.path}（${programSourceLabel(resolution.source)}），新建会话时该引擎无法启动。`}
+                </InlineNotice>
+              )}
             </div>
           );
         })}

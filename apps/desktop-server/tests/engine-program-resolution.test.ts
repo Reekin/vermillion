@@ -29,7 +29,8 @@ describe("resolveEngineProgramCommand", () => {
     ).toEqual({
       path: "C:\\custom\\codex.exe",
       source: "custom",
-      args: ["app-server"]
+      args: ["app-server"],
+      found: false
     });
   });
 
@@ -47,7 +48,8 @@ describe("resolveEngineProgramCommand", () => {
       path: "C:\\tools\\codex.exe",
       source: "environment",
       environmentVariable: "CODEX_BIN",
-      args: ["app-server"]
+      args: ["app-server"],
+      found: false
     });
   });
 
@@ -75,7 +77,8 @@ describe("resolveEngineProgramCommand", () => {
     ).toEqual({
       path: "second.cmd",
       source: "configured",
-      args: ["serve"]
+      args: ["serve"],
+      found: false
     });
   });
 
@@ -88,7 +91,8 @@ describe("resolveEngineProgramCommand", () => {
     ).toEqual({
       path: "second",
       source: "default",
-      args: []
+      args: [],
+      found: false
     });
   });
 
@@ -111,5 +115,37 @@ describe("resolveEngineProgramCommand", () => {
         "\"C:\\Program Files\\Codex\\codex.cmd\" app-server"
       ]
     });
+  });
+
+  it("reports whether the resolved program exists", () => {
+    const env = { PATH: "C:\\tools", PATHEXT: ".EXE;.CMD" };
+    expect(
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        customPath: process.execPath,
+        env,
+        platform: "win32"
+      })
+    ).toMatchObject({ found: true, resolvedPath: process.execPath });
+    expect(
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        configuredPath: "C:\\tools\\missing.cmd",
+        env,
+        platform: "win32"
+      })
+    ).toEqual({
+      path: "C:\\tools\\missing.cmd",
+      source: "configured",
+      args: ["serve"],
+      found: false
+    });
+    expect(
+      resolveEngineProgramCommand("second", {
+        program: secondEngineProgram,
+        env: { PATH: "C:\\tools", PATHEXT: ".EXE" },
+        platform: "win32"
+      })
+    ).toMatchObject({ path: "second.cmd", source: "default", found: false });
   });
 });

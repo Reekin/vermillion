@@ -97,7 +97,10 @@ const zSessionSettingsSchema = z.object({
       z.object({
         path: z.string().min(1),
         source: z.enum(["custom", "configured", "environment", "default"]),
-        environmentVariable: z.string().min(1).optional()
+        environmentVariable: z.string().min(1).optional(),
+        /** 解析出的可执行文件是否存在；用于设置页直接告诉用户这个引擎能不能启动。 */
+        found: z.boolean(),
+        resolvedPath: z.string().min(1).optional()
       })
     )
     .default({}),

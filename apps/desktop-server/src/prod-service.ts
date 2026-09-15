@@ -20,6 +20,7 @@ import { createSessionWorkingDirectoryResolver } from "./session-working-directo
 import { TurnChangeService } from "./turn-change-service.js";
 import {
   resolveEngineProgramCommand,
+  type EngineProgramCommand,
   type EngineProgramRule
 } from "./engine-program-resolution.js";
 import {
@@ -65,14 +66,14 @@ export const createSessionRuntimeService = (
   const writeDiagnostic = (input: Parameters<DiagnosticLogService["write"]>[0]) => {
     void diagnosticLogService.write(input).catch(() => undefined);
   };
-  const resolveProgram = (engineId: string, program: EngineProgramRule) => {
+  const resolveProgram = (engineId: string, program: EngineProgramRule): EngineProgramCommand => {
     const override = options.engineCommands?.[engineId];
     if (override) {
-      return {
-        path: override.path,
-        source: "custom" as const,
-        args: override.args ?? program.defaultArgs
-      };
+      return resolveEngineProgramCommand(engineId, {
+        program,
+        customPath: override.path,
+        configuredArgs: override.args
+      });
     }
     return resolveEngineProgramCommand(engineId, {
       program,
