@@ -9,7 +9,9 @@ import { WrapperChatTreeService } from "../src/wrapper-chat-tree.js";
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
 
-const fixture = async () => {
+const fixture = async (
+  logDiagnostic?: (input: { message: string; sessionId?: string }) => void
+) => {
   const baseDir = await mkdtemp(join(tmpdir(), "wrapper-tree-"));
   dirs.push(baseDir);
   const index = new SessionIndexStore({ baseDir });
@@ -46,7 +48,8 @@ const fixture = async () => {
       notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
-    fork
+    fork,
+    ...(logDiagnostic ? { logDiagnostic } : {})
   });
   return { service, index, snapshot, load, fork, baseDir, changed, updateSessionMetadata,
     completed: (sessionId: string, turnId: string) => listener({ event: { type: "turn.completed", sessionId, turnId, finishReason: "completed" } } as EventEnvelope),
@@ -223,6 +226,27 @@ describe("wrapper session trees", () => {
     releaseReload();
     await vi.waitFor(() => expect(f.changed).toHaveBeenCalled());
     expect((await f.service.get("root")).currentNodeId).toBe("c");
+    f.service.dispose();
+  });
+
+  it("records an aborted tree load on the diagnostic channel", async () => {
+    const diagnostics: { message: string; sessionId?: string }[] = [];
+    const f = await fixture((input) => diagnostics.push(input));
+    let releaseReload!: () => void;
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    f.load.mockImplementation(async () => { await reloadGate; return true; });
+
+    const pending = f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalled());
+    f.service.invalidate("root");
+    releaseReload();
+    await pending.catch(() => undefined);
+
+    await vi.waitFor(() => expect(diagnostics.length).toBeGreaterThan(0));
+    expect(diagnostics[0]).toMatchObject({
+      message: "Chat tree load aborted",
+      sessionId: "root"
+    });
     f.service.dispose();
   });
 

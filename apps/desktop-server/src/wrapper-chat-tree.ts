@@ -46,6 +46,12 @@ export class WrapperChatTreeService {
     sessionIndexStore: SessionIndexStore;
     reconciliation: SessionReconciliationService;
     fork: (sessionId: string, turnId: string) => Promise<string>;
+    /** 诊断通道：记录被失效中止的一代树加载。 */
+    logDiagnostic?: (input: {
+      message: string;
+      sessionId?: string;
+      context?: Record<string, unknown>;
+    }) => void;
   }) {
     this.unsubscribe = options.runtimeService.subscribe(({ event }) => {
       if (event.type === "turn.completed") {
@@ -115,7 +121,10 @@ export class WrapperChatTreeService {
     try {
       await this.loadMembers(sessionId, load, force);
     } catch (error) {
-      if (load.controller.signal.aborted) return;
+      if (load.controller.signal.aborted) {
+        this.logAbortedLoad(sessionId, "failed");
+        return;
+      }
       state.error = error;
       if (state.published) {
         await this.reportTreeRefresh(sessionId, {
@@ -126,7 +135,10 @@ export class WrapperChatTreeService {
       }
       return;
     }
-    if (load.controller.signal.aborted) return;
+    if (load.controller.signal.aborted) {
+      this.logAbortedLoad(sessionId, "loaded");
+      return;
+    }
     const hadPublished = Boolean(state.published);
     state.members = load.members;
     state.published = this.buildProjection(sessionId, state.members);
@@ -134,6 +146,14 @@ export class WrapperChatTreeService {
       await this.reportTreeRefresh(sessionId, { status: "ready" });
       this.changed(sessionId);
     }
+  }
+
+  private logAbortedLoad(sessionId: string, stage: "loaded" | "failed"): void {
+    this.options.logDiagnostic?.({
+      message: "Chat tree load aborted",
+      sessionId,
+      context: { stage, memberCount: this.options.sessionIndexStore.getTreeMembers(sessionId).length }
+    });
   }
 
   private async loadMembers(
