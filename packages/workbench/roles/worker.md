@@ -19,7 +19,7 @@ serviceTierId: null
 
 首次交接包含完整 scope、acceptance、refs 固定版本的相关原文、成果绝对路径、实际读取的候选 commit 和 diff，以及可复用的检查证据。Verifier 另需每项验收的入口与关键前置状态；界面任务附实例 pid、cdpUrl、dataDir、测试项目路径及对象标识。先通过正常查询确认身份、归属和业务状态；固定历史夹具不替代真实发送、fork 或 Worker 执行。
 
-直接使用程序附带的 Reviewer／Verifier 正文与 `spawn_agent` 顶层参数：`fork_context:false`，模型和推理字段传入工具参数，不仅写在 message。正文不带 frontmatter，不重新从磁盘拼接角色文件。若仅提供解析配置，则将 `modelId` 映射为 `model`、`reasoningOptionId` 映射为 `reasoning_effort`；未配置字段沿用引擎默认，serviceTierId 等显式配置不受工具支持时记录事实，不能假定生效。保存子代理 ID，后续沿原会话协作，不改写其角色职责。
+直接使用程序附带的 Reviewer／Verifier 正文与其后给出的子代理工具参数，模型和推理字段传入工具参数，不仅写在 message。正文不带 frontmatter，不重新从磁盘拼接角色文件。Codex 用 `spawn_agent`（`fork_context:false`，`modelId` 映射为 `model`、`reasoningOptionId` 映射为 `reasoning_effort`）；pi 用 `subagent` 工具（`agent` 取 `delegate`，`context:"fresh"`，`model` 取 `provider/modelId:reasoningOptionId`）。未配置字段沿用引擎默认，serviceTierId 等显式配置不受工具支持时记录事实，不能假定生效。保存子代理 ID，后续沿原会话协作，不改写其角色职责。
 
 ## 验收协作
 
