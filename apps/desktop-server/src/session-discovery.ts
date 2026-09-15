@@ -516,7 +516,6 @@ export type SessionDiscoveryProvider = {
   hydrateSession: (
     entry: SessionIndexEntry,
     input?: {
-      isCancelled?: () => boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
       historySources?: { entry: SessionIndexEntry; sourceTurnIds: string[] }[];
@@ -528,7 +527,6 @@ export type SessionDiscoveryProvider = {
       limit: number;
       cursor?: string;
       anchorTurnId?: string;
-      isCancelled?: () => boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
@@ -539,28 +537,53 @@ export type SessionDiscoveryProvider = {
   ) => Promise<boolean>;
 };
 
-type HydrationConsumer = {
-  isCancelled?: () => boolean;
-  signal?: AbortSignal;
-};
+/** 不携带 signal 的调用方视为不会取消读取。 */
+const uncancellableSignal = new AbortController().signal;
 
 type SharedHydrationTask<T> = {
-  consumers: Set<HydrationConsumer>;
   promise: Promise<T>;
+  /** 共享任务自己的 signal；已取消的任务不再接受新消费者。 */
+  signal: AbortSignal;
+  addConsumer: (signal: AbortSignal | undefined) => void;
 };
 
-const areAllHydrationConsumersCancelled = (
-  consumers: ReadonlySet<HydrationConsumer>
-): boolean => {
-  if (consumers.size === 0) {
-    return false;
-  }
-  for (const consumer of consumers) {
-    if (!consumer.signal?.aborted && !consumer.isCancelled?.()) {
-      return false;
+/**
+ * 同一段历史读取可由多个调用方共享，只有全部调用方都取消时才中止底层请求；
+ * 共享任务持有自己的 signal，读取方只需判断这一个 signal。
+ */
+const shareHydration = <T>(
+  start: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal | undefined
+): SharedHydrationTask<T> => {
+  const controller = new AbortController();
+  const consumers = new Set<AbortSignal>();
+  const abortIfAllConsumersCancelled = (): void => {
+    if ([...consumers].every((consumer) => consumer.aborted)) {
+      controller.abort();
     }
+  };
+  const addConsumer = (next: AbortSignal | undefined): void => {
+    const consumer = next ?? uncancellableSignal;
+    consumers.add(consumer);
+    if (consumer.aborted) {
+      abortIfAllConsumersCancelled();
+      return;
+    }
+    consumer.addEventListener("abort", abortIfAllConsumersCancelled, { once: true });
+  };
+  addConsumer(signal);
+  return { promise: start(controller.signal), signal: controller.signal, addConsumer };
+};
+
+/** 任务收尾时只清理仍属于本次的登记，避免覆盖接管同一 key 的新任务。 */
+const clearSharedHydration = <T>(
+  registry: Map<string, SharedHydrationTask<T>>,
+  key: string,
+  task: SharedHydrationTask<T>
+): void => {
+  if (registry.get(key) === task) {
+    registry.delete(key);
   }
-  return true;
 };
 
 const resolveHydratedLastCompletedTurnAt = (
@@ -630,9 +653,9 @@ const hydrateCodexTurnEntities = async (input: {
   thread: Thread;
   rolloutPath?: string;
   turnChangesStore?: CodexTurnChangesStore;
-  isCancelled?: () => boolean;
+  signal?: AbortSignal;
 }): Promise<HydratedCodexTurnEntities | undefined> => {
-  const { entry, thread, rolloutPath, turnChangesStore, isCancelled } = input;
+  const { entry, thread, rolloutPath, turnChangesStore, signal } = input;
   const turns: HydratedTurn[] = [];
   const messageBlocks: MessageBlock[] = [];
   const toolCalls: ToolCall[] = [];
@@ -646,7 +669,7 @@ const hydrateCodexTurnEntities = async (input: {
     ? { ...thread, turns: thread.turns.filter((turn) => isCodexTurnOwnedByThread(thread, turn)) }
     : thread;
   for (const [turnIndex, turn] of ownedThread.turns.entries()) {
-    if (isCancelled?.()) {
+    if (signal?.aborted) {
       return undefined;
     }
     const hydratedItems = turn.items;
@@ -680,7 +703,7 @@ const hydrateCodexTurnEntities = async (input: {
     let lastAgentMessageId: string | undefined;
 
     for (const [itemIndex, item] of hydratedItems.entries()) {
-      if (isCancelled?.()) {
+      if (signal?.aborted) {
         return undefined;
       }
       const itemStartedAt =
@@ -1112,7 +1135,6 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
   public async hydrateSession(
     entry: SessionIndexEntry,
     input: {
-      isCancelled?: () => boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
       historySources?: { entry: SessionIndexEntry; sourceTurnIds: string[] }[];
@@ -1146,7 +1168,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       const thread = restored
         ? header
         : await this.codexRuntimePort.readThread(threadId, true, { signal: input.signal });
-      if (input.isCancelled?.()) {
+      if (input.signal?.aborted) {
         return undefined;
       }
       this.codexRuntimePort.attachThreadToSession(entry.sessionId, thread.id, false);
@@ -1185,7 +1207,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         thread,
         rolloutPath: rolloutPathForEntry(entry, thread),
         turnChangesStore: this.turnChangesStore,
-        isCancelled: input.isCancelled
+        signal: input.signal
       });
       if (!hydratedTurns) {
         return undefined;
@@ -1220,7 +1242,6 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
       limit: number;
       cursor?: string;
       anchorTurnId?: string;
-      isCancelled?: () => boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
@@ -1247,7 +1268,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
           itemsView: "full"
         } as const;
       const turnsPage = await this.codexRuntimePort.listThreadTurns(turnsInput, { signal: input.signal });
-      if (input.isCancelled?.()) {
+      if (input.signal?.aborted) {
         return undefined;
       }
       let pageTurns = turnsPage.data;
@@ -1274,7 +1295,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         );
         pageTurns = pageTurns.map((turn) => completeTurnsById.get(turn.id) ?? turn);
       }
-      if (input.isCancelled?.()) {
+      if (input.signal?.aborted) {
         return undefined;
       }
       const pageThread: Thread = {
@@ -1316,7 +1337,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         thread: pageThread,
         rolloutPath: rolloutPathForEntry(entry, thread),
         turnChangesStore: this.turnChangesStore,
-        isCancelled: input.isCancelled
+        signal: input.signal
       });
       if (!hydratedTurns) {
         return undefined;
@@ -1444,7 +1465,6 @@ export class SessionReconciliationService {
     SharedHydrationTask<boolean>
   >();
   private readonly fullyHydratedSessionIds = new Set<string>();
-  private readonly hydrationGenerationBySessionId = new Map<string, number>();
   private readonly windowHydrationByKey = new Map<
     string,
     SharedHydrationTask<HydratedSessionWindowSnapshot | undefined>
@@ -1489,16 +1509,6 @@ export class SessionReconciliationService {
       () => undefined
     );
     return repair;
-  }
-
-  public invalidateSessions(sessionIds: readonly string[]): void {
-    for (const sessionId of sessionIds) {
-      this.hydrationGenerationBySessionId.set(
-        sessionId,
-        (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) + 1
-      );
-      this.fullyHydratedSessionIds.delete(sessionId);
-    }
   }
 
   private async runWorkspaceRepair(workspaceIds: readonly string[]): Promise<{
@@ -1622,18 +1632,12 @@ export class SessionReconciliationService {
   public async ensureSessionLoaded(
     sessionId: string,
     input: {
-      isCancelled?: () => boolean;
       force?: boolean;
       requireFull?: boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
     } = {}
   ): Promise<boolean> {
-    const generation = this.hydrationGenerationBySessionId.get(sessionId) ?? 0;
-    const consumer: HydrationConsumer = {
-      isCancelled: input.isCancelled,
-      signal: input.signal
-    };
     const loaded = this.runtimeService
       .listSessions({ includeArchived: true })
       .some((session) => session.sessionId === sessionId);
@@ -1642,17 +1646,13 @@ export class SessionReconciliationService {
       !input.force &&
       (!input.requireFull || this.fullyHydratedSessionIds.has(sessionId))
     ) {
-      const existingHydration = this.hydrationBySessionId.get(sessionId);
+      const existingHydration = this.reusableHydration(sessionId);
       if (!existingHydration) {
         return true;
       }
-      existingHydration.consumers.add(consumer);
+      existingHydration.addConsumer(input.signal);
       const loadedByExisting = await existingHydration.promise;
-      if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
-          !input.isCancelled?.()) {
-        return this.ensureSessionLoaded(sessionId, input);
-      }
-      return input.isCancelled?.() ? false : loadedByExisting;
+      return input.signal?.aborted ? false : loadedByExisting;
     }
 
     await this.sessionIndexStore.ready();
@@ -1664,36 +1664,33 @@ export class SessionReconciliationService {
     if (!provider) {
       return false;
     }
-    const existingHydration = this.hydrationBySessionId.get(sessionId);
+    const existingHydration = this.reusableHydration(sessionId);
     if (existingHydration) {
-      existingHydration.consumers.add(consumer);
+      existingHydration.addConsumer(input.signal);
       const loadedByExisting = await existingHydration.promise;
-      if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
-          !input.isCancelled?.()) {
-        return this.ensureSessionLoaded(sessionId, input);
-      }
-      return input.isCancelled?.() ? false : loadedByExisting;
+      return input.signal?.aborted ? false : loadedByExisting;
     }
-    const consumers = new Set<HydrationConsumer>([consumer]);
-    const hydration: SharedHydrationTask<boolean> = {
-      consumers,
-      promise: this.hydrateSessionEntry(entry, provider, {
-        signal: input.signal,
-        retainExecution: input.retainExecution,
-        isCancelled: () =>
-          areAllHydrationConsumersCancelled(consumers) ||
-          (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation
-      }).finally(() => {
-        this.hydrationBySessionId.delete(sessionId);
-      })
-    };
+    const hydration: SharedHydrationTask<boolean> = shareHydration(
+      (signal) => this.hydrateSessionEntry(entry, provider, {
+        signal,
+        retainExecution: input.retainExecution
+      }),
+      input.signal
+    );
     this.hydrationBySessionId.set(sessionId, hydration);
+    hydration.promise = hydration.promise.finally(() =>
+      clearSharedHydration(this.hydrationBySessionId, sessionId, hydration)
+    );
     const loadedByHydration = await hydration.promise;
-    if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
-        !input.isCancelled?.()) {
-      return this.ensureSessionLoaded(sessionId, input);
-    }
-    return input.isCancelled?.() ? false : loadedByHydration;
+    return input.signal?.aborted ? false : loadedByHydration;
+  }
+
+  /** 已经取消的共享任务不再复用：新调用方需要重新发起读取。 */
+  private reusableHydration(
+    sessionId: string
+  ): SharedHydrationTask<boolean> | undefined {
+    const existing = this.hydrationBySessionId.get(sessionId);
+    return existing && !existing.signal.aborted ? existing : undefined;
   }
 
   public async ensureSessionExecutable(
@@ -1718,12 +1715,10 @@ export class SessionReconciliationService {
       limit: number;
       cursor?: string;
       anchorTurnId?: string;
-      isCancelled?: () => boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
   ): Promise<HydratedSessionWindowSnapshot | undefined> {
-    const generation = this.hydrationGenerationBySessionId.get(sessionId) ?? 0;
     await this.sessionIndexStore.ready();
     const entry = this.sessionIndexStore.getEntry(sessionId);
     if (!entry) {
@@ -1737,58 +1732,37 @@ export class SessionReconciliationService {
     const hydrationKey = `${sessionId}\u0000${input.cursor ?? ""}\u0000${
       anchorTurnId ?? ""
     }\u0000${input.limit}`;
-    const consumer: HydrationConsumer = {
-      isCancelled: input.isCancelled,
-      signal: input.signal
-    };
-    const existingHydration = this.windowHydrationByKey.get(hydrationKey);
+    const reusable = this.windowHydrationByKey.get(hydrationKey);
+    const existingHydration = reusable && !reusable.signal.aborted ? reusable : undefined;
     if (existingHydration) {
-      existingHydration.consumers.add(consumer);
+      existingHydration.addConsumer(input.signal);
       const hydrated = await existingHydration.promise;
-      if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
-          !input.isCancelled?.()) {
-        return this.hydrateSessionWindow(sessionId, input);
-      }
-      return input.isCancelled?.() ? undefined : hydrated;
+      return input.signal?.aborted ? undefined : hydrated;
     }
-    const consumers = new Set<HydrationConsumer>([consumer]);
-    const hydration: SharedHydrationTask<
-      HydratedSessionWindowSnapshot | undefined
-    > = {
-      consumers,
-      promise: provider
-        .hydrateSessionWindow(entry, {
+    const hydration: SharedHydrationTask<HydratedSessionWindowSnapshot | undefined> =
+      shareHydration(
+      (signal) => provider
+        .hydrateSessionWindow!(entry, {
           limit: input.limit,
           cursor: input.cursor,
           anchorTurnId,
-          signal: input.signal,
-          retainExecution: input.retainExecution,
-          isCancelled: () =>
-            areAllHydrationConsumersCancelled(consumers) ||
-            (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation
+          signal,
+          retainExecution: input.retainExecution
         })
         .then(async (hydrated) => {
-          if (!hydrated || areAllHydrationConsumersCancelled(consumers) ||
-              (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation) {
+          if (!hydrated || signal.aborted) {
             return undefined;
           }
-          return this.commitHydratedSession(entry, hydrated, {
-            partial: true,
-            atLatest: !input.cursor && !anchorTurnId,
-            isCancelled: () =>
-              areAllHydrationConsumersCancelled(consumers) ||
-              (this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation
-          });
-        })
-        .finally(() => this.windowHydrationByKey.delete(hydrationKey))
-    };
+          return this.commitHydratedSession(entry, hydrated, { partial: true });
+        }),
+      input.signal
+    );
     this.windowHydrationByKey.set(hydrationKey, hydration);
+    hydration.promise = hydration.promise.finally(() =>
+      clearSharedHydration(this.windowHydrationByKey, hydrationKey, hydration)
+    );
     const hydrated = await hydration.promise;
-    if ((this.hydrationGenerationBySessionId.get(sessionId) ?? 0) !== generation &&
-        !input.isCancelled?.()) {
-      return this.hydrateSessionWindow(sessionId, input);
-    }
-    if (!hydrated || input.isCancelled?.()) {
+    if (!hydrated || input.signal?.aborted) {
       return undefined;
     }
     return hydrated;
@@ -1798,7 +1772,6 @@ export class SessionReconciliationService {
     entry: SessionIndexEntry,
     provider: SessionDiscoveryProvider,
     input: {
-      isCancelled?: () => boolean;
       signal?: AbortSignal;
       retainExecution?: boolean;
     } = {}
@@ -1821,7 +1794,6 @@ export class SessionReconciliationService {
         visit(entry.sessionId);
       }
       hydrated = await provider.hydrateSession(entry, {
-        isCancelled: input.isCancelled,
         signal: input.signal,
         retainExecution: input.retainExecution,
         historySources: entry.archivedAt ? historySources : undefined
@@ -1834,16 +1806,16 @@ export class SessionReconciliationService {
       await this.sessionIndexStore.archiveSessions([entry.sessionId]);
       return false;
     }
-    if (!hydrated || input.isCancelled?.()) {
+    if (!hydrated || input.signal?.aborted) {
       return false;
     }
-    return Boolean(await this.commitHydratedSession(entry, hydrated, input));
+    return Boolean(await this.commitHydratedSession(entry, hydrated));
   }
 
   private async commitHydratedSession<T extends HydratedSessionSnapshot>(
     entry: SessionIndexEntry,
     hydrated: T,
-    input: { partial?: boolean; atLatest?: boolean; isCancelled?: () => boolean } = {}
+    input: { partial?: boolean } = {}
   ): Promise<T | undefined> {
     const indexRelations = this.sessionIndexStore.listRelations(entry.workspaceId);
     const relatedIndexRelations = indexRelations.filter(
@@ -1856,86 +1828,33 @@ export class SessionReconciliationService {
         relation.relationType === "fork" &&
         this.normalizeProviderSessionId(relation.childSessionId, entry) === entry.sessionId
     )?.sourceTurnId;
-    let normalizedHydrated = this.normalizeHydratedRelations(
+    const normalizedHydrated = this.normalizeHydratedRelations(
       entry,
       hydrated,
       relatedIndexRelations
     );
-    const forkByChild = new Map(
-      [...normalizedHydrated.sessionRelations, ...indexRelations]
-        .filter((relation) => relation.relationType === "fork")
-        .map((relation) => [relation.childSessionId, relation] as const)
+    // 轮次归属由引擎适配层判定，这里只补齐索引缺失的 fork 连接点。
+    const fork = [...normalizedHydrated.sessionRelations, ...indexRelations].find(
+      (relation) =>
+        relation.relationType === "fork" && relation.childSessionId === entry.sessionId
     );
-    const fork = forkByChild.get(entry.sessionId);
-    const knownForkSourceTurnId = fork?.sourceTurnId ?? hydratedForkSourceTurnId;
-    const ancestorSessionIds = new Set<string>();
-    for (
-      let ancestor = fork;
-      ancestor;
-      ancestor = forkByChild.get(ancestor.parentSessionId)
-    ) {
-      ancestorSessionIds.add(ancestor.parentSessionId);
-    }
-    for (const ancestorSessionId of [...ancestorSessionIds].reverse()) {
-      await this.ensureSessionLoaded(ancestorSessionId, {
-        requireFull: true,
-        isCancelled: input.isCancelled
+    if (fork && !fork.sourceTurnId && hydratedForkSourceTurnId) {
+      const repaired = await this.sessionIndexStore.upsertRelation({
+        workspaceId: entry.workspaceId,
+        parentSessionId: fork.parentSessionId,
+        childSessionId: fork.childSessionId,
+        relationType: "fork",
+        sourceTurnId: hydratedForkSourceTurnId,
+        createdAt: fork.createdAt
       });
-    }
-    if (input.isCancelled?.()) {
-      return undefined;
-    }
-    if (fork) {
-      const inheritedTurnIds = new Set(
-        this.runtimeService.getSnapshot().turns
-          .filter((turn) => ancestorSessionIds.has(turn.sessionId))
-          .map((turn) => turn.turnId)
+      const relationIndex = relatedIndexRelations.findIndex(
+        (relation) => relation.childSessionId === entry.sessionId
       );
-      const forkPointIndex = knownForkSourceTurnId
-        ? normalizedHydrated.turns.findIndex((turn) => turn.turnId === knownForkSourceTurnId)
-        : -1;
-      if (forkPointIndex >= 0) {
-        const inheritedTurns = input.partial
-          ? normalizedHydrated.turns.slice(forkPointIndex)
-          : normalizedHydrated.turns.slice(0, forkPointIndex + 1);
-        for (const turn of inheritedTurns) inheritedTurnIds.add(turn.turnId);
+      if (relationIndex >= 0) {
+        relatedIndexRelations[relationIndex] = repaired;
+      } else {
+        relatedIndexRelations.push(repaired);
       }
-      const sharedTurns = hydrated.turns.filter((turn) => inheritedTurnIds.has(turn.turnId));
-      // A newest-first window can identify the fork point only on its latest page.
-      const includesLatest = !input.partial || input.atLatest;
-      const sourceTurnId = knownForkSourceTurnId ??
-        (input.partial ? sharedTurns[0]?.turnId : sharedTurns.at(-1)?.turnId);
-      if (!fork.sourceTurnId && includesLatest && sourceTurnId) {
-        const repaired = await this.sessionIndexStore.upsertRelation({
-          workspaceId: entry.workspaceId,
-          parentSessionId: fork.parentSessionId,
-          childSessionId: fork.childSessionId,
-          relationType: "fork",
-          sourceTurnId,
-          createdAt: fork.createdAt
-        });
-        const relationIndex = relatedIndexRelations.findIndex(
-          (relation) => relation.childSessionId === entry.sessionId
-        );
-        if (relationIndex >= 0) {
-          relatedIndexRelations[relationIndex] = repaired;
-        } else {
-          relatedIndexRelations.push(repaired);
-          normalizedHydrated = this.normalizeHydratedRelations(
-            entry,
-            normalizedHydrated,
-            relatedIndexRelations
-          );
-        }
-      }
-      const isOwn = (entity: { turnId: string }): boolean => !inheritedTurnIds.has(entity.turnId);
-      normalizedHydrated = {
-        ...normalizedHydrated,
-        turns: normalizedHydrated.turns.filter(isOwn),
-        messageBlocks: normalizedHydrated.messageBlocks.filter(isOwn),
-        toolCalls: normalizedHydrated.toolCalls.filter(isOwn),
-        terminalStreams: normalizedHydrated.terminalStreams.filter(isOwn)
-      };
     }
     const currentSession = this.runtimeService.getSession(entry.sessionId);
     const replaceSessionHistory =

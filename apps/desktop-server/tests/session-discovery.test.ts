@@ -164,9 +164,9 @@ describe("cold history hydration", () => {
     });
     const resolveHistoryCwd = vi.fn().mockReturnValue(root);
     const provider = new CodexSessionDiscoveryProvider({ codexRuntimePort: port, resolveHistoryCwd });
-    const hydrate = (isCancelled?: () => boolean) => mode === "full"
-      ? provider.hydrateSession(entry, { isCancelled })
-      : provider.hydrateSessionWindow(entry, { limit: 1, cursor: "page-cursor", isCancelled });
+    const hydrate = (signal?: AbortSignal) => mode === "full"
+      ? provider.hydrateSession(entry, { signal })
+      : provider.hydrateSessionWindow(entry, { limit: 1, cursor: "page-cursor", signal });
     return { root, port, rpc, hydrate, finishResume, resolveHistoryCwd };
   };
 
@@ -204,14 +204,14 @@ describe("cold history hydration", () => {
 
   it.each(["full", "page"] as const)("unsubscribes cold %s history when cancelled during loading", async (mode) => {
     const { port, rpc, hydrate, finishResume } = await setupHistory(mode);
-    let cancelled = false;
-    const pending = hydrate(() => cancelled);
+    const controller = new AbortController();
+    const pending = hydrate(controller.signal);
     await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith(
       "thread/resume",
       expect.anything(),
-      { timeoutMs: 120_000 }
+      expect.objectContaining({ timeoutMs: 120_000 })
     ));
-    cancelled = true;
+    controller.abort();
     finishResume();
     await expect(pending).resolves.toBeUndefined();
     expect(rpc).toHaveBeenLastCalledWith("thread/unsubscribe", { threadId: "thread-history" });
@@ -1066,12 +1066,12 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-1"
     });
 
-    let sharedIsCancelled: (() => boolean) | undefined;
+    let sharedSignal: AbortSignal | undefined;
     let resolveHydration:
       | ((value: ReturnType<typeof buildHydratedWindow>) => void)
       | undefined;
     const hydrateSessionWindow = vi.fn((_entry, input) => {
-      sharedIsCancelled = input.isCancelled;
+      sharedSignal = input.signal;
       return new Promise<ReturnType<typeof buildHydratedWindow>>((resolve) => {
         resolveHydration = resolve;
       });
@@ -1090,22 +1090,25 @@ describe("Session discovery and reconciliation", () => {
       ] as never
     });
 
-    const cancelledOpen = reconciliation.hydrateSessionWindow("session-1", {
+    const activeController = new AbortController();
+    const activeOpen = reconciliation.hydrateSessionWindow("session-1", {
       limit: 2,
-      isCancelled: () => true
+      signal: activeController.signal
     });
     await vi.waitFor(() => {
       expect(hydrateSessionWindow).toHaveBeenCalledTimes(1);
     });
-    const activeOpen = reconciliation.hydrateSessionWindow("session-1", {
+    // A caller that cancels after joining cannot cancel the read the active caller is waiting for.
+    const cancelledController = new AbortController();
+    const cancelledOpen = reconciliation.hydrateSessionWindow("session-1", {
       limit: 2,
-      isCancelled: () => false
+      signal: cancelledController.signal
     });
+    cancelledController.abort();
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(hydrateSessionWindow).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => {
-      expect(sharedIsCancelled?.()).toBe(false);
-    });
+    expect(sharedSignal?.aborted).toBe(false);
     resolveHydration?.(buildHydratedWindow());
 
     await expect(cancelledOpen).resolves.toBeUndefined();
@@ -1119,6 +1122,63 @@ describe("Session discovery and reconciliation", () => {
         sessionId: "session-1"
       })
     ]);
+  });
+
+  it("starts a fresh window hydration after every consumer of a shared read cancelled", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const sessionIndexStore = new SessionIndexStore({ baseDir });
+    const runtimeService = new SessionRuntimeService({
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
+    });
+    await workspaceRegistry.registerWorkspace({
+      workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha"
+    });
+    await sessionIndexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1", conversationId: "conversation-1", engineId: "codex",
+        title: "Session", createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:00.000Z"
+      },
+      providerKind: "codex-thread", providerSessionId: "thread-1"
+    });
+
+    const gates: (() => void)[] = [];
+    const hydrateSessionWindow = vi.fn((_entry, input) => {
+      const aborted = input.signal.aborted;
+      return new Promise<ReturnType<typeof buildHydratedWindow>>((resolve) => {
+        gates.push(() => (aborted ? resolve(undefined as never) : resolve(buildHydratedWindow())));
+      });
+    });
+    const reconciliation = new SessionReconciliationService({
+      workspaceRegistry, sessionIndexStore, runtimeService,
+      providers: [{ engineId: "codex", discoverWorkspaces: vi.fn(), hydrateSession: vi.fn(), hydrateSessionWindow }] as never
+    });
+
+    const controller = new AbortController();
+    const cancelledOpen = reconciliation.hydrateSessionWindow("session-1", {
+      limit: 2, signal: controller.signal
+    });
+    await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(1));
+    controller.abort();
+
+    // The cancelled read is still gated, but a new caller starts a usable read instead of joining it.
+    const retry = reconciliation.hydrateSessionWindow("session-1", { limit: 2 });
+    await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(2));
+
+    // Draining the cancelled task must not clear the registry entry of the new read.
+    gates.shift()?.();
+    await expect(cancelledOpen).resolves.toBeUndefined();
+    const joined = reconciliation.hydrateSessionWindow("session-1", { limit: 2 });
+    await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(2));
+    gates.shift()?.();
+    await expect(retry).resolves.toEqual(
+      expect.objectContaining({ olderCursor: "older-cursor" })
+    );
+    await expect(joined).resolves.toEqual(
+      expect.objectContaining({ olderCursor: "older-cursor" })
+    );
+    expect(hydrateSessionWindow).toHaveBeenCalledTimes(2);
   });
 
   it("discovers codex threads, derives subagent relations, and hydrates discovered sessions", async () => {
@@ -1546,25 +1606,44 @@ describe("Session discovery and reconciliation", () => {
         archivedAt: ["A", "B"].includes(id) ? "2026-09-10T00:00:00Z" : undefined
       }, providerKind: "codex-thread", providerSessionId: `thread-${id}` });
     }
-    for (const [parentSessionId, childSessionId, sourceTurnId] of [
+    const forkRelations: [string, string, string][] = [
       ["root", "A", "r"], ["A", "B", earlierRefork ? "a2" : "a1"],
       ["B", "C", earlierRefork ? "a1" : "b1"], ...(!earlierRefork ? [["A", "D", "a2"]] : [])
-    ]) await index.upsertRelation({ workspaceId: "workspace-1", parentSessionId: parentSessionId!,
-      childSessionId: childSessionId!, sourceTurnId, relationType: "fork" });
-    const historyThread = (threadId: string): Thread => ({
-      ...createThread({ id: threadId }),
-      turns: histories[threadId.slice(7)]!.map((id) => ({
-        id, status: "completed", error: null,
-        items: [{ id: `question-${id}`, type: "userMessage", content: [{ type: "text", text: id, text_elements: [] }] }]
-      }))
-    });
+    ];
+    for (const [parentSessionId, childSessionId, sourceTurnId] of forkRelations) {
+      await index.upsertRelation({ workspaceId: "workspace-1", parentSessionId,
+        childSessionId, sourceTurnId, relationType: "fork" });
+    }
+    // A fork thread carries its inherited prefix in its own rollout, so thread creation time
+    // separates inherited turns from the turns the session actually owns.
+    const firstTurnStartedAt = 1_747_110_000;
+    const historyThread = (threadId: string): Thread => {
+      const sessionId = threadId.slice(7);
+      const history = histories[sessionId]!;
+      const fork = forkRelations.find(([, childSessionId]) => childSessionId === sessionId);
+      const startedAt = (turnId: string): number =>
+        firstTurnStartedAt + history.indexOf(turnId) * 6;
+      return {
+        ...createThread({
+          id: threadId,
+          forkedFromId: fork ? `thread-${fork[0]}` : null
+        }),
+        createdAt: fork ? startedAt(fork[2]) + 1 : startedAt(history[0]!),
+        turns: history.map((id) => ({
+          id, status: "completed" as const, error: null,
+          startedAt: startedAt(id), completedAt: startedAt(id) + 1,
+          items: [{ id: `question-${id}`, type: "userMessage", content: [{ type: "text", text: id, text_elements: [] }] }]
+        }))
+      };
+    };
     const readThread = vi.fn(async (threadId: string, includeTurns: boolean) => {
       if (includeTurns && ["thread-A", "thread-B"].includes(threadId)) {
         throw new Error("paginated_threads is not supported yet");
       }
-      return includeTurns ? historyThread(threadId) : {
-        ...createThread({ id: threadId }), status: { type: "notLoaded" as const }
-      };
+      const thread = historyThread(threadId);
+      return includeTurns
+        ? thread
+        : { ...thread, turns: [], status: { type: "notLoaded" as const } };
     });
     const resumeThread = vi.fn(async (threadId: string) => {
       if (["thread-A", "thread-B"].includes(threadId)) throw new Error("Archived threads cannot resume");
@@ -1602,7 +1681,7 @@ describe("Session discovery and reconciliation", () => {
     }
   });
 
-  it("fully loads a partially hydrated ancestor before assigning inherited turns", async () => {
+  it("commits a fork child without waiting for its ancestor to finish loading", async () => {
     const baseDir = await createTempDir();
     const index = new SessionIndexStore({ baseDir });
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
@@ -1702,12 +1781,8 @@ describe("Session discovery and reconciliation", () => {
         ]);
       }
       childHydrationReturned = true;
-      return makeHydrated("child", [
-        makeTurn("child", "parent-1", 0),
-        makeTurn("child", "compacted-parent-turn", 1),
-        makeTurn("child", "parent-2", 2),
-        makeTurn("child", "child-1", 4)
-      ]);
+      // 引擎适配层只交出子会话自有轮次，对账层不再依赖祖先的加载状态判定归属。
+      return makeHydrated("child", [makeTurn("child", "child-1", 4)]);
     });
     const reconciliation = new SessionReconciliationService({
       workspaceRegistry,
@@ -1738,14 +1813,14 @@ describe("Session discovery and reconciliation", () => {
       });
       await vi.waitFor(() => expect(childHydrationReturned).toBe(true));
       await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(runtimeService.getSnapshot().turns.some((turn) => turn.turnId === "child-1")).toBe(false);
+      expect(runtimeService.getSnapshot().turns.some((turn) => turn.turnId === "child-1")).toBe(true);
+      expect(hydrateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "child" }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
       releaseParent();
       const tree = await treePromise;
 
-      expect(hydrateSession).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: "parent" }),
-        expect.objectContaining({ isCancelled: expect.any(Function) })
-      );
       expect(tree.nodes.map(({ nodeId, parentNodeId, sessionId }) => ({
         nodeId,
         parentNodeId,
@@ -1758,7 +1833,6 @@ describe("Session discovery and reconciliation", () => {
       ]);
       expect(tree.nodes.find((node) => node.nodeId === "parent-2")?.status).toBe("completed");
       expect(runtimeService.getSession("parent")?.status).toBe("running");
-      expect(tree.nodes.some((node) => node.nodeId === "compacted-parent-turn")).toBe(false);
     } finally {
       treeService.dispose();
     }

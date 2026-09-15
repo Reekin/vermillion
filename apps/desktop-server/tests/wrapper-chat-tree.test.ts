@@ -9,7 +9,9 @@ import { WrapperChatTreeService } from "../src/wrapper-chat-tree.js";
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
 
-const fixture = async () => {
+const fixture = async (
+  logDiagnostic?: (input: { message: string; sessionId?: string }) => void
+) => {
   const baseDir = await mkdtemp(join(tmpdir(), "wrapper-tree-"));
   dirs.push(baseDir);
   const index = new SessionIndexStore({ baseDir });
@@ -46,7 +48,8 @@ const fixture = async () => {
       notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
-    fork
+    fork,
+    ...(logDiagnostic ? { logDiagnostic } : {})
   });
   return { service, index, snapshot, load, fork, baseDir, changed, updateSessionMetadata,
     completed: (sessionId: string, turnId: string) => listener({ event: { type: "turn.completed", sessionId, turnId, finishReason: "completed" } } as EventEnvelope),
@@ -161,7 +164,10 @@ describe("wrapper session trees", () => {
       return true;
     });
     const first = f.service.get("root");
-    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith("branch", { force: false }));
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith(
+      "branch",
+      expect.objectContaining({ force: false })
+    ));
     let secondResolved = false;
     const second = f.service.get("root").then((tree) => {
       secondResolved = true;
@@ -223,6 +229,90 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
+  it("records an aborted tree load on the diagnostic channel", async () => {
+    const diagnostics: { message: string; sessionId?: string }[] = [];
+    const f = await fixture((input) => diagnostics.push(input));
+    let releaseReload!: () => void;
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    f.load.mockImplementation(async () => { await reloadGate; return true; });
+
+    const pending = f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalled());
+    f.service.invalidate("root");
+    releaseReload();
+    await pending.catch(() => undefined);
+
+    await vi.waitFor(() => expect(diagnostics.length).toBeGreaterThan(0));
+    expect(diagnostics[0]).toMatchObject({
+      message: "Chat tree load aborted",
+      sessionId: "root"
+    });
+    f.service.dispose();
+  });
+
+  it("keeps the published tree while a refresh is still committing members", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    let releaseReload!: () => void;
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    f.load.mockImplementation(async () => {
+      await reloadGate;
+      return true;
+    });
+
+    f.service.invalidate("root");
+    // A member commits new history while the refresh is still in flight.
+    f.snapshot.turns.push({
+      turnId: "d", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:02:00Z"
+    });
+    const duringReload = await f.service.get("root");
+    expect(duringReload.nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);
+
+    releaseReload();
+    await vi.waitFor(async () => {
+      expect((await f.service.get("root")).nodes.map((node) => node.nodeId)).toEqual([
+        "a", "b", "d", "c"
+      ]);
+    });
+    f.service.dispose();
+  });
+
+  it("does not publish a projection derived while a refresh started during the read", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    const newcomer = {
+      sessionId: "newcomer", conversationId: "conversation", engineId: "codex",
+      status: "idle", createdAt: "2026-09-07T00:00:00Z", updatedAt: "2026-09-07T00:00:00Z"
+    };
+    f.snapshot.sessions.push(newcomer);
+    await f.index.upsertSession({ workspaceId: "workspace", session: newcomer });
+    await f.index.upsertRelation({
+      workspaceId: "workspace", parentSessionId: "branch", childSessionId: "newcomer",
+      relationType: "fork", sourceTurnId: "c"
+    });
+    let releaseMember!: () => void;
+    const memberGate = new Promise<void>((resolve) => { releaseMember = resolve; });
+    f.load.mockImplementation(async (sessionId) => {
+      if (sessionId === "newcomer") await memberGate;
+      return true;
+    });
+
+    const pending = f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith(
+      "newcomer",
+      expect.objectContaining({ force: false })
+    ));
+    // The refresh and the new turn both land while this read is still waiting for the new member.
+    f.service.invalidate("root");
+    f.snapshot.turns.push({
+      turnId: "mixed", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:03:00Z"
+    });
+    releaseMember();
+
+    expect((await pending).nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);
+    f.service.dispose();
+  });
+
   it("reports a failed rebuild without discarding or repeatedly reloading the published tree", async () => {
     const f = await fixture();
     await f.service.get("root");
@@ -245,26 +335,23 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
-  it("retries when the tree is invalidated immediately before projection", async () => {
+  it("returns a new projection for a new viewing position instead of rewriting the previous one", async () => {
     const f = await fixture();
-    await f.service.get("root");
-    const internals = f.service as unknown as {
-      loadPublishedTreeChanges: (sessionId: string) => Promise<void>;
-    };
-    const loadChanges = internals.loadPublishedTreeChanges.bind(f.service);
-    let invalidateBeforeProjection = true;
-    internals.loadPublishedTreeChanges = async (sessionId) => {
-      await loadChanges(sessionId);
-      if (invalidateBeforeProjection) {
-        invalidateBeforeProjection = false;
-        f.service.invalidate(sessionId);
-      }
-    };
-    const tree = await f.service.get("root");
-    expect(tree.nodes.map((node) => [node.nodeId, node.parentNodeId])).toEqual([
+    const opened = await f.service.get("root");
+    expect(opened.nodes.map((node) => [node.nodeId, node.parentNodeId])).toEqual([
       ["a", undefined], ["b", "a"], ["c", "a"]
     ]);
-    expect(f.load).toHaveBeenCalledTimes(4);
+    expect(opened.currentNodeId).toBe("b");
+
+    await f.service.jump("root", "a");
+    const jumped = await f.service.get("root");
+    expect(jumped.currentNodeId).toBe("a");
+    expect(jumped.visibleTurnIds).toEqual(["a"]);
+    expect(jumped).not.toBe(opened);
+    expect(opened.currentNodeId).toBe("b");
+    expect(opened.visibleTurnIds).toEqual(["a", "b"]);
+    expect(opened.nodes.filter((node) => node.isCurrent).map((node) => node.nodeId)).toEqual(["b"]);
+    expect(f.load).toHaveBeenCalledTimes(2);
     f.service.dispose();
   });
 

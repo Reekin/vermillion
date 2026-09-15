@@ -270,6 +270,16 @@ export const createSessionRuntimeService = (
       runtimeService,
       sessionIndexStore,
       reconciliation: sessionReconciliation,
+      logDiagnostic: ({ message, sessionId, context }) => {
+        void diagnosticLogService.write({
+          kind: "runtime-pipeline",
+          severity: "info",
+          source: "chat-tree",
+          message,
+          sessionId,
+          context
+        }).catch(() => undefined);
+      },
       fork: async (sessionId, fromTurnId) => {
         const result = await new CodexSessionActionsProvider({ codexRuntimePort }).runAction({
           ...capabilities.resolveContext(sessionId), action: "fork", fromTurnId, activateFork: false
