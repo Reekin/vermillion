@@ -80,3 +80,49 @@ it("requires a real duplicate target and records the original issue", async () =
   expect(await f.service.updateIssue(f.workspaceId, duplicate.issueId, { status: "duplicate", resolutionReason: "Same problem", duplicateOf: original.issueId }))
     .toMatchObject({ status: "duplicate", duplicateOf: original.issueId });
 });
+
+it("filters the issue list by domain and status", async () => {
+  const f = await fixture();
+  const open = await f.service.createIssue(f.workspaceId, { title: "Open UI issue", summary: "First", domainId: "ui-ux" });
+  const decided = await f.service.createIssue(f.workspaceId, { title: "Decided UI issue", summary: "Second", domainId: "ui-ux",
+    status: "decision", decisionQuestion: "Keep the draft or drop it?" });
+  const work = await f.service.createIssue(f.workspaceId, { title: "Work execution issue", summary: "Third", domainId: "work-execution" });
+  const listed = async (filter: { domainId?: string; status?: "open" | "decision" }) =>
+    (await f.client.request("issue.list", { workspaceId: f.workspaceId, ...filter })).map((issue) => issue.issueId).sort();
+  expect(await listed({})).toEqual([open.issueId, decided.issueId, work.issueId].sort());
+  expect(await listed({ domainId: "ui-ux" })).toEqual([open.issueId, decided.issueId].sort());
+  expect(await listed({ status: "decision" })).toEqual([decided.issueId]);
+  expect(await listed({ domainId: "work-execution", status: "decision" })).toEqual([]);
+  expect(await listed({ domainId: "work-execution" })).toEqual([work.issueId]);
+});
+
+it("records the patrol session on both new and updated issues", async () => {
+  const f = await fixture();
+  await f.client.request("docs.write", { workspaceId: f.workspaceId, path: ".vermillion/docs/domains/ui-ux.md", content: "# UI/UX\n\n桌面界面。\n" });
+  await f.client.request("docs.commit", { workspaceId: f.workspaceId, message: "Add domain" });
+  const run = await f.service.queuePatrol(f.workspaceId, "ui-ux");
+  await f.service.startPatrolRun(f.workspaceId, run.patrolRunId, "patrol-session");
+  await f.service.setPatrolTurn(f.workspaceId, run.patrolRunId, "patrol-turn");
+  const issue = await f.client.request("issue.create", { workspaceId: f.workspaceId, title: "Draft disappears", summary: "Observed mismatch",
+    domainId: "ui-ux", source: "maintainer", patrolRunId: run.patrolRunId });
+  expect(issue).toMatchObject({ sourceSessionId: "patrol-session", sourceTurnId: "patrol-turn" });
+  expect(issue.activities.at(-1)).toMatchObject({ kind: "created", sessionId: "patrol-session" });
+
+  const updated = await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, patrolRunId: run.patrolRunId,
+    appendEvidence: [{ kind: "static", text: "Composer unmounts with the page" }] });
+  expect(updated.sourceSessionId).toBe("patrol-session");
+  expect(updated.activities.at(-1)).toMatchObject({ kind: "evidence", sessionId: "patrol-session" });
+
+  // A supplement records its own patrol session on the new activity, without rewriting where the issue came from.
+  const reported = await f.client.request("issue.create", { workspaceId: f.workspaceId, title: "Reported by the user", summary: "Observed mismatch",
+    domainId: "ui-ux" });
+  const supplemented = await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: reported.issueId, patrolRunId: run.patrolRunId,
+    appendEvidence: [{ kind: "static", text: "Confirmed against the standard" }] });
+  expect(supplemented.sourceSessionId).toBeUndefined();
+  expect(supplemented.activities.at(-1)).toMatchObject({ kind: "evidence", sessionId: "patrol-session" });
+
+  const manual = await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "closed", resolutionReason: "Handled" });
+  expect(manual.activities.at(-1)).toMatchObject({ kind: "resolved", sessionId: undefined });
+  await expect(f.client.request("issue.create", { workspaceId: f.workspaceId, title: "Unknown patrol", summary: "Bad link",
+    domainId: "ui-ux", source: "maintainer", patrolRunId: "patrol-missing" })).rejects.toThrow("Unknown patrol run");
+});

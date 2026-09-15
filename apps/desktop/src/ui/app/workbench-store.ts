@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { AgentRun, DecisionCard, DocChange, DocFile, DomainDefinition, InboxItem, Issue, PatrolRun, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
 
 export type Panel = "workbench" | "inbox" | "settings";
-export type WorkspaceSection = "workItems" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation";
+export type WorkspaceSection = "workItems" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation" | "manage";
 
 export type CommitOutcome =
   | { kind: "commit"; commit: string; message: string }

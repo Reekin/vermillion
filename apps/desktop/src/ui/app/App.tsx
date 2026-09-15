@@ -41,7 +41,8 @@ const tabs: Array<{ id: WorkspaceSection; label: string }> = [
   { id: "domains", label: "Domain" },
   { id: "roles", label: "角色" },
   { id: "issues", label: "Issues" },
-  { id: "automation", label: "Automation" }
+  { id: "automation", label: "Automation" },
+  { id: "manage", label: "管理" }
 ];
 
 

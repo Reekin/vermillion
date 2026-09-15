@@ -35,6 +35,17 @@ const exists = async (path: string): Promise<boolean> => {
 
 const toPosix = (value: string): string => value.split(sep).join("/");
 
+/** Every directory holding a Git-tracked file, as a POSIX path relative to the workspace root. */
+export const listTrackedDirectories = async (rootPath: string): Promise<string[]> => {
+  const listed = await git(rootPath, ["ls-files", "-z"]);
+  const directories = new Set<string>();
+  for (const file of listed.split("\0")) {
+    const parts = file.split("/").slice(0, -1);
+    for (let i = 1; i <= parts.length; i += 1) directories.add(parts.slice(0, i).join("/"));
+  }
+  return [...directories].sort();
+};
+
 /** Documents are UTF-8 text; whitespace controls are allowed, binary controls are not. */
 const isTextContent = (bytes: Buffer): boolean =>
   isUtf8(bytes) && !bytes.some((byte) => byte < 9 || (byte > 13 && byte < 32) || byte === 127);
@@ -146,6 +157,19 @@ export class DocsService {
     const full = join(this.rootPath, path);
     await mkdir(dirname(full), { recursive: true });
     await writeFile(full, content, "utf8");
+  }
+
+  /** Delete a document. Tracked files stay recorded as pending deletions until the next docs commit. */
+  async remove(path: string): Promise<void> {
+    assertDocPath(path);
+    const full = join(this.rootPath, path);
+    const info = await lstat(full).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!info) return;
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error("Doc delete requires a real file: " + path);
+    await unlink(full);
   }
 
   /** Read-only: does not touch the index. Untracked files count as added. */

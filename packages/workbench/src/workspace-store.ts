@@ -25,6 +25,7 @@ type Collection<T> = {
   list: () => Promise<T[]>;
   get: (id: string) => Promise<T | undefined>;
   put: (record: T) => Promise<T>;
+  remove: (id: string) => Promise<void>;
 };
 
 const parseStored = <T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, raw: string): T => {
@@ -92,7 +93,8 @@ const createCollection = <T extends Record<string, unknown>>(
     await mkdir(dir, { recursive: true });
     await writeJsonAtomic(join(dir, String(parsed[idKey]) + ".json"), parsed);
     return parsed;
-  }
+  },
+  remove: async (id) => { await rm(join(dir, id + ".json"), { force: true }); }
 });
 
 const transactCollection = async <T, R>(

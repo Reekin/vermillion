@@ -160,6 +160,11 @@ export class RoleService {
     await writeFile(join(dir, domainId + ".md"), content, "utf8");
   }
 
+  async removeMaintainerInstruction(workspaceRoot: string, domainId: string): Promise<void> {
+    assertDomainId(domainId);
+    await rm(join(workspaceRoot, ROLES_DIR, "maintainer", domainId + ".md"), { force: true });
+  }
+
   async resolveMaintainer(workspaceRoot: string, domainId: string): Promise<ResolvedRole> {
     const base = await this.resolve(workspaceRoot, "maintainer");
     const domain = (await this.readMaintainerInstruction(workspaceRoot, domainId)).trim();

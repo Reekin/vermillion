@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocsService } from "../src/docs.js";
@@ -95,9 +95,10 @@ describe("domain owner patrols", () => {
     await fixture.service.startPatrolRun(fixture.workspaceId, run.patrolRunId, "maintainer-session");
     const head = await git(fixture.root, "rev-parse", "HEAD");
     const issue = await fixture.client.request("issue.create", { workspaceId: fixture.workspaceId, title: "Draft disappears", summary: "Observed mismatch",
-      domainId: domain.domainId, source: "maintainer", sourceSessionId: "maintainer-session",
+      domainId: domain.domainId, source: "maintainer", patrolRunId: run.patrolRunId,
       requirement: { text: "Keep the draft", path: ".vermillion/docs/Foundation/UIUX/Standards.md", section: "Draft", commit: head },
       evidence: [{ kind: "reproduced", text: "Draft cleared after tab switch", path: "Session -> Domain -> Session" }] });
+    expect(issue).toMatchObject({ sourceSessionId: "maintainer-session" });
     const work = { workspaceId: fixture.workspaceId, patrolRunId: run.patrolRunId, sessionId: "maintainer-session", issueId: issue.issueId,
       authorizationReason: "The configured permission covers restoring draft retention", expectedBehavior: "Draft remains after switching tabs",
       title: "Restore draft retention", objective: "Restore the documented behavior", risk: "R2" as const,
@@ -149,5 +150,45 @@ describe("domain owner patrols", () => {
     await vi.waitFor(() => expect(runner.release).toHaveBeenCalledWith("patrol-session"));
     expect((await fixture.client.request("domain.patrol.get", { workspaceId: fixture.workspaceId, patrolRunId: run.patrolRunId })).status).toBe("completed");
     await orchestrator.dispose();
+  });
+
+  it("lists the directories that hold tracked files and ignores untracked output", async () => {
+    const fixture = await setup(); fixtures.push(fixture);
+    await mkdir(join(fixture.root, "apps/desktop/src/ui"), { recursive: true });
+    await mkdir(join(fixture.root, "node_modules/left-pad"), { recursive: true });
+    await writeFile(join(fixture.root, "apps/desktop/src/ui/panel.tsx"), "export const panel = 1;\n", "utf8");
+    await writeFile(join(fixture.root, "node_modules/left-pad/index.js"), "module.exports = 1;\n", "utf8");
+    await git(fixture.root, "add", "apps");
+    await createDomain(fixture);
+    expect(await fixture.client.request("workspace.directories", { workspaceId: fixture.workspaceId })).toEqual([
+      ".vermillion", ".vermillion/docs", ".vermillion/docs/Foundation", ".vermillion/docs/Foundation/UIUX", ".vermillion/docs/domains",
+      "apps", "apps/desktop", "apps/desktop/src", "apps/desktop/src/ui"
+    ]);
+  });
+
+  it("removes a domain definition, its instruction and its configuration while keeping history", async () => {
+    const fixture = await setup(); fixtures.push(fixture);
+    await createDomain(fixture);
+    await fixture.client.request("domain.instruction.write", { workspaceId: fixture.workspaceId, domainId: "ui-ux", content: "Check UI draft retention.\n" });
+    await fixture.client.request("domain.config.set", { workspaceId: fixture.workspaceId, domainId: "ui-ux", value: {
+      ...(await fixture.client.request("domain.config.get", { workspaceId: fixture.workspaceId, domainId: "ui-ux" })), intervalHours: 12
+    } });
+    const run = await fixture.client.request("domain.patrol.run", { workspaceId: fixture.workspaceId, domainId: "ui-ux" });
+    const issue = await fixture.client.request("issue.create", { workspaceId: fixture.workspaceId, title: "Draft disappears",
+      summary: "Observed mismatch", domainId: "ui-ux", source: "maintainer", patrolRunId: run.patrolRunId });
+
+    await fixture.client.request("domain.remove", { workspaceId: fixture.workspaceId, domainId: "ui-ux" });
+
+    expect(await fixture.client.request("domain.list", { workspaceId: fixture.workspaceId })).toEqual([]);
+    await expect(fixture.client.request("domain.instruction.read", { workspaceId: fixture.workspaceId, domainId: "ui-ux" }))
+      .rejects.toThrow("Unknown domain");
+    for (const path of [".vermillion/roles/maintainer/ui-ux.md", ".vermillion/domains/ui-ux.json"]) {
+      await expect(stat(join(fixture.root, path))).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    expect(await fixture.client.request("issue.get", { workspaceId: fixture.workspaceId, issueId: issue.issueId })).toMatchObject({ domainId: "ui-ux" });
+    expect(await fixture.client.request("domain.patrol.list", { workspaceId: fixture.workspaceId })).toMatchObject([{ patrolRunId: run.patrolRunId }]);
+    expect((await fixture.client.request("docs.pending", { workspaceId: fixture.workspaceId }))
+      .map((change) => [change.path, change.status])).toEqual([[".vermillion/docs/domains/ui-ux.md", "deleted"]]);
+    await expect(fixture.client.request("domain.remove", { workspaceId: fixture.workspaceId, domainId: "ui-ux" })).rejects.toThrow("Unknown domain");
   });
 });
