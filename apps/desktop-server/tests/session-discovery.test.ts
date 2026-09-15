@@ -1161,12 +1161,14 @@ describe("Session discovery and reconciliation", () => {
     });
     await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(1));
     controller.abort();
-    gates.shift()?.();
-    await expect(cancelledOpen).resolves.toBeUndefined();
 
-    // The cancelled read is still draining, but a new caller starts a usable read instead of joining it.
+    // The cancelled read is still gated, but a new caller starts a usable read instead of joining it.
     const retry = reconciliation.hydrateSessionWindow("session-1", { limit: 2 });
     await vi.waitFor(() => expect(hydrateSessionWindow).toHaveBeenCalledTimes(2));
+
+    // Draining the cancelled task must not clear the registry entry of the new read.
+    gates.shift()?.();
+    await expect(cancelledOpen).resolves.toBeUndefined();
     gates.shift()?.();
     await expect(retry).resolves.toEqual(
       expect.objectContaining({ olderCursor: "older-cursor" })

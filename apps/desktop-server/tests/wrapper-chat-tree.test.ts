@@ -253,6 +253,42 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
+  it("does not publish a projection derived while a refresh started during the read", async () => {
+    const f = await fixture();
+    await f.service.get("root");
+    const newcomer = {
+      sessionId: "newcomer", conversationId: "conversation", engineId: "codex",
+      status: "idle", createdAt: "2026-09-07T00:00:00Z", updatedAt: "2026-09-07T00:00:00Z"
+    };
+    f.snapshot.sessions.push(newcomer);
+    await f.index.upsertSession({ workspaceId: "workspace", session: newcomer });
+    await f.index.upsertRelation({
+      workspaceId: "workspace", parentSessionId: "branch", childSessionId: "newcomer",
+      relationType: "fork", sourceTurnId: "c"
+    });
+    let releaseMember!: () => void;
+    const memberGate = new Promise<void>((resolve) => { releaseMember = resolve; });
+    f.load.mockImplementation(async (sessionId) => {
+      if (sessionId === "newcomer") await memberGate;
+      return true;
+    });
+
+    const pending = f.service.get("root");
+    await vi.waitFor(() => expect(f.load).toHaveBeenCalledWith(
+      "newcomer",
+      expect.objectContaining({ force: false })
+    ));
+    // The refresh and the new turn both land while this read is still waiting for the new member.
+    f.service.invalidate("root");
+    f.snapshot.turns.push({
+      turnId: "mixed", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:03:00Z"
+    });
+    releaseMember();
+
+    expect((await pending).nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);
+    f.service.dispose();
+  });
+
   it("reports a failed rebuild without discarding or repeatedly reloading the published tree", async () => {
     const f = await fixture();
     await f.service.get("root");

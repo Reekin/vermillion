@@ -343,10 +343,7 @@ export class WrapperChatTreeService {
     await this.options.sessionIndexStore.ready();
     const state = this.treeState(sessionId);
     if (state.published) {
-      if (!state.load && !state.error && !state.reload) {
-        await this.loadNewMembers(sessionId, state);
-        state.published = this.buildProjection(sessionId, state.members);
-      }
+      await this.rebuildIfSettled(sessionId, state);
     } else {
       await this.awaitTreeLoad(sessionId, state);
     }
@@ -362,8 +359,12 @@ export class WrapperChatTreeService {
     return this.publishedProjection(sessionId).tree;
   }
 
-  /** 索引中新出现的成员在投影前补齐；进行中的加载与本次发送目标不在这里等待。 */
-  private async loadNewMembers(sessionId: string, state: TreeState): Promise<void> {
+  /**
+   * 稳定状态下补齐索引新成员并重建投影。等待期间开始的刷新由新代接管发布，
+   * 这里不再用中间结果覆盖已发布快照。
+   */
+  private async rebuildIfSettled(sessionId: string, state: TreeState): Promise<void> {
+    if (state.load || state.error || state.reload) return;
     const index = this.options.sessionIndexStore;
     const pendingTargets = new Set([...this.operations.values()]
       .map((entry) => entry.operation)
@@ -376,6 +377,8 @@ export class WrapperChatTreeService {
     await Promise.all(missing.map((memberId) =>
       this.loadMember(state.members, memberId, undefined, false)
     ));
+    if (state.load || state.error || state.reload) return;
+    state.published = this.buildProjection(sessionId, state.members);
   }
 
   /** 失效会打断本代加载，本次读取接续新一代，直到有发布结果或确定失败。 */
