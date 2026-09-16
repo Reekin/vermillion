@@ -247,13 +247,15 @@ it("follows a section-scoped ref only when the referenced section changes", asyn
 
 it("moves a worker's own document commit without notifying that worker", async () => {
   const { service, workspaceId } = await fixture();
+  service.setSessionTreeResolver(async (sessionId) => sessionId);
   const path = ".vermillion/docs/Own/PRD.md";
   await service.writeDoc(workspaceId, path, "Before\n");
   const initial = await service.commitDocs(workspaceId, { message: "Initial" });
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker", refs: [{ path, commit: initial.commit }] });
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
 
-  await service.writeDoc(workspaceId, path, "After\n");
+  // The worker edits its own tree's draft; the commit publishes it to the main branch and moves the ref.
+  await service.writeDoc(workspaceId, path, "After\n", "worker");
   const committed = await service.commitDocs(workspaceId, { message: "Own docs", paths: [path], sessionId: "worker" });
 
   const updated = await service.getWorkItem(workspaceId, item.workItemId);

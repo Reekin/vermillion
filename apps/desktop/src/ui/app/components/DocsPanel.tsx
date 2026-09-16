@@ -51,6 +51,7 @@ const EMPTY_CHANGES: DocChange[] = [];
 export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps) => {
   const client = store((s) => s.client);
   const workspace = store((s) => s.workspaces.find((w) => w.workspaceId === s.browsingWorkspaceId));
+  const docsSessionId = store((s) => s.docsSessionId);
   const view = store((s) => s.view);
   const viewError = store((s) => s.viewError);
   const docs = view?.docs ?? EMPTY_DOCS;
@@ -60,7 +61,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | undefined>();
   const [commitOpen, setCommitOpen] = useState(false);
-  const [discardTarget, setDiscardTarget] = useState<{ workspaceId: string; path: string }>();
+  const [discardTarget, setDiscardTarget] = useState<{ workspaceId: string; path: string; sessionId?: string }>();
   const setResult = store((s) => s.setDocCommit);
   const [diffTarget, setDiffTarget] = useState<{ workspaceId: string; path: string }>();
   const [diffResult, setDiffResult] = useState<{ diff?: string; error?: string }>();
@@ -69,12 +70,12 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
     setDiffResult(undefined);
     if (!diffTarget) return;
     let active = true;
-    void client.request("docs.diff", diffTarget).then(
+    void client.request("docs.diff", { ...diffTarget, sessionId: docsSessionId }).then(
       (result) => { if (active) setDiffResult(result); },
       (error: Error) => { if (active) setDiffResult({ error: error.message }); }
     );
     return () => { active = false; };
-  }, [client, diffTarget]);
+  }, [client, diffTarget, docsSessionId]);
 
   const tree = useMemo(() => buildTree([...new Set([...docs.map((doc) => doc.path), ...pending.map((change) => change.path)])]), [docs, pending]);
   const changeByPath = useMemo(() => new Map(pending.map((c) => [c.path, c])), [pending]);
@@ -116,7 +117,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
       <li key={node.path}>
         <button
           type="button"
-          onClick={() => { if (isDir) toggle(node.path); else if (docs.find((doc) => doc.path === node.path)?.isText) openEditor({ kind: "doc", path: node.path }); }}
+          onClick={() => { if (isDir) toggle(node.path); else if (docs.find((doc) => doc.path === node.path)?.isText) openEditor({ kind: "doc", path: node.path, sessionId: docsSessionId }); }}
           onContextMenu={(event) => onContextMenu(event, node.path)}
           className={cn(
             "flex h-[26px] w-full items-center gap-1.5 pr-3 text-left text-label text-foreground hover:bg-surface-hover",
@@ -159,7 +160,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
           onClose={() => setMenu(undefined)}
           items={[
             { key: "commit", label: "提交", disabled: pending.length === 0, onSelect: () => setCommitOpen(true) },
-            { key: "discard", label: "丢弃变更", disabled: !pending.some((change) => change.path === menu.path || change.path.startsWith(menu.path + "/")), onSelect: () => setDiscardTarget({ workspaceId: workspace.workspaceId, path: menu.path }) },
+            { key: "discard", label: "丢弃变更", disabled: !pending.some((change) => change.path === menu.path || change.path.startsWith(menu.path + "/")), onSelect: () => setDiscardTarget({ workspaceId: workspace.workspaceId, path: menu.path, sessionId: docsSessionId }) },
             ...(docs.some((doc) => doc.path === menu.path) || changeByPath.has(menu.path)
               ? [{ key: "diff", label: "查看差异", onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
               : []),
@@ -174,7 +175,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
           pending={pending}
           onClose={() => setCommitOpen(false)}
           onCommit={async (input) => {
-            const committed = await client.request("docs.commit", { workspaceId: workspace.workspaceId, ...input });
+            const committed = await client.request("docs.commit", { workspaceId: workspace.workspaceId, sessionId: docsSessionId, ...input });
             setResult({ kind: "commit", ...committed });
             setCommitOpen(false);
           }}

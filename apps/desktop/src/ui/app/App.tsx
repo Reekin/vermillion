@@ -60,6 +60,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const openOverlay = store((s) => s.openOverlay);
   const closeOverlay = store((s) => s.closeOverlay);
   const browseWorkspace = store((s) => s.browseWorkspace);
+  const setDocsSessionId = store((s) => s.setDocsSessionId);
   const connect = store((s) => s.connect);
 
   useEffect(() => connect(), [connect]);
@@ -135,12 +136,17 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   }, [sidebar.findSession, store]);
   const openSidebarMenu = useCallback((event: ReactMouseEvent, id: string, title: string) => void sessionActions.openMenu(event, id, title), [sessionActions.openMenu]);
 
-  // Docs panel follows the open session's workspace; in draft it follows the picker.
+  // Docs panel follows the open session's workspace and tree; anywhere else it shows the main branch.
   const openSession = sessionId ? sidebar.findSession(sessionId) : undefined;
   const sessionWorkspaceId = openSession?.workspaceId ?? (navigationTarget?.sessionId === sessionId ? navigationTarget?.workspaceId : undefined);
   useEffect(() => {
-    if (panel === "workbench" && section === "sessions") browseWorkspace(sessionId ? sessionWorkspaceId : draftWorkspaceId);
-  }, [panel, section, sessionId, sessionWorkspaceId, draftWorkspaceId, browseWorkspace]);
+    if (panel !== "workbench" || section !== "sessions") {
+      setDocsSessionId(undefined);
+      return;
+    }
+    browseWorkspace(sessionId ? sessionWorkspaceId : draftWorkspaceId);
+    setDocsSessionId(sessionId);
+  }, [panel, section, sessionId, sessionWorkspaceId, draftWorkspaceId, browseWorkspace, setDocsSessionId]);
   useEffect(() => {
     if (workspaceFilterId && !workspaces.some((workspace) => workspace.workspaceId === workspaceFilterId)) setWorkspaceFilterId(undefined);
   }, [workspaces, workspaceFilterId]);

@@ -31,7 +31,7 @@ export type WorkspaceView = {
 };
 
 /** What the text editor modal is showing: a doc under .vermillion/docs or a role prompt override. */
-export type EditorTarget = { kind: "doc"; path: string; line?: number; column?: number; nonce?: number }
+export type EditorTarget = { kind: "doc"; path: string; line?: number; column?: number; nonce?: number; sessionId?: string }
   | { kind: "maintainer"; domainId: string; path: string; nonce?: number }
   | { kind: "role"; roleId: string };
 
@@ -50,6 +50,8 @@ export type WorkbenchState = {
   draftWorkspaceId: string | undefined;
   /** Workspace whose docs and work items are shown. Follows the open session, or the draft when none. */
   browsingWorkspaceId: string | undefined;
+  /** Session whose conversation tree's documents the explorer shows; undefined browses the main branch. */
+  docsSessionId: string | undefined;
   view: WorkspaceView | undefined;
   /** Why the last view load failed (a bad record, a missing workspace); cleared on the next successful load. */
   viewError: string | undefined;
@@ -76,6 +78,7 @@ export type WorkbenchState = {
   toggleInboxDetails: (workspaceId: string, decisionId: string) => void;
   setDraftWorkspace: (workspaceId: string | undefined) => void;
   browseWorkspace: (workspaceId: string | undefined) => void;
+  setDocsSessionId: (sessionId: string | undefined) => void;
   openEditor: (target: EditorTarget | undefined) => void;
   /** Opens any session in the workbench conversation tab. */
   showAgentSession: (workspaceId: string, sessionId: string, turnId?: string) => void;
@@ -120,6 +123,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
 
     const loadView = async () => {
       const workspaceId = get().browsingWorkspaceId;
+      const docsSessionId = get().docsSessionId;
       const generation = ++viewGeneration;
       if (!workspaceId) {
         set({ view: undefined });
@@ -132,8 +136,8 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           client.request("issue.list", { workspaceId }),
           client.request("domain.list", { workspaceId }),
           client.request("domain.patrol.list", { workspaceId }),
-          client.request("docs.list", { workspaceId }),
-          client.request("docs.pending", { workspaceId }),
+          client.request("docs.list", { workspaceId, sessionId: docsSessionId }),
+          client.request("docs.pending", { workspaceId, sessionId: docsSessionId }),
           client.request("role.list", { workspaceId }),
           client.request("scheduler.get", { workspaceId }),
           client.request("run.list", { workspaceId }),
@@ -170,6 +174,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       workspaces: [],
       draftWorkspaceId: undefined,
       browsingWorkspaceId: undefined,
+      docsSessionId: undefined,
       view: undefined,
       viewError: undefined,
       inbox: [],
@@ -208,6 +213,11 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       browseWorkspace: (workspaceId) => {
         if (workspaceId === get().browsingWorkspaceId) return;
         set({ browsingWorkspaceId: workspaceId, editor: undefined, issueTarget: undefined, view: undefined, viewError: undefined });
+        void loadView();
+      },
+      setDocsSessionId: (docsSessionId) => {
+        if (docsSessionId === get().docsSessionId) return;
+        set({ docsSessionId, view: undefined, viewError: undefined });
         void loadView();
       },
       openEditor: (target) => set({ editor: target }),

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rmdir, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { DocChange, DocFile } from "./contracts.js";
 
@@ -14,12 +14,29 @@ export class WorktreeMergeConflict extends Error {
   }
 }
 
+/** A draft could not reach the main branch; the same files stay editable in the draft. */
+export class DocDraftConflict extends Error {
+  constructor(readonly files: string[]) {
+    super("文档草稿与主分支冲突：" + files.join("、") +
+      "。调用 docs.rebase 把本会话的草稿同步到主分支，解决冲突标记后用 docs.write 保存并再次 docs.commit。");
+  }
+}
+
 export class WorktreeNotReady extends Error {}
 
 export class WorkspaceNotReady extends Error {}
 
 export const STATE_DIR = ".vermillion";
 export const DOCS_DIR = STATE_DIR + "/docs";
+export const DRAFT_DIR_SUFFIX = "-docs-drafts";
+const DRAFT_BRANCH_PREFIX = "docs/";
+
+/** One conversation tree's documents before they reach the main branch. */
+export type DocDraft = { treeId: string; path: string; branch: string };
+
+/** Git-safe name of a tree's draft; the same key names the branch and the directory. */
+export const draftKey = (treeId: string): string =>
+  treeId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "tree";
 
 const git = async (cwd: string, args: string[]): Promise<string> => {
   const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
@@ -98,7 +115,12 @@ const assertDocPath = (path: string): void => {
 /** Git-backed document store rooted at <workspace>/.vermillion/docs. */
 export class DocsService {
   private gitDir?: string;
-  constructor(private readonly rootPath: string) {}
+  /**
+   * A draft worktree compares its documents with the main branch it will be merged into, so its
+   * markers, diffs and discards describe what the draft would change there. The main store uses its
+   * own HEAD.
+   */
+  constructor(private readonly rootPath: string, private readonly base?: string) {}
 
   async ensureRepo(): Promise<void> {
     let topLevel = "";
@@ -204,6 +226,21 @@ export class DocsService {
 
   /** Read-only: does not touch the index. Untracked files count as added. */
   async pendingChanges(): Promise<DocChange[]> {
+    if (!this.base) return this.editedChanges();
+    const changes = new Map<string, DocChange["status"]>();
+    const diff = await git(this.rootPath, ["--no-optional-locks", "--literal-pathspecs", "diff", "--name-status", "-z", "--no-renames", this.base, "--", DOCS_DIR]);
+    const listed = diff.split("\0").filter(Boolean);
+    for (let i = 0; i + 1 < listed.length; i += 2) {
+      changes.set(listed[i + 1]!, listed[i]!.includes("D") ? "deleted" : listed[i]!.includes("A") ? "added" : "modified");
+    }
+    for (const path of (await git(this.rootPath, ["--literal-pathspecs", "ls-files", "--others", "-z", "--exclude-standard", "--", DOCS_DIR])).split("\0").filter(Boolean)) {
+      changes.set(path, "added");
+    }
+    return [...changes].map(([path, status]) => ({ path, status })).sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /** Worktree edits this scope has not committed yet; the only changes a commit can capture. */
+  async editedChanges(): Promise<DocChange[]> {
     const status = await git(this.rootPath, ["--no-optional-locks", "--literal-pathspecs", "status", "--no-renames", "--porcelain=v1", "-z", "--untracked-files=all", "--", DOCS_DIR]);
     const changes: DocChange[] = [];
     const entries = status.split("\0").filter(Boolean);
@@ -246,7 +283,7 @@ export class DocsService {
         }
       }
     }
-    const head = await this.head();
+    const head = this.base ?? await this.head();
     const tracked = new Set(head ? (await git(this.rootPath, ["ls-tree", "-r", "--name-only", "-z", head, "--", DOCS_DIR])).split("\0") : []);
     const restore = changes.filter(({ path }) => tracked.has(path)).map(({ path }) => path);
     const remove = changes.filter(({ path }) => !tracked.has(path)).map(({ path }) => path);
@@ -263,7 +300,7 @@ export class DocsService {
   /** Current file against HEAD, including staged edits and untracked additions; never writes the index. */
   async diff(path: string): Promise<string> {
     assertDocPath(path);
-    const head = await this.head();
+    const head = this.base ?? await this.head();
     if (head) {
       const diff = await git(this.rootPath, ["-c", "diff.autoRefreshIndex=false", "--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", head, "--", path]);
       if (diff) return diff;
@@ -343,10 +380,15 @@ export class DocsService {
     const before = await this.resolveCommit("HEAD");
     const target = await this.resolveCommit(targetCommit ?? branch);
     if (await this.isAncestor(target, before)) return { diffStat: "" };
-    await this.checkIntegrationReady();
     if (await git(worktreePath, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"])) {
       throw new WorktreeNotReady("Worker must commit its worktree before integration.");
     }
+    return this.mergeCommit(target, message, before);
+  }
+
+  /** Merge one committed revision into the main branch; a conflicting merge is aborted and reported. */
+  private async mergeCommit(target: string, message: string, before: string): Promise<{ commit: string; diffStat: string }> {
+    await this.checkIntegrationReady();
     try {
       await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "merge", "--no-ff", "-q", "-m", "Merge " + message, target]);
     } catch (error) {
@@ -357,6 +399,142 @@ export class DocsService {
     }
     const commit = await this.resolveCommit("HEAD");
     return { commit, diffStat: await git(this.rootPath, ["diff", "--stat", before, commit]) };
+  }
+
+  /** Where this tree's drafts live: beside the workspace, outside the repository. */
+  private draftRoot(): string {
+    return join(dirname(this.rootPath), basename(this.rootPath) + DRAFT_DIR_SUFFIX);
+  }
+
+  /** One tree's draft, created at the main branch tip when requested. */
+  async draft(treeId: string, create = false): Promise<DocDraft | undefined> {
+    const key = draftKey(treeId);
+    const path = join(this.draftRoot(), key);
+    const branch = DRAFT_BRANCH_PREFIX + key;
+    const registered = await this.registration(path);
+    // A draft replaying its own commits is detached, so the path and not the branch identifies it.
+    if (registered) return !registered.branch || registered.branch === branch ? { treeId: key, path, branch } : undefined;
+    if (!create) return undefined;
+    const head = await this.resolveCommit("HEAD");
+    await git(this.rootPath, (await this.branchExists(branch))
+      ? ["worktree", "add", "--no-checkout", path, branch]
+      : ["worktree", "add", "--no-checkout", "-b", branch, path, head]);
+    await git(path, ["sparse-checkout", "set", DOCS_DIR]);
+    await git(path, ["read-tree", "-mu", "HEAD"]);
+    return { treeId: key, path, branch };
+  }
+
+  /** Every draft this workspace still registers. */
+  async listDrafts(): Promise<DocDraft[]> {
+    const root = this.draftRoot();
+    return (await this.registrations())
+      .flatMap((entry) => samePath(dirname(entry.path), root)
+        ? [{ treeId: basename(entry.path), path: entry.path, branch: DRAFT_BRANCH_PREFIX + basename(entry.path) }]
+        : []);
+  }
+
+  /**
+   * Bring a draft to the main branch tip so its changes are always measured against the current
+   * main branch. Local edits survive: a draft whose own edit would be overwritten, and a draft
+   * carrying its own commits, stay put and are resolved by the next commit.
+   */
+  async syncDraft(draft: DocDraft): Promise<void> {
+    if (await this.rebaseInProgress(draft.path)) return;
+    const head = await this.resolveCommit("HEAD");
+    const own = await this.resolveCommit(draft.branch);
+    if (await this.isAncestor(head, own) || !await this.isAncestor(own, head)) return;
+    const local = await this.editedPaths(draft.path);
+    const incoming = (await git(this.rootPath, ["diff", "--name-only", own, head, "--", DOCS_DIR])).split("\n").filter(Boolean);
+    if (incoming.some((path) => local.has(path))) return;
+    await git(draft.path, ["merge", "--ff-only", "-q", head]);
+  }
+
+  /** Documents this worktree holds, staged, edited or not tracked yet; a merge must never touch them. */
+  private async editedPaths(worktreePath: string): Promise<Set<string>> {
+    const status = await git(worktreePath, ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", DOCS_DIR]);
+    return new Set(status.split("\0").filter(Boolean).map((entry) => entry.slice(3)));
+  }
+
+  /** True while the draft holds commits the main branch does not carry yet. */
+  async draftAhead(draft: DocDraft): Promise<boolean> {
+    return !await this.isAncestor(await this.resolveCommit(draft.branch), await this.resolveCommit("HEAD"));
+  }
+
+  /** Merge a committed draft into the main branch, then let the draft follow the merged tip. */
+  async mergeDraft(draft: DocDraft, message: string): Promise<{ commit?: string; diffStat: string }> {
+    const before = await this.resolveCommit("HEAD");
+    const target = await this.resolveCommit(draft.branch);
+    if (await this.isAncestor(target, before)) return { diffStat: "" };
+    try {
+      const merged = await this.isAncestor(before, target)
+        ? await this.fastForwardMain(target, before)
+        : await this.mergeCommit(target, message, before);
+      await this.syncDraft(draft);
+      return merged;
+    } catch (error) {
+      if (error instanceof WorktreeMergeConflict) throw new DocDraftConflict(error.files);
+      throw error;
+    }
+  }
+
+  /** The main branch has not moved since the draft branched, so the draft is the whole change. */
+  private async fastForwardMain(target: string, before: string): Promise<{ commit: string; diffStat: string }> {
+    await this.checkIntegrationReady();
+    await git(this.rootPath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "merge", "--ff-only", "-q", target]);
+    const commit = await this.resolveCommit("HEAD");
+    return { commit, diffStat: await git(this.rootPath, ["diff", "--stat", before, commit]) };
+  }
+
+  /** True while a draft is replaying its own commits on the main branch. */
+  async rebaseInProgress(worktreePath: string): Promise<boolean> {
+    for (const marker of ["rebase-merge", "rebase-apply"]) {
+      const path = (await git(worktreePath, ["rev-parse", "--git-path", marker])).trim();
+      if (await exists(resolve(worktreePath, path))) return true;
+    }
+    return false;
+  }
+
+  /** Replay a draft's own commits on the main branch; a conflict stays in the draft with its files. */
+  async rebaseDraft(draft: DocDraft): Promise<string[]> {
+    const head = await this.resolveCommit("HEAD");
+    try {
+      await git(draft.path, ["rebase", head]);
+    } catch (error) {
+      const files = await this.unmerged(draft.path);
+      if (!files.length) throw error;
+      return files;
+    }
+    return [];
+  }
+
+  /** Finish a rebase the caller resolved; a further conflict stops again with its files. */
+  async continueDraftRebase(worktreePath: string, message?: string): Promise<string[]> {
+    await git(worktreePath, ["add", "-A", "--", DOCS_DIR]);
+    try {
+      await git(worktreePath, ["-c", "core.editor=true", "rebase", "--continue"]);
+    } catch (error) {
+      const files = await this.unmerged(worktreePath);
+      if (!files.length) throw error;
+      return files;
+    }
+    const files = await this.unmerged(worktreePath);
+    // The replayed commit keeps its original message; the caller's message describes this delivery.
+    if (!files.length && message) {
+      await git(worktreePath, ["-c", "user.name=Vermillion", "-c", "user.email=vermillion@local", "commit", "--amend", "-m", message]);
+    }
+    return files;
+  }
+
+  /** True when a draft holds nothing the main branch does not already carry. */
+  async draftMerged(draft: DocDraft): Promise<boolean> {
+    const head = await this.head();
+    if (!head) return false;
+    if ((await git(draft.path, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all", "--", DOCS_DIR])).trim()) return false;
+    return !(await git(this.rootPath, ["diff", "--name-only", head, draft.branch, "--", DOCS_DIR])).trim();
+  }
+
+  private async unmerged(worktreePath: string): Promise<string[]> {
+    return (await git(worktreePath, ["diff", "--name-only", "--diff-filter=U", "-z", "--", DOCS_DIR])).split("\0").filter(Boolean);
   }
 
   /** Find Git's standard merge-revert record on the mainline since the saved starting point. */
@@ -393,9 +571,8 @@ export class DocsService {
 
   async dropWorktree(worktreePath: string, branch: string, discard = false): Promise<void> {
     if (samePath(worktreePath, this.rootPath)) throw new Error("Cannot remove the workspace root");
-    const registrations = (await git(this.rootPath, ["worktree", "list", "--porcelain", "-z"])).split("\0\0");
-    const registered = registrations.find((entry) => entry.split("\0").some((field) => field.startsWith("worktree ") && samePath(field.slice(9), worktreePath)));
-    if (registered && !registered.split("\0").includes("branch refs/heads/" + branch)) throw new Error("Worktree branch ownership changed: " + worktreePath);
+    const registered = await this.registration(worktreePath);
+    if (registered && registered.branch !== branch) throw new Error("Worktree branch ownership changed: " + worktreePath);
     if (registered) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
     else if (await exists(worktreePath)) {
       if ((await readdir(worktreePath)).length) throw new Error("已注销的 worktree 目录仍有内容，保留以待检查：" + worktreePath);
@@ -404,6 +581,31 @@ export class DocsService {
     const ref = "refs/heads/" + branch;
     const branches = await git(this.rootPath, ["for-each-ref", "--format=%(refname)", ref]);
     if (branches.split("\n").includes(ref)) await git(this.rootPath, ["branch", discard ? "-D" : "-d", "--", branch]);
+  }
+
+  /** Worktrees Git currently registers for this repository, with their checked-out branch. */
+  private async registrations(): Promise<Array<{ path: string; branch?: string }>> {
+    const listed = await git(this.rootPath, ["worktree", "list", "--porcelain", "-z"]);
+    return listed.split("\0\0").flatMap((entry) => {
+      const fields = entry.split("\0");
+      const location = fields.find((field) => field.startsWith("worktree "));
+      if (!location) return [];
+      const branch = fields.find((field) => field.startsWith("branch "))?.slice("branch ".length).replace(/^refs\/heads\//, "");
+      return [{ path: location.slice("worktree ".length), ...(branch ? { branch } : {}) }];
+    });
+  }
+
+  private async registration(path: string): Promise<{ path: string; branch?: string } | undefined> {
+    return (await this.registrations()).find((entry) => samePath(entry.path, path));
+  }
+
+  private async branchExists(branch: string): Promise<boolean> {
+    try {
+      await git(this.rootPath, ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch]);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async head(): Promise<string | undefined> {

@@ -7,7 +7,8 @@ export const TextEditor = ({ store }: { store: WorkbenchStore }) => {
   const workspaceId = store((s) => s.browsingWorkspaceId);
   const target = store((s) => s.editor);
   return workspaceId && (target?.kind === "doc" || target?.kind === "maintainer")
-    ? <DocumentEditor key={workspaceId + ":" + target.path + ":" + (target.kind === "doc" ? target.line + ":" + target.column : "") + ":" + target.nonce} store={store} workspaceId={workspaceId} target={target} />
+    // The scope is part of the identity: the same path shows different content in a draft and on the main branch.
+    ? <DocumentEditor key={[workspaceId, target.path, target.kind === "doc" ? target.sessionId ?? "" : "", target.kind === "doc" ? target.line : "", target.kind === "doc" ? target.column : "", target.nonce].join(":")} store={store} workspaceId={workspaceId} target={target} />
     : null;
 };
 
@@ -15,6 +16,7 @@ const DocumentEditor = ({ store, workspaceId, target }: { store: WorkbenchStore;
   const path = target.path;
   const line = target.kind === "doc" ? target.line : undefined;
   const column = target.kind === "doc" ? target.column : undefined;
+  const sessionId = target.kind === "doc" ? target.sessionId : undefined;
   const client = store((s) => s.client);
   const rootPath = store((s) => s.workspaces.find((w) => w.workspaceId === workspaceId)?.rootPath ?? "");
   const openEditor = store((s) => s.openEditor);
@@ -31,20 +33,20 @@ const DocumentEditor = ({ store, workspaceId, target }: { store: WorkbenchStore;
   useEffect(() => {
     let active = true;
     const request = target.kind === "doc"
-      ? client.request("docs.read", { workspaceId, path })
+      ? client.request("docs.read", { workspaceId, path, sessionId })
       : client.request("domain.instruction.read", { workspaceId, domainId: target.domainId });
     void request.then((result) => {
       if (active) { setContent(result.content); setSaved(result.content); }
     }).catch((cause: unknown) => { if (active) setError(String(cause)); });
     return () => { active = false; };
-  }, [client, workspaceId, path, target.kind, target.kind === "maintainer" ? target.domainId : undefined]);
+  }, [client, workspaceId, path, sessionId, target.kind, target.kind === "maintainer" ? target.domainId : undefined]);
 
   const save = async () => {
     if (content === undefined || saving || !dirty) return;
     setSaving(true);
     setError(undefined);
     try {
-      if (target.kind === "doc") await client.request("docs.write", { workspaceId, path, content });
+      if (target.kind === "doc") await client.request("docs.write", { workspaceId, path, content, sessionId });
       else await client.request("domain.instruction.write", { workspaceId, domainId: target.domainId, content });
       setSaved(content);
     } catch (cause) {

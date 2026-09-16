@@ -21,7 +21,7 @@ import type {
 } from "./contracts.js";
 import { effectiveNeeds, actionIsOpen, projectWorkItem, type ExecutionNotice, type WorkflowAction, type Execution, type Integration, type VerifySubmission, type WorkItemRecord } from "./contracts.js";
 import type { SessionNavigationPort } from "./session-navigation.js";
-import { DocsService, WorktreeMergeConflict, WorktreeNotReady, listTrackedDirectories } from "./docs.js";
+import { DocDraftConflict, DocsService, WorktreeMergeConflict, WorktreeNotReady, draftKey, listTrackedDirectories, type DocDraft } from "./docs.js";
 import { RoleService } from "./roles.js";
 import type { AppLauncher, AppStartInput, AppStartResult, AppWindowInput, AppWindowResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -166,6 +166,7 @@ export class WorkbenchService {
   private readonly decisionDeliveries = new Map<string, Promise<void>>();
   private schedulerOwner?: object;
   private sourceTurnResolver?: (sessionId: string) => Promise<string | undefined>;
+  private sessionTreeResolver?: (sessionId: string) => Promise<string | undefined>;
   private workerActive?: (sessionId: string) => boolean;
   private releaseWorkerEnvironment?: (sessionId: string) => Promise<void>;
 
@@ -182,6 +183,11 @@ export class WorkbenchService {
   setSourceTurnResolver(resolver: (sessionId: string) => Promise<string | undefined>): () => void {
     this.sourceTurnResolver = resolver;
     return () => { if (this.sourceTurnResolver === resolver) this.sourceTurnResolver = undefined; };
+  }
+
+  setSessionTreeResolver(resolver: (sessionId: string) => Promise<string | undefined>): () => void {
+    this.sessionTreeResolver = resolver;
+    return () => { if (this.sessionTreeResolver === resolver) this.sessionTreeResolver = undefined; };
   }
 
   constructor(options: WorkbenchServiceOptions) {
@@ -312,34 +318,55 @@ export class WorkbenchService {
 
   // ---- docs ----
 
-  async listDocs(workspaceId: string): Promise<DocFile[]> {
-    return (await this.context(workspaceId)).docs.list();
+  /**
+   * The documents a session reads and writes: its conversation tree's draft, or the main branch when
+   * the session names none. A draft is created on the first write, never for a read.
+   */
+  private async docsScope(workspaceId: string, sessionId?: string, create = false):
+    Promise<{ documents: DocsService; draft?: DocDraft }> {
+    const { docs } = await this.context(workspaceId);
+    if (!sessionId) return { documents: docs };
+    const treeId = await this.sessionTreeResolver?.(sessionId);
+    if (!treeId) throw new Error("无法确定会话所属的会话树：" + sessionId + "。桌面未连接时省略 sessionId，直接作用于主分支。");
+    const draft = await docs.draft(treeId, create);
+    if (!draft) return { documents: docs };
+    await docs.syncDraft(draft);
+    return { documents: new DocsService(draft.path, await docs.head()), draft };
   }
 
-  async readDoc(workspaceId: string, path: string, commit?: string): Promise<string> {
-    return (await this.context(workspaceId)).docs.read(path, commit);
+  async listDocs(workspaceId: string, sessionId?: string): Promise<DocFile[]> {
+    return (await this.docsScope(workspaceId, sessionId)).documents.list();
   }
 
-  async writeDoc(workspaceId: string, path: string, content: string): Promise<void> {
-    await (await this.context(workspaceId)).docs.write(path, content);
-    this.emit({ type: "docs.changed", workspaceId });
+  async readDoc(workspaceId: string, path: string, commit?: string, sessionId?: string): Promise<string> {
+    // A referenced revision lives in the shared object database, so the scope does not apply to it.
+    if (commit !== undefined) return (await this.context(workspaceId)).docs.read(path, commit);
+    return (await this.docsScope(workspaceId, sessionId)).documents.read(path);
   }
 
-  async pendingDocChanges(workspaceId: string): Promise<DocChange[]> {
-    return (await this.context(workspaceId)).docs.pendingChanges();
+  async writeDoc(workspaceId: string, path: string, content: string, sessionId?: string): Promise<void> {
+    // Serialized with draft cleanup so a write never lands in a worktree that is being recycled.
+    await this.integrate(workspaceId, async () => {
+      await (await this.docsScope(workspaceId, sessionId, true)).documents.write(path, content);
+      this.emit({ type: "docs.changed", workspaceId });
+    });
   }
 
-  async docDiff(workspaceId: string, path: string): Promise<string> {
-    return (await this.context(workspaceId)).docs.diff(path);
+  async pendingDocChanges(workspaceId: string, sessionId?: string): Promise<DocChange[]> {
+    return (await this.docsScope(workspaceId, sessionId)).documents.pendingChanges();
   }
 
-  async previewDocDiscard(workspaceId: string, paths: string[]): Promise<DocChange[]> {
-    return (await this.context(workspaceId)).docs.discardPreview(paths);
+  async docDiff(workspaceId: string, path: string, sessionId?: string): Promise<string> {
+    return (await this.docsScope(workspaceId, sessionId)).documents.diff(path);
   }
 
-  async discardDocs(workspaceId: string, paths: string[]): Promise<DocChange[]> {
+  async previewDocDiscard(workspaceId: string, paths: string[], sessionId?: string): Promise<DocChange[]> {
+    return (await this.docsScope(workspaceId, sessionId)).documents.discardPreview(paths);
+  }
+
+  async discardDocs(workspaceId: string, paths: string[], sessionId?: string): Promise<DocChange[]> {
     return this.integrate(workspaceId, async () => {
-      const changes = await (await this.context(workspaceId)).docs.discard(paths);
+      const changes = await (await this.docsScope(workspaceId, sessionId)).documents.discard(paths);
       if (changes.length) this.emit({ type: "docs.changed", workspaceId });
       return changes;
     });
@@ -353,12 +380,45 @@ export class WorkbenchService {
     const message = input.message.trim();
     if (!message) throw new Error("Commit message is required.");
     const { docs } = await this.context(workspaceId);
-    const pending = await docs.pendingChanges();
-    const paths = input.paths ?? pending.map((entry) => entry.path);
-    const { commit } = await this.commitDocChanges(docs, message, input.paths);
-    await this.moveDocRefs(workspaceId, { commit, paths, originatorSessionId: input.sessionId });
+    if (!input.sessionId) {
+      const { commit } = await this.commitDocChanges(docs, message, input.paths);
+      await this.moveDocRefs(workspaceId, { commit });
+      this.emit({ type: "docs.changed", workspaceId });
+      return { commit, message };
+    }
+    const { documents, draft } = await this.docsScope(workspaceId, input.sessionId, true);
+    if (!draft) throw new Error("无法确定会话所属的会话树：" + input.sessionId);
+    if (input.paths?.length === 0) throw new Error("Select at least one doc path to commit.");
+    const authored = await documents.editedChanges();
+    const pending = await documents.pendingChanges();
+    const chosen = (changes: DocChange[]) => input.paths ? changes.filter((change) => input.paths!.includes(change.path)) : changes;
+    let paths: string[] | undefined;
+    if (await documents.rebaseInProgress(draft.path)) {
+      // A draft that carried its own commits across a conflict is finished by continuing that rebase.
+      const files = await documents.continueDraftRebase(draft.path, message);
+      if (files.length) throw new DocDraftConflict(files);
+    } else if (chosen(authored).length) {
+      paths = (await this.commitDocChanges(documents, message, chosen(authored).map((change) => change.path))).paths;
+    } else if (input.paths && !chosen(pending).length) {
+      // The selection names nothing this draft holds; publishing its other files would ignore the caller.
+      throw new Error("No pending doc changes to commit.");
+    } else if (!await docs.draftAhead(draft)) {
+      throw new Error("No pending doc changes to commit.");
+    }
+    const { commit } = await docs.mergeDraft(draft, message);
+    const head = commit ?? await docs.head();
+    if (!head) throw new Error("文档提交未进入主分支：" + message);
+    await this.moveDocRefs(workspaceId, { commit: head, paths, originatorSessionId: input.sessionId });
     this.emit({ type: "docs.changed", workspaceId });
-    return { commit, message };
+    return { commit: head, message };
+  }
+
+  /** Rebase this session's draft onto the main branch; a conflict stays in the draft as markers. */
+  async rebaseDocDraft(workspaceId: string, sessionId: string): Promise<{ files: string[] }> {
+    const { docs } = await this.context(workspaceId);
+    const { draft } = await this.docsScope(workspaceId, sessionId, true);
+    if (!draft) throw new Error("无法确定会话所属的会话树：" + sessionId);
+    return { files: await docs.rebaseDraft(draft) };
   }
 
   async refreshDocRefs(workspaceId: string): Promise<void> {
@@ -834,9 +894,10 @@ export class WorkbenchService {
     if (issue.status === "duplicate" && (!issue.duplicateOf || !issue.resolutionReason)) throw new Error("重复 Issue 必须提供原 Issue 和处理原因。");
   }
 
+  /** Commit the worktree edits a scope still holds; a scope whose work is already committed has none. */
   private async commitDocChanges(docs: DocsService, message: string, paths: string[] | undefined) {
     if (paths?.length === 0) throw new Error("Select at least one doc path to commit.");
-    const pending = await docs.pendingChanges();
+    const pending = await docs.editedChanges();
     const selected = paths ? pending.filter((c) => paths.includes(c.path)) : pending;
     if (selected.length === 0) throw new Error("No pending doc changes to commit.");
     const selectedPaths = selected.map((c) => c.path);
@@ -1655,7 +1716,7 @@ export class WorkbenchService {
     return this.integrate(workspaceId, async () => {
       const { docs } = await this.context(workspaceId);
       const removed: string[] = [];
-      const retained: Array<{ workItemId: string; worktreePath: string; reason: string }> = [];
+      const retained: Array<{ workItemId?: string; worktreePath: string; reason: string }> = [];
       for (const candidate of await this.listWorktreeCleanup(workspaceId)) {
         const items = await this.listWorkItems(workspaceId);
         const reused = items.some((item) => !["closed", "cancelled"].includes(item.status) &&
@@ -1674,8 +1735,35 @@ export class WorkbenchService {
         }
         if (reason) retained.push({ workItemId: candidate.workItemId, worktreePath: candidate.worktreePath, reason });
       }
+      for (const draft of await docs.listDrafts()) {
+        const reason = await this.draftCleanupBlocker(workspaceId, docs, draft);
+        if (reason) { retained.push({ worktreePath: draft.path, reason }); continue; }
+        try {
+          await docs.dropWorktree(draft.path, draft.branch, true);
+          removed.push(draft.path);
+        } catch (error) {
+          retained.push({ worktreePath: draft.path, reason: error instanceof Error ? error.message : String(error) });
+        }
+      }
       return { removed, retained };
     });
+  }
+
+  /**
+   * Why a document draft must stay: an unfinished work item, unfetched main branch work, or its own
+   * edits. A draft that holds nothing the main branch lacks is safe to recycle even while its session
+   * is open: the next write creates the draft again at the main branch tip and finds the same files.
+   */
+  private async draftCleanupBlocker(workspaceId: string, docs: DocsService, draft: DocDraft): Promise<string | undefined> {
+    const owned = (await this.listWorkItems(workspaceId)).some((item) =>
+      !["closed", "cancelled"].includes(item.status) && !!item.treeId && draftKey(item.treeId) === draft.treeId);
+    if (owned) return "该会话树仍有未结束工单";
+    try {
+      await docs.syncDraft(draft);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    return await docs.draftMerged(draft) ? undefined : "草稿仍有未合入的文档修改";
   }
 
   private sameWorktreePath(left: string, right: string): boolean {

@@ -842,6 +842,7 @@ const boot = async (): Promise<void> => {
   });
   service.setSessionRoleResolver((workspaceId, metadata) =>
     workbenchService.resolveSessionInstructions(workspaceId, metadata));
+  workbenchService.setSessionTreeResolver(async (sessionId) => service.getSessionTreeId(sessionId));
   const workbenchRpc = createWorkbenchRpcHandler(workbenchService);
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     workbenchRpc(payload as { method: string; params: unknown })

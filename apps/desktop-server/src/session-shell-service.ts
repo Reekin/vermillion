@@ -330,6 +330,11 @@ export class SessionShellService {
     return this.runtimeService.listSessions(options);
   }
 
+  /** The conversation tree a session belongs to, which one document draft is shared by. */
+  public getSessionTreeId(sessionId: string): string {
+    return this.runtimeService.getSessionIndexStore?.()?.getTreeId(sessionId) ?? sessionId;
+  }
+
   public getSnapshot(): DomainSnapshot {
     return this.runtimeService.getSnapshot();
   }

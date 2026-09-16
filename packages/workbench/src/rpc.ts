@@ -44,10 +44,13 @@ const zWs = z.object({ workspaceId: z.string().min(1) });
 const zWi = zWs.extend({ workItemId: z.string().min(1) });
 const zEmpty = z.object({});
 
+/** A document call inside a session edits that conversation tree's draft; without a session it edits the main branch. */
+const zDocsScope = zWs.extend({ sessionId: z.string().min(1).optional() });
+
 /** Single method registry: name -> params/result schemas. Handler and client are both derived from it. */
 export const workbenchRpc = {
   "worktree.list": { params: zWs, result: z.array(zWorktreeCleanup.extend({ workItemId: z.string() })) },
-  "worktree.cleanup": { params: zWs, result: z.object({ removed: z.array(z.string()), retained: z.array(z.object({ workItemId: z.string(), worktreePath: z.string(), reason: z.string() })) }) },
+  "worktree.cleanup": { params: zWs, result: z.object({ removed: z.array(z.string()), retained: z.array(z.object({ workItemId: z.string().optional(), worktreePath: z.string(), reason: z.string() })) }) },
   "sessionNavigation.create": {
     params: z.object({ sessionId: z.string().min(1), targetSessionId: z.string().min(1), reason: z.string().trim().optional() }),
     result: zSessionNavigation
@@ -84,13 +87,14 @@ export const workbenchRpc = {
   "workspace.remove": { params: zWs, result: zEmpty },
   "workspace.directories": { params: zWs, result: z.array(z.string().min(1)) },
 
-  "docs.list": { params: zWs, result: z.array(zDocFile) },
-  "docs.read": { params: zWs.extend({ path: z.string().min(1), commit: z.string().min(1).optional() }), result: z.object({ content: z.string() }) },
-  "docs.write": { params: zWs.extend({ path: z.string().min(1), content: z.string() }), result: zEmpty },
-  "docs.pending": { params: zWs, result: z.array(zDocChange) },
-  "docs.discardPreview": { params: zWs.extend({ paths: z.array(z.string().min(1)).min(1) }), result: z.array(zDocChange) },
-  "docs.discard": { params: zWs.extend({ paths: z.array(z.string().min(1)).min(1) }), result: z.array(zDocChange) },
-  "docs.diff": { params: zWs.extend({ path: z.string().min(1) }), result: z.object({ diff: z.string() }) },
+  "docs.list": { params: zDocsScope, result: z.array(zDocFile) },
+  "docs.read": { params: zDocsScope.extend({ path: z.string().min(1), commit: z.string().min(1).optional() }), result: z.object({ content: z.string() }) },
+  "docs.write": { params: zDocsScope.extend({ path: z.string().min(1), content: z.string() }), result: zEmpty },
+  "docs.pending": { params: zDocsScope, result: z.array(zDocChange) },
+  "docs.discardPreview": { params: zDocsScope.extend({ paths: z.array(z.string().min(1)).min(1) }), result: z.array(zDocChange) },
+  "docs.discard": { params: zDocsScope.extend({ paths: z.array(z.string().min(1)).min(1) }), result: z.array(zDocChange) },
+  "docs.diff": { params: zDocsScope.extend({ path: z.string().min(1) }), result: z.object({ diff: z.string() }) },
+  "docs.rebase": { params: zWs.extend({ sessionId: z.string().min(1) }), result: z.object({ files: z.array(z.string()) }) },
   "docs.commit": {
     params: zWs.extend({ message: z.string().trim().min(1), paths: z.array(z.string()).min(1).optional(), sessionId: z.string().min(1).optional() }),
     result: zDocCommit

@@ -5,26 +5,26 @@ import { Button, InlineNotice } from "./ui.js";
 
 const actionLabel = { added: "删除新增文件", modified: "还原修改", deleted: "恢复已删除文件" };
 
-export const DiscardDocsDialog = ({ client, workspaceId, path, onClose }: {
-  client: WorkbenchClient; workspaceId: string; path: string; onClose: () => void;
+export const DiscardDocsDialog = ({ client, workspaceId, path, sessionId, onClose }: {
+  client: WorkbenchClient; workspaceId: string; path: string; sessionId?: string; onClose: () => void;
 }) => {
   const [changes, setChanges] = useState<DocChange[]>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let active = true;
-    void client.request("docs.discardPreview", { workspaceId, paths: [path] }).then(
+    void client.request("docs.discardPreview", { workspaceId, paths: [path], sessionId }).then(
       (result) => { if (active) setChanges(result); },
       (caught: Error) => { if (active) setError(caught.message); }
     );
     return () => { active = false; };
-  }, [client, workspaceId, path]);
+  }, [client, workspaceId, path, sessionId]);
   const discard = async () => {
     if (!changes?.length) return;
     setBusy(true);
     setError(undefined);
     try {
-      await client.request("docs.discard", { workspaceId, paths: changes.map((change) => change.path) });
+      await client.request("docs.discard", { workspaceId, paths: changes.map((change) => change.path), sessionId });
       onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
