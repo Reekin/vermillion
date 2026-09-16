@@ -56,13 +56,13 @@ export const useSessionActions = ({ transport, refreshSidebar, onArchived, onRes
         try {
           await transport.sessionBrowser.rename({ sessionId: rename.sessionId, title });
           setRename(undefined);
-          await reloadSidebar();
+          await refreshSidebar();
         } catch (error) {
           setRename((current) => (current ? { ...current, busy: false, error: (error as Error).message } : current));
         }
       })();
     },
-    [rename, transport, reloadSidebar]
+    [rename, transport, refreshSidebar]
   );
 
   const renameDialog: SessionRenameController = { state: rename, open: openRename, close: closeRename, submit: submitRename };
