@@ -90,6 +90,8 @@ const zWorkspaceRecordSchema = z.object({
 
 const zSessionSettingsSchema = z.object({
   defaultNewSessionEngineId: z.string().min(1).optional(),
+  /** 会话标题生成使用的模型；未设置时使用内置默认模型。 */
+  titleGenerationModelId: z.string().min(1).optional(),
   engineProgramPathsByEngineId: z.record(z.string(), z.string().min(1)).default({}),
   engineProgramResolutionsByEngineId: z
     .record(
@@ -543,6 +545,7 @@ const zSettingsUpdateRequestSchema = z.object({
   method: z.literal("settings.update"),
   params: z.object({
     defaultNewSessionEngineId: z.string().min(1).optional(),
+    titleGenerationModelId: z.string().min(1).nullable().optional(),
     engineProgramPathsByEngineId: z
       .record(z.string(), z.string().min(1))
       .optional(),
@@ -1451,6 +1454,13 @@ export const zSessionEventPushBatchSchema = z.object({
 });
 
 export type SessionSettingsRpc = z.infer<typeof zSessionSettingsSchema>;
+/** 设置更新入参：`titleGenerationModelId` 传 null 表示清除自定义，回落到内置默认模型。 */
+export type SessionSettingsUpdateRpc = Omit<
+  Partial<SessionSettingsRpc>,
+  "titleGenerationModelId"
+> & {
+  titleGenerationModelId?: string | null;
+};
 export type EngineProgramResolutionRpc =
   SessionSettingsRpc["engineProgramResolutionsByEngineId"][string];
 export type SessionEventSubscriptionFilter = z.infer<

@@ -235,10 +235,15 @@ describe("prod runtime service", () => {
     vi.stubGlobal("fetch", fetchImpl);
 
     try {
+      const baseDir = await mkdtemp(join(tmpdir(), "awb-title-model-"));
+      tempDirs.push(baseDir);
       const service = createSessionRuntimeService({
+        persistenceBaseDir: baseDir,
         engineCommands: { codex: { path: process.execPath, args: [codexFixturePath] } }
       });
       disposers.push(() => service.dispose());
+
+      await service.updateSettings({ titleGenerationModelId: "gpt-5.6-sol" });
 
       await service.executeCommand({
         commandId: "create-codex-title-session",
@@ -281,6 +286,13 @@ describe("prod runtime service", () => {
           })
         })
       );
+      expect(
+        (
+          JSON.parse(fetchImpl.mock.calls[0][1].body as string) as {
+            model: string;
+          }
+        ).model
+      ).toBe("gpt-5.6-sol");
     } finally {
       if (previousFakeToken === undefined) {
         delete process.env.FAKE_CODEX_AUTH_TOKEN;

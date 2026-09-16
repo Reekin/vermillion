@@ -4,18 +4,19 @@ Vermillion 通过引擎运行会话。当前支持 Codex（`codex`，Codex app-s
 
 ## 设置
 
-设置页提供两项：
+设置页提供三项：
 
 - **新会话引擎**：下拉选择已注册的引擎。之后从零创建的会话使用该引擎，包括 New Chat、Maintainer 巡检会话、Issue 讨论会话及其他由工作台自动发起的新会话。从已有会话 fork 出的会话沿用源会话树的引擎：开工准备分支、Worker、`asksource` 临时会话与普通分支都是在某个位置上 fork 出来的，因此跟随源会话引擎而不跟随本设置。
 - **引擎程序路径**：每个引擎一行，可填自定义可执行文件路径；留空时按各引擎默认命令名在 PATH 中解析。行内回显解析结果与是否找到。
+- **标题模型**：下拉选择新会话引擎模型目录中的模型，留空时使用内置默认模型 `gpt-5.6-luna`。
 
-两项保存在全局注册表（`~/.vermillion/workspace-registry.json` 的 `defaultNewSessionEngineId`、`engineProgramPathsByEngineId`），修改立即生效，不重启应用。会话列表与输入器按会话的 `engineId` 展示对应引擎的能力面。
+三项保存在全局注册表（`~/.vermillion/workspace-registry.json` 的 `defaultNewSessionEngineId`、`engineProgramPathsByEngineId`、`titleGenerationModelId`），修改立即生效，不重启应用。会话列表与输入器按会话的 `engineId` 展示对应引擎的能力面。
 
 ## 执行配置
 
 模型与推理档位是引擎无关的标识：`modelId` 为模型名（如 `gpt-5.6-luna`），`reasoningOptionId` 为推理档位（如 `max`）。执行偏好、角色 frontmatter、工单与 subagent 配置都使用这套标识，不按引擎分别配置。各引擎适配层把它映射到自身协议：Codex 直接传模型名与 effort；pi 通过 `get_available_models` 匹配唯一 `provider/id` 并映射为 thinking level。`serviceTierId` 只在引擎声明支持时展示与传递，pi 不支持。引擎模型目录中没有该模型或不支持该档位时明确报错，不静默回退。
 
-标题生成沿用全局生成器，凭据来源优先当前会话引擎提供的 OpenAI 兼容凭据，该引擎无法提供时使用其他已配置引擎的凭据。
+标题生成沿用全局生成器，凭据来源优先当前会话引擎提供的 OpenAI 兼容凭据，该引擎无法提供时使用其他已配置引擎的凭据；模型取设置页的「标题模型」，未设置时用内置默认模型 `gpt-5.6-luna`。
 
 ## 能力面
 

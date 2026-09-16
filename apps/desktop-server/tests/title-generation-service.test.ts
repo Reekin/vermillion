@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_SESSION_TITLE_MODEL_ID } from "@vermillion/shared";
 import {
   createOpenAiSessionTitleGenerator,
   sanitizeGeneratedTitle
@@ -51,6 +52,36 @@ describe("title generation service", () => {
     expect(body.input[1].content[0].text).toContain(
       "帮我调研低功耗迷你主机 CPU"
     );
+  });
+
+  it("prefers the configured title model and falls back to the built-in default", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ output_text: "标题" })
+    });
+    const requestModel = (callIndex: number): string =>
+      (
+        JSON.parse(fetchImpl.mock.calls[callIndex][1].body as string) as {
+          model: string;
+        }
+      ).model;
+
+    const configured = createOpenAiSessionTitleGenerator({
+      apiKey: "test-key",
+      fetch: fetchImpl as never,
+      resolveModel: () => "gpt-5.6-sol"
+    });
+    await configured.generateTitle({ content: "写个标题", attachments: [] });
+
+    const unset = createOpenAiSessionTitleGenerator({
+      apiKey: "test-key",
+      fetch: fetchImpl as never,
+      resolveModel: () => undefined
+    });
+    await unset.generateTitle({ content: "写个标题", attachments: [] });
+
+    expect(requestModel(0)).toBe("gpt-5.6-sol");
+    expect(requestModel(1)).toBe(DEFAULT_SESSION_TITLE_MODEL_ID);
   });
 
   it("sanitizes quoted labels and limits title length", () => {

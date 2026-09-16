@@ -141,6 +141,10 @@ export const createSessionRuntimeService = (
             }
           }
           return undefined;
+        },
+        resolveModel: async () => {
+          await workspaceRegistry.ready();
+          return workspaceRegistry.getState().titleGenerationModelId;
         }
       }),
     agentBindings: integrations.map((integration) => integration.binding)

@@ -1,6 +1,6 @@
+import { DEFAULT_SESSION_TITLE_MODEL_ID } from "@vermillion/shared";
 import type { Attachment } from "@vermillion/shared";
 
-const DEFAULT_TITLE_MODEL = "gpt-5.6-luna";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_PROMPT_CONTENT_LENGTH = 4_000;
@@ -30,6 +30,8 @@ export type OpenAiSessionTitleGeneratorOptions = {
   baseUrl?: string;
   resolveAuth?: (engineId?: string) => MaybePromise<OpenAiSessionTitleAuth | undefined>;
   model?: string;
+  /** 设置页指定的标题模型；返回空时使用内置默认模型。 */
+  resolveModel?: () => MaybePromise<string | undefined>;
   fetch?: FetchLike;
   timeoutMs?: number;
 };
@@ -39,12 +41,15 @@ export const createOpenAiSessionTitleGenerator = (
 ): SessionTitleGenerator => {
   const staticApiKey = options.apiKey?.trim();
   const staticBaseUrl = options.baseUrl?.trim();
-  const model = options.model?.trim() || DEFAULT_TITLE_MODEL;
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return {
     async generateTitle(input) {
+      const model =
+        options.model?.trim() ||
+        (await options.resolveModel?.())?.trim() ||
+        DEFAULT_SESSION_TITLE_MODEL_ID;
       const resolvedAuth = staticApiKey
         ? undefined
         : await options.resolveAuth?.(input.engineId);

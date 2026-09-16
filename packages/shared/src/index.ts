@@ -10,5 +10,6 @@ export * from "./engine-control.js";
 export * from "./ipc.js";
 export * from "./paths.js";
 export * from "./session-profile.js";
+export * from "./session-title.js";
 export * from "./stream-text-limits.js";
 export * from "./unified-diff.js";

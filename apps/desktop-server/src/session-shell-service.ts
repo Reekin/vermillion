@@ -22,6 +22,7 @@ import type {
   SessionBrowserPageRpc,
   SkillDescriptorRpc,
   SessionSettingsRpc,
+  SessionSettingsUpdateRpc,
 } from "@vermillion/shared";
 import { resolveEngineExecutionPreference } from "@vermillion/shared";
 import type { RuntimeEventFilter, RuntimeEventReplayInput } from "@vermillion/core";
@@ -268,6 +269,7 @@ export class SessionShellService {
     const state = registry.getState();
     return {
       defaultNewSessionEngineId: state.defaultNewSessionEngineId,
+      titleGenerationModelId: state.titleGenerationModelId,
       engineProgramPathsByEngineId: { ...state.engineProgramPathsByEngineId },
       engineProgramResolutionsByEngineId: Object.fromEntries(
         this.listEngines().map((engine) => [
@@ -280,7 +282,7 @@ export class SessionShellService {
   }
 
   public async updateSettings(
-    input: Partial<SessionSettingsRpc>
+    input: SessionSettingsUpdateRpc
   ): Promise<SessionSettingsRpc> {
     const registry = this.requireWorkspaceRegistry();
     await registry.updateSettings(input);

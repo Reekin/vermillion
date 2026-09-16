@@ -7,6 +7,7 @@ import {
   writeEngineExecutionPreference,
   zExecutionPreferencesByEngineIdSchema,
   zSessionExecutionProfileInputSchema,
+  type SessionSettingsUpdateRpc,
   type ExecutionPreferencesByEngineId
 } from "@vermillion/shared";
 import {
@@ -34,6 +35,7 @@ const workspaceRegistryDocumentSchema = z.object({
   workspaces: z.array(workspaceRecordSchema).default([]),
   pinnedSessionIds: z.array(z.string().min(1)).default([]),
   defaultNewSessionEngineId: z.string().min(1).optional(),
+  titleGenerationModelId: z.string().min(1).optional(),
   engineProgramPathsByEngineId: z.record(z.string(), z.string().min(1)).default({}),
   allowedModelIdsByEngineId: z
     .record(z.string(), z.array(z.string().min(1)))
@@ -324,21 +326,15 @@ export class WorkspaceRegistryService {
     await this.persist();
   }
 
-  public async updateSettings(input: {
-    defaultNewSessionEngineId?: string;
-    engineProgramPathsByEngineId?: Record<string, string>;
-    allowedModelIdsByEngineId?: Record<string, string[]>;
-    customModelReasoningOptionIdsByEngineId?: Record<
-      string,
-      Record<string, string[]>
-    >;
-    executionPreferencesByEngineId?: WorkspaceRegistryDocument["executionPreferencesByEngineId"];
-  }): Promise<void> {
+  public async updateSettings(input: SessionSettingsUpdateRpc): Promise<void> {
     await this.ready();
     this.document = {
       ...this.document,
       ...(Object.hasOwn(input, "defaultNewSessionEngineId")
         ? { defaultNewSessionEngineId: input.defaultNewSessionEngineId }
+        : {}),
+      ...(Object.hasOwn(input, "titleGenerationModelId")
+        ? { titleGenerationModelId: input.titleGenerationModelId ?? undefined }
         : {}),
       ...(Object.hasOwn(input, "engineProgramPathsByEngineId")
         ? {

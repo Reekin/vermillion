@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import type { EngineDefinitionRpc, SessionSettingsRpc } from "@vermillion/shared";
+import { DEFAULT_SESSION_TITLE_MODEL_ID } from "@vermillion/shared";
+import type {
+  EngineDefinitionRpc,
+  EngineModelCatalogRpc,
+  SessionSettingsRpc,
+  SessionSettingsUpdateRpc
+} from "@vermillion/shared";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
+import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
 import { Button, Field, InlineNotice, PanelHeader } from "./ui.js";
 
 type SettingsPageProps = {
@@ -19,7 +26,9 @@ const programSourceLabel = (source: string): string =>
 export const SettingsPage = ({ transport }: SettingsPageProps) => {
   const [settings, setSettings] = useState<SessionSettingsRpc | undefined>(undefined);
   const [engines, setEngines] = useState<EngineDefinitionRpc[]>([]);
+  const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [modelCatalogError, setModelCatalogError] = useState<string | undefined>(undefined);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const reload = useCallback(async () => {
@@ -42,11 +51,42 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
     };
   }, [reload]);
 
+  // 标题模型的可选值与输入器一致，取当前新会话引擎的模型目录。
+  const titleEngineId =
+    settings?.defaultNewSessionEngineId ?? engines[0]?.engineId ?? "";
+  useEffect(() => {
+    if (!titleEngineId) {
+      setModelCatalog(undefined);
+      return;
+    }
+    let disposed = false;
+    void transport.engine
+      .listModels(titleEngineId)
+      .then((catalog) => {
+        if (disposed) return;
+        setModelCatalog(catalog);
+        setModelCatalogError(undefined);
+      })
+      .catch((cause: unknown) => {
+        if (disposed) return;
+        setModelCatalog(undefined);
+        setModelCatalogError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [transport, titleEngineId]);
+
+  const titleModels = resolveComposerModels({
+    catalog: modelCatalog,
+    allowedModelIds: settings?.allowedModelIdsByEngineId?.[titleEngineId],
+    customModelReasoningOptionIds:
+      settings?.customModelReasoningOptionIdsByEngineId?.[titleEngineId]
+  });
+  const titleGenerationModelId = settings?.titleGenerationModelId;
+
   const save = useCallback(
-    async (input: {
-      defaultNewSessionEngineId?: string;
-      engineProgramPathsByEngineId?: Record<string, string>;
-    }) => {
+    async (input: SessionSettingsUpdateRpc) => {
       setError(undefined);
       try {
         const updated = await transport.settings.update(input);
@@ -105,6 +145,31 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
           </option>
         ))}
       </Field>
+      <Field
+        kind="select"
+        label="标题模型"
+        className="max-w-md"
+        value={titleGenerationModelId ?? ""}
+        disabled={!settings}
+        hint="会话首条消息用它生成标题；选项来自新会话引擎，留空用内置默认模型。"
+        onChange={(event) =>
+          void save({ titleGenerationModelId: event.target.value || null })
+        }
+      >
+        <option value="">{`默认（${DEFAULT_SESSION_TITLE_MODEL_ID}）`}</option>
+        {titleGenerationModelId &&
+          !titleModels.some((model) => model.modelId === titleGenerationModelId) && (
+            <option value={titleGenerationModelId}>{`${titleGenerationModelId}（不在模型列表中）`}</option>
+          )}
+        {titleModels.map((model) => (
+          <option key={model.modelId} value={model.modelId}>
+            {model.displayName}
+          </option>
+        ))}
+      </Field>
+      {modelCatalogError && (
+        <InlineNotice tone="error">{`模型选项加载失败：${modelCatalogError}`}</InlineNotice>
+      )}
       <div className="flex max-w-2xl flex-col gap-3">
         {engines.map((engine) => {
           const resolution = settings?.engineProgramResolutionsByEngineId?.[engine.engineId];

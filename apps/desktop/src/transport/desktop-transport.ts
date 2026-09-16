@@ -35,6 +35,7 @@ import type {
   SessionEventPush,
   SessionEventSubscriptionFilter,
   SessionSettingsRpc,
+  SessionSettingsUpdateRpc,
   WorktreeSnapshotRpc,
   WorkspaceRecordRpc,
   SessionRpcResponse
@@ -226,13 +227,7 @@ export type DesktopTransport = {
   };
   settings: {
     get: () => Promise<SessionSettingsRpc>;
-    update: (input: {
-      defaultNewSessionEngineId?: string;
-      allowedModelIdsByEngineId?: Record<string, string[]>;
-      customModelReasoningOptionIdsByEngineId?: Record<string, Record<string, string[]>>;
-      executionPreferencesByEngineId?: SessionSettingsRpc["executionPreferencesByEngineId"];
-      engineProgramPathsByEngineId?: Record<string, string>;
-    }) => Promise<SessionSettingsRpc>;
+    update: (input: SessionSettingsUpdateRpc) => Promise<SessionSettingsRpc>;
   };
   domain: {
     snapshot: () => Promise<{ snapshot: DomainSnapshot; cursor?: string }>;
@@ -662,13 +657,9 @@ export const createDesktopTransport = (
     return rpc.request("settings.get", {});
   };
 
-  const requestSettingsUpdate = async (input: {
-    defaultNewSessionEngineId?: string;
-    engineProgramPathsByEngineId?: Record<string, string>;
-    allowedModelIdsByEngineId?: Record<string, string[]>;
-    customModelReasoningOptionIdsByEngineId?: Record<string, Record<string, string[]>>;
-    executionPreferencesByEngineId?: SessionSettingsRpc["executionPreferencesByEngineId"];
-  }): Promise<SessionSettingsRpc> => {
+  const requestSettingsUpdate = async (
+    input: SessionSettingsUpdateRpc
+  ): Promise<SessionSettingsRpc> => {
     return rpc.request("settings.update", input);
   };
 
