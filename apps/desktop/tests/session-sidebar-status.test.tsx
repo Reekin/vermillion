@@ -50,6 +50,7 @@ const render = (sessions: SidebarSession[]): string =>
       onOpenMenu={() => {}}
       onCloseMenu={() => {}}
       onRunAction={() => {}}
+      renameDialog={{ state: undefined, open: () => {}, close: () => {}, submit: () => {} }}
       notice={undefined}
       onClearNotice={() => {}}
     />
