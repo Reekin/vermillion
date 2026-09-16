@@ -131,6 +131,8 @@ export class SessionCatalogService {
   private materialized:
     | { sourceRevision: string; model: SessionBrowserReadModel }
     | undefined;
+  /** Last model handed to callers; it stays the diff baseline even when the cache is dropped. */
+  private adoptedModel: SessionBrowserReadModel | undefined;
   private materializing:
     | { sourceRevision: string; promise: Promise<SessionBrowserReadModel> }
     | undefined;
@@ -257,13 +259,14 @@ export class SessionCatalogService {
 
   /** Swapping the model records the row deltas callers need to advance from the previous revision. */
   private adoptReadModel(sourceRevision: string, model: SessionBrowserReadModel): void {
-    const previous = this.materialized?.model;
+    const previous = this.adoptedModel;
     if (previous) {
       for (const delta of diffRowDeltas(previous, model)) {
         const chain = this.rowDeltasByWorkspaceId.get(delta.workspaceId) ?? [];
         this.rowDeltasByWorkspaceId.set(delta.workspaceId, [...chain, delta].slice(-ROW_DELTA_LIMIT));
       }
     }
+    this.adoptedModel = model;
     this.materialized = { sourceRevision, model };
   }
 
