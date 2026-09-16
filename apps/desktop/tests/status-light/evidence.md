@@ -1,6 +1,6 @@
 # 会话列表状态灯验收记录
 
-候选分支 `work/sidebar-status-light`，成果提交见 `git log`（代码提交 + 本记录）。基线为主分支 `60ac476`。
+候选分支 `work/sidebar-status-light`，成果提交见 `git log`（代码提交 + 本记录）。首次验收基线为主分支 `60ac476`；提交前主分支前进到 `e16482f`（含会话列表右键重命名），已在本 worktree rebase 后重新检查并在新构建上复核，见文末「rebase 后复核」。
 
 实例：`app.start` 隔离真机
 
@@ -48,3 +48,11 @@
 ## 收尾
 
 验收结束后 `vermillion app.stop '{"pid":76900}'` 返回成功；核对 pid 76900 已不存在、9421 无 LISTENING 端口（仅剩 TIME_WAIT），隔离 dataDir 内无残留 Electron 进程。浏览器验收 session 已 `close`。
+
+## rebase 后复核
+
+主分支推进到 `e16482f` 后 rebase（冲突只在 `SessionSidebar.tsx` 的 import 行：并入重命名入口），重新构建并按受影响范围复核：
+
+- `pnpm -r --workspace-concurrency=1 typecheck` 通过；`pnpm -r --workspace-concurrency=1 test` 6 个包 135 个测试文件、983 条通过（desktop-server 另 4 条 skipped）；`pnpm --filter @vermillion/desktop lint:ui` 为 `ui: ok`。重命名入口带来的 `renameDialog` 属性已补进本单单测，3 条继续通过。
+- 新实例：pid 52296、CDP 9421、dataDir 同前、buildId `sha256:5705437…`，仍是本 worktree 构建。
+- 复核观察（`verify-shots/20-rebased-rename-unread.png`、`21-rebased-two-states.png`）：运行中行黄灯 `rgb(207,183,106)`、未读行绿灯 `rgb(143,188,152)`、已读行无灯同帧成立；对带绿灯的行执行右键「Rename」并保存新标题后，灯仍在同一槽位（此前该入口尚未合入，本单未覆盖，现已补上）；顶层行槽位左边缘 92、相对时间右边缘 327、无角色标记行标题左边缘 106，与 rebase 前一致。
