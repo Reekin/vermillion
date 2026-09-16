@@ -1,60 +1,98 @@
 # Vermillion
 
-个人 agent 工作台。讨论形成文档，从讨论节点开工，在同一棵会话树中查看 Worker 的执行，在 Inbox 处理决定和查看结果。
+Vermillion（朱砂）是一款个人 agent 工作台：将对话组织为树，让讨论沉淀为文档和工单，再由 Worker 在 worktree 里异步执行。你只负责参与设计讨论和关键决策。
 
-## 运行
+https://github.com/user-attachments/assets/32f76ad1-74f8-4569-8af3-19a3c273b51a
 
-- `start.bat`：构建并启动桌面应用
-- `dev.bat`：开发模式（Vite HMR + Electron）
+适配 Codex、pi 等 engine 的wrapper，重点提供两个feature：非线性对话，为你找回灵活度自由感；通过文档-工单工作流解放并行能力，一天单刷上百 commit 不是梦。
 
-需要 Node >= 22、pnpm 10、PATH 里的 `git` 和 `codex`（也可用 `VERMILLION_CODEX_BIN` 指定）。
+## 关键Feature
 
-## 使用
+### 树形对话，多线并行
 
-主导航提供工作台、Inbox 和底部同级的设置。工作台左侧会话列表常驻，统一显示用户与 agent 根会话；Worker 分支留在所属会话树中。右侧分页为会话（默认）、工单、Docs、Domain、角色、Issues、Automation。会话与右侧 Docs 切页时保留挂载和草稿；其他分页的浏览与编辑范围由标题栏 workspace 选择器指定，列表筛选 All 不代表全局编辑范围。设置打开完整空白页面，当前没有配置项。Inbox 支持弹窗查看和展开为页面。
+线性会话对 agent 开发是非常差劲的形态：讨论一个小 bug 到一半，总会想回到之前的节点继续主线，而引擎自带的 rollback 和 fork 使用体验都过于原始。
 
-1. 工作台会话页底部 Composer 的 workspace 选择器里选「新建 workspace…」，挑一个项目目录。Vermillion 会在目录里初始化 git（若尚无）并创建 `.vermillion/docs/`。
-2. 直接在 Composer 输入并发送：第一条消息发出时创建会话，cwd 是 workspace 根（设计伙伴能读整个项目），角色 prompt 作为 developer instructions 注入（追加在 codex config.toml 的 `developer_instructions` 之后），只会改 `.vermillion/docs/` 下的文件。
-3. 右栏 Docs 树按文件夹显示 `.vermillion/docs/`；有改动的文件带 M/U/D 标记，点击可编辑，右键可在文件管理器或默认编辑器中打开。
-4. 点右侧 Docs 底部的 **开工**，或说“把 ABC 开工做掉”：本轮结束后 fork 出 Worker 分支，由它整理和提交相关文档、建单，结束准备轮后等调度续跑。查看位置留在讨论节点；ChatTree 底部列出 Worker，点击查看对应分支。单独提交文档使用 Docs 右键菜单的 **Commit**。
-5. **Inbox** 汇总所有 workspace 的决策卡和已合入结果。可以选择选项或自由答复，答复送回原 Worker；已合入结果可以确认或附理由回滚。
-6. 左栏 **New Chat** 回到草稿态；会话列表按最近完成的 turn 排序，New Chat 旁的 All / workspace 下拉只筛选列表，不切换当前会话；选中具体 workspace 后新建草稿使用该项目，可加载更多。
-7. **工作台 → 工单** 按来源会话树分组，展示调度开关、并发上限、进度与等待原因。Worker 自行判断是否使用 worktree，完成 review 和独立验证后提交，由工作台合入并关闭工单。后台每 5 分钟回收不再使用的 worktree，目录占用不影响工单完成。
-8. **工作台 → Domain** 列出 `.vermillion/docs/domains/` 下的领域定义，可新建和编辑；Worker 建单时据此附上相关规范。**工作台 → 角色** 编辑设计伙伴、Worker、Maintainer、Liaison 及 Reviewer、Verifier 的角色配置。全局版本在 `~/.vermillion/roles/`；workspace 可以覆盖或追加。
+Vermillion 基于引擎的 fork 能力将对话重组为一棵树。你可以在任意节点分出新分支、直观查看整棵树、随时跳回之前离开的分支继续推进。多个话题可以并行讨论，互不污染上下文；分支都收在同一棵树里，会话列表不会被大量同源标题淹没。
 
-## CLI
+### Spec-driven 工单流
+
+设计讨论是需要人全程投入的同步工作，而执行不是。Vermillion 把两者拆开：
+
+```
+      与设计伙伴讨论 ──► 结论写进 .vermillion/docs/ ──► 开工
+                                                        │
+Inbox：决策卡 / 合入结果 ◄── Worker 在 worktree 中执行 ◄──┘
+```
+
+开工后，工作台从当前讨论节点 fork 出 Worker 分支，由它整理文档、建单、在独立 worktree 中执行、完成 review 和验证后提交合入。执行期间只有需要你拍板的问题会以决策卡进入 Inbox。派出工单后，你可以立刻转去讨论下一件事，不用在多个会话之间来回盯进度。
+* 当然，对于小活和需要你频繁给反馈的任务，你也完全可以不走开单流程，让主agent完成一切。
+
+![多张工单并行执行](docs/media/workitems.png)
+
+### 多引擎
+
+会话引擎可插拔，目前支持 Codex（app-server）和 pi（rpc 模式）。同一棵会话树沿用创建时的引擎；角色 prompt 以 developer instructions 的形式注入，全局版本在 `~/.vermillion/roles/`，每个 workspace 可以覆盖或追加。
+
+## 快速开始
+
+需要 Node >= 22、pnpm 10，以及 PATH 中的 `git` 和 `codex`（可用 `VERMILLION_CODEX_BIN` 指定路径）。
+
+```
+start.bat   # 构建并启动桌面应用
+dev.bat     # 开发模式（Vite HMR + Electron）
+```
+
+1. 在会话页底部 Composer 的 workspace 选择器里选「新建 workspace…」，指向一个项目目录。Vermillion 会按需初始化 git 并创建 `.vermillion/docs/`。
+2. 直接发消息开始与设计伙伴讨论。会话 cwd 是 workspace 根，设计伙伴可以阅读整个项目，但只改 `.vermillion/docs/` 下的文档。
+3. 讨论清楚后点 Docs 面板底部的 **开工**，或直接说「把 XXX 开工做掉」。之后去 Inbox 处理决策卡和查看合入结果即可。
+
+## 工作台一览
+
+| 分页 | 用途 |
+| --- | --- |
+| 会话 | 树形对话，右侧 Docs Explorer 直接编辑文档，切页保留草稿 |
+| 工单 | 按来源会话树分组，显示调度开关、并发上限、进度与等待原因 |
+| Docs | `.vermillion/docs/` 文件树，改动带 M/U/D 标记，右键可提交 |
+| Domain | 领域定义与规范索引，Worker 建单时据此附上相关规范 |
+| 角色 | 设计伙伴、Worker、Maintainer、Liaison、Reviewer、Verifier 的 prompt 配置 |
+| Inbox | 汇总所有 workspace 的决策卡与合入结果，可答复、确认或回滚 |
+
+完整产品行为见 [产品总览](.vermillion/docs/Overview/PRD.md)。
+
+## 开发
+
+```
+packages/shared        会话引擎契约（zod）
+packages/core          会话领域存储与投影
+packages/adapters      运行时适配（codex app-server / pi）
+packages/workbench     工作台领域 + typed RPC + CLI
+apps/desktop-server    会话引擎宿主（Electron main 进程内）
+apps/desktop           Electron 壳：SessionPane + 工作台 / Docs / Inbox
+```
+
+CLI 与桌面共用同一个服务和方法表，CLI 的写入会实时反映到桌面：
 
 ```
 pnpm --filter @vermillion/workbench build
 node packages/workbench/bin/vermillion.mjs --help
 node packages/workbench/bin/vermillion.mjs workspace.list
-node packages/workbench/bin/vermillion.mjs workItem.submit '{"workspaceId":"...","workItemId":"...","evidence":{...},"review":[],"verify":{...}}'
-node packages/workbench/bin/vermillion.mjs worktree.list '{"workspaceId":"..."}'
-node packages/workbench/bin/vermillion.mjs worktree.cleanup '{"workspaceId":"..."}'
 ```
 
-CLI 与桌面共用同一个服务和方法表；CLI 的写入会通过文件监听实时反映到桌面。
+数据分两处：全局 `~/.vermillion/` 存 workspace 注册表、会话索引和角色 prompt；每个 workspace 的 `<root>/.vermillion/` 中只有 `docs/` 走 git，工单、决策、运行记录等排除在 git 之外。
 
-## 数据位置
+`pnpm package` 产出 `release/vermillion-<version>-<stamp>/`，目录可整体拷走运行，不需要 node_modules。开发检查、隔离验收实例和打包细节见 [docs/development.md](docs/development.md)。
 
-- 全局：`~/.vermillion/`（workspace 注册表、会话索引、`roles/` 角色 prompt）
-- 每个 workspace：`<root>/.vermillion/`：`docs/`（真相源，走 git）、`roles/`（角色 prompt 覆盖）、`work-requests/`（开工请求）、`workitems/`（每张工单的合同、执行过程和合入检查点）、`decisions/`（决策）、`runs/`（历史运行记录）、`scheduler.json`。工单和过程查询共享同一份存储记录。Worker 按需创建独立 worktree 并在工单登记位置。工作台运行记录排除在 git 之外。
+## Roadmap
 
-## 结构
+树形对话、工单流、Inbox 与多引擎已可日常使用。
 
-```
-packages/shared        会话引擎契约（zod）
-packages/core          会话领域存储与投影
-packages/adapters      运行时适配（codex app-server）
-packages/workbench     工作台领域 + typed RPC + CLI
-apps/desktop-server    会话引擎宿主（Electron main 进程内）
-apps/desktop           Electron 壳：SessionPane（会话）+ 应用壳（工作台 / Docs / Inbox / 设置）
-```
+下列能力已完成设计，等待Tibo重置中：
 
-## 打包
+- **Issues 与领域巡检**：Maintainer 按 Domain 定期巡检代码与文档，把发现的问题登记为 Issue 并分诊；证据充分、方向明确且在领域授权范围内的问题直接转为工单，其余进入调查或等待用户决策。
+- **Liaison**：接入 IM，从聊天中收集反馈并归并到 Issues。
+- **暂离巡视**：用户离开期间由一个 agent 低频巡视所有未结束的工单，发现卡住或无人推进的情况汇报到 Inbox。
+- **Automation**：用户自定义的定时或触发任务，与内部 Worker 调度分离。
 
-```
-pnpm package
-```
+## License
 
-产物在 `release/vermillion-<version>-<时间戳>/`：`Vermillion.exe`、`vermillion-cli.cmd`、`resources/app/`（main/preload 与 renderer 构建、单文件 CLI）。目录可整体拷走运行，不需要 node_modules；CLI 需要 PATH 里有 node。
+[MIT](LICENSE)
