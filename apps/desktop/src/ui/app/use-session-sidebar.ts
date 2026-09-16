@@ -180,7 +180,11 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     [workspaces]
   );
 
-  /** Finds a tree or nested subagent tree by any member session id. */
+  /**
+   * Finds a tree or nested subagent tree by any member session id.
+   * It reads the applied list instead of the rendered one so its identity survives list updates
+   * and the memoized rows keep rendering untouched.
+   */
   const findSession = useCallback((sessionId: string): SidebarSession | undefined => {
     const walk = (items: SidebarSession[]): SidebarSession | undefined => {
       for (const item of items) {
@@ -190,8 +194,12 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
       }
       return undefined;
     };
-    return walk(sessions);
-  }, [sessions]);
+    for (const entry of Object.values(appliedRef.current.workspaces)) {
+      const found = walk(entry.items);
+      if (found) return found;
+    }
+    return undefined;
+  }, []);
 
   return { sessions, loading, error, reload, findSession };
 };
