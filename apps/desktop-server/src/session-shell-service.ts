@@ -875,6 +875,13 @@ export class SessionShellService {
     return result;
   }
 
+  public async renameSession(input: {
+    sessionId: string;
+    title: string;
+  }): Promise<{ sessionId: string; title: string }> {
+    return this.sessionCatalog.renameSession(input);
+  }
+
   public async getChatTree(sessionId: string): Promise<ChatTreeSnapshot> {
     if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId);
     return this.capabilities

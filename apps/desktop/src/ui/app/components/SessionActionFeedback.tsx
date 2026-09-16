@@ -7,12 +7,16 @@ type Props = {
   menu: SessionMenu | undefined;
   onCloseMenu: () => void;
   onRunAction: (sessionId: string, action: SessionActionDescriptorRpc["action"]) => void;
+  /** Session rows add a rename entry driven by the app shell; other menus leave it out. */
+  onOpenRename?: (sessionId: string, title: string) => void;
   notice: { text: string; error?: boolean } | undefined;
   onClearNotice: () => void;
 };
 
-export const SessionActionFeedback = ({ menu, onCloseMenu, onRunAction, notice, onClearNotice }: Props) => (
-  <>
+export const SessionActionFeedback = ({ menu, onCloseMenu, onRunAction, onOpenRename, notice, onClearNotice }: Props) => {
+  const renameTitle = menu?.title;
+  return (
+    <>
       {notice && (
         <div role="status" className={cn("flex items-start gap-2 border-t border-border px-4 py-2 text-caption", notice.error ? "text-strong" : "text-muted-foreground")}>
           <span className="min-w-0 flex-1 break-words">{notice.text}</span>
@@ -24,14 +28,18 @@ export const SessionActionFeedback = ({ menu, onCloseMenu, onRunAction, notice, 
           x={menu.x}
           y={menu.y}
           onClose={onCloseMenu}
-          items={menu.actions.map((action) => ({
-            key: action.action,
-            label: action.label,
-            disabled: action.disabled,
-            title: action.reason,
-            onSelect: () => onRunAction(menu.sessionId, action.action)
-          }))}
+          items={[
+            ...(onOpenRename && renameTitle ? [{ key: "rename", label: "Rename", onSelect: () => onOpenRename(menu.sessionId, renameTitle) }] : []),
+            ...menu.actions.map((action) => ({
+              key: action.action,
+              label: action.label,
+              disabled: action.disabled,
+              title: action.reason,
+              onSelect: () => onRunAction(menu.sessionId, action.action)
+            }))
+          ]}
         />
       )}
-  </>
-);
+    </>
+  );
+};

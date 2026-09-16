@@ -46,6 +46,7 @@ export const sessionRpcMethods = [
   "sessionBrowser.loadOlder",
   "sessionBrowser.getActions",
   "sessionBrowser.runAction",
+  "sessionBrowser.rename",
   "chat.getCapabilities",
   "skills.list",
   "chatTree.get",
@@ -693,6 +694,15 @@ const zSessionBrowserRunActionRequestSchema = z.object({
   })
 });
 
+const zSessionBrowserRenameRequestSchema = z.object({
+  id: zRequestId,
+  method: z.literal("sessionBrowser.rename"),
+  params: z.object({
+    sessionId: zSessionId,
+    title: z.string()
+  })
+});
+
 const zChatGetCapabilitiesRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("chat.getCapabilities"),
@@ -932,6 +942,7 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zSessionBrowserLoadOlderRequestSchema,
   zSessionBrowserGetActionsRequestSchema,
   zSessionBrowserRunActionRequestSchema,
+  zSessionBrowserRenameRequestSchema,
   zChatGetCapabilitiesRequestSchema,
   zSkillsListRequestSchema,
   zChatTreeGetRequestSchema,
@@ -1149,6 +1160,16 @@ const zSessionBrowserRunActionResponseSchema = z.object({
   method: z.literal("sessionBrowser.runAction"),
   ok: z.literal(true),
   result: zSessionActionResultSchema
+});
+
+const zSessionBrowserRenameResponseSchema = z.object({
+  id: zRequestId,
+  method: z.literal("sessionBrowser.rename"),
+  ok: z.literal(true),
+  result: z.object({
+    sessionId: zSessionId,
+    title: z.string().min(1)
+  })
 });
 
 const zChatGetCapabilitiesResponseSchema = z.object({
@@ -1412,6 +1433,7 @@ export const zSessionRpcResponseSchema = z.union([
   zSessionBrowserLoadOlderResponseSchema,
   zSessionBrowserGetActionsResponseSchema,
   zSessionBrowserRunActionResponseSchema,
+  zSessionBrowserRenameResponseSchema,
   zChatGetCapabilitiesResponseSchema,
   zSkillsListResponseSchema,
   zChatTreeGetResponseSchema,

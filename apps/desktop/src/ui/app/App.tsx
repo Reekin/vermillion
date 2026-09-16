@@ -241,9 +241,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             }}
             onSearch={() => setSearchOpen(true)}
             menu={sessionActions.menu}
-            onOpenMenu={(event, id) => void sessionActions.openMenu(event, id)}
+            onOpenMenu={(event, id, title) => void sessionActions.openMenu(event, id, title)}
             onCloseMenu={sessionActions.closeMenu}
             onRunAction={(id, action) => void sessionActions.run(id, action)}
+            renameDialog={sessionActions.renameDialog}
             notice={sessionActions.notice ?? (sidebar.error ? { text: sidebar.error, error: true } : undefined)}
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />

@@ -159,6 +159,41 @@ export class SessionCatalogService {
     }
   }
 
+  /** Rename works for every listed session: loaded ones through session state, the rest through the index entry. */
+  public async renameSession(input: {
+    sessionId: string;
+    title: string;
+  }): Promise<{ sessionId: string; title: string }> {
+    const title = input.title.trim();
+    if (!title) {
+      throw new Error("Session title must not be blank.");
+    }
+    const loaded = this.runtimeService
+      .getSnapshot()
+      .sessions.some((session) => session.sessionId === input.sessionId);
+    if (loaded) {
+      await this.runtimeService.setSessionTitle(input.sessionId, title);
+      return {
+        sessionId: input.sessionId,
+        title
+      };
+    }
+    const renamed = await this.sessionIndexStore.renameSession(input.sessionId, title);
+    if (!renamed) {
+      throw new Error(`Unknown session: ${input.sessionId}`);
+    }
+    // The index is the only source here, so the loaded list needs this event to pick the new title up.
+    this.runtimeService.notifyIndexedSessionUpdated({
+      sessionId: renamed.sessionId,
+      conversationId: renamed.conversationId,
+      title: renamed.title ?? title
+    });
+    return {
+      sessionId: input.sessionId,
+      title: renamed.title ?? title
+    };
+  }
+
   private async getReadModel(): Promise<SessionBrowserReadModel> {
     await this.workspaceRegistry.ready();
     await this.sessionIndexStore.ready();

@@ -360,6 +360,20 @@ export const createWorkbenchRpcHandler = (
               ok: true,
               result: await shellService.runSessionAction(request.params)
             });
+          case "sessionBrowser.rename":
+            if (!shellService) {
+              return toErrorResponse(
+                request,
+                "SESSION_BROWSER_UNAVAILABLE",
+                "Session browser APIs are unavailable for this runtime service."
+              );
+            }
+            return parseSessionRpcResponse({
+              id: request.id,
+              method: request.method,
+              ok: true,
+              result: await shellService.renameSession(request.params)
+            });
           case "chat.getCapabilities":
             if (!shellService) {
               return toErrorResponse(

@@ -873,7 +873,7 @@ const boot = async (): Promise<void> => {
       }
       return { ok: true, result: await writeVerifiedClipboardImage(clipboard, source) };
     }
-    if (["engine.listModels", "sessionBrowser.open", "chatTree.get", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
+    if (["engine.listModels", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
       const response = await router.handleRequest({ ...request, id: randomUUID() });
       return response.ok
         ? { ok: true, result: response.result }

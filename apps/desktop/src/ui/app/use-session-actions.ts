@@ -3,7 +3,17 @@ import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { writeClipboardText } from "../chat-shell/clipboard.js";
 
-export type SessionMenu = { sessionId: string; x: number; y: number; actions: SessionActionDescriptorRpc[] };
+/** Session rows also carry the displayed title so the rename entry can prefill the current name. */
+export type SessionMenu = { sessionId: string; title?: string; x: number; y: number; actions: SessionActionDescriptorRpc[] };
+
+export type SessionRename = { sessionId: string; title: string; busy: boolean; error?: string };
+
+export type SessionRenameController = {
+  state: SessionRename | undefined;
+  open: (sessionId: string, title: string) => void;
+  close: () => void;
+  submit: (title: string) => void;
+};
 
 type SessionActionsInput = {
   transport: DesktopTransport;
@@ -16,6 +26,7 @@ type SessionActionsInput = {
 /** Right-click actions on sidebar sessions: menu state, execution and a short-lived result notice. */
 export const useSessionActions = ({ transport, reloadSidebar, onArchived, onResumed }: SessionActionsInput) => {
   const [menu, setMenu] = useState<SessionMenu | undefined>();
+  const [rename, setRename] = useState<SessionRename | undefined>();
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | undefined>();
 
   useEffect(() => {
@@ -25,13 +36,36 @@ export const useSessionActions = ({ transport, reloadSidebar, onArchived, onResu
   }, [notice]);
 
   const openMenu = useCallback(
-    async (event: MouseEvent, sessionId: string) => {
+    async (event: MouseEvent, sessionId: string, title: string) => {
       event.preventDefault();
       const { actions } = await transport.sessionBrowser.getActions(sessionId);
-      setMenu({ sessionId, x: event.clientX, y: event.clientY, actions: actions.filter((action) => action.action !== "fork") });
+      setMenu({ sessionId, title, x: event.clientX, y: event.clientY, actions: actions.filter((action) => action.action !== "fork") });
     },
     [transport]
   );
+
+  const openRename = useCallback((sessionId: string, title: string) => setRename({ sessionId, title, busy: false }), []);
+
+  const closeRename = useCallback(() => setRename(undefined), []);
+
+  const submitRename = useCallback(
+    (title: string) => {
+      if (!rename || rename.busy) return;
+      setRename({ ...rename, busy: true, error: undefined });
+      void (async () => {
+        try {
+          await transport.sessionBrowser.rename({ sessionId: rename.sessionId, title });
+          setRename(undefined);
+          await reloadSidebar();
+        } catch (error) {
+          setRename((current) => (current ? { ...current, busy: false, error: (error as Error).message } : current));
+        }
+      })();
+    },
+    [rename, transport, reloadSidebar]
+  );
+
+  const renameDialog: SessionRenameController = { state: rename, open: openRename, close: closeRename, submit: submitRename };
 
   const run = useCallback(
     async (sessionId: string, action: SessionActionDescriptorRpc["action"]) => {
@@ -69,5 +103,5 @@ export const useSessionActions = ({ transport, reloadSidebar, onArchived, onResu
     [transport, reloadSidebar, onArchived, onResumed]
   );
 
-  return { menu, closeMenu: () => setMenu(undefined), openMenu, run, notice, clearNotice: () => setNotice(undefined) };
+  return { menu, closeMenu: () => setMenu(undefined), openMenu, run, notice, clearNotice: () => setNotice(undefined), renameDialog };
 };

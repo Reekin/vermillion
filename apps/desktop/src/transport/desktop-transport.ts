@@ -300,6 +300,10 @@ export type DesktopTransport = {
       sessionId: string
     ) => Promise<{ actions: SessionActionDescriptorRpc[] }>;
     runAction: (input: SessionBrowserActionInput) => Promise<SessionActionResultRpc>;
+    rename: (input: {
+      sessionId: string;
+      title: string;
+    }) => Promise<{ sessionId: string; title: string }>;
   };
   chat: {
     send: (input: ChatSendInput) => Promise<CommandReceipt>;
@@ -811,7 +815,12 @@ export const createDesktopTransport = (
           sessionId
         }),
       runAction: (input: SessionBrowserActionInput) =>
-        rpc.request("sessionBrowser.runAction", input) as Promise<SessionActionResultRpc>
+        rpc.request("sessionBrowser.runAction", input) as Promise<SessionActionResultRpc>,
+      rename: (input) =>
+        rpc.request("sessionBrowser.rename", {
+          sessionId: input.sessionId,
+          title: input.title
+        })
     },
     chat: {
       send: (input: ChatSendInput) =>

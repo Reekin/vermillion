@@ -487,6 +487,34 @@ describe("session browser transport contracts", () => {
     ]);
   });
 
+  it("routes session rename through the typed rename method", async () => {
+    const preload = createPreloadMock(async (request) => {
+      if (request.method !== "sessionBrowser.rename") {
+        throw new Error(`Unexpected method: ${request.method}`);
+      }
+      return {
+        id: request.id,
+        method: "sessionBrowser.rename",
+        ok: true,
+        result: {
+          sessionId: request.params.sessionId,
+          title: request.params.title
+        }
+      } as const;
+    });
+    const transport = createDesktopTransport(preload.api);
+
+    await expect(
+      transport.sessionBrowser.rename({ sessionId: "session-1", title: "Renamed session" })
+    ).resolves.toEqual({ sessionId: "session-1", title: "Renamed session" });
+    expect(preload.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "sessionBrowser.rename",
+        params: { sessionId: "session-1", title: "Renamed session" }
+      })
+    );
+  });
+
   it("reads worktree, checkpoint, diagnostics, and background-run summaries through typed rpc methods", async () => {
     const preload = createPreloadMock(async (request) => {
       switch (request.method) {
