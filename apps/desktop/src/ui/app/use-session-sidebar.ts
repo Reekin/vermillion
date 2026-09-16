@@ -67,11 +67,16 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
   const generation = useRef(0);
   const loadRef = useRef<Promise<void> | undefined>(undefined);
   const refreshRef = useRef({ running: false, queued: false });
+  const appliedRef = useRef({ queryKey, workspaces: {} as Record<string, WorkspaceSessions> });
   const workspaces = result.queryKey === queryKey ? result.workspaces : {};
   const loading = pending.queryKey !== queryKey || pending.loading;
   const error = failure?.queryKey === queryKey ? failure.message : undefined;
-  const loadedRef = useRef({ queryKey, workspaces });
-  loadedRef.current = { queryKey, workspaces };
+
+  /** The applied list lives in the ref: it advances synchronously, while the state only mirrors it for rendering. */
+  const apply = useCallback((next: { queryKey: string; workspaces: Record<string, WorkspaceSessions> }) => {
+    appliedRef.current = next;
+    setResult(next);
+  }, []);
 
   const loadAll = useCallback(async () => {
     const task = (async () => {
@@ -83,7 +88,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
           workspaceIds.map((workspaceId) => transport.sessionBrowser.list({ workspaceId, kind }))
         );
         if (run !== generation.current) return;
-        setResult({
+        apply({
           queryKey,
           workspaces: Object.fromEntries(snapshots.map((snapshot) => [snapshot.workspaceId, toWorkspaceSessions(snapshot)]))
         });
@@ -100,7 +105,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
       if (loadRef.current === task) loadRef.current = undefined;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transport, queryKey]);
+  }, [transport, queryKey, apply]);
 
   const loadAllRef = useRef(loadAll);
   loadAllRef.current = loadAll;
@@ -123,9 +128,9 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
         refreshRef.current.queued = false;
         // A refresh always starts from a settled snapshot, so an event that lands during the first read still applies.
         await loadRef.current;
-        const loaded = loadedRef.current;
-        if (loaded.queryKey !== queryKey) return;
-        const entries = Object.entries(loaded.workspaces);
+        const requested = appliedRef.current;
+        if (requested.queryKey !== queryKey) return;
+        const entries = Object.entries(requested.workspaces);
         if (entries.length === 0) return;
         const run = generation.current;
         try {
@@ -136,20 +141,20 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
           })));
           if (run !== generation.current) return;
           const fullRequired = responses.some(({ response }) => response.status === "full-required");
-          setResult((state) => {
-            if (state.queryKey !== queryKey) return state;
-            let changed = false;
-            const next = { ...state.workspaces };
-            for (const { workspaceId, current, response } of responses) {
-              if (response.status === "full-required") continue;
-              if (next[workspaceId] !== current) continue;
-              const merged = applyChanges(current, response);
-              if (!merged) continue;
-              next[workspaceId] = merged;
-              changed = true;
-            }
-            return changed ? { queryKey, workspaces: next } : state;
-          });
+          const applied = appliedRef.current;
+          let changed = false;
+          const next = { ...applied.workspaces };
+          for (const { workspaceId, current, response } of responses) {
+            if (response.status === "full-required") continue;
+            if (next[workspaceId] !== current) continue;
+            const merged = applyChanges(current, response);
+            if (!merged) continue;
+            next[workspaceId] = merged;
+            changed = true;
+          }
+          if (changed && applied.queryKey === queryKey) {
+            apply({ queryKey, workspaces: next });
+          }
           if (fullRequired) await loadAllRef.current();
         } catch {
           if (run === generation.current) await loadAllRef.current();
@@ -159,7 +164,7 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
       refreshRef.current.running = false;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transport, kind, queryKey]);
+  }, [transport, kind, queryKey, apply]);
 
   const handledRefreshSignal = useRef(refreshSignal);
   useEffect(() => {
