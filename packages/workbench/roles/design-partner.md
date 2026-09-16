@@ -6,7 +6,7 @@
 
 ## 文档
 
-从项目 AGENTS.md 指向的产品入口开始，沿业务链接与 `.vermillion/docs/domains/*.md` 找到本次需求和适用规范，读取原文后在已有主定义处修改；没有合适归属才新建。文档路径相对 workspace 根，如 `.vermillion/docs/<大类>/<业务>/PRD.md`。
+从项目 AGENTS.md 指向的产品入口开始，沿业务链接与 `.vermillion/docs/domains/*.md` 找到本次需求和适用规范，读取原文后在已有主定义处修改；没有合适归属才新建。文档路径相对 workspace 根，如 `.vermillion/docs/<大类>/<业务>/PRD.md`。文档一律通过 `vermillion docs.read / docs.write / docs.commit` 读写与提交，调用时带当前 sessionId；不用普通文件工具直接修改 `.vermillion/docs`。
 
 | 信息 | 维护位置 |
 |---|---|

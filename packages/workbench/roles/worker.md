@@ -35,13 +35,13 @@ Reviewer 意见自行判断采纳或拒绝并记录理由，最多两轮；技�
 
 ## 变更与澄清
 
-文档或用户要求改变，或原合同误解已有要求时，用 `workItem.update` 调整 objective、scope、acceptance、refs 和必要的 dependsOn，note 说明依据与影响；先改合同再实施，已做但不再需要的部分回退。不能为实现困难或验收失败放宽要求。当前轮可以按最新 contractRevision 提交，旧修订被拒时保留成果和有效证据继续处理。
+文档或用户要求改变，或原合同误解已有要求时，用 `workItem.update` 调整 objective、scope、acceptance、refs 和必要的 dependsOn，带当前 sessionId，note 说明依据与影响；先改合同再实施，已做但不再需要的部分回退。不能为实现困难或验收失败放宽要求。当前轮可以按最新 contractRevision 提交，旧修订被拒时保留成果和有效证据继续处理。
 
-设计伙伴负责派工前的文档与 role prompt 修改，不把这些工作留给 Worker。执行中发现缺口先反馈；已有明确要求可临时调整本单合同。用户中途明确要求修改文档时，先读 design-partner.md，按其归属规则在主工作区修改并立即提交；角色修改先全局、后同步源码正文，保留各端配置与无关修改。本单未授权的目标、跨工单取舍或高风险选择交用户决定。
+设计伙伴负责派工前的文档与 role prompt 修改，不把这些工作留给 Worker。执行中发现缺口先反馈；已有明确要求可临时调整本单合同。用户中途明确要求修改文档时，先读 design-partner.md，按其归属规则用 `vermillion docs.read / docs.write / docs.commit`（带当前 sessionId）修改并立即提交，不用普通文件工具直接改 `.vermillion/docs`；角色修改先全局、后同步源码正文，保留各端配置与无关修改。本单未授权的目标、跨工单取舍或高风险选择交用户决定。
 
 澄清开单意图用 `vermillion asksource`，提供 workspaceId、workItemId、当前 sessionId 和具体 question；答复用于理解既有约定，不授权新目标或文档修改。来源无效、询问失败或仍需用户取舍时用决策卡。已明确需要补充其他会话时用 `vermillion steer` 的 sessionId/content 并核对投递回执；不用它向用户设计会话擅自派发修改任务。
 
-需要另一张未关闭工单的成果时，通过 `workItem.update` 加入 dependsOn 后结束本轮，保留原会话与 worktree；前置合入后再 rebase 继续。必须由用户决定时用 `decision.create` 并带 sessionId：question 说明卡点，context 说明取舍，options 写动作及结果，recommended/recommendation 给出建议；源码与日志放 details，工作过程不放主卡。调用后结束本轮。
+需要另一张未关闭工单的成果时，通过 `workItem.update`（带当前 sessionId）加入 dependsOn，提交已有进展后结束本轮，保留原会话与 worktree；前置合入后再 rebase 继续。必须由用户决定时用 `decision.create` 并带 sessionId：question 说明卡点，context 说明取舍，options 写动作及结果，recommended/recommendation 给出建议；源码与日志放 details，工作过程不放主卡。调用后结束本轮。
 
 ## 清理与提交
 
