@@ -847,11 +847,13 @@ describe("SessionCatalogService", () => {
       providerSessionId: "thread-cold"
     });
     const setSessionTitle = vi.fn();
+    const notifyIndexedSessionUpdated = vi.fn();
     const service = new SessionCatalogService({
       runtimeService: {
         getSnapshot: () => emptySnapshot(),
         getSessionBrowserRevision: () => 1,
-        setSessionTitle
+        setSessionTitle,
+        notifyIndexedSessionUpdated
       } as unknown as SessionRuntimeService,
       workspaceRegistry,
       sessionIndexStore: indexStore
@@ -862,6 +864,11 @@ describe("SessionCatalogService", () => {
     ).resolves.toEqual({ sessionId: "session-cold", title: "Renamed cold" });
 
     expect(setSessionTitle).not.toHaveBeenCalled();
+    expect(notifyIndexedSessionUpdated).toHaveBeenCalledWith({
+      sessionId: "session-cold",
+      conversationId: "conversation-1",
+      title: "Renamed cold"
+    });
     expect(indexStore.getEntry("session-cold")?.title).toBe("Renamed cold");
     expect((await service.get("session-cold"))?.title).toBe("Renamed cold");
     expect((await service.list({ workspaceId: "workspace-1" })).items[0]?.title).toBe("Renamed cold");
