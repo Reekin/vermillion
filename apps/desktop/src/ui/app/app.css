@@ -217,3 +217,6 @@
 .vm-diff__line.is-add { background: var(--awb-accent-soft); color: var(--awb-ink-strong); border-left-color: var(--awb-accent-strong); }
 .vm-diff__line.is-delete { background: rgba(255, 255, 255, 0.04); color: var(--awb-ink-muted); text-decoration: line-through; text-decoration-color: var(--awb-ink-muted); border-left: 3px solid var(--awb-ink-muted); }
 .vm-diff__line.is-context { color: var(--awb-ink-muted); }
+
+/* The session list holds its own anchor while rows reorder; the browser's anchor is dropped when nodes move. */
+.vm-session-list { overflow-anchor: none; }

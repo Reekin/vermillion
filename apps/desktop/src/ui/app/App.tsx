@@ -122,7 +122,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [reloadSignal, setReloadSignal] = useState(0);
   const sessionActions = useSessionActions({
     transport,
-    reloadSidebar: sidebar.reload,
+    refreshSidebar: sidebar.refresh,
     onArchived: (id) => setSessionId((current) => (current === id || (current && sidebar.findSession(current)?.sessionId === id) ? undefined : current)),
     onResumed: () => setReloadSignal((n) => n + 1)
   });

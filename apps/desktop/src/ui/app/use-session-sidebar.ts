@@ -201,5 +201,5 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
     return undefined;
   }, []);
 
-  return { sessions, loading, error, reload, findSession };
+  return { sessions, loading, error, reload, refresh: refreshChanges, findSession };
 };
