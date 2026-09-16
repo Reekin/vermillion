@@ -44,3 +44,7 @@
 ## 环境说明
 
 隔离实例按项目规范准备，模型为 `gpt-5.6-luna` / `max` / `标准`。该模型在本机账号上频繁返回 `usage_limit_exceeded`（见隔离 CODEX_HOME 中 rollout 的 `task_complete` 记录），因此后半段真实 turn 改用同一引擎下可用的 `deepseek-flash` 完成；状态灯取值与模型无关，两种模型下都观察到相同的运行→未读→已读变化。
+
+## 收尾
+
+验收结束后 `vermillion app.stop '{"pid":76900}'` 返回成功；核对 pid 76900 已不存在、9421 无 LISTENING 端口（仅剩 TIME_WAIT），隔离 dataDir 内无残留 Electron 进程。浏览器验收 session 已 `close`。
