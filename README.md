@@ -93,6 +93,10 @@ node packages/workbench/bin/vermillion.mjs workspace.list
 - **暂离巡视**：用户离开期间由一个 agent 低频巡视所有未结束的工单，发现卡住或无人推进的情况汇报到 Inbox。
 - **Automation**：用户自定义的定时或触发任务，与内部 Worker 调度分离。
 
+
+## 友情链接
+[LINUX DO](https://linux.do) — 新的理想型社区
+
 ## License
 
 [MIT](LICENSE)
