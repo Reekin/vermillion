@@ -33,7 +33,6 @@
 
 @theme {
   --tracking-eyebrow: normal;
-  --shadow-halo: 0 0 0 3px var(--awb-accent-soft);
   --text-micro: var(--awb-text-micro);
   --text-micro--font-weight: 500;
   --text-micro--line-height: 1;
