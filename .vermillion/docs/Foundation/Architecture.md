@@ -7,7 +7,7 @@
 | `packages/shared`、`core`、`adapters`、`apps/desktop-server` | 会话引擎契约、会话与 turn 投影、引擎适配（Codex app-server、pi RPC）、会话浏览 |
 | `packages/workbench` | Workspace、Doc、开工请求、工单、决策和 Inbox 的领域操作与持久化 |
 | `apps/desktop/src/ui/chat-shell` | `SessionPane` 的消息阅读、输入、会话切换和审批 |
-| `apps/desktop/src/ui/app` | 导航、Docs、工作区面板、工单与 Worker 分支的展示和查询 |
+| `apps/desktop/src/ui/app` | 导航、文档、工作区面板、工单与 Worker 分支的展示和查询 |
 
 Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用壳向会话区提供展示数据、渲染插槽和回调；会话区不引用应用壳 Context 或工作台业务类型，不自行查询工单。
 
@@ -15,7 +15,7 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 ## Workspace 与界面状态
 
-`draftWorkspaceId` 决定 New Chat 创建位置；已创建会话的 workspaceId 来自会话引擎；`browsingWorkspaceId` 决定 Docs 等工作台查询范围，随当前会话切换，草稿态跟随 draft。
+`draftWorkspaceId` 决定新建会话创建位置；已创建会话的 workspaceId 来自会话引擎；`browsingWorkspaceId` 决定文档等工作台查询范围，随当前会话切换，草稿态跟随 draft。
 
 查询结果携带 workspaceId，界面 store 丢弃与当前 browsing 不匹配的响应。领域写入发布 `WorkbenchEvent`；`.vermillion/` 文件监听把外部修改纳入同一事件更新链路。界面订阅事件刷新，不以轮询推进状态。
 
@@ -25,13 +25,15 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 每个 workspace 的 `.vermillion/` 保存 `docs/`、`roles/`、`work-requests/`、`workitems/`、`decisions/`、`runs/` 和 `scheduler.json`。文档在 `.vermillion/docs/` 内，以 Git commit 作为工单引用依据；工作台运行记录通过领域服务写入。
 
+文档草稿是每棵会话树一个只签出 `.vermillion/docs` 的 sparse worktree，分支与目录以 treeId 命名，由 `DocsService` 在首次写入时创建。`docs.*` RPC 按调用方 sessionId 解析 treeId 并路由到对应草稿；treeId 由会话索引提供，工作台服务通过它已有的运行时接入点获取。草稿合入主干走与 Worker 成果合入相同的 `integrate` 串行边界和冲突处理，回收复用 `cleanup` 候选机制。
+
 每张工单持久化为一份 `WorkItemRecord`，包含合同与业务进度 `item`、当前执行过程 `execution`、合入检查点 `integrations` 和回收候选 `cleanup`。执行过程保存当前会话、消息投递、失败和重试状态，是恢复执行的唯一依据。工单查询中的 `run` 由 execution 投影，不单独持久化；`runs/` 中的历史记录只用于追溯。
 
 `WorkspaceStore` 只负责记录查询和按工单串行的读改写事务；`WorkbenchService` 在事务内完成状态转换。持久化成功后统一发布工单和动作事件。取消事件先于通用更新事件送达，使本次取消触发的中断先于后续调度入队。查询投影不提供写入入口。
 
 ## 会话引擎接入
 
-引擎产品行为见[会话引擎](Engines/PRD.md)。每个引擎是一个装配单元 `EngineIntegration`（`apps/desktop-server/src/engines/<engineId>/`），包含引擎定义、能力面声明、`AgentAdapter` 与 runtime port、`AgentWorkbenchCapabilities`、程序解析规则和可选的 turn 扩展；`prod-service` 只持有装配单元列表，不直接引用任何引擎实现。会话级操作（释放执行、清理历史、活动 turn、技能列表、fork、凭据）都属于 `AgentWorkbenchCapabilities`，由 `CapabilityRegistry` 按会话 `engineId` 分发；shell 层不接收面向单一引擎的函数。入口（New Chat、AgentRunner、asksource）从设置读取新会话引擎，不写死引擎 ID。
+引擎产品行为见[会话引擎](Engines/PRD.md)。每个引擎是一个装配单元 `EngineIntegration`（`apps/desktop-server/src/engines/<engineId>/`），包含引擎定义、能力面声明、`AgentAdapter` 与 runtime port、`AgentWorkbenchCapabilities`、程序解析规则和可选的 turn 扩展；`prod-service` 只持有装配单元列表，不直接引用任何引擎实现。会话级操作（释放执行、清理历史、活动 turn、技能列表、fork、凭据）都属于 `AgentWorkbenchCapabilities`，由 `CapabilityRegistry` 按会话 `engineId` 分发；shell 层不接收面向单一引擎的函数。入口（新建会话、AgentRunner、asksource）从设置读取新会话引擎，不写死引擎 ID。
 
 pi 的 runtime port 每会话启动一个 `pi --mode rpc` 进程，使用只按 `
 ` 切分的 JSONL 客户端；宿主工具与角色指令注入由随包附带的 pi extension 提供。
