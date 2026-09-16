@@ -1,4 +1,4 @@
-import { effectiveNeeds, actionIsOpen, type AgentRun, type Execution, type PatrolRun, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, renderExecutionNotices, type AgentRun, type Execution, type PatrolRun, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 
@@ -100,7 +100,7 @@ export class Orchestrator {
     this.disposers.push(this.service.subscribe((event) => {
       if (!("workspaceId" in event)) return;
       if (event.type === "workItem.updated") {
-        void this.enqueue(event.workspaceId, () => this.deliverUpdate(event.workspaceId, event.workItemId, event.sessionId, event.note));
+        void this.enqueue(event.workspaceId, () => this.deliverUpdate(event.workspaceId, event.workItemId, event.sessionId));
       } else if (["actions.changed", "workItems.changed", "workRequests.changed", "decisions.changed", "scheduler.changed"].includes(event.type)) {
         void this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
       } else if (["domains.changed", "docs.changed", "issues.changed"].includes(event.type)) {
@@ -373,10 +373,12 @@ export class Orchestrator {
       if (action.stage === "execute") {
         // An unbound inactive execute stage is a restart recovery, not evidence of failure.
         action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending",
-          message: action.message + "\n会话已恢复。核对当前成果与持久化处置结果，继续尚未完成的动作。" }));
+          notices: [...action.notices, { at: this.now(), kind: "resumed" as const,
+            text: "会话已恢复。核对当前成果与持久化处置结果，继续尚未完成的动作。" }] }));
       }
       if (action.stage === "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver" }));
       const message = await this.actionMessage(workspaceId, action, cwd);
+      const delivered = action.notices.length;
       let scheduledTurnId: string | undefined;
       // Delivery is durable even when send throws. The same session and message are retried.
       if (wasActive) {
@@ -402,13 +404,15 @@ export class Orchestrator {
         scheduledTurnId = turnId;
       }
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
-      await this.service.updateAction(workspaceId, action, (latest) => ({
-        ...latest,
-        ...(scheduledTurnId ? { scheduledTurnId } : {}),
-        ...(latest.message === action.message && latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
-          ? { status: "running" as const, stage: "execute" as const, message: "", failure: undefined, retryAt: undefined } : {}),
-        deliveredAt: this.now()
-      }));
+      await this.service.updateAction(workspaceId, action, (latest) => {
+        const settled = { ...(scheduledTurnId ? { scheduledTurnId } : {}),
+          ...(latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
+            ? { status: "running" as const, stage: "execute" as const, failure: undefined, retryAt: undefined } : {}),
+          deliveredAt: this.now() };
+        // Only the notices this delivery carried are consumed; append-only writers keep the rest.
+        return latest.kind === "execute" ? { ...latest, ...settled, notices: latest.notices.slice(delivered) }
+          : { ...latest, ...settled };
+      });
     } catch (error) {
       await this.fail(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
     }
@@ -472,7 +476,7 @@ export class Orchestrator {
   }
 
   private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {
-    const update = [action.message.trim(), action.failure].filter(Boolean).join("\n");
+    const update = [renderExecutionNotices(action.notices), action.failure].filter(Boolean).join("\n");
     if (action.integrationActionId) return [update, await this.completion(workspaceId, action.actionId)].filter(Boolean).join("\n");
     if (action.deliveredAt) return update;
     const item = await this.service.getWorkItem(workspaceId, action.workItemId);
@@ -523,15 +527,15 @@ export class Orchestrator {
     }
   }
 
-  private async deliverUpdate(workspaceId: string, workItemId: string, sessionId: string, note: string): Promise<void> {
+  /** The pending notices already sit on the record; this only decides when to hand them over. */
+  private async deliverUpdate(workspaceId: string, workItemId: string, sessionId: string): Promise<void> {
     const item = await this.service.getWorkItem(workspaceId, workItemId);
     const action = (await this.service.listActions(workspaceId)).find((a) => a.kind === "execute" && a.workItemId === workItemId && actionIsOpen(a));
     if (await this.service.isWorkItemBlocked(workspaceId, workItemId)) {
       // The service persists the waiting condition before this event. Stop work on the old contract.
       await this.runner.interrupt(sessionId);
     } else if (action?.kind === "execute" && item.status === "running") {
-      await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending", idleTurns: 0,
-        message: "工单已调整：" + note + "\n立即重新执行 vermillion workItem.get 读取最新合同，按新合同继续；已完成但不再需要的部分回退。" }));
+      await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending", idleTurns: 0 }));
     }
     await this.reconcile(workspaceId);
   }

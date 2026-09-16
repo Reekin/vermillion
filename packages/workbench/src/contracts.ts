@@ -352,7 +352,6 @@ const zProcess = z.object({
   actionId: z.string(),
   workItemId: z.string(),
   status: z.enum(["pending", "running", "retry", "decision", "done", "cancelled"]),
-  message: z.string(),
   attempts: z.number().int().nonnegative(),
   retryAt: z.string().optional(),
   failure: z.string().optional(),
@@ -360,6 +359,23 @@ const zProcess = z.object({
   createdAt: z.string(),
   updatedAt: z.string()
 });
+
+/** One pending delivery to a worker. Writers only append; the scheduler renders and consumes the list. */
+export const executionNoticeKinds = ["contract", "docs", "rejected", "resumed", "nag"] as const;
+export const zExecutionNotice = z.object({
+  at: z.string(),
+  kind: z.enum(executionNoticeKinds),
+  text: z.string().min(1)
+});
+export type ExecutionNotice = z.infer<typeof zExecutionNotice>;
+
+const executionNoticeLabels: Record<ExecutionNotice["kind"], string> = {
+  contract: "合同调整", docs: "文档合入", rejected: "提交退回", resumed: "恢复执行", nag: "催办"
+};
+
+/** Every pending notice as the one message a worker receives, each labeled by why it arrived. */
+export const renderExecutionNotices = (notices: ExecutionNotice[]): string =>
+  notices.map((notice) => "【" + executionNoticeLabels[notice.kind] + "】" + notice.text).join("\n");
 
 /** The sole owner of a worker's runtime state and pending delivery. */
 export const zExecution = zProcess.extend({
@@ -372,6 +388,8 @@ export const zExecution = zProcess.extend({
   deliveredAt: z.string().optional(),
   /** Most recent turn started by scheduler delivery, used to recover its origin. */
   scheduledTurnId: z.string().optional(),
+  /** Notices waiting for the next delivery; emptied by the scheduler once they are delivered. */
+  notices: z.array(zExecutionNotice),
   idleTurns: z.number().int().nonnegative()
 });
 export type Execution = z.infer<typeof zExecution>;
@@ -380,6 +398,7 @@ export type Execution = z.infer<typeof zExecution>;
 export const zIntegration = zProcess.extend({
   kind: z.literal("integration"),
   stage: z.enum(["merge", "rollback"]),
+  message: z.string(),
   /** Present while the original Worker owns a failed or explicitly delegated merge. */
   agent: z.object({
     sessionId: z.string().min(1),
@@ -403,6 +422,9 @@ export const zWorkflowAction = z.discriminatedUnion("kind", [zExecution, zIntegr
 export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
 export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.pauseReason === "user";
+/** The pending state of whichever process this action runs. */
+export const actionNote = (action: WorkflowAction): string =>
+  action.kind === "integration" ? action.message : renderExecutionNotices(action.notices);
 
 export const zInboxItem = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("decision"), workspaceId: z.string(), card: zDecisionCard }),
@@ -432,7 +454,7 @@ export type WorkItemRecord = z.infer<typeof zWorkItemRecord>;
 
 export const projectWorkItem = ({ item, execution }: WorkItemRecord): WorkItem => ({
   ...item,
-  run: zRun.parse({ ...execution, lastFailure: execution.failure, resumeMessage: execution.message || undefined })
+  run: zRun.parse({ ...execution, lastFailure: execution.failure, resumeMessage: renderExecutionNotices(execution.notices) || undefined })
 });
 
 export const zSessionNavigation = z.object({
@@ -459,8 +481,8 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("domains.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("roles.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("scheduler.changed"), workspaceId: z.string() }),
-  /** A running work item's contract changed; the orchestrator steers its worker right away. */
-  z.object({ type: z.literal("workItem.updated"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string(), note: z.string() }),
+  /** A running work item gained pending notices; the orchestrator hands them to its worker right away. */
+  z.object({ type: z.literal("workItem.updated"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string() }),
   /** A work item was cancelled. sessionId when a worker held it (interrupted); dependants are queued items that listed it in dependsOn. */
   z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string().optional(), dependants: z.array(z.string()) }),
   /** A preparation request was cancelled; sessionId identifies its preparation branch when one exists. */

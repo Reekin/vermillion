@@ -1,4 +1,4 @@
-import { isUserPaused, type WorkflowAction, type WorkItem } from "@vermillion/workbench/client";
+import { actionNote, isUserPaused, type WorkflowAction, type WorkItem } from "@vermillion/workbench/client";
 import { Badge, Button, DetailSection } from "./ui.js";
 import { actionKindLabel, actionStatusText, recoveryCondition, actionRoleLabel } from "./workflow-display.js";
 
@@ -8,7 +8,7 @@ export const WorkflowDetails = ({ actions, item, onOpenSession }: { actions: Wor
       {!isUserPaused(action) && <Badge>{actionStatusText(action, item)}</Badge>}<span>{actionRoleLabel(action)}</span>
       {action.kind === "execute" && action.sessionId && <Button variant="ghost" outlined size="sm" onClick={() => onOpenSession(action.sessionId!)}>处理会话</Button>}
     </div>
-    <DetailSection title="问题">{action.message}</DetailSection>
+    <DetailSection title="问题">{actionNote(action)}</DetailSection>
     {action.status !== "done" && action.status !== "cancelled" && !(action.kind === "integration" && action.agent) && <>
       <DetailSection title="等待条件">{recoveryCondition(action)}</DetailSection>
       <DetailSection title="下一次重试">{action.retryAt ? new Date(action.retryAt).toLocaleString("zh-CN") : "未安排定时重试"}</DetailSection>
