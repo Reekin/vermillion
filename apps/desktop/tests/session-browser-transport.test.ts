@@ -77,9 +77,20 @@ describe("session browser transport contracts", () => {
                 isActive: true,
                 isPinned: false
               }],
-              nextCursor: "cursor-2",
-              hasMore: true,
               totalCount: 11
+            }
+          } as const;
+        case "sessionBrowser.changes":
+          return {
+            id: request.id,
+            method: "sessionBrowser.changes",
+            ok: true,
+            result: {
+              status: "changed",
+              workspaceId: request.params.workspaceId,
+              revision: "revision-2",
+              items: [],
+              removedSessionIds: ["session-gone"]
             }
           } as const;
         case "sessionBrowser.repair":
@@ -180,6 +191,10 @@ describe("session browser transport contracts", () => {
       workspaceId: "workspace-1"
     });
     const page = await transport.sessionBrowser.list({ workspaceId: "workspace-1" });
+    const changes = await transport.sessionBrowser.changes({
+      workspaceId: "workspace-1",
+      revision: "revision-1"
+    });
     const repair = await transport.sessionBrowser.repair(["workspace-1"]);
     const openResult = await transport.sessionBrowser.open("session-child");
     const forceOpenResult = await transport.sessionBrowser.open("session-force", {
@@ -209,6 +224,13 @@ describe("session browser transport contracts", () => {
       removed: true
     });
     expect(page.items[0]?.sessionId).toBe("session-root");
+    expect(changes).toEqual({
+      status: "changed",
+      workspaceId: "workspace-1",
+      revision: "revision-2",
+      items: [],
+      removedSessionIds: ["session-gone"]
+    });
     expect(repair).toEqual({
       workspaces: 1,
       sessions: 2,
@@ -257,6 +279,7 @@ describe("session browser transport contracts", () => {
       "workspace.select",
       "workspace.remove",
       "sessionBrowser.list",
+      "sessionBrowser.changes",
       "sessionBrowser.repair",
       "sessionBrowser.open",
       "sessionBrowser.open",

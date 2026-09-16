@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { parseSessionRpcRequest, safeParseSessionRpcResponse } from "./ipc.js";
 
 describe("IPC schemas", () => {
-  it("parses bounded session browser pages without transcript metadata", () => {
+  it("parses session browser snapshots without transcript metadata", () => {
     const request = parseSessionRpcRequest({
       id: "req-roots",
       method: "sessionBrowser.list",
       params: { workspaceId: "workspace-1" }
     });
-    expect(request.params).toMatchObject({ limit: 20 });
+    expect(request.params).toMatchObject({ workspaceId: "workspace-1" });
 
     const parsed = safeParseSessionRpcResponse({
       id: "req-roots",
@@ -25,11 +25,38 @@ describe("IPC schemas", () => {
           isActive: true,
           isPinned: false
         }],
-        hasMore: false,
         totalCount: 1
       }
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it("parses session browser changes and the full snapshot request", () => {
+    expect(parseSessionRpcRequest({
+      id: "req-changes",
+      method: "sessionBrowser.changes",
+      params: { workspaceId: "workspace-1", revision: "revision-1" }
+    }).params).toEqual({ workspaceId: "workspace-1", revision: "revision-1" });
+
+    expect(safeParseSessionRpcResponse({
+      id: "req-changes",
+      method: "sessionBrowser.changes",
+      ok: true,
+      result: {
+        status: "changed",
+        workspaceId: "workspace-1",
+        revision: "revision-2",
+        items: [],
+        removedSessionIds: ["session-2"]
+      }
+    }).success).toBe(true);
+
+    expect(safeParseSessionRpcResponse({
+      id: "req-changes",
+      method: "sessionBrowser.changes",
+      ok: true,
+      result: { status: "full-required", workspaceId: "workspace-1" }
+    }).success).toBe(true);
   });
 
   it("requires an explicit non-empty workspace batch for repair", () => {

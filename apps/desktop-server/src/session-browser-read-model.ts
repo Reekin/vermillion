@@ -1,4 +1,4 @@
-import type { SessionBrowserItemRpc, SessionBrowserPageRpc } from "@vermillion/shared";
+import type { SessionBrowserItemRpc, SessionBrowserSnapshotRpc } from "@vermillion/shared";
 
 export type SessionBrowserReadModelSeed = Omit<SessionBrowserItemRpc, "subagents"> & {
   workspaceId: string;
@@ -8,19 +8,64 @@ export type SessionBrowserReadModelSeed = Omit<SessionBrowserItemRpc, "subagents
   isVisible?: boolean;
 };
 
-type CursorPayload = {
-  revision: string;
-  offset: number;
+/** Rows that entered or left one workspace between two revisions. */
+export type SessionBrowserRowDelta = {
+  workspaceId: string;
+  from: string;
+  to: string;
+  changedIds: string[];
+  removedIds: string[];
 };
 
-export class SessionBrowserCursorStaleError extends Error {
-  public readonly code = "CURSOR_STALE";
-
-  public constructor() {
-    super("The session browser cursor belongs to an outdated workspace revision.");
-    this.name = "SessionBrowserCursorStaleError";
+/** Walks the recorded deltas from the caller's revision up to the current one. */
+export const resolveRowDelta = (
+  chain: readonly SessionBrowserRowDelta[],
+  revision: string,
+  currentRevision: string
+): { changedIds: string[]; removedIds: string[] } | undefined => {
+  const start = chain.findIndex((entry) => entry.from === revision);
+  if (start < 0 || chain.at(-1)?.to !== currentRevision) {
+    return undefined;
   }
-}
+  const changedIds = new Set<string>();
+  const removedIds = new Set<string>();
+  for (const entry of chain.slice(start)) {
+    for (const id of entry.changedIds) {
+      changedIds.add(id);
+      removedIds.delete(id);
+    }
+    for (const id of entry.removedIds) {
+      removedIds.add(id);
+      changedIds.delete(id);
+    }
+  }
+  return { changedIds: [...changedIds], removedIds: [...removedIds] };
+};
+
+/** Row level difference between two models; rows are addressed by their tree root session id. */
+export const diffRowDeltas = (
+  previous: SessionBrowserReadModel,
+  next: SessionBrowserReadModel
+): SessionBrowserRowDelta[] => {
+  const deltas: SessionBrowserRowDelta[] = [];
+  for (const workspaceId of new Set([...previous.workspaces(), ...next.workspaces()])) {
+    const from = previous.revision(workspaceId);
+    const to = next.revision(workspaceId);
+    if (from === to) {
+      continue;
+    }
+    const before = previous.rowFingerprints(workspaceId);
+    const after = next.rowFingerprints(workspaceId);
+    deltas.push({
+      workspaceId,
+      from,
+      to,
+      changedIds: [...after].filter(([id, fingerprint]) => before.get(id) !== fingerprint).map(([id]) => id),
+      removedIds: [...before.keys()].filter((id) => !after.has(id))
+    });
+  }
+  return deltas;
+};
 
 /** Pinned first, then most recent activity first. */
 const compareSeeds = (
@@ -32,25 +77,6 @@ const compareSeeds = (
   }
   const bySortAt = right.sortAt.localeCompare(left.sortAt);
   return bySortAt !== 0 ? bySortAt : left.sessionId.localeCompare(right.sessionId);
-};
-
-const encodeCursor = (payload: CursorPayload): string =>
-  encodeURIComponent(JSON.stringify(payload));
-
-const decodeCursor = (cursor: string): CursorPayload => {
-  try {
-    const parsed = JSON.parse(decodeURIComponent(cursor)) as Partial<CursorPayload>;
-    if (
-      typeof parsed.revision !== "string" ||
-      !Number.isInteger(parsed.offset) ||
-      (parsed.offset ?? -1) < 0
-    ) {
-      throw new Error("invalid cursor");
-    }
-    return parsed as CursorPayload;
-  } catch {
-    throw new SessionBrowserCursorStaleError();
-  }
 };
 
 const createRevision = (value: string): string => {
@@ -116,11 +142,13 @@ const isVisibleTree = (seed: SessionBrowserReadModelSeed): boolean =>
   seed.isVisible !== false && !seed.archivedAt;
 
 /**
- * Per-workspace paged view with one row per fork tree. Subagents nest under the tree that spawned them.
+ * Per-workspace view with one row per fork tree. Subagents nest under the tree that spawned them.
  * Each member id resolves to its tree entry; archiving a root hides the tree and its nested subagents.
+ * A workspace revision covers the rows the browser shows; row fingerprints let callers diff two revisions.
  */
 export class SessionBrowserReadModel {
   private readonly rootsByWorkspaceId = new Map<string, SessionBrowserItemRpc[]>();
+  private readonly fingerprintsByWorkspaceId = new Map<string, Map<string, string>>();
   private readonly itemsBySessionId = new Map<string, SessionBrowserItemRpc>();
   private readonly revisions = new Map<string, string>();
 
@@ -161,67 +189,41 @@ export class SessionBrowserReadModel {
         .filter((seed) => seed.workspaceId === workspaceId && isVisibleTree(seed))
         .sort(compareSeeds)
         .map((seed) => build(seed));
+      const fingerprints = workspaceRoots.map((root) => [root.sessionId, JSON.stringify(root)] as const);
       this.rootsByWorkspaceId.set(workspaceId, workspaceRoots);
-      const fingerprint = seeds
-        .filter((seed) => seed.workspaceId === workspaceId)
-        .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
-        .map((seed) => [
-          seed.sessionId,
-          seed.memberSessionIds,
-          seed.parentSessionId,
-          seed.archivedAt,
-          seed.isVisible,
-          seed.title,
-          seed.engineId,
-          seed.statusDot,
-          seed.isActive,
-          seed.isPinned,
-          seed.role,
-          seed.activityAt,
-          seed.lastCompletedTurnAt,
-          seed.sortAt
-        ]);
-      this.revisions.set(workspaceId, createRevision(JSON.stringify(fingerprint)));
+      this.fingerprintsByWorkspaceId.set(workspaceId, new Map(fingerprints));
+      this.revisions.set(workspaceId, createRevision(JSON.stringify(fingerprints)));
     }
   }
 
-  public list(input: {
-    workspaceId: string;
-    cursor?: string;
-    limit?: number;
-    expectedRevision?: string;
-    kind?: "user" | "agent";
-  }): SessionBrowserPageRpc {
-    const revision = this.revisionFor(input.workspaceId);
-    if (input.expectedRevision && input.expectedRevision !== revision) {
-      throw new SessionBrowserCursorStaleError();
-    }
-    const limit = Math.min(100, Math.max(1, input.limit ?? 20));
-    const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
-    if (cursor && cursor.revision !== revision) {
-      throw new SessionBrowserCursorStaleError();
-    }
-    const offset = cursor?.offset ?? 0;
-    const all = this.rootsByWorkspaceId.get(input.workspaceId) ?? [];
-    const roots = input.kind ? all.filter((item) => (item.role === undefined) === (input.kind === "user")) : all;
-    const items = roots.slice(offset, offset + limit);
-    const nextOffset = offset + items.length;
-    const hasMore = nextOffset < roots.length;
+  public snapshot(input: { workspaceId: string; kind?: "user" | "agent" }): SessionBrowserSnapshotRpc {
+    const items = this.rows(input);
     return {
       workspaceId: input.workspaceId,
-      revision,
+      revision: this.revision(input.workspaceId),
       items,
-      nextCursor: hasMore ? encodeCursor({ revision, offset: nextOffset }) : undefined,
-      hasMore,
-      totalCount: roots.length
+      totalCount: items.length
     };
+  }
+
+  public rows(input: { workspaceId: string; kind?: "user" | "agent" }): SessionBrowserItemRpc[] {
+    const all = this.rootsByWorkspaceId.get(input.workspaceId) ?? [];
+    return input.kind ? all.filter((item) => (item.role === undefined) === (input.kind === "user")) : all;
+  }
+
+  public workspaces(): string[] {
+    return [...this.revisions.keys()];
+  }
+
+  public revision(workspaceId: string): string {
+    return this.revisions.get(workspaceId) ?? createRevision(workspaceId);
+  }
+
+  public rowFingerprints(workspaceId: string): ReadonlyMap<string, string> {
+    return this.fingerprintsByWorkspaceId.get(workspaceId) ?? new Map<string, string>();
   }
 
   public get(sessionId: string): SessionBrowserItemRpc | undefined {
     return this.itemsBySessionId.get(sessionId);
-  }
-
-  private revisionFor(workspaceId: string): string {
-    return this.revisions.get(workspaceId) ?? createRevision(workspaceId);
   }
 }

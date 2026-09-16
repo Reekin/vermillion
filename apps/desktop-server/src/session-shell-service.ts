@@ -19,7 +19,8 @@ import type {
   ErrorLogWriteResultRpc,
   SessionExecutionProfileInput,
   SessionBrowserItemRpc,
-  SessionBrowserPageRpc,
+  SessionBrowserChangesRpc,
+  SessionBrowserSnapshotRpc,
   SkillDescriptorRpc,
   SessionSettingsRpc,
   SessionSettingsUpdateRpc,
@@ -528,12 +529,17 @@ export class SessionShellService {
 
   public async listBrowserSessions(input: {
     workspaceId: string;
-    cursor?: string;
-    limit?: number;
-    expectedRevision?: string;
     kind?: "user" | "agent";
-  }): Promise<SessionBrowserPageRpc> {
+  }): Promise<SessionBrowserSnapshotRpc> {
     return this.sessionCatalog.list(input);
+  }
+
+  public async changesBrowserSessions(input: {
+    workspaceId: string;
+    revision: string;
+    kind?: "user" | "agent";
+  }): Promise<SessionBrowserChangesRpc> {
+    return this.sessionCatalog.changes(input);
   }
 
   public async getSessionBrowserItem(sessionId: string): Promise<SessionBrowserItemRpc | undefined> {

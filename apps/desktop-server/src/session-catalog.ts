@@ -1,11 +1,15 @@
 import type {
   ChatSession,
   DomainSnapshot,
+  SessionBrowserChangesRpc,
   SessionBrowserItemRpc,
-  SessionBrowserPageRpc
+  SessionBrowserSnapshotRpc
 } from "@vermillion/shared";
 import {
+  diffRowDeltas,
+  resolveRowDelta,
   SessionBrowserReadModel,
+  type SessionBrowserRowDelta,
   type SessionBrowserReadModelSeed
 } from "./session-browser-read-model.js";
 import type { SessionRuntimeService } from "./runtime-service.js";
@@ -13,6 +17,9 @@ import type { SessionIndexEntry, SessionIndexStore } from "./session-index.js";
 import type { WorkspaceRegistryService } from "./workspace-registry.js";
 
 export type SessionStatusDot = "none" | "running" | "unread_completed";
+
+/** How far back a browser session may lag before it must read a full snapshot again. */
+const ROW_DELTA_LIMIT = 64;
 
 type SessionCatalogServiceOptions = {
   runtimeService: SessionRuntimeService;
@@ -120,9 +127,12 @@ export class SessionCatalogService {
   private readonly workspaceRegistry: WorkspaceRegistryService;
   private readonly sessionIndexStore: SessionIndexStore;
   private catalogRevision = 0;
+  private readonly rowDeltasByWorkspaceId = new Map<string, SessionBrowserRowDelta[]>();
   private materialized:
     | { sourceRevision: string; model: SessionBrowserReadModel }
     | undefined;
+  /** Last model handed to callers; it stays the diff baseline even when the cache is dropped. */
+  private adoptedModel: SessionBrowserReadModel | undefined;
   private materializing:
     | { sourceRevision: string; promise: Promise<SessionBrowserReadModel> }
     | undefined;
@@ -135,12 +145,32 @@ export class SessionCatalogService {
 
   public async list(input: {
     workspaceId: string;
-    cursor?: string;
-    limit?: number;
-    expectedRevision?: string;
     kind?: "user" | "agent";
-  }): Promise<SessionBrowserPageRpc> {
-    return (await this.getReadModel()).list(input);
+  }): Promise<SessionBrowserSnapshotRpc> {
+    return (await this.getReadModel()).snapshot(input);
+  }
+
+  public async changes(input: {
+    workspaceId: string;
+    revision: string;
+    kind?: "user" | "agent";
+  }): Promise<SessionBrowserChangesRpc> {
+    const model = await this.getReadModel();
+    const revision = model.revision(input.workspaceId);
+    const delta = input.revision === revision
+      ? { changedIds: [], removedIds: [] }
+      : resolveRowDelta(this.rowDeltasByWorkspaceId.get(input.workspaceId) ?? [], input.revision, revision);
+    if (!delta) {
+      return { status: "full-required", workspaceId: input.workspaceId };
+    }
+    const rows = new Map(model.rows(input).map((row) => [row.sessionId, row]));
+    return {
+      status: "changed",
+      workspaceId: input.workspaceId,
+      revision,
+      items: delta.changedIds.flatMap((sessionId) => rows.get(sessionId) ?? []),
+      removedSessionIds: delta.removedIds
+    };
   }
 
   public async get(sessionId: string): Promise<SessionBrowserItemRpc | undefined> {
@@ -199,7 +229,7 @@ export class SessionCatalogService {
       if (this.materializing?.sourceRevision === sourceRevision) {
         const model = await this.materializing.promise;
         if (this.getSourceRevision() === sourceRevision) {
-          this.materialized = { sourceRevision, model };
+          this.adoptReadModel(sourceRevision, model);
           return model;
         }
         continue;
@@ -215,10 +245,23 @@ export class SessionCatalogService {
         }
       }
       if (this.getSourceRevision() === sourceRevision) {
-        this.materialized = { sourceRevision, model };
+        this.adoptReadModel(sourceRevision, model);
         return model;
       }
     }
+  }
+
+  /** Swapping the model records the row deltas callers need to advance from the previous revision. */
+  private adoptReadModel(sourceRevision: string, model: SessionBrowserReadModel): void {
+    const previous = this.adoptedModel;
+    if (previous) {
+      for (const delta of diffRowDeltas(previous, model)) {
+        const chain = this.rowDeltasByWorkspaceId.get(delta.workspaceId) ?? [];
+        this.rowDeltasByWorkspaceId.set(delta.workspaceId, [...chain, delta].slice(-ROW_DELTA_LIMIT));
+      }
+    }
+    this.adoptedModel = model;
+    this.materialized = { sourceRevision, model };
   }
 
   private getSourceRevision(): string {

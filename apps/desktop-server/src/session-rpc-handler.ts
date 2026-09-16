@@ -10,7 +10,6 @@ import {
 } from "@vermillion/shared";
 import type { SessionRuntimeService } from "./runtime-service.js";
 import type { SessionShellService } from "./session-shell-service.js";
-import { SessionBrowserCursorStaleError } from "./session-browser-read-model.js";
 
 type Clock = () => string;
 type IdFactory = () => string;
@@ -255,6 +254,20 @@ export const createWorkbenchRpcHandler = (
               method: request.method,
               ok: true,
               result: await shellService.listBrowserSessions(request.params)
+            });
+          case "sessionBrowser.changes":
+            if (!shellService) {
+              return toErrorResponse(
+                request,
+                "SESSION_BROWSER_UNAVAILABLE",
+                "Session browser APIs are unavailable for this runtime service."
+              );
+            }
+            return parseSessionRpcResponse({
+              id: request.id,
+              method: request.method,
+              ok: true,
+              result: await shellService.changesBrowserSessions(request.params)
             });
           case "sessionBrowser.repair":
             if (!shellService) {
@@ -687,11 +700,6 @@ export const createWorkbenchRpcHandler = (
           }
         }
       } catch (error) {
-        if (error instanceof SessionBrowserCursorStaleError) {
-          return toErrorResponse(request, error.code, error.message, {
-            failedAt: now()
-          });
-        }
         return toErrorResponse(
           request,
           "WORKBENCH_REQUEST_FAILED",

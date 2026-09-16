@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { mergeSessionExecutionProfile, resolveEngineExecutionPreference } from "@vermillion/shared";
 import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
@@ -122,10 +122,18 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [reloadSignal, setReloadSignal] = useState(0);
   const sessionActions = useSessionActions({
     transport,
-    reloadSidebar: sidebar.reload,
+    refreshSidebar: sidebar.refresh,
     onArchived: (id) => setSessionId((current) => (current === id || (current && sidebar.findSession(current)?.sessionId === id) ? undefined : current)),
     onResumed: () => setReloadSignal((n) => n + 1)
   });
+  const openSidebarSession = useCallback((id: string) => {
+    setSessionEntry(undefined);
+    const selected = sidebar.findSession(id);
+    if (selected) setNavigationTarget({ sessionId: id, workspaceId: selected.workspaceId });
+    setSessionId(id);
+    store.getState().setWorkspaceSection("sessions");
+  }, [sidebar.findSession, store]);
+  const openSidebarMenu = useCallback((event: ReactMouseEvent, id: string, title: string) => void sessionActions.openMenu(event, id, title), [sessionActions.openMenu]);
 
   // Docs panel follows the open session's workspace; in draft it follows the picker.
   const openSession = sessionId ? sidebar.findSession(sessionId) : undefined;
@@ -225,13 +233,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               setWorkspaceFilterId(id);
               if (!sessionId && id && section === "sessions") store.getState().setDraftWorkspace(id);
             }}
-            onOpen={(id) => {
-              setSessionEntry(undefined);
-              const selected = sidebar.findSession(id);
-              if (selected) setNavigationTarget({ sessionId: id, workspaceId: selected.workspaceId });
-              setSessionId(id);
-              store.getState().setWorkspaceSection("sessions");
-            }}
+            onOpen={openSidebarSession}
             onNewChat={() => {
               setSessionEntry(undefined);
               if (workspaceFilterId) store.getState().setDraftWorkspace(workspaceFilterId);
@@ -241,7 +243,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             }}
             onSearch={() => setSearchOpen(true)}
             menu={sessionActions.menu}
-            onOpenMenu={(event, id, title) => void sessionActions.openMenu(event, id, title)}
+            onOpenMenu={openSidebarMenu}
             onCloseMenu={sessionActions.closeMenu}
             onRunAction={(id, action) => void sessionActions.run(id, action)}
             renameDialog={sessionActions.renameDialog}

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  SessionBrowserCursorStaleError,
+  diffRowDeltas,
+  resolveRowDelta,
   SessionBrowserReadModel,
-  type SessionBrowserReadModelSeed
+  type SessionBrowserReadModelSeed,
+  type SessionBrowserRowDelta
 } from "../src/session-browser-read-model.js";
 
 const seed = (
@@ -17,8 +19,15 @@ const seed = (
   ...input
 });
 
+const delta = (
+  from: string,
+  to: string,
+  changedIds: string[],
+  removedIds: string[]
+): SessionBrowserRowDelta => ({ workspaceId: "workspace-1", from, to, changedIds, removedIds });
+
 describe("SessionBrowserReadModel", () => {
-  it("returns bounded stable pages, pinned first then most recent", () => {
+  it("returns every row of the workspace, pinned first then most recent", () => {
     const model = new SessionBrowserReadModel([
       seed({ sessionId: "s-1", sortAt: "2026-07-19T03:00:00Z" }),
       seed({ sessionId: "s-2", sortAt: "2026-07-19T02:00:00Z" }),
@@ -26,17 +35,14 @@ describe("SessionBrowserReadModel", () => {
       seed({ sessionId: "s-4", sortAt: "2026-07-19T04:00:00Z" })
     ]);
 
-    const first = model.list({ workspaceId: "workspace-1", limit: 2 });
-    expect(first.items.map((item) => item.sessionId)).toEqual(["s-3", "s-4"]);
-    expect(first).toMatchObject({ hasMore: true, totalCount: 4 });
-    const second = model.list({ workspaceId: "workspace-1", limit: 2, cursor: first.nextCursor });
-    expect(second.items.map((item) => item.sessionId)).toEqual(["s-1", "s-2"]);
-    expect(second.hasMore).toBe(false);
+    const snapshot = model.snapshot({ workspaceId: "workspace-1" });
+    expect(snapshot.items.map((item) => item.sessionId)).toEqual(["s-3", "s-4", "s-1", "s-2"]);
+    expect(snapshot.totalCount).toBe(4);
     expect(model.get("s-2")?.title).toBe("s-2");
     expect(model.get("missing")).toBeUndefined();
   });
 
-  it("nests subagent sessions under their parent and keeps them out of the root page", () => {
+  it("nests subagent sessions under their parent and keeps them out of the root rows", () => {
     const model = new SessionBrowserReadModel([
       seed({ sessionId: "worker", sortAt: "2026-07-19T01:00:00Z" }),
       seed({ sessionId: "reviewer", sortAt: "2026-07-19T02:00:00Z", parentSessionId: "worker" }),
@@ -44,11 +50,11 @@ describe("SessionBrowserReadModel", () => {
       seed({ sessionId: "orphan", sortAt: "2026-07-19T04:00:00Z", parentSessionId: "missing" })
     ]);
 
-    const page = model.list({ workspaceId: "workspace-1" });
-    expect(page.items.map((item) => item.sessionId)).toEqual(["orphan", "worker"]);
-    expect(page.totalCount).toBe(2);
-    expect(page.items[1]?.subagents.map((item) => item.sessionId)).toEqual(["verifier", "reviewer"]);
-    expect(page.items[1]?.subagents[0]).toMatchObject({ parentSessionId: "worker", subagents: [] });
+    const snapshot = model.snapshot({ workspaceId: "workspace-1" });
+    expect(snapshot.items.map((item) => item.sessionId)).toEqual(["orphan", "worker"]);
+    expect(snapshot.totalCount).toBe(2);
+    expect(snapshot.items[1]?.subagents.map((item) => item.sessionId)).toEqual(["verifier", "reviewer"]);
+    expect(snapshot.items[1]?.subagents[0]).toMatchObject({ parentSessionId: "worker", subagents: [] });
     expect(model.get("reviewer")?.parentSessionId).toBe("worker");
   });
 
@@ -69,10 +75,10 @@ describe("SessionBrowserReadModel", () => {
       })
     ]);
 
-    const page = model.list({ workspaceId: "workspace-1" });
+    const snapshot = model.snapshot({ workspaceId: "workspace-1" });
 
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]).toMatchObject({
+    expect(snapshot.items).toHaveLength(1);
+    expect(snapshot.items[0]).toMatchObject({
       sessionId: "root",
       activityAt: "2026-07-19T03:00:00Z",
       lastCompletedTurnAt: "2026-07-19T01:30:00Z",
@@ -80,22 +86,58 @@ describe("SessionBrowserReadModel", () => {
     });
   });
 
-  it("rejects cursors from another revision", () => {
-    const original = new SessionBrowserReadModel([
-      seed({ sessionId: "older", sortAt: "2026-07-18T01:00:00Z" }),
-      seed({ sessionId: "root", sortAt: "2026-07-19T01:00:00Z" })
+  it("keeps user sessions and agent sessions apart when the caller asks for one kind", () => {
+    const model = new SessionBrowserReadModel([
+      seed({ sessionId: "user-session", sortAt: "2026-07-19T02:00:00Z" }),
+      seed({ sessionId: "worker-session", sortAt: "2026-07-19T01:00:00Z", role: "worker" })
     ]);
-    const cursor = original.list({ workspaceId: "workspace-1", limit: 1 }).nextCursor;
-    const changed = new SessionBrowserReadModel([
-      seed({ sessionId: "new", sortAt: "2026-07-19T03:00:00Z" }),
-      seed({ sessionId: "root", sortAt: "2026-07-19T01:00:00Z" })
+
+    expect(model.snapshot({ workspaceId: "workspace-1", kind: "user" }).items.map((item) => item.sessionId))
+      .toEqual(["user-session"]);
+    expect(model.snapshot({ workspaceId: "workspace-1", kind: "agent" }).items.map((item) => item.sessionId))
+      .toEqual(["worker-session"]);
+  });
+
+  it("keeps the revision stable while the rows do not move", () => {
+    const first = new SessionBrowserReadModel([seed({ sessionId: "s-1", sortAt: "2026-07-19T02:00:00Z" })]);
+    const same = new SessionBrowserReadModel([seed({ sessionId: "s-1", sortAt: "2026-07-19T02:00:00Z" })]);
+    const titled = new SessionBrowserReadModel([seed({ sessionId: "s-1", sortAt: "2026-07-19T02:00:00Z", title: "renamed" })]);
+
+    expect(first.revision("workspace-1")).toBe(same.revision("workspace-1"));
+    expect(diffRowDeltas(first, same)).toEqual([]);
+    expect(diffRowDeltas(first, titled)).toHaveLength(1);
+  });
+
+  it("reports the rows that changed and disappeared between two revisions", () => {
+    const before = new SessionBrowserReadModel([
+      seed({ sessionId: "s-1", sortAt: "2026-07-19T02:00:00Z" }),
+      seed({ sessionId: "s-2", sortAt: "2026-07-19T01:00:00Z" })
     ]);
-    expect(() => changed.list({ workspaceId: "workspace-1", cursor })).toThrow(SessionBrowserCursorStaleError);
-    expect(() =>
-      changed.list({
-        workspaceId: "workspace-1",
-        expectedRevision: original.list({ workspaceId: "workspace-1" }).revision
-      })
-    ).toThrow(SessionBrowserCursorStaleError);
+    const after = new SessionBrowserReadModel([
+      seed({ sessionId: "s-1", sortAt: "2026-07-19T02:00:00Z", title: "renamed" }),
+      seed({ sessionId: "s-3", sortAt: "2026-07-19T03:00:00Z" })
+    ]);
+
+    const [moved] = diffRowDeltas(before, after);
+    expect(moved).toMatchObject({
+      workspaceId: "workspace-1",
+      from: before.revision("workspace-1"),
+      to: after.revision("workspace-1")
+    });
+    expect([...(moved?.changedIds ?? [])].sort()).toEqual(["s-1", "s-3"]);
+    expect(moved?.removedIds).toEqual(["s-2"]);
+  });
+
+  it("walks a delta chain and reports when a full snapshot is required", () => {
+    const chain = [
+      delta("a", "b", ["s-1"], []),
+      delta("b", "c", [], ["s-2"]),
+      delta("c", "d", ["s-2"], [])
+    ];
+
+    expect(resolveRowDelta(chain, "a", "d")).toEqual({ changedIds: ["s-1", "s-2"], removedIds: [] });
+    expect(resolveRowDelta(chain, "b", "d")).toEqual({ changedIds: ["s-2"], removedIds: [] });
+    expect(resolveRowDelta(chain, "unknown", "d")).toBeUndefined();
+    expect(resolveRowDelta(chain, "a", "e")).toBeUndefined();
   });
 });

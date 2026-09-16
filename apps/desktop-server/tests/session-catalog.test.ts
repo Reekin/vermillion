@@ -710,7 +710,7 @@ describe("SessionCatalogService", () => {
     });
   });
 
-  it("returns bounded lightweight pages and caches until sources change", async () => {
+  it("returns every row of the workspace without summary text and caches until sources change", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
     const indexStore = new SessionIndexStore({ baseDir });
@@ -746,11 +746,10 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const page = await service.list({ workspaceId: "workspace-1" });
-    expect(page.items).toHaveLength(20);
-    expect(page.totalCount).toBe(25);
-    expect(page.hasMore).toBe(true);
-    expect(JSON.stringify(page)).not.toContain("summaryText");
+    const snapshot = await service.list({ workspaceId: "workspace-1" });
+    expect(snapshot.items).toHaveLength(25);
+    expect(snapshot.totalCount).toBe(25);
+    expect(JSON.stringify(snapshot)).not.toContain("summaryText");
     expect((await service.get("session-24"))?.title).toBe("Session 24");
     expect(getSnapshot).toHaveBeenCalledTimes(1);
 
@@ -881,6 +880,78 @@ describe("SessionCatalogService", () => {
     await expect(service.renameSession({ sessionId: "session-1", title: "Renamed" })).rejects.toThrow(
       "Unknown session: session-1"
     );
+  });
+
+  it("keeps revisions addressable so callers can read only the rows that changed", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const indexStore = new SessionIndexStore({ baseDir });
+    await workspaceRegistry.registerWorkspace({
+      workspaceId: "workspace-1",
+      absolutePath: "I:/workspace-alpha"
+    });
+    await indexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        title: "Before",
+        createdAt: "2026-07-19T00:00:00Z",
+        updatedAt: "2026-07-19T00:00:00Z"
+      },
+      providerSessionId: "thread-1"
+    });
+    const service = new SessionCatalogService({
+      runtimeService: {
+        getSnapshot: () => emptySnapshot(),
+        getRevision: () => "runtime-1",
+        getSessionBrowserRevision: () => 1
+      } as unknown as SessionRuntimeService,
+      workspaceRegistry,
+      sessionIndexStore: indexStore
+    });
+
+    const first = await service.list({ workspaceId: "workspace-1" });
+    expect(await service.changes({ workspaceId: "workspace-1", revision: first.revision })).toEqual({
+      status: "changed",
+      workspaceId: "workspace-1",
+      revision: first.revision,
+      items: [],
+      removedSessionIds: []
+    });
+
+    await indexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        title: "After",
+        createdAt: "2026-07-19T00:00:00Z",
+        updatedAt: "2026-07-19T00:05:00Z"
+      },
+      providerSessionId: "thread-1"
+    });
+    const renamed = await service.changes({ workspaceId: "workspace-1", revision: first.revision });
+    if (renamed.status !== "changed") {
+      throw new Error(`expected changed rows, received ${renamed.status}`);
+    }
+    expect(renamed.revision).not.toBe(first.revision);
+    expect(renamed.items.map((item) => item.title)).toEqual(["After"]);
+    expect(renamed.removedSessionIds).toEqual([]);
+
+    await indexStore.archiveSession("session-1", "2026-07-19T00:10:00Z");
+    const archived = await service.changes({ workspaceId: "workspace-1", revision: renamed.revision });
+    expect(archived).toMatchObject({
+      status: "changed",
+      removedSessionIds: ["session-1"]
+    });
+
+    expect(await service.changes({ workspaceId: "workspace-1", revision: "unknown-revision" })).toEqual({
+      status: "full-required",
+      workspaceId: "workspace-1"
+    });
   });
 
 });

@@ -17,14 +17,14 @@ export type SessionRenameController = {
 
 type SessionActionsInput = {
   transport: DesktopTransport;
-  /** Re-queries the sidebar for actions that change list state without emitting a runtime event (pin, archive of an index-only session). */
-  reloadSidebar: () => Promise<void>;
+  /** Re-reads the changed rows for actions that change list state without emitting a runtime event (pin, archive of an index-only session). */
+  refreshSidebar: () => Promise<void>;
   onArchived: (sessionId: string) => void;
   onResumed: (sessionId: string) => void;
 };
 
 /** Right-click actions on sidebar sessions: menu state, execution and a short-lived result notice. */
-export const useSessionActions = ({ transport, reloadSidebar, onArchived, onResumed }: SessionActionsInput) => {
+export const useSessionActions = ({ transport, refreshSidebar, onArchived, onResumed }: SessionActionsInput) => {
   const [menu, setMenu] = useState<SessionMenu | undefined>();
   const [rename, setRename] = useState<SessionRename | undefined>();
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | undefined>();
@@ -56,13 +56,13 @@ export const useSessionActions = ({ transport, reloadSidebar, onArchived, onResu
         try {
           await transport.sessionBrowser.rename({ sessionId: rename.sessionId, title });
           setRename(undefined);
-          await reloadSidebar();
+          await refreshSidebar();
         } catch (error) {
           setRename((current) => (current ? { ...current, busy: false, error: (error as Error).message } : current));
         }
       })();
     },
-    [rename, transport, reloadSidebar]
+    [rename, transport, refreshSidebar]
   );
 
   const renameDialog: SessionRenameController = { state: rename, open: openRename, close: closeRename, submit: submitRename };
@@ -79,11 +79,11 @@ export const useSessionActions = ({ transport, reloadSidebar, onArchived, onResu
             return;
           case "pin":
           case "unpin":
-            await reloadSidebar();
+            await refreshSidebar();
             return;
           case "archive":
             onArchived(sessionId);
-            await reloadSidebar();
+            await refreshSidebar();
             return;
           case "open_rollout":
             await transport.file.runAction({ path: result.rolloutPath, action: "open" });
@@ -100,7 +100,7 @@ export const useSessionActions = ({ transport, reloadSidebar, onArchived, onResu
         setNotice({ text: action + " 失败：" + (error as Error).message, error: true });
       }
     },
-    [transport, reloadSidebar, onArchived, onResumed]
+    [transport, refreshSidebar, onArchived, onResumed]
   );
 
   return { menu, closeMenu: () => setMenu(undefined), openMenu, run, notice, clearNotice: () => setNotice(undefined), renameDialog };

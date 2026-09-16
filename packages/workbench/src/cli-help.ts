@@ -58,6 +58,8 @@ function describe(schema: z.ZodTypeAny, sample = false, key = "value"): unknown 
 
 export function methodHelp(method: string): string | undefined {
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
+    "sessionBrowser.list": { params: "workspaceId: string; kind?: user | agent", state: "桌面在线；一次返回该 workspace 会话列表的全部行与当前 revision。", example: { workspaceId: "<workspaceId>" } },
+    "sessionBrowser.changes": { params: "workspaceId: string; revision: string; kind?: user | agent", state: "桌面在线；返回自该 revision 以来变化的行与被移除的行标识；revision 不可用时返回 full-required。", example: { workspaceId: "<workspaceId>", revision: "<revision>" } },
     "sessionBrowser.open": { params: "sessionId: string; forceProviderHydration?: boolean", state: "桌面在线；进入会话并按当前 rollout 刷新 Codex 历史。", example: { sessionId: "<sessionId>" } },
     "sessionBrowser.rename": { params: "sessionId: string, title: 非空 string", state: "桌面在线；改会话标题，返回保存后的标题。列表中的会话都可用，未加载的历史会话改其索引记录。", example: { sessionId: "<sessionId>", title: "新标题" } },
     "chatTree.get": { params: "sessionId: string", state: "桌面在线；读取完整会话树，节点包含所属 sessionId 与 canArchive。", example: { sessionId: "<sessionId>" } },
