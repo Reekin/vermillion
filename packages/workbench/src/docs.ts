@@ -53,6 +53,36 @@ const isTextContent = (bytes: Buffer): boolean =>
 const samePath = (a: string, b: string): boolean =>
   toPosix(resolve(a)).toLowerCase() === toPosix(resolve(b)).toLowerCase();
 
+/**
+ * Section labels combine the enclosing heading with a free-text qualifier and line hint:
+ * `流转 / 合同修订号与提交依据（L41）` or `从哪里开始（L5）`. Several `；`-separated labels
+ * name one section each; every qualifier that happens to be a heading is used.
+ */
+const sectionHeadingNames = (section: string): string[] =>
+  section.split("；").flatMap((part) => part.split("/"))
+    .map((part) => part.replace(/（[^）]*）/g, "").replace(/\([^)]*\)/g, "").trim())
+    .filter(Boolean);
+
+/**
+ * Markdown blocks of the named headings; a block runs to the next heading of the same or higher
+ * level. The most specific match wins, so `Spec / Alpha` follows Alpha instead of the whole document.
+ */
+const headingBlocks = (content: string, names: string[]): string[] => {
+  const lines = content.split("\n");
+  const headings = lines.flatMap((line, index) => {
+    const level = /^#+ /.exec(line)?.[0].trim().length ?? 0;
+    return level ? [{ index, level, text: line.replace(/^#+ /, "").trim() }] : [];
+  });
+  const matched = headings.flatMap((heading, position) =>
+    names.some((name) => heading.text.includes(name)) ? [{ heading, position }] : []);
+  if (!matched.length) return [];
+  const level = Math.max(...matched.map((entry) => entry.heading.level));
+  return matched.filter((entry) => entry.heading.level === level).flatMap(({ heading, position }) => {
+    const end = headings.slice(position + 1).find((next) => next.level <= heading.level)?.index ?? lines.length;
+    return [lines.slice(heading.index, end).join("\n").trim()];
+  });
+};
+
 const assertDocPathOrRoot = (path: string): void => {
   if (toPosix(path) === DOCS_DIR) return;
   assertDocPath(path);
@@ -440,6 +470,22 @@ export class DocsService {
   async committedDiff(path: string, from: string, to: string): Promise<string> {
     assertDocPath(path);
     return git(this.rootPath, ["diff", from, to, "--", ":(literal)" + path]);
+  }
+
+  /**
+   * Did the section a work item references change between two revisions? Undefined when the label
+   * names no heading in either revision, which leaves the caller with the committed diff.
+   */
+  async sectionChanged(path: string, from: string, to: string, section: string): Promise<boolean | undefined> {
+    assertDocPath(path);
+    const names = sectionHeadingNames(section);
+    if (!names.length) return undefined;
+    const [before, after] = await Promise.all([this.read(path, from), this.read(path, to)]);
+    const previous = headingBlocks(before, names);
+    const next = headingBlocks(after, names);
+    if (!previous.length || !next.length) return undefined;
+    const normalize = (blocks: string[]) => blocks.join("\n").replace(/\s+/g, " ").trim();
+    return normalize(previous) !== normalize(next);
   }
 
   /**

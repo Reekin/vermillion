@@ -293,6 +293,21 @@ it("rejects unsupported historical state before dispatch and leaves every histor
   expect(await readFile(missionPath, "utf8")).toBe('{"historical":true}');
 });
 
+it("refuses a record that still carries the pre-notice execution message", async () => {
+  const { root, service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  const path = join(root, ".vermillion", "workitems", item.workItemId + ".json");
+  const record = JSON.parse(await readFile(path, "utf8"));
+  delete record.execution.notices;
+  record.execution.message = "旧的待送达消息";
+  const raw = JSON.stringify(record, null, 2) + "\n";
+  await writeFile(path, raw);
+
+  await expect(new WorkspaceStore(root).listRecords()).rejects.toThrow("Unsupported or invalid workbench record");
+  await expect(service.refreshActions(workspaceId)).rejects.toThrow("Convert stored data explicitly");
+  expect(await readFile(path, "utf8")).toBe(raw);
+});
+
 it("blocks preparation at workspace load when separate action history requires conversion", async () => {
   const { root, service, options, workspaceId } = await fixture();
   await service.startWork(workspaceId, { sessionId: "design", turnId: "source" });
@@ -324,14 +339,14 @@ it("persists runtime only in Execution and preserves concurrent contract, heartb
   expect(stored.item).toMatchObject({ title: "Adjusted", status: "queued" });
   expect(stored.item).not.toHaveProperty("run");
   expect(stored.execution).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", attempts: 1, failure: "model unavailable", stage: "deliver" });
-  expect(stored.execution.message).toContain("Read updated contract");
+  expect(stored.execution.notices).toEqual([expect.objectContaining({ kind: "contract", text: expect.stringContaining("Read updated contract") })]);
   expect(stored.execution).not.toHaveProperty("resumeMessage");
   expect(stored.execution).not.toHaveProperty("lastFailure");
   const restarted = new WorkbenchService(options);
   try {
     const projected = await restarted.getWorkItem(workspaceId, item.workItemId);
     expect(projected.run).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", attempts: 1, lastFailure: "model unavailable", retryAt: stored.execution.retryAt });
-    expect(projected.run.resumeMessage).toBe(stored.execution.message);
+    expect(projected.run.resumeMessage).toContain("Read updated contract");
     const decision = await restarted.createDecision(workspaceId, { workItemId: item.workItemId, question: "Continue?", context: "Retry", options: [{ key: "retry", label: "Retry" }] });
     await restarted.answerDecision(workspaceId, decision.decisionId, { key: "retry" });
     expect((await restarted.getWorkItem(workspaceId, item.workItemId)).run).toMatchObject({ attempts: 0 });
@@ -547,4 +562,31 @@ it("hides retired built-in roles while preserving their files and custom roles",
   expect(ids).toContain("my-role");
   expect(ids).not.toContain("steward"); expect(ids).not.toContain("supervisor"); expect(ids).not.toContain("workspace-repair");
   expect(await readFile(join(global, "steward.md"), "utf8")).toBe("# steward");
+});
+
+it("keeps the contract revision while only scheduling fields change", async () => {
+  const { service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+
+  const updated = await service.updateWorkItem(workspaceId, item.workItemId, { title: "Renamed", needs: ["shared-instance"], note: "Scheduling only" });
+
+  expect(updated.contractRevision).toBe(0);
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+  expect(closed).toMatchObject({ status: "closed", contractRevision: 0 });
+});
+
+it("asks the worker to re-read an externally edited contract and leaves its own edits undelivered", async () => {
+  const { service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
+
+  const external = await service.updateWorkItem(workspaceId, item.workItemId, { objective: "Updated result", note: "Requirement moved" });
+  expect(external.run.resumeMessage).toContain("【合同调整】Requirement moved");
+  expect(external.run.resumeMessage).toContain("workItem.get");
+
+  const own = await service.updateWorkItem(workspaceId, item.workItemId, { sessionId: "worker", note: "Own adjustment", scope: { ...contract.scope, allowedPaths: ["src"] } });
+  expect(own.contractRevision).toBe(2);
+  expect(own.decisions).toContain("工单调整：Own adjustment");
+  expect(own.run.resumeMessage).toBe("【合同调整】Requirement moved\n立即重新执行 vermillion workItem.get 读取最新合同，按新合同继续；已完成但不再需要的部分回退。");
 });

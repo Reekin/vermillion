@@ -92,7 +92,7 @@ export const workbenchRpc = {
   "docs.discard": { params: zWs.extend({ paths: z.array(z.string().min(1)).min(1) }), result: z.array(zDocChange) },
   "docs.diff": { params: zWs.extend({ path: z.string().min(1) }), result: z.object({ diff: z.string() }) },
   "docs.commit": {
-    params: zWs.extend({ message: z.string().trim().min(1), paths: z.array(z.string()).min(1).optional() }),
+    params: zWs.extend({ message: z.string().trim().min(1), paths: z.array(z.string()).min(1).optional(), sessionId: z.string().min(1).optional() }),
     result: zDocCommit
   },
   "search.query": { params: zSearchQuery, result: zSearchResult },
@@ -194,6 +194,8 @@ export const workbenchRpc = {
   "workItem.update": {
     params: zWi.extend({
       note: z.string().min(1),
+      /** The session raising the change; a worker editing its own item passes its own session and is not notified. */
+      sessionId: z.string().min(1).optional(),
       worktreePath: z.string().optional(), branch: z.string().optional(),
       title: z.string().min(1).optional(),
       objective: z.string().optional(),
