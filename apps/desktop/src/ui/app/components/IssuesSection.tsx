@@ -58,7 +58,7 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
     <div className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
       <Field compact aria-label="搜索 Issue" placeholder="搜索 Issue" className="min-w-48 flex-1" value={search} onChange={(event) => setSearch(event.target.value)} />
       <Field kind="select" compact aria-label="Issue 状态" className="w-32" value={filter} onChange={(event) => setFilter(event.target.value)}>
-        <option value="decision">待决策</option><option value="all">全部议题</option><option value="open">待处理</option>
+        <option value="decision">待决策</option><option value="all">全部 Issue</option><option value="open">待处理</option>
         <option value="investigating">调查中</option><option value="started">已开工</option><option value="suggestion">建议</option>
         <option value="closed">关闭</option><option value="duplicate">重复</option>
       </Field>
@@ -74,7 +74,7 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
           onClick={() => setSelectedId(issue.issueId)}
           columns={{ info: <span>{issue.type === "suggestion" && "建议 · "}{issue.domainId} · {sourceLabel[issue.source]} · {relativeTime(issue.updatedAt)}</span>, status: <Badge tone={issue.status === "decision" ? "accent" : "neutral"}>{statusLabel[issue.status]}</Badge> }} />
       </li>)}
-    </ul> : <EmptyState title={filter === "decision" ? "没有待决策的 Issue" : "没有符合条件的 Issue"} hint="调整筛选，或新建一条议题。" />}
+    </ul> : <EmptyState title={filter === "decision" ? "没有待决策的 Issue" : "没有符合条件的 Issue"} hint="调整筛选，或新建一条 Issue。" />}
     {creating && <CreateIssueDialog client={client} workspaceId={workspaceId} domainIds={availableDomainIds} onCreated={(issue) => { setCreating(false); setSelectedId(issue.issueId); }} onClose={() => setCreating(false)} />}
     {selected && <IssueDialog key={selected.issueId} client={client} workspaceId={workspaceId} issue={selected} issues={issues} workItems={workItems}
       onClose={() => setSelectedId(undefined)} onOpenIssue={setSelectedId} onOpenSession={onOpenSession} onOpenWorkItem={onOpenWorkItem} />}
@@ -172,7 +172,7 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
           {issue.sourceSessionId && <Button variant="ghost" outlined onClick={() => {
             onClose(); onOpenSession(issue.sourceSessionId!, issue.sourceTurnId);
           }}>巡检会话</Button>}
-          {issue.duplicateOf && <Button variant="ghost" outlined onClick={() => onOpenIssue(issue.duplicateOf!)}>原议题</Button>}
+          {issue.duplicateOf && <Button variant="ghost" outlined onClick={() => onOpenIssue(issue.duplicateOf!)}>原 Issue</Button>}
           {linked.map((item) => <Button key={item.workItemId} variant="ghost" outlined onClick={() => {
             onClose(); onOpenWorkItem(item.workItemId);
           }}>工单</Button>)}
@@ -186,7 +186,7 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
           </Button>}
         </>}
       >
-        <DetailSection title="议题">{issue.title}</DetailSection>
+        <DetailSection title="Issue">{issue.title}</DetailSection>
         <DetailSection title="问题与影响">{issue.summary || "未填写"}</DetailSection>
         {issue.requirement && <DetailSection title="要求依据">
           {[issue.requirement.text, issue.requirement.path, issue.requirement.section, issue.requirement.commit].filter(Boolean).join("\n")}
@@ -199,7 +199,7 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
         {issue.decisionQuestion && <DetailSection title="需要决定">{issue.decisionQuestion}</DetailSection>}
         {issue.suggestion && <DetailSection title="建议方向">{issue.suggestion}</DetailSection>}
         {issue.resolutionReason && <DetailSection title="处理结果">
-          {issue.resolutionReason}{issue.duplicateOf ? "\n原议题：" + issue.duplicateOf : ""}
+          {issue.resolutionReason}{issue.duplicateOf ? "\n原 Issue：" + issue.duplicateOf : ""}
         </DetailSection>}
         <DetailSection title="活动">
           <div className="space-y-1">
@@ -216,8 +216,8 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
             <option value="closed">关闭</option>
             <option value="duplicate">重复</option>
           </Field>
-          {resolution === "duplicate" && <Field kind="select" label="原议题" value={duplicateOf} onChange={(event) => setDuplicateOf(event.target.value)}>
-            <option value="">选择原议题</option>
+          {resolution === "duplicate" && <Field kind="select" label="原 Issue" value={duplicateOf} onChange={(event) => setDuplicateOf(event.target.value)}>
+            <option value="">选择原 Issue</option>
             {issues.filter((entry) => entry.issueId !== issue.issueId).map((entry) => <option key={entry.issueId} value={entry.issueId}>{entry.title}</option>)}
           </Field>}
           <Field kind="textarea" label="处理原因" rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />

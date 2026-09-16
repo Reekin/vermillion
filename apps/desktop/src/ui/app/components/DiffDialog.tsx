@@ -19,7 +19,7 @@ export const DiffDialog = ({ files, initialPath, loading, error, onClose }: {
   const parsed = useMemo(() => parseUnifiedDiff(selected?.diff), [selected?.diff]);
 
   return createPortal(
-    <Modal title="Diff" width={1040} height="78vh" onClose={onClose}>
+    <Modal title="差异" width={1040} height="78vh" onClose={onClose}>
       <div className="vm-diff">
         {files.length > 1 && (
           <nav className="vm-diff__files" aria-label="变更文件">

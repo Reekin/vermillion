@@ -125,7 +125,7 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
         targetDomainId={linkedIssueDomain}
         targetIssueId={issueTarget?.workspaceId === activeWorkspaceId ? issueTarget.issueId : undefined} onTargetConsumed={() => store.setState({ issueTarget: undefined })} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)}
         onOpenWorkItem={(workItemId) => { setLinkedWorkItemTarget({ workspaceId: activeWorkspaceId, workItemId, nonce: Date.now() }); store.getState().setWorkspaceSection("workItems"); }} />}
-      {section === "automation" && <EmptyState title="Automation 暂未提供" />}
+      {section === "automation" && <EmptyState title="自动化暂未提供" />}
     </div>}
   </section>;
 };
@@ -243,7 +243,7 @@ const DomainsSection = ({ client, workspaceId, domains, patrolRuns, onOpenDoc, o
   };
   const target = domains.find((domain) => domain.domainId === removing);
   const listed = <div className="flex w-52 shrink-0 flex-col border-r border-border">
-    <PanelHeader title="Domain"><IconButton icon={Plus} label="新建领域" onClick={() => setCreating((value) => !value)} /></PanelHeader>
+    <PanelHeader title="领域"><IconButton icon={Plus} label="新建领域" onClick={() => setCreating((value) => !value)} /></PanelHeader>
     {creating && <form className="flex items-center gap-1 px-4 pb-2" onSubmit={(event) => { event.preventDefault(); void create(); }}>
       <Field value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="领域 id" className="w-28" /><Button type="submit" size="sm" disabled={!draft.trim()}>创建</Button>
     </form>}

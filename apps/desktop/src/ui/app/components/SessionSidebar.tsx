@@ -131,10 +131,10 @@ export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, 
       <header className="px-4 pt-3"><span className="eyebrow">工作台</span></header>
       <div className="flex items-center gap-1 px-3 pb-2 pt-3">
         <Button variant={isDraft ? "secondary" : "accent"} size="sm" className="shrink-0" onClick={onNewChat}>
-          <Plus size={13} /> New Chat
+          <Plus size={13} /> 新建会话
         </Button>
         <Field kind="select" compact aria-label="筛选 workspace" className="min-w-0 flex-1" value={workspaceFilterId ?? ""} onChange={(event) => onWorkspaceFilter(event.target.value || undefined)}>
-          <option value="">All</option>
+          <option value="">全部</option>
           {[...workspaceLabelById].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </Field>
       </div>
@@ -147,7 +147,7 @@ export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, 
         {isDraft && (
           <li><ListRow selected title="新对话" meta="发送第一条消息后创建" /></li>
         )}
-        {sessions.length === 0 && !isDraft && !loading && <li className="px-4 py-2 text-caption text-muted-foreground">还没有会话。点 New Chat 开始。</li>}
+        {sessions.length === 0 && !isDraft && !loading && <li className="px-4 py-2 text-caption text-muted-foreground">还没有会话。点新建会话开始。</li>}
         {rows.map(({ session, depth, expanded }) => (
           <li key={session.sessionId} data-session-row={session.sessionId}>
             <SessionRow

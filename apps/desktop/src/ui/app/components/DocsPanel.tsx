@@ -88,7 +88,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
   }, [pending]);
 
   if (!workspace) {
-    return <EmptyState title="未选择 workspace" hint="在 Composer 里选择 workspace 后，这里显示它的文档。" />;
+    return <EmptyState title="未选择 workspace" hint="在输入器里选择 workspace 后，这里显示它的文档。" />;
   }
 
   const toggle = (path: string) =>
@@ -140,7 +140,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
 
   return (
     <div className="flex h-full flex-col" onContextMenu={(event) => onContextMenu(event, ".vermillion/docs")}>
-      <PanelHeader title="Docs">
+      <PanelHeader title="文档">
         {pending.length > 0 && <span className="font-mono text-micro text-accent-strong">{pending.length} 处变更</span>}
       </PanelHeader>
       {viewError && <InlineNotice tone="error">工作区数据加载失败：<span className="break-all font-mono text-micro text-muted-foreground">{viewError}</span></InlineNotice>}
@@ -158,10 +158,10 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
           y={menu.y}
           onClose={() => setMenu(undefined)}
           items={[
-            { key: "commit", label: "Commit", disabled: pending.length === 0, onSelect: () => setCommitOpen(true) },
+            { key: "commit", label: "提交", disabled: pending.length === 0, onSelect: () => setCommitOpen(true) },
             { key: "discard", label: "丢弃变更", disabled: !pending.some((change) => change.path === menu.path || change.path.startsWith(menu.path + "/")), onSelect: () => setDiscardTarget({ workspaceId: workspace.workspaceId, path: menu.path }) },
             ...(docs.some((doc) => doc.path === menu.path) || changeByPath.has(menu.path)
-              ? [{ key: "diff", label: "Diff", onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
+              ? [{ key: "diff", label: "查看差异", onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
               : []),
             { key: "reveal", label: "在文件管理器中显示", onSelect: () => void onFileAction(absolute(menu.path), "reveal") },
             { key: "open", label: "用默认编辑器打开", onSelect: () => void onFileAction(absolute(menu.path), "open") }

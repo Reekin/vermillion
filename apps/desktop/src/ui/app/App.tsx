@@ -38,11 +38,11 @@ type AppProps = {
 const tabs: Array<{ id: WorkspaceSection; label: string }> = [
   { id: "sessions", label: "会话" },
   { id: "workItems", label: "工单" },
-  { id: "docs", label: "Docs" },
-  { id: "domains", label: "Domain" },
+  { id: "docs", label: "文档" },
+  { id: "domains", label: "领域" },
   { id: "roles", label: "角色" },
   { id: "issues", label: "Issues" },
-  { id: "automation", label: "Automation" },
+  { id: "automation", label: "自动化" },
   { id: "manage", label: "管理" }
 ];
 
@@ -287,7 +287,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   </>}
                 />
               </main>
-              <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="Docs">
+              <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="文档">
                 <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
                   <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
                     const workspaceId = sessionId ? sessionWorkspaceId : draftWorkspaceId;

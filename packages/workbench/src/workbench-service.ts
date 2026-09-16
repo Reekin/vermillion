@@ -708,7 +708,7 @@ export class WorkbenchService {
       `检查依据:\n${run.requirementRefs.map((ref) => `- ${ref.path} @ ${ref.commit}`).join("\n")}`,
       `当前自动开单: ${domain.config.autoWorkEnabled ? "启用" : "关闭"}\n授权范围:\n${domain.config.authorizationScope.length ? domain.config.authorizationScope.map((entry) => "- " + entry).join("\n") : "- 未授权"}`,
       `已有 Issue 摘要:\n${issues.length ? issues.map((issue) => `- ${issue.issueId} [${issue.status}] ${issue.title}`).join("\n") : "- 无"}`,
-      `先通过 docs.read、issue.list / issue.get 核对材料。新问题用 issue.create，并传 source=maintainer、patrolRunId=${run.patrolRunId}；已有议题用 issue.update 补充证据，同样传 patrolRunId=${run.patrolRunId}，让记录回链到本轮巡检会话。证据不足标为 investigating，需要取舍标为 decision 并提供 decisionQuestion，优化想法使用 suggestion 类型。`,
+      `先通过 docs.read、issue.list / issue.get 核对材料。新问题用 issue.create，并传 source=maintainer、patrolRunId=${run.patrolRunId}；已有 Issue 用 issue.update 补充证据，同样传 patrolRunId=${run.patrolRunId}，让记录回链到本轮巡检会话。证据不足标为 investigating，需要取舍标为 decision 并提供 decisionQuestion，优化想法使用 suggestion 类型。`,
       "只有满足领域授权时才调用 domain.issue.workItem.create；该入口会再次核对巡检会话、授权、固定要求引用和证据。不要直接修改代码、文档或规范。",
       `完成后必须调用：vermillion domain.patrol.complete '${JSON.stringify({ workspaceId, patrolRunId: run.patrolRunId, sessionId: run.sessionId ?? "<sessionId>", issueIds: ["<issueId>"], summary: "<本轮结果>" })}'。没有 Issue 时传空数组。`
     ].join("\n\n");
@@ -738,7 +738,7 @@ export class WorkbenchService {
       source, type: input.type ?? "problem", status: input.status ?? "open", requirement: input.requirement,
       evidence: input.evidence ?? [], suggestion: input.suggestion, decisionQuestion: input.decisionQuestion,
       sourceSessionId: patrol?.sessionId, sourceTurnId: patrol?.turnId, workItemIds: [], unread: source !== "user",
-      activities: [{ at: now, kind: "created", message: source === "user" ? "用户创建议题" : source === "maintainer" ? "Maintainer 创建议题" : "Liaison 创建议题", sessionId: patrol?.sessionId }],
+      activities: [{ at: now, kind: "created", message: source === "user" ? "用户创建 Issue" : source === "maintainer" ? "Maintainer 创建 Issue" : "Liaison 创建 Issue", sessionId: patrol?.sessionId }],
       createdAt: now, updatedAt: now
     };
     this.validateIssue(issue);
@@ -759,7 +759,7 @@ export class WorkbenchService {
       if (!current) throw new Error("Unknown issue: " + issueId);
       const { appendEvidence = [], patrolRunId: _patrolRunId, ...fields } = changes;
       const status = fields.status ?? current.status;
-      const message = appendEvidence.length ? `补充 ${appendEvidence.length} 条证据` : status !== current.status ? `状态变为 ${issueStatusText[status]}` : "更新议题";
+      const message = appendEvidence.length ? `补充 ${appendEvidence.length} 条证据` : status !== current.status ? `状态变为 ${issueStatusText[status]}` : "更新 Issue";
       const issue: Issue = { ...current, ...fields,
         evidence: [...current.evidence, ...appendEvidence],
         activities: [...current.activities, { at: now, kind: appendEvidence.length ? "evidence" : status === "closed" || status === "duplicate" ? "resolved" : "updated", message,
@@ -812,7 +812,7 @@ export class WorkbenchService {
     if (issue.status === "started" && !issue.workItemIds.length) throw new Error("已开工 Issue 必须关联实际工单。");
     if (issue.status === "decision" && !issue.decisionQuestion) throw new Error("待决策 Issue 必须提供具体决策问题。");
     if (issue.status === "closed" && !issue.resolutionReason) throw new Error("关闭 Issue 必须提供处理原因。");
-    if (issue.status === "duplicate" && (!issue.duplicateOf || !issue.resolutionReason)) throw new Error("重复 Issue 必须提供原议题和处理原因。");
+    if (issue.status === "duplicate" && (!issue.duplicateOf || !issue.resolutionReason)) throw new Error("重复 Issue 必须提供原 Issue 和处理原因。");
   }
 
   private async commitDocChanges(docs: DocsService, message: string, paths: string[] | undefined) {
