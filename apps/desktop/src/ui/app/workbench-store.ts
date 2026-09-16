@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import type { AgentRun, DecisionCard, DocChange, DocFile, DomainDefinition, InboxItem, Issue, PatrolRun, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
 
-export type Panel = "workbench" | "inbox" | "settings";
+/** Full-area panels: the workbench, and Inbox when it is expanded out of its popup. */
+export type Panel = "workbench" | "inbox";
+/** Entries that open over the current panel instead of replacing it. */
+export type Overlay = "inbox" | "settings";
 export type WorkspaceSection = "workItems" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation" | "manage";
 
 export type CommitOutcome =
@@ -36,7 +39,7 @@ export type EditorTarget = { kind: "doc"; path: string; line?: number; column?: 
 export type WorkbenchState = {
   client: WorkbenchClient;
   panel: Panel;
-  overlay: "inbox" | undefined;
+  overlay: Overlay | undefined;
   /** Workbench tab selection survives navigation to other panels. */
   workspaceSection: WorkspaceSection;
   expandedInboxDetails: Record<string, boolean>;
@@ -67,7 +70,7 @@ export type WorkbenchState = {
   setDocCommit: (result: CommitOutcome | undefined) => void;
 
   setPanel: (panel: Panel) => void;
-  openOverlay: (panel: "inbox") => void;
+  openOverlay: (panel: Overlay) => void;
   closeOverlay: () => void;
   setWorkspaceSection: (section: WorkspaceSection) => void;
   toggleInboxDetails: (workspaceId: string, decisionId: string) => void;

@@ -1,16 +1,16 @@
 import { Inbox, PanelsTopLeft, Settings } from "lucide-react";
 import { cn } from "../lib/cn.js";
-import type { Panel } from "../workbench-store.js";
+import type { Overlay, Panel } from "../workbench-store.js";
 
 type RailProps = {
   panel: Panel;
-  overlay: "inbox" | undefined;
+  overlay: Overlay | undefined;
   inboxCount: number;
-  onSelect: (panel: Panel) => void;
+  onSelect: (target: Panel | Overlay) => void;
   onOpenPage: (panel: Panel) => void;
 };
 
-const items: Array<{ id: Panel; label: string; icon: typeof Inbox }> = [
+const items: Array<{ id: Panel | Overlay; label: string; icon: typeof Inbox }> = [
   { id: "workbench", label: "工作台", icon: PanelsTopLeft },
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "settings", label: "设置", icon: Settings }

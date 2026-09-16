@@ -8,20 +8,11 @@ import type {
 } from "@vermillion/shared";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
-import { Button, Field, InlineNotice, PanelHeader } from "./ui.js";
+import { Button, Field, InlineNotice } from "./ui.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
 };
-
-const programSourceLabel = (source: string): string =>
-  source === "custom"
-    ? "自定义路径"
-    : source === "configured"
-      ? "设置中的路径"
-      : source === "environment"
-        ? "环境变量"
-        : "默认命令";
 
 export const SettingsPage = ({ transport }: SettingsPageProps) => {
   const [settings, setSettings] = useState<SessionSettingsRpc | undefined>(undefined);
@@ -29,7 +20,6 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [modelCatalogError, setModelCatalogError] = useState<string | undefined>(undefined);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const reload = useCallback(async () => {
     const [nextSettings, nextEngines] = await Promise.all([
@@ -38,7 +28,6 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
     ]);
     setSettings(nextSettings);
     setEngines(nextEngines);
-    setDrafts({ ...nextSettings.engineProgramPathsByEngineId });
   }, [transport]);
 
   useEffect(() => {
@@ -91,7 +80,6 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
       try {
         const updated = await transport.settings.update(input);
         setSettings(updated);
-        setDrafts({ ...updated.engineProgramPathsByEngineId });
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -105,28 +93,27 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
       if (!picked || picked.canceled || !picked.path) {
         return;
       }
-      setDrafts((current) => ({ ...current, [engineId]: picked.path as string }));
+      await save({
+        engineProgramPathsByEngineId: {
+          ...(settings?.engineProgramPathsByEngineId ?? {}),
+          [engineId]: picked.path
+        }
+      });
     },
-    []
+    [save, settings]
   );
 
-  const saveProgramPath = useCallback(
+  const clearProgramPath = useCallback(
     async (engineId: string) => {
       const next = { ...(settings?.engineProgramPathsByEngineId ?? {}) };
-      const path = (drafts[engineId] ?? "").trim();
-      if (path) {
-        next[engineId] = path;
-      } else {
-        delete next[engineId];
-      }
+      delete next[engineId];
       await save({ engineProgramPathsByEngineId: next });
     },
-    [drafts, save, settings]
+    [save, settings]
   );
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-auto p-4">
-      <PanelHeader title="设置" align="start" />
+    <div className="flex flex-col gap-4 p-5">
       {error && <InlineNotice tone="error">{error}</InlineNotice>}
       <Field
         kind="select"
@@ -173,52 +160,43 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
       <div className="flex max-w-2xl flex-col gap-3">
         {engines.map((engine) => {
           const resolution = settings?.engineProgramResolutionsByEngineId?.[engine.engineId];
+          const customPath = settings?.engineProgramPathsByEngineId[engine.engineId];
+          const programPath = resolution
+            ? (resolution.found && resolution.resolvedPath) || resolution.path
+            : "";
           return (
-            <div key={engine.engineId} className="flex flex-col gap-1">
-              <Field
-                label={`${engine.displayName} 程序路径`}
-                value={drafts[engine.engineId] ?? ""}
-                placeholder={resolution?.path ?? engine.engineId}
-                hint={
-                  resolution
-                    ? `当前解析：${resolution.path}（${programSourceLabel(resolution.source)}）`
-                    : undefined
-                }
-                onChange={(event) =>
-                  setDrafts((current) => ({
-                    ...current,
-                    [engine.engineId]: event.target.value
-                  }))
-                }
-              />
-              <div className="flex items-center gap-1">
+            <div key={engine.engineId} className="flex flex-col gap-2">
+              <span className="eyebrow">{`${engine.displayName} 程序路径`}</span>
+              <div className="flex items-center gap-2">
+                <span
+                  className="min-w-0 flex-1 truncate font-mono text-body text-foreground"
+                  title={programPath}
+                >
+                  {programPath}
+                </span>
                 <Button
                   variant="ghost"
                   size="sm"
+                  outlined
+                  disabled={!settings}
                   onClick={() => void pickProgramPath(engine.engineId)}
                 >
-                  选择文件
+                  选择
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={
-                    (drafts[engine.engineId] ?? "").trim() ===
-                    (settings?.engineProgramPathsByEngineId[engine.engineId] ?? "")
-                  }
-                  onClick={() => void saveProgramPath(engine.engineId)}
-                >
-                  保存
-                </Button>
+                {customPath && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    outlined
+                    onClick={() => void clearProgramPath(engine.engineId)}
+                  >
+                    恢复默认
+                  </Button>
+                )}
               </div>
-              {resolution && resolution.found && resolution.resolvedPath && (
-                <span className="text-caption text-muted-foreground">
-                  {`已找到：${resolution.resolvedPath}`}
-                </span>
-              )}
               {resolution && !resolution.found && (
-                <InlineNotice tone="error">
-                  {`未找到 ${resolution.path}（${programSourceLabel(resolution.source)}），新建会话时该引擎无法启动。`}
+                <InlineNotice tone="error" className="px-0 pb-0">
+                  {`未找到 ${resolution.path}，新建会话时该引擎无法启动。`}
                 </InlineNotice>
               )}
             </div>

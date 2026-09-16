@@ -23,7 +23,7 @@ import { Button, InlineNotice, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
-import { createWorkbenchStore, type Panel, type WorkspaceSection } from "./workbench-store.js";
+import { createWorkbenchStore, type Overlay, type Panel, type WorkspaceSection } from "./workbench-store.js";
 import { createRendererWorkbenchClient } from "./workbench-client.js";
 import "./app.css";
 import { SessionNavigationContext, renderSessionNavigation } from "./session-navigation.js";
@@ -187,8 +187,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   );
 
   const onSelect = useCallback(
-    (next: Panel) => {
-      if (next !== "inbox") setPanel(next);
+    (next: Panel | Overlay) => {
+      if (next === "workbench") setPanel(next);
       else if (overlay === next) closeOverlay();
       else openOverlay(next);
     },
@@ -305,9 +305,10 @@ export const App = ({ sessionStore, transport }: AppProps) => {
           title="Inbox" onClose={closeOverlay} onExpand={() => setPanel("inbox")}>
           <InboxPanel store={store} includeProcessed={overlay !== "inbox" && panel === "inbox"} />
         </Modal>
-        {panel === "settings" && <section className="h-full" aria-label="设置">
+        <Modal contained presentation={overlay === "settings" ? "modal" : "hidden"}
+          title="设置" width={640} onClose={closeOverlay}>
           <SettingsPage transport={transport} />
-        </section>}
+        </Modal>
       </div>
       </div>
       {navigationError && <InlineNotice tone="error">{navigationError}</InlineNotice>}

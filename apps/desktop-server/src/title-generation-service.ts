@@ -5,6 +5,8 @@ const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_PROMPT_CONTENT_LENGTH = 4_000;
 const MAX_TITLE_LENGTH = 48;
+/** Reasoning models spend most of the budget on hidden reasoning before writing the title. */
+const MAX_OUTPUT_TOKENS = 1024;
 
 type FetchLike = typeof fetch;
 type MaybePromise<T> = T | Promise<T>;
@@ -98,7 +100,7 @@ export const createOpenAiSessionTitleGenerator = (
                 ]
               }
             ],
-            max_output_tokens: 32
+            max_output_tokens: MAX_OUTPUT_TOKENS
           }),
           signal: controller.signal
         });
@@ -110,7 +112,14 @@ export const createOpenAiSessionTitleGenerator = (
         }
 
         const payload = (await response.json()) as unknown;
-        return sanitizeGeneratedTitle(extractResponseText(payload));
+        const title = sanitizeGeneratedTitle(extractResponseText(payload));
+        if (!title) {
+          console.warn("[vermillion] Title generation returned no usable text", {
+            model,
+            status: (payload as { status?: unknown } | undefined)?.status
+          });
+        }
+        return title;
       } finally {
         clearTimeout(timeout);
       }
