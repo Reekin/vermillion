@@ -76,6 +76,54 @@ describe("pi engine integration", () => {
     expect(integration.capabilities.worktree).toBeUndefined();
     expect(integration.capabilities.checkpoint).toBeUndefined();
   });
+
+  it("applies the scheduler metadata when a pi session is resumed", async () => {
+    const updates: Array<{ sessionId: string; metadata: Record<string, unknown> }> = [];
+    const provider = new PiSessionActionsProvider({
+      runtimePort: undefined as never,
+      now: () => "2026-01-01T00:00:00.000Z"
+    });
+    const result = await provider.runAction({
+      sessionId: "pi-session:resume-1",
+      engineId: "pi",
+      indexEntry: {
+        workspaceId: "workspace-pi-resume",
+        sessionId: "pi-session:resume-1",
+        conversationId: "conversation-pi-resume",
+        engineId: "pi",
+        providerKind: "pi-session",
+        providerSessionId: "resume-1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        unreadState: "read",
+        source: "registry",
+        metadata: { cwd: "I:/workspace" }
+      },
+      runtimeService: {
+        updateSessionMetadata: async (
+          sessionId: string,
+          metadata: Record<string, unknown>
+        ) => {
+          updates.push({ sessionId, metadata });
+        },
+        getSnapshot: () => ({ conversations: [] })
+      } as unknown as SessionRuntimeService,
+      sessionIndexStore: undefined as never,
+      sessionIdentity: undefined as never,
+      action: "resume",
+      preserveExecution: true,
+      metadata: {
+        role: "worker",
+        workItemId: "wi-resume-1",
+        sessionProfile: { engineId: "pi", modelId: "gpt-5.6-luna" }
+      }
+    });
+    expect(result?.action).toBe("resume");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.sessionId).toBe("pi-session:resume-1");
+    expect(updates[0]?.metadata.role).toBe("worker");
+    expect(updates[0]?.metadata.workItemId).toBe("wi-resume-1");
+  });
 });
 
 describe.skipIf(!enabled)("pi runtime port", () => {

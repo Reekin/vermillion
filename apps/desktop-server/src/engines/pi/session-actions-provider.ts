@@ -80,6 +80,25 @@ export class PiSessionActionsProvider implements SessionAgentActionsProvider {
       if (!resolveProviderSessionId(input)) {
         throw new Error("Resume is unavailable without a pi session id.");
       }
+      // 调度器把 Worker 角色、模型配置与 cwd 作为 resume 的 metadata 传进来，
+      // 不落到会话上就会一直沿用准备分支的身份。
+      if (!input.preserveExecution) {
+        await this.runtimePort.releaseSession(input.sessionId);
+      }
+      const cwd =
+        input.cwd ??
+        (typeof input.session?.metadata?.cwd === "string"
+          ? input.session.metadata.cwd
+          : undefined) ??
+        (typeof input.indexEntry?.metadata?.cwd === "string"
+          ? input.indexEntry.metadata.cwd
+          : undefined);
+      if (input.cwd || input.metadata) {
+        await input.runtimeService.updateSessionMetadata(input.sessionId, {
+          ...input.metadata,
+          ...(input.cwd ? { cwd } : {})
+        });
+      }
       return {
         action: "resume",
         resumed: true
