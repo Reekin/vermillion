@@ -65,6 +65,8 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
   const [pending, setPending] = useState<{ queryKey: string; loading: boolean }>({ queryKey, loading: true });
   const [failure, setFailure] = useState<{ queryKey: string; message: string }>();
   const generation = useRef(0);
+  const loadRef = useRef<Promise<void> | undefined>(undefined);
+  const refreshRef = useRef({ running: false, queued: false });
   const workspaces = result.queryKey === queryKey ? result.workspaces : {};
   const loading = pending.queryKey !== queryKey || pending.loading;
   const error = failure?.queryKey === queryKey ? failure.message : undefined;
@@ -72,22 +74,30 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
   loadedRef.current = { queryKey, workspaces };
 
   const loadAll = useCallback(async () => {
-    const run = ++generation.current;
-    setPending({ queryKey, loading: true });
-    setFailure(undefined);
+    const task = (async () => {
+      const run = ++generation.current;
+      setPending({ queryKey, loading: true });
+      setFailure(undefined);
+      try {
+        const snapshots = await Promise.all(
+          workspaceIds.map((workspaceId) => transport.sessionBrowser.list({ workspaceId, kind }))
+        );
+        if (run !== generation.current) return;
+        setResult({
+          queryKey,
+          workspaces: Object.fromEntries(snapshots.map((snapshot) => [snapshot.workspaceId, toWorkspaceSessions(snapshot)]))
+        });
+      } catch (cause) {
+        if (run === generation.current) setFailure({ queryKey, message: cause instanceof Error ? cause.message : String(cause) });
+      } finally {
+        if (run === generation.current) setPending({ queryKey, loading: false });
+      }
+    })();
+    loadRef.current = task;
     try {
-      const snapshots = await Promise.all(
-        workspaceIds.map((workspaceId) => transport.sessionBrowser.list({ workspaceId, kind }))
-      );
-      if (run !== generation.current) return;
-      setResult({
-        queryKey,
-        workspaces: Object.fromEntries(snapshots.map((snapshot) => [snapshot.workspaceId, toWorkspaceSessions(snapshot)]))
-      });
-    } catch (cause) {
-      if (run === generation.current) setFailure({ queryKey, message: cause instanceof Error ? cause.message : String(cause) });
+      await task;
     } finally {
-      if (run === generation.current) setPending({ queryKey, loading: false });
+      if (loadRef.current === task) loadRef.current = undefined;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transport, queryKey]);
@@ -102,36 +112,51 @@ export const useSessionSidebar = (input: { transport: DesktopTransport; store: R
   }, [loadAll]);
 
   const refreshChanges = useCallback(async () => {
-    const loaded = loadedRef.current;
-    if (loaded.queryKey !== queryKey) return;
-    const entries = Object.entries(loaded.workspaces);
-    if (entries.length === 0) return;
-    const run = generation.current;
+    // Overlapping events collapse into one extra pass instead of dropping the delta the loser carried.
+    if (refreshRef.current.running) {
+      refreshRef.current.queued = true;
+      return;
+    }
+    refreshRef.current.running = true;
     try {
-      const responses = await Promise.all(entries.map(async ([workspaceId, current]) => ({
-        workspaceId,
-        current,
-        response: await transport.sessionBrowser.changes({ workspaceId, revision: current.revision, kind })
-      })));
-      if (run !== generation.current) return;
-      const fullRequired = responses.some(({ response }) => response.status === "full-required");
-      setResult((state) => {
-        if (state.queryKey !== queryKey) return state;
-        let changed = false;
-        const next = { ...state.workspaces };
-        for (const { workspaceId, current, response } of responses) {
-          if (response.status === "full-required") continue;
-          if (next[workspaceId] !== current) continue;
-          const merged = applyChanges(current, response);
-          if (!merged) continue;
-          next[workspaceId] = merged;
-          changed = true;
+      do {
+        refreshRef.current.queued = false;
+        // A refresh always starts from a settled snapshot, so an event that lands during the first read still applies.
+        await loadRef.current;
+        const loaded = loadedRef.current;
+        if (loaded.queryKey !== queryKey) return;
+        const entries = Object.entries(loaded.workspaces);
+        if (entries.length === 0) return;
+        const run = generation.current;
+        try {
+          const responses = await Promise.all(entries.map(async ([workspaceId, current]) => ({
+            workspaceId,
+            current,
+            response: await transport.sessionBrowser.changes({ workspaceId, revision: current.revision, kind })
+          })));
+          if (run !== generation.current) return;
+          const fullRequired = responses.some(({ response }) => response.status === "full-required");
+          setResult((state) => {
+            if (state.queryKey !== queryKey) return state;
+            let changed = false;
+            const next = { ...state.workspaces };
+            for (const { workspaceId, current, response } of responses) {
+              if (response.status === "full-required") continue;
+              if (next[workspaceId] !== current) continue;
+              const merged = applyChanges(current, response);
+              if (!merged) continue;
+              next[workspaceId] = merged;
+              changed = true;
+            }
+            return changed ? { queryKey, workspaces: next } : state;
+          });
+          if (fullRequired) await loadAllRef.current();
+        } catch {
+          if (run === generation.current) await loadAllRef.current();
         }
-        return changed ? { queryKey, workspaces: next } : state;
-      });
-      if (fullRequired) await loadAllRef.current();
-    } catch {
-      if (run === generation.current) await loadAllRef.current();
+      } while (refreshRef.current.queued);
+    } finally {
+      refreshRef.current.running = false;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transport, kind, queryKey]);
