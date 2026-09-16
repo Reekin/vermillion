@@ -9,7 +9,7 @@ Vermillion（朱砂）是个人 agent 工作台：通过讨论明确需求，把
 | Workspace | 对应一个项目目录，关联文档、工单和会话 | |
 | Domain | 一个业务或跨模块领域的定义：覆盖什么、什么改动应考虑它、遵守哪些规范 | [Domain](../Workbench/Domains/PRD.md) |
 | Doc | 驱动工作的文档，存放于 `.vermillion/docs/` 并用 Git 管理 | [文档管理](../Workbench/Documents/PRD.md) |
-| Issue | 用户提出或 agent 收集的议题，支持分诊、讨论及授权范围内自动开单 | [Issues](../Workbench/Issues/PRD.md) |
+| Issue | 用户提出或 agent 收集的问题与建议，支持分诊、讨论及授权范围内自动开单 | [Issues](../Workbench/Issues/PRD.md) |
 | WorkItem | 可独立执行和验收的工单，由开工分支创建并执行 | [工单](../Workbench/Missions/PRD.md) |
 | DecisionCard | 执行中需要用户决定的问题，进入 Inbox | [Inbox](../Workbench/Inbox/PRD.md) |
 
@@ -17,9 +17,9 @@ Vermillion（朱砂）是个人 agent 工作台：通过讨论明确需求，把
 
 主导航上方是 **工作台** 和 **Inbox**，底部是同级的 **设置**。工作台是主页，用于讨论、修改文档、开工和查看执行，见 [工作台](../Workbench/Think/PRD.md)。Inbox 集中展示待决策和已合入内容。设置以弹窗打开，提供新会话引擎、标题模型与引擎程序路径，见[会话引擎](../Foundation/Engines/PRD.md)。
 
-工作台左侧会话列表常驻。New Chat 旁的 All / workspace 下拉只筛选列表，不切换当前阅读的会话；选择具体 workspace 后点击 New Chat，草稿使用该 workspace。右侧顶部依次为会话、工单、Docs、Domain、角色、Issues、Automation、管理，默认进入会话。会话页包含阅读区和右侧 Docs Explorer，切换分页时保留挂载和未发送草稿。其他分页通过标题栏的 workspace 选择器明确浏览和编辑范围；列表中的 All 不代表全局编辑范围。选择器只做切换；workspace 的添加在会话输入器与管理分页进行，移除只在管理分页进行。
+工作台左侧会话列表常驻。新建会话旁的「全部」/ workspace 下拉只筛选列表，不切换当前阅读的会话；选择具体 workspace 后点击新建会话，草稿使用该 workspace。右侧顶部依次为会话、工单、文档、领域、角色、Issues、自动化、管理，默认进入会话。会话页包含阅读区和右侧 Docs Explorer，切换分页时保留挂载和未发送草稿。其他分页通过标题栏的 workspace 选择器明确浏览和编辑范围；列表中的「全部」不代表全局编辑范围。选择器只做切换；workspace 的添加在会话输入器与管理分页进行，移除只在管理分页进行。
 
-Inbox 与设置单击以弹窗打开，Inbox 可展开为页面，双击主导航入口直接以页面打开。弹窗遮罩不覆盖主导航，再次单击入口关闭弹窗；Inbox 展开时保留当前选中项和已展开详情。Automation 用于用户自定义定时或触发任务，不承载内部 Worker 调度。
+Inbox 与设置单击以弹窗打开，Inbox 可展开为页面，双击主导航入口直接以页面打开。弹窗遮罩不覆盖主导航，再次单击入口关闭弹窗；Inbox 展开时保留当前选中项和已展开详情。自动化用于用户自定义定时或触发任务，不承载内部 Worker 调度。
 
 ### 搜索
 
@@ -60,4 +60,4 @@ Agent 会话行标注角色，subagent 缩进挂在派出它的会话下，沿�
 
 ## 实现状态
 
-Issues 与 Automation 目前只有占位入口，议题管理、采集和自动化任务待实现。
+Issues 与自动化目前只有占位入口，Issue 管理、采集和自动化任务待实现。
