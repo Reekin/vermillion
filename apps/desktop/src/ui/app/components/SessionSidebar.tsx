@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, CornerDownRight, Pin, Plus, Search } from "lucide-react";
-import { useState, type MouseEvent } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { formatRelativeActivityAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu, SessionRenameController } from "../use-session-actions.js";
@@ -11,9 +11,7 @@ import { roleLabel } from "./workflow-display.js";
 
 type SessionSidebarProps = {
   sessions: SidebarSession[];
-  hasMore: boolean;
   loading: boolean;
-  loadMore: () => Promise<void>;
   selectedSessionId: string | undefined;
   isDraft: boolean;
   workspaceLabelById: Map<string, string>;
@@ -31,51 +29,102 @@ type SessionSidebarProps = {
   onClearNotice: () => void;
 };
 
-export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, renameDialog, notice, onClearNotice }: SessionSidebarProps) => {
+type SessionRowProps = {
+  session: SidebarSession;
+  depth: number;
+  expanded: boolean;
+  selected: boolean;
+  workspaceLabel: string | undefined;
+  onToggleExpanded: (sessionId: string) => void;
+  onOpen: (sessionId: string) => void;
+  onOpenMenu: (event: MouseEvent, sessionId: string, title: string) => void;
+};
+
+/** One session row; subagents render as separate rows, so unchanged rows keep rendering untouched. */
+const SessionRow = memo(function SessionRow({ session, depth, expanded, selected, workspaceLabel, onToggleExpanded, onOpen, onOpenMenu }: SessionRowProps) {
+  return (
+    <ListRow
+      depth={depth}
+      leadingAction={session.subagents.length > 0 ? (
+        <IconButton
+          icon={expanded ? ChevronDown : ChevronRight}
+          label={`${expanded ? "折叠" : "展开"}子会话：${session.title}`}
+          aria-expanded={expanded}
+          onClick={() => onToggleExpanded(session.sessionId)}
+        />
+      ) : <span aria-hidden="true" />}
+      selected={selected}
+      onClick={() => onOpen(session.sessionId)}
+      onContextMenu={(event) => onOpenMenu(event, session.sessionId, session.title)}
+      leading={
+        <>
+          <StatusDot status={session.statusDot} />
+          {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
+          {session.role && session.role !== "design-partner" && <Badge>{roleLabel[session.role] ?? session.role}</Badge>}
+        </>
+      }
+      title={
+        <>
+          {session.title}
+          {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label="pinned" />}
+        </>
+      }
+      meta={workspaceLabel}
+      trailing={formatRelativeActivityAge(session.activityAt ?? session.lastCompletedTurnAt)}
+    />
+  );
+});
+
+type SidebarRow = { session: SidebarSession; depth: number; expanded: boolean };
+
+/** Rows in display order: every session, followed by the subagents of the ones that are expanded. */
+const flattenRows = (sessions: SidebarSession[], expandedIds: ReadonlySet<string>): SidebarRow[] => {
+  const rows: SidebarRow[] = [];
+  const push = (session: SidebarSession, depth: number) => {
+    const expanded = expandedIds.has(session.sessionId);
+    rows.push({ session, depth, expanded });
+    if (expanded) session.subagents.forEach((child) => push(child, depth + 1));
+  };
+  sessions.forEach((session) => push(session, 0));
+  return rows;
+};
+
+export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, renameDialog, notice, onClearNotice }: SessionSidebarProps) => {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
-  const toggleExpanded = (sessionId: string) => setExpandedIds((current) => {
+  const toggleExpanded = useCallback((sessionId: string) => setExpandedIds((current) => {
     const next = new Set(current);
     if (next.has(sessionId)) next.delete(sessionId);
     else next.add(sessionId);
     return next;
-  });
-  /** A session row; subagents it spawned render nested beneath it, indented one level per depth. */
-  const renderRow = (session: SidebarSession, depth = 0) => (
-    <li key={session.sessionId}>
-      <ListRow
-        depth={depth}
-        leadingAction={session.subagents.length > 0 ? (
-          <IconButton
-            icon={expandedIds.has(session.sessionId) ? ChevronDown : ChevronRight}
-            label={`${expandedIds.has(session.sessionId) ? "折叠" : "展开"}子会话：${session.title}`}
-            aria-expanded={expandedIds.has(session.sessionId)}
-            onClick={() => toggleExpanded(session.sessionId)}
-          />
-        ) : <span aria-hidden="true" />}
-        selected={selectedSessionId === session.sessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))}
-        onClick={() => onOpen(session.sessionId)}
-        onContextMenu={(event) => onOpenMenu(event, session.sessionId, session.title)}
-        leading={
-          <>
-            <StatusDot status={session.statusDot} />
-            {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
-            {session.role && session.role !== "design-partner" && <Badge>{roleLabel[session.role] ?? session.role}</Badge>}
-          </>
-        }
-        title={
-          <>
-            {session.title}
-            {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label="pinned" />}
-          </>
-        }
-        meta={!workspaceFilterId ? workspaceLabelById.get(session.workspaceId) ?? session.workspaceId : undefined}
-        trailing={formatRelativeActivityAge(session.activityAt ?? session.lastCompletedTurnAt)}
-      />
-      {session.subagents.length > 0 && expandedIds.has(session.sessionId) && (
-        <ul>{session.subagents.map((child) => renderRow({ ...child, workspaceId: session.workspaceId, sortAt: session.sortAt }, depth + 1))}</ul>
-      )}
-    </li>
+  }), []);
+  const rows = useMemo(() => flattenRows(sessions, expandedIds), [sessions, expandedIds]);
+  const workspaceLabelFor = useCallback(
+    (session: SidebarSession) => workspaceFilterId ? undefined : workspaceLabelById.get(session.workspaceId) ?? session.workspaceId,
+    [workspaceFilterId, workspaceLabelById]
   );
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const anchorRef = useRef<{ sessionId: string; offset: number; scrollTop: number } | undefined>(undefined);
+
+  /**
+   * Keeps the row the reader is looking at in place when the list reorders or grows.
+   * A reader who scrolled since the last render owns the position, so that case only re-anchors.
+   */
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const top = list.getBoundingClientRect().top;
+    const anchor = anchorRef.current;
+    if (anchor && list.scrollTop === anchor.scrollTop) {
+      const row = [...list.querySelectorAll<HTMLElement>("[data-session-row]")]
+        .find((item) => item.dataset.sessionRow === anchor.sessionId);
+      if (row) list.scrollTop += row.getBoundingClientRect().top - top - anchor.offset;
+    }
+    const leading = [...list.querySelectorAll<HTMLElement>("[data-session-row]")]
+      .find((row) => row.getBoundingClientRect().bottom > top);
+    anchorRef.current = leading?.dataset.sessionRow
+      ? { sessionId: leading.dataset.sessionRow, offset: leading.getBoundingClientRect().top - top, scrollTop: list.scrollTop }
+      : undefined;
+  });
 
   return (
     <aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-border-strong bg-app-shell">
@@ -94,17 +143,25 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           <Search size={13} /> 搜索
         </Button>
       </div>
-      <ul className="min-h-0 flex-1 overflow-auto">
+      <ul ref={listRef} className="vm-session-list min-h-0 flex-1 overflow-auto">
         {isDraft && (
           <li><ListRow selected title="新对话" meta="发送第一条消息后创建" /></li>
         )}
         {sessions.length === 0 && !isDraft && !loading && <li className="px-4 py-2 text-caption text-muted-foreground">还没有会话。点 New Chat 开始。</li>}
-        {sessions.map((session) => renderRow(session))}
-        {hasMore && (
-          <li className="px-3 py-2">
-            <Button size="sm" variant="ghost" className="w-full" disabled={loading} onClick={() => void loadMore()}>{loading ? "加载中…" : "加载更多"}</Button>
+        {rows.map(({ session, depth, expanded }) => (
+          <li key={session.sessionId} data-session-row={session.sessionId}>
+            <SessionRow
+              session={session}
+              depth={depth}
+              expanded={expanded}
+              selected={selectedSessionId === session.sessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))}
+              workspaceLabel={workspaceLabelFor(session)}
+              onToggleExpanded={toggleExpanded}
+              onOpen={onOpen}
+              onOpenMenu={onOpenMenu}
+            />
           </li>
-        )}
+        ))}
       </ul>
       <SessionActionFeedback menu={menu} onCloseMenu={onCloseMenu} onRunAction={onRunAction} onOpenRename={renameDialog.open} notice={notice} onClearNotice={onClearNotice} />
       {renameDialog.state && (

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWorkbenchRpcHandler } from "../src/session-rpc-handler.js";
-import { SessionBrowserCursorStaleError } from "../src/session-browser-read-model.js";
 import type { SessionShellService } from "../src/session-shell-service.js";
 
 const createShell = (overrides: Record<string, unknown> = {}): SessionShellService => ({
@@ -9,46 +8,43 @@ const createShell = (overrides: Record<string, unknown> = {}): SessionShellServi
     workspaceId: "workspace-1",
     revision: "revision-1",
     items: [],
-    hasMore: false,
     totalCount: 0
+  })),
+  changesBrowserSessions: vi.fn(async () => ({
+    status: "changed",
+    workspaceId: "workspace-1",
+    revision: "revision-2",
+    items: [],
+    removedSessionIds: []
   })),
   ...overrides
 } as unknown as SessionShellService);
 
 describe("session browser workbench RPC handler", () => {
-  it("routes bounded session list requests", async () => {
+  it("routes the full session list request", async () => {
     const shell = createShell();
-    const handler = createWorkbenchRpcHandler(shell);
 
-    const page = await handler.handleRequest({
+    const snapshot = await createWorkbenchRpcHandler(shell).handleRequest({
       id: "req-list",
       method: "sessionBrowser.list",
-      params: { workspaceId: "workspace-1", limit: 20 }
+      params: { workspaceId: "workspace-1" }
     });
 
-    expect(page).toMatchObject({ ok: true, method: "sessionBrowser.list" });
-    expect(shell.listBrowserSessions).toHaveBeenCalledWith({ workspaceId: "workspace-1", limit: 20 });
+    expect(snapshot).toMatchObject({ ok: true, method: "sessionBrowser.list" });
+    expect(shell.listBrowserSessions).toHaveBeenCalledWith({ workspaceId: "workspace-1" });
   });
 
-  it("maps revision mismatch to CURSOR_STALE", async () => {
-    const shell = createShell({
-      listBrowserSessions: vi.fn(async () => {
-        throw new SessionBrowserCursorStaleError();
-      })
+  it("routes the changed-row request", async () => {
+    const shell = createShell();
+
+    const changes = await createWorkbenchRpcHandler(shell).handleRequest({
+      id: "req-changes",
+      method: "sessionBrowser.changes",
+      params: { workspaceId: "workspace-1", revision: "revision-1" }
     });
-    const response = await createWorkbenchRpcHandler(shell).handleRequest({
-      id: "req-stale",
-      method: "sessionBrowser.list",
-      params: {
-        workspaceId: "workspace-1",
-        expectedRevision: "old-revision",
-        limit: 20
-      }
-    });
-    expect(response).toMatchObject({
-      ok: false,
-      error: { code: "CURSOR_STALE" }
-    });
+
+    expect(changes).toMatchObject({ ok: true, method: "sessionBrowser.changes" });
+    expect(shell.changesBrowserSessions).toHaveBeenCalledWith({ workspaceId: "workspace-1", revision: "revision-1" });
   });
 
   it("routes session renames to the shell service", async () => {

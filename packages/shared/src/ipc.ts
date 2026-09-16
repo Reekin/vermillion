@@ -39,6 +39,7 @@ export const sessionRpcMethods = [
   "workspace.remove",
   "workspace.select",
   "sessionBrowser.list",
+  "sessionBrowser.changes",
   "sessionBrowser.repair",
   "sessionBrowser.create",
   "sessionBrowser.open",
@@ -170,14 +171,25 @@ type SessionBrowserItemRpcInput = Omit<SessionBrowserItemRpc, "subagents"> & {
   subagents?: SessionBrowserItemRpcInput[];
 };
 
-export type SessionBrowserPageRpc = {
+export type SessionBrowserSnapshotRpc = {
   workspaceId: string;
   revision: string;
   items: SessionBrowserItemRpc[];
-  nextCursor?: string;
-  hasMore: boolean;
   totalCount: number;
 };
+
+/** Rows that changed after the revision the caller already holds. */
+export type SessionBrowserChangesRpc =
+  | {
+      status: "changed";
+      workspaceId: string;
+      /** Revision to send with the next changes query. */
+      revision: string;
+      items: SessionBrowserItemRpc[];
+      removedSessionIds: string[];
+    }
+  /** The caller's revision is unknown here; it must read a full snapshot instead. */
+  | { status: "full-required"; workspaceId: string };
 
 const zSessionBrowserItemSchema: z.ZodType<
   SessionBrowserItemRpc,
@@ -200,14 +212,26 @@ const zSessionBrowserItemSchema: z.ZodType<
   })
 );
 
-const zSessionBrowserPageSchema = z.object({
+const zSessionBrowserSnapshotSchema = z.object({
   workspaceId: z.string().min(1),
   revision: z.string().min(1),
   items: z.array(zSessionBrowserItemSchema),
-  nextCursor: z.string().min(1).optional(),
-  hasMore: z.boolean(),
   totalCount: z.number().int().nonnegative()
 });
+
+const zSessionBrowserChangesSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("changed"),
+    workspaceId: z.string().min(1),
+    revision: z.string().min(1),
+    items: z.array(zSessionBrowserItemSchema),
+    removedSessionIds: z.array(zSessionId)
+  }),
+  z.object({
+    status: z.literal("full-required"),
+    workspaceId: z.string().min(1)
+  })
+]);
 
 const zSessionActionKindSchema = z.enum([
   "archive",
@@ -620,10 +644,18 @@ const zSessionBrowserListRequestSchema = z.object({
   method: z.literal("sessionBrowser.list"),
   params: z.object({
     workspaceId: z.string().min(1),
-    cursor: z.string().min(1).optional(),
-    expectedRevision: z.string().min(1).optional(),
-    limit: z.number().int().positive().max(100).default(20),
     /** "user" = sessions the user opened themselves (no agent role); "agent" = steward/worker/supervisor sessions. */
+    kind: z.enum(["user", "agent"]).optional()
+  })
+});
+
+const zSessionBrowserChangesRequestSchema = z.object({
+  id: zRequestId,
+  method: z.literal("sessionBrowser.changes"),
+  params: z.object({
+    workspaceId: z.string().min(1),
+    /** Revision returned by the previous list or changes response for this workspace. */
+    revision: z.string().min(1),
     kind: z.enum(["user", "agent"]).optional()
   })
 });
@@ -935,6 +967,7 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zWorkspaceRemoveRequestSchema,
   zWorkspaceSelectRequestSchema,
   zSessionBrowserListRequestSchema,
+  zSessionBrowserChangesRequestSchema,
   zSessionBrowserRepairRequestSchema,
   zSessionBrowserCreateRequestSchema,
   zSessionBrowserOpenRequestSchema,
@@ -1095,7 +1128,14 @@ const zSessionBrowserListResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("sessionBrowser.list"),
   ok: z.literal(true),
-  result: zSessionBrowserPageSchema
+  result: zSessionBrowserSnapshotSchema
+});
+
+const zSessionBrowserChangesResponseSchema = z.object({
+  id: zRequestId,
+  method: z.literal("sessionBrowser.changes"),
+  ok: z.literal(true),
+  result: zSessionBrowserChangesSchema
 });
 
 const zSessionBrowserCreateResponseSchema = z.object({
@@ -1426,6 +1466,7 @@ export const zSessionRpcResponseSchema = z.union([
   zWorkspaceRemoveResponseSchema,
   zWorkspaceSelectResponseSchema,
   zSessionBrowserListResponseSchema,
+  zSessionBrowserChangesResponseSchema,
   zSessionBrowserRepairResponseSchema,
   zSessionBrowserCreateResponseSchema,
   zSessionBrowserOpenResponseSchema,

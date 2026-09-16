@@ -36,22 +36,18 @@ export const loadSourceTreeTitles = async (
 ): Promise<Record<string, string>> => {
   const pending = new Map(workItems.flatMap((item) => item.treeId ? [[item.treeId, item.sourceSessionId] as const] : []));
   const titles: Record<string, string> = {};
-  let cursor: string | undefined;
-  let expectedRevision: string | undefined;
-  while (pending.size) {
-    const page = await list({ workspaceId, kind: "user", limit: 100, cursor, expectedRevision });
-    for (const session of page.items) {
-      const ids = new Set([session.sessionId, ...(session.memberSessionIds ?? [])]);
-      for (const [treeId, sourceId] of pending) {
-        if (ids.has(treeId) || (sourceId && ids.has(sourceId))) {
-          titles[treeId] = session.title;
-          pending.delete(treeId);
-        }
+  if (pending.size === 0) {
+    return titles;
+  }
+  const snapshot = await list({ workspaceId, kind: "user" });
+  for (const session of snapshot.items) {
+    const ids = new Set([session.sessionId, ...(session.memberSessionIds ?? [])]);
+    for (const [treeId, sourceId] of pending) {
+      if (ids.has(treeId) || (sourceId && ids.has(sourceId))) {
+        titles[treeId] = session.title;
+        pending.delete(treeId);
       }
     }
-    if (!page.hasMore || !page.nextCursor) break;
-    cursor = page.nextCursor;
-    expectedRevision = page.revision;
   }
   return titles;
 };

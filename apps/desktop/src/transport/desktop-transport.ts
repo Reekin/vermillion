@@ -22,7 +22,8 @@ import type {
   CodexTurnChangesUndoResultRpc,
   FileActionKindRpc,
   FileActionResultRpc,
-  SessionBrowserPageRpc,
+  SessionBrowserChangesRpc,
+  SessionBrowserSnapshotRpc,
   SkillDescriptorRpc,
   SessionActionDescriptorRpc,
   SessionActionKindRpc,
@@ -261,11 +262,13 @@ export type DesktopTransport = {
   sessionBrowser: {
     list: (input: {
       workspaceId: string;
-      cursor?: string;
-      limit?: number;
-      expectedRevision?: string;
       kind?: "user" | "agent";
-    }) => Promise<SessionBrowserPageRpc>;
+    }) => Promise<SessionBrowserSnapshotRpc>;
+    changes: (input: {
+      workspaceId: string;
+      revision: string;
+      kind?: "user" | "agent";
+    }) => Promise<SessionBrowserChangesRpc>;
     repair: (workspaceIds: string[]) => Promise<{
       workspaces: number;
       sessions: number;
@@ -789,11 +792,8 @@ export const createDesktopTransport = (
         })
     },
     sessionBrowser: {
-      list: (input) =>
-        rpc.request("sessionBrowser.list", {
-          ...input,
-          limit: input.limit ?? 20
-        }),
+      list: (input) => rpc.request("sessionBrowser.list", input),
+      changes: (input) => rpc.request("sessionBrowser.changes", input),
       repair: (workspaceIds: string[]) =>
         rpc.request("sessionBrowser.repair", {
           workspaceIds
