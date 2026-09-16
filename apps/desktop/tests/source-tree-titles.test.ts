@@ -6,8 +6,7 @@ import { loadSourceTreeTitles } from "../src/ui/app/components/WorkspacePages.js
 const snapshot = (items: SessionBrowserSnapshotRpc["items"]): SessionBrowserSnapshotRpc => ({
   workspaceId: "workspace",
   revision: "revision-1",
-  items,
-  totalCount: items.length
+  items
 });
 
 describe("source tree titles", () => {

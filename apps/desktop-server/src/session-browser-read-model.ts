@@ -197,12 +197,10 @@ export class SessionBrowserReadModel {
   }
 
   public snapshot(input: { workspaceId: string; kind?: "user" | "agent" }): SessionBrowserSnapshotRpc {
-    const items = this.rows(input);
     return {
       workspaceId: input.workspaceId,
       revision: this.revision(input.workspaceId),
-      items,
-      totalCount: items.length
+      items: this.rows(input)
     };
   }
 

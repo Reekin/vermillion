@@ -24,8 +24,7 @@ describe("IPC schemas", () => {
           statusDot: "none",
           isActive: true,
           isPinned: false
-        }],
-        totalCount: 1
+        }]
       }
     });
     expect(parsed.success).toBe(true);

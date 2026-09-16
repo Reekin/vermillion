@@ -748,7 +748,6 @@ describe("SessionCatalogService", () => {
 
     const snapshot = await service.list({ workspaceId: "workspace-1" });
     expect(snapshot.items).toHaveLength(25);
-    expect(snapshot.totalCount).toBe(25);
     expect(JSON.stringify(snapshot)).not.toContain("summaryText");
     expect((await service.get("session-24"))?.title).toBe("Session 24");
     expect(getSnapshot).toHaveBeenCalledTimes(1);

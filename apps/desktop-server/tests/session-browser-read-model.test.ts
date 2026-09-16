@@ -37,7 +37,6 @@ describe("SessionBrowserReadModel", () => {
 
     const snapshot = model.snapshot({ workspaceId: "workspace-1" });
     expect(snapshot.items.map((item) => item.sessionId)).toEqual(["s-3", "s-4", "s-1", "s-2"]);
-    expect(snapshot.totalCount).toBe(4);
     expect(model.get("s-2")?.title).toBe("s-2");
     expect(model.get("missing")).toBeUndefined();
   });
@@ -52,7 +51,6 @@ describe("SessionBrowserReadModel", () => {
 
     const snapshot = model.snapshot({ workspaceId: "workspace-1" });
     expect(snapshot.items.map((item) => item.sessionId)).toEqual(["orphan", "worker"]);
-    expect(snapshot.totalCount).toBe(2);
     expect(snapshot.items[1]?.subagents.map((item) => item.sessionId)).toEqual(["verifier", "reviewer"]);
     expect(snapshot.items[1]?.subagents[0]).toMatchObject({ parentSessionId: "worker", subagents: [] });
     expect(model.get("reviewer")?.parentSessionId).toBe("worker");

@@ -7,8 +7,7 @@ const createShell = (overrides: Record<string, unknown> = {}): SessionShellServi
   listBrowserSessions: vi.fn(async () => ({
     workspaceId: "workspace-1",
     revision: "revision-1",
-    items: [],
-    totalCount: 0
+    items: []
   })),
   changesBrowserSessions: vi.fn(async () => ({
     status: "changed",

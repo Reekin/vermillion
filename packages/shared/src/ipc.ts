@@ -175,7 +175,6 @@ export type SessionBrowserSnapshotRpc = {
   workspaceId: string;
   revision: string;
   items: SessionBrowserItemRpc[];
-  totalCount: number;
 };
 
 /** Rows that changed after the revision the caller already holds. */
@@ -215,8 +214,7 @@ const zSessionBrowserItemSchema: z.ZodType<
 const zSessionBrowserSnapshotSchema = z.object({
   workspaceId: z.string().min(1),
   revision: z.string().min(1),
-  items: z.array(zSessionBrowserItemSchema),
-  totalCount: z.number().int().nonnegative()
+  items: z.array(zSessionBrowserItemSchema)
 });
 
 const zSessionBrowserChangesSchema = z.discriminatedUnion("status", [

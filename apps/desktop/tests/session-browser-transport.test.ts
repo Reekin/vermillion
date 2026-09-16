@@ -76,8 +76,7 @@ describe("session browser transport contracts", () => {
                 statusDot: "running",
                 isActive: true,
                 isPinned: false
-              }],
-              totalCount: 11
+              }]
             }
           } as const;
         case "sessionBrowser.changes":
