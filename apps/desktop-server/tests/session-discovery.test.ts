@@ -1124,6 +1124,49 @@ describe("Session discovery and reconciliation", () => {
     ]);
   });
 
+  it("keeps a title renamed while the session was still hydrating", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const sessionIndexStore = new SessionIndexStore({ baseDir });
+    const runtimeService = new SessionRuntimeService({
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
+    });
+    await workspaceRegistry.registerWorkspace({
+      workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha"
+    });
+    await sessionIndexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1", conversationId: "conversation-1", engineId: "codex",
+        title: "Session", createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:00.000Z"
+      },
+      providerKind: "codex-thread",
+      providerSessionId: "thread-1"
+    });
+    let resolveHydration: ((value: ReturnType<typeof buildHydratedWindow>) => void) | undefined;
+    const reconciliation = new SessionReconciliationService({
+      workspaceRegistry,
+      sessionIndexStore,
+      runtimeService,
+      providers: [{
+        engineId: "codex",
+        discoverWorkspaces: vi.fn(),
+        hydrateSession: vi.fn(() => new Promise<ReturnType<typeof buildHydratedWindow>>((resolve) => {
+          resolveHydration = resolve;
+        }))
+      }] as never
+    });
+
+    const loading = reconciliation.ensureSessionLoaded("session-1");
+    await vi.waitFor(() => { expect(resolveHydration).toBeDefined(); });
+    await sessionIndexStore.renameSession("session-1", "Renamed while loading");
+    resolveHydration?.(buildHydratedWindow());
+
+    await expect(loading).resolves.toBe(true);
+    expect(sessionIndexStore.getEntry("session-1")?.title).toBe("Renamed while loading");
+    expect(runtimeService.getSession("session-1")?.title).toBe("Renamed while loading");
+  });
+
   it("starts a fresh window hydration after every consumer of a shared read cancelled", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });

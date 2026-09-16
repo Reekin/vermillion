@@ -182,12 +182,6 @@ export class SessionCatalogService {
     if (!renamed) {
       throw new Error(`Unknown session: ${input.sessionId}`);
     }
-    // The index is the only source here, so the loaded list needs this event to pick the new title up.
-    this.runtimeService.notifyIndexedSessionUpdated({
-      sessionId: renamed.sessionId,
-      conversationId: renamed.conversationId,
-      title: renamed.title ?? title
-    });
     return {
       sessionId: input.sessionId,
       title: renamed.title ?? title

@@ -590,6 +590,11 @@ export class SessionReconciliationService {
     hydrated: T,
     input: { partial?: boolean } = {}
   ): Promise<T | undefined> {
+    // The entry was captured when the read started; a rename that landed meanwhile stays authoritative.
+    const currentTitle = this.sessionIndexStore.getEntry(entry.sessionId)?.title;
+    if (currentTitle && currentTitle !== hydrated.session.title) {
+      hydrated = { ...hydrated, session: { ...hydrated.session, title: currentTitle } };
+    }
     const indexRelations = this.sessionIndexStore.listRelations(entry.workspaceId);
     const relatedIndexRelations = indexRelations.filter(
       (relation) =>

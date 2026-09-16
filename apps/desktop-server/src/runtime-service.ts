@@ -274,21 +274,6 @@ export class SessionRuntimeService {
     });
   }
 
-  /** Sessions the runtime has not loaded are absent from the snapshot, so list readers still need the update event. */
-  public notifyIndexedSessionUpdated(input: {
-    sessionId: string;
-    conversationId: string;
-    title: string;
-  }): void {
-    this.publishRuntimeEvent({
-      type: "session.updated",
-      sessionId: input.sessionId,
-      conversationId: input.conversationId,
-      status: "idle",
-      title: input.title
-    });
-  }
-
   public subscribe(
     listener: (envelope: EventEnvelope) => void,
     filter: RuntimeEventFilter = {}

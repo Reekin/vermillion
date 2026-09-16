@@ -354,9 +354,14 @@ export class SessionIndexStore {
     input: UpsertSessionIndexInput
   ): MutationResult<SessionIndexEntry> {
     const existing = this.getEntry(input.session.sessionId);
-    const normalized = this.normalizeSessionEntry(input, existing);
+    return this.replaceEntryInMemory(existing, this.normalizeSessionEntry(input, existing));
+  }
 
-    if (existing && isSameSessionEntry(existing, normalized)) {
+  private replaceEntryInMemory(
+    existing: SessionIndexEntry | undefined,
+    next: SessionIndexEntry
+  ): MutationResult<SessionIndexEntry> {
+    if (existing && isSameSessionEntry(existing, next)) {
       return {
         value: existing,
         changed: false
@@ -368,13 +373,13 @@ export class SessionIndexStore {
       entries: sortEntries(
         existing
           ? this.document.entries.map((entry) =>
-              entry.sessionId === normalized.sessionId ? normalized : entry
+              entry.sessionId === next.sessionId ? next : entry
             )
-          : [...this.document.entries, normalized]
+          : [...this.document.entries, next]
       )
     };
     return {
-      value: normalized,
+      value: next,
       changed: true
     };
   }
@@ -561,20 +566,12 @@ export class SessionIndexStore {
     if (!existing) {
       return undefined;
     }
-    const renamed = sessionIndexEntrySchema.parse({ ...existing, title });
-    if (isSameSessionEntry(existing, renamed)) {
-      return existing;
-    }
-    this.document = {
-      ...this.document,
-      entries: sortEntries(
-        this.document.entries.map((entry) =>
-          entry.sessionId === sessionId ? renamed : entry
-        )
-      )
-    };
-    await this.persistMutation(true);
-    return renamed;
+    const mutation = this.replaceEntryInMemory(
+      existing,
+      sessionIndexEntrySchema.parse({ ...existing, title })
+    );
+    await this.persistMutation(mutation.changed);
+    return mutation.value;
   }
 
   public async removeWorkspace(workspaceId: string): Promise<void> {
