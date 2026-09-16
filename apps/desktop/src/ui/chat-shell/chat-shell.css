@@ -19,8 +19,8 @@
   --awb-accent: #8c8f8d;
   --awb-accent-strong: #b6b9b7;
   --awb-accent-soft: rgba(140, 143, 141, 0.14);
-  --awb-tree-running: #cfb76a;
-  --awb-tree-unread: #8fbc98;
+  --awb-status-running: #cfb76a;
+  --awb-status-unread: #8fbc98;
   --awb-success: #919491;
   --awb-warning: #94928f;
   --awb-danger: #918d8e;
@@ -2030,7 +2030,7 @@ label.awb-configuration-control > span {
   position: absolute;
   width: 24px;
   height: 24px;
-  border: 1px solid var(--awb-tree-running);
+  border: 1px solid var(--awb-status-running);
   border-top-color: transparent;
   border-radius: 50%;
   animation: awb-spin 1s linear infinite;
@@ -2187,12 +2187,12 @@ label.awb-configuration-control > span {
 }
 
 .awb-chat-tree__graph-node.is-unread {
-  --node-color: var(--awb-tree-unread);
-  --node-fill: var(--awb-tree-unread);
+  --node-color: var(--awb-status-unread);
+  --node-fill: var(--awb-status-unread);
 }
 .awb-chat-tree__graph-node.is-running {
-  --node-color: var(--awb-tree-running);
-  --node-fill: var(--awb-tree-running);
+  --node-color: var(--awb-status-running);
+  --node-fill: var(--awb-status-running);
 }
 .awb-chat-tree__graph-node.is-current .awb-chat-tree__graph-node-dot {
   outline: 1px solid var(--awb-ink-strong);

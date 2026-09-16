@@ -24,6 +24,8 @@
   --color-accent: var(--awb-accent);
   --color-accent-strong: var(--awb-accent-strong);
   --color-accent-soft: var(--awb-accent-soft);
+  --color-status-running: var(--awb-status-running);
+  --color-status-unread: var(--awb-status-unread);
   --radius-sm: var(--awb-radius-tight);
   --radius-md: var(--awb-radius-soft);
   --radius-lg: var(--awb-control-radius);

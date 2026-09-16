@@ -97,21 +97,19 @@ export const InlineNotice = ({ children, tone = "muted", className }: { children
 );
 
 /**
- * Session activity marker. `running`: a turn is in progress (pulses). `unread_completed`: a turn finished while
- * the session was not open (solid with halo); it clears once the session is opened. `none` renders nothing.
+ * Session activity marker, coloured like the session tree nodes: `running` pulses in yellow, `unread_completed`
+ * stays solid green, `none` stays dark. The slot keeps its width either way so rows stay aligned.
  */
-export const StatusDot = ({ status }: { status: "none" | "running" | "unread_completed" }) => {
-  if (status === "none") return null;
-  return (
-    <span
-      aria-label={status === "running" ? "运行中" : "有新回复"}
-      className={cn(
-        "h-1.5 w-1.5 shrink-0 rounded-full bg-accent-strong",
-        status === "running" ? "animate-pulse" : "shadow-halo"
-      )}
-    />
-  );
-};
+export const StatusDot = ({ status }: { status: "none" | "running" | "unread_completed" }) => (
+  <span data-session-status={status} className="inline-flex h-1.5 w-1.5 shrink-0 items-center justify-center">
+    {status !== "none" && (
+      <span
+        aria-label={status === "running" ? "进行中" : "已完成未读"}
+        className={cn("h-1.5 w-1.5 rounded-full", status === "running" ? "animate-pulse bg-status-running" : "bg-status-unread")}
+      />
+    )}
+  </span>
+);
 
 // ---- Fields ----
 
