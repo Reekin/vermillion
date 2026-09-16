@@ -59,6 +59,7 @@ function describe(schema: z.ZodTypeAny, sample = false, key = "value"): unknown 
 export function methodHelp(method: string): string | undefined {
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
     "sessionBrowser.open": { params: "sessionId: string; forceProviderHydration?: boolean", state: "桌面在线；进入会话并按当前 rollout 刷新 Codex 历史。", example: { sessionId: "<sessionId>" } },
+    "sessionBrowser.rename": { params: "sessionId: string, title: 非空 string", state: "桌面在线；改会话标题，返回保存后的标题。列表中的会话都可用，未加载的历史会话改其索引记录。", example: { sessionId: "<sessionId>", title: "新标题" } },
     "chatTree.get": { params: "sessionId: string", state: "桌面在线；读取完整会话树，节点包含所属 sessionId 与 canArchive。", example: { sessionId: "<sessionId>" } },
     "chatTree.nodeAction": { params: "sessionId: string, nodeId: string, action: copy_session_id | copy_awb_session_id | open_rollout | archive", state: "桌面在线；复制返回 copiedText，open_rollout 返回节点所属会话的文件，archive 仅归档末端 fork 分支。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", action: "copy_session_id" } },
     "clipboard.writeImage": { params: "source: 非空 data:、file:、http: 或 https: 图片 URL", state: "桌面在线；将图片写入系统剪贴板并返回实际尺寸。", example: { source: "file:///C:/path/image.png" } },

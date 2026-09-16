@@ -551,6 +551,32 @@ export class SessionIndexStore {
     return result.archivedEntries;
   }
 
+  /** Renames an entry that this runtime has not loaded; loaded sessions keep the title in their session state. */
+  public async renameSession(
+    sessionId: string,
+    title: string
+  ): Promise<SessionIndexEntry | undefined> {
+    await this.ready();
+    const existing = this.getEntry(sessionId);
+    if (!existing) {
+      return undefined;
+    }
+    const renamed = sessionIndexEntrySchema.parse({ ...existing, title });
+    if (isSameSessionEntry(existing, renamed)) {
+      return existing;
+    }
+    this.document = {
+      ...this.document,
+      entries: sortEntries(
+        this.document.entries.map((entry) =>
+          entry.sessionId === sessionId ? renamed : entry
+        )
+      )
+    };
+    await this.persistMutation(true);
+    return renamed;
+  }
+
   public async removeWorkspace(workspaceId: string): Promise<void> {
     await this.ready();
     this.document = {

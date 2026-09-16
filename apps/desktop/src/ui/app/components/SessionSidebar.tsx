@@ -2,9 +2,10 @@ import { ChevronDown, ChevronRight, CornerDownRight, Pin, Plus, Search } from "l
 import { useState, type MouseEvent } from "react";
 import { formatRelativeActivityAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
-import type { SessionMenu } from "../use-session-actions.js";
+import type { SessionMenu, SessionRenameController } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
+import { SessionRenameDialog } from "./SessionRenameDialog.js";
 import { Badge, Button, Field, IconButton, ListRow } from "./ui.js";
 import { roleLabel } from "./workflow-display.js";
 
@@ -22,14 +23,15 @@ type SessionSidebarProps = {
   onNewChat: () => void;
   onSearch: () => void;
   menu: SessionMenu | undefined;
-  onOpenMenu: (event: MouseEvent, sessionId: string) => void;
+  onOpenMenu: (event: MouseEvent, sessionId: string, title: string) => void;
   onCloseMenu: () => void;
   onRunAction: (sessionId: string, action: SessionActionDescriptorRpc["action"]) => void;
+  renameDialog: SessionRenameController;
   notice: { text: string; error?: boolean } | undefined;
   onClearNotice: () => void;
 };
 
-export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, notice, onClearNotice }: SessionSidebarProps) => {
+export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, renameDialog, notice, onClearNotice }: SessionSidebarProps) => {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const toggleExpanded = (sessionId: string) => setExpandedIds((current) => {
     const next = new Set(current);
@@ -52,7 +54,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         ) : <span aria-hidden="true" />}
         selected={selectedSessionId === session.sessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))}
         onClick={() => onOpen(session.sessionId)}
-        onContextMenu={(event) => onOpenMenu(event, session.sessionId)}
+        onContextMenu={(event) => onOpenMenu(event, session.sessionId, session.title)}
         leading={
           <>
             {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
@@ -103,7 +105,16 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
           </li>
         )}
       </ul>
-      <SessionActionFeedback menu={menu} onCloseMenu={onCloseMenu} onRunAction={onRunAction} notice={notice} onClearNotice={onClearNotice} />
+      <SessionActionFeedback menu={menu} onCloseMenu={onCloseMenu} onRunAction={onRunAction} onOpenRename={renameDialog.open} notice={notice} onClearNotice={onClearNotice} />
+      {renameDialog.state && (
+        <SessionRenameDialog
+          title={renameDialog.state.title}
+          busy={renameDialog.state.busy}
+          error={renameDialog.state.error}
+          onSubmit={renameDialog.submit}
+          onClose={renameDialog.close}
+        />
+      )}
     </aside>
   );
 };

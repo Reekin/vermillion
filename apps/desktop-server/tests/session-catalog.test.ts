@@ -767,4 +767,120 @@ describe("SessionCatalogService", () => {
     expect(getSnapshot).toHaveBeenCalledTimes(3);
   });
 
+  it("renames a loaded session through session state", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const indexStore = new SessionIndexStore({ baseDir });
+    await workspaceRegistry.registerWorkspace({
+      workspaceId: "workspace-1",
+      absolutePath: "I:/workspace-alpha"
+    });
+    let snapshot: DomainSnapshot = {
+      ...emptySnapshot(),
+      conversations: [
+        {
+          conversationId: "conversation-1",
+          workspaceId: "workspace-1",
+          participantEngineIds: ["codex"],
+          activeSessionId: "session-1",
+          sessionIds: ["session-1"],
+          createdAt: "2026-04-18T00:00:00Z",
+          updatedAt: "2026-04-18T00:00:00Z"
+        }
+      ],
+      sessions: [
+        {
+          sessionId: "session-1",
+          conversationId: "conversation-1",
+          engineId: "codex",
+          status: "idle",
+          title: "Runtime title",
+          createdAt: "2026-04-18T00:00:01Z",
+          updatedAt: "2026-04-18T00:00:02Z"
+        }
+      ]
+    };
+    const renameSession = vi.fn(async (sessionId: string, title: string) => {
+      snapshot = {
+        ...snapshot,
+        sessions: snapshot.sessions.map((session) =>
+          session.sessionId === sessionId ? { ...session, title } : session
+        )
+      };
+    });
+    const service = new SessionCatalogService({
+      runtimeService: {
+        getSnapshot: () => snapshot,
+        getSessionBrowserRevision: () => 1,
+        setSessionTitle: renameSession
+      } as unknown as SessionRuntimeService,
+      workspaceRegistry,
+      sessionIndexStore: indexStore
+    });
+
+    await expect(
+      service.renameSession({ sessionId: "session-1", title: "  Renamed root  " })
+    ).resolves.toEqual({ sessionId: "session-1", title: "Renamed root" });
+
+    expect(renameSession).toHaveBeenCalledWith("session-1", "Renamed root");
+    expect((await service.get("session-1"))?.title).toBe("Renamed root");
+  });
+
+  it("renames a session this runtime has not loaded through its index entry", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const indexStore = new SessionIndexStore({ baseDir });
+    await workspaceRegistry.registerWorkspace({
+      workspaceId: "workspace-1",
+      absolutePath: "I:/workspace-alpha"
+    });
+    await indexStore.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-cold",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        title: "Cold session",
+        createdAt: "2026-04-18T00:00:01Z",
+        updatedAt: "2026-04-18T00:00:02Z"
+      },
+      providerSessionId: "thread-cold"
+    });
+    const setSessionTitle = vi.fn();
+    const service = new SessionCatalogService({
+      runtimeService: {
+        getSnapshot: () => emptySnapshot(),
+        getSessionBrowserRevision: () => 1,
+        setSessionTitle
+      } as unknown as SessionRuntimeService,
+      workspaceRegistry,
+      sessionIndexStore: indexStore
+    });
+
+    await expect(
+      service.renameSession({ sessionId: "session-cold", title: "Renamed cold" })
+    ).resolves.toEqual({ sessionId: "session-cold", title: "Renamed cold" });
+
+    expect(setSessionTitle).not.toHaveBeenCalled();
+    expect(indexStore.getEntry("session-cold")?.title).toBe("Renamed cold");
+    expect((await service.get("session-cold"))?.title).toBe("Renamed cold");
+    expect((await service.list({ workspaceId: "workspace-1" })).items[0]?.title).toBe("Renamed cold");
+  });
+
+  it("refuses a blank title and an unknown session", async () => {
+    const baseDir = await createTempDir();
+    const service = new SessionCatalogService({
+      runtimeService: { getSnapshot: () => emptySnapshot() } as unknown as SessionRuntimeService,
+      workspaceRegistry: new WorkspaceRegistryService({ baseDir }),
+      sessionIndexStore: new SessionIndexStore({ baseDir })
+    });
+
+    await expect(service.renameSession({ sessionId: "session-1", title: "   " })).rejects.toThrow(
+      "Session title must not be blank."
+    );
+    await expect(service.renameSession({ sessionId: "session-1", title: "Renamed" })).rejects.toThrow(
+      "Unknown session: session-1"
+    );
+  });
+
 });

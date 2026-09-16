@@ -50,4 +50,35 @@ describe("session browser workbench RPC handler", () => {
       error: { code: "CURSOR_STALE" }
     });
   });
+
+  it("routes session renames to the shell service", async () => {
+    const shell = createShell({
+      renameSession: vi.fn(async () => ({
+        sessionId: "session-1",
+        title: "Renamed session"
+      }))
+    });
+
+    const response = await createWorkbenchRpcHandler(shell).handleRequest({
+      id: "req-rename",
+      method: "sessionBrowser.rename",
+      params: {
+        sessionId: "session-1",
+        title: "Renamed session"
+      }
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      method: "sessionBrowser.rename",
+      result: {
+        sessionId: "session-1",
+        title: "Renamed session"
+      }
+    });
+    expect(shell.renameSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      title: "Renamed session"
+    });
+  });
 });
