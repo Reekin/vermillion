@@ -3,13 +3,32 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepareRealSessionFixture } from "../src/real-session-fixture.js";
 
 const execFileAsync = promisify(execFile);
 const directories: string[] = [];
+let piAgentSource: string;
+let previousPiAgentDir: string | undefined;
+
+beforeEach(async () => {
+  piAgentSource = await mkdtemp(join(tmpdir(), "verm-real-pi-agent-"));
+  directories.push(piAgentSource);
+  await writeFile(
+    join(piAgentSource, "models.json"),
+    `${JSON.stringify({ providers: { fixture: { baseUrl: "http://127.0.0.1:1", api: "openai-completions", apiKey: "fixture", models: [{ id: "fixture-model" }] } } })}\n`,
+    "utf8"
+  );
+  previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = piAgentSource;
+});
 
 afterEach(async () => {
+  if (previousPiAgentDir === undefined) {
+    delete process.env.PI_CODING_AGENT_DIR;
+  } else {
+    process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+  }
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -41,6 +60,10 @@ describe("real-session fixture preparation", () => {
 
     expect(fixture.env.CODEX_HOME).toBe(fixture.codexHome);
     expect(fixture.env.CODEX_SQLITE_HOME).toBe(join(dataDir, "codex-sqlite"));
+    expect(fixture.env.PI_CODING_AGENT_DIR).toBe(fixture.piAgentDir);
+    expect(
+      await readFile(join(fixture.piAgentDir, "models.json"), "utf8")
+    ).toContain("fixture-model");
     expect(config).toContain("fixture-model");
     expect(config).not.toMatch(/sqlite_home\s*=/i);
     expect(config).not.toContain("C:/user/state");
@@ -75,6 +98,18 @@ describe("real-session fixture preparation", () => {
     await writeFile(join(source, "config.toml"), "model = \"fixture-model\"\n", "utf8");
 
     await expect(prepareRealSessionFixture(dataDir, source)).rejects.toThrow("models_cache.json");
+    await expect(stat(join(dataDir, "real-session-fixture.json"))).rejects.toThrow();
+  });
+
+  it("rejects a pi agent directory without a usable model catalog", async () => {
+    const source = await mkdtemp(join(tmpdir(), "verm-real-source-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "verm-real-fixture-"));
+    directories.push(source, dataDir);
+    await writeFile(join(source, "config.toml"), "model = \"fixture-model\"\n", "utf8");
+    await writeFile(join(source, "models_cache.json"), "{\"models\":[{\"id\":\"fixture-model\"}]}", "utf8");
+    await rm(join(piAgentSource, "models.json"));
+
+    await expect(prepareRealSessionFixture(dataDir, source)).rejects.toThrow("models.json");
     await expect(stat(join(dataDir, "real-session-fixture.json"))).rejects.toThrow();
   });
 });

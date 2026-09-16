@@ -25,6 +25,10 @@ export type EngineMethodHandler = {
  * `runtimeService` 由 shell 装配完成后回填，引擎在收到请求前不读取它。
  */
 export type EngineIntegrationHost = {
+  /** 工作台数据目录；引擎自己管理的会话目录与运行文件落在其下。 */
+  persistenceBaseDir?: string;
+  /** 随包附带的 pi 扩展入口；缺失时 pi 引擎拒绝为该会话启动进程。 */
+  piExtensionPath?: string;
   workspaceRegistry: WorkspaceRegistryService;
   sessionIndexStore: SessionIndexStore;
   hostTools: HostToolRegistry;

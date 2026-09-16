@@ -235,7 +235,7 @@ export const workbenchRpc = {
 
   "app.start": {
     params: z.object({ dataDir: z.string().min(1), userDataDir: z.string().min(1).optional(), port: z.number().int().min(1024).max(65535), fixture: z.enum(["session-tree", "real-session"]).optional(), codexConfigSource: z.string().min(1).optional(), env: z.record(z.string()).optional() }),
-    result: z.object({ pid: z.number().int(), cdpUrl: z.string(), desktop: z.string(), dataDir: z.string().optional(), projectPath: z.string().optional(), workspaceId: z.string().optional(), codexHome: z.string().optional() })
+    result: z.object({ pid: z.number().int(), cdpUrl: z.string(), desktop: z.string(), dataDir: z.string().optional(), projectPath: z.string().optional(), workspaceId: z.string().optional(), codexHome: z.string().optional(), piAgentDir: z.string().optional() })
   },
   "app.stop": { params: z.object({ pid: z.number().int().positive() }), result: zEmpty },
   "app.window": {

@@ -1,22 +1,24 @@
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const fixtureVersion = 1;
+const fixtureVersion = 2;
 
 type FixtureMarker = {
   version?: number;
   projectPath?: string;
   codexHome?: string;
+  piAgentDir?: string;
 };
 
 export type RealSessionFixture = {
   dataDir: string;
   projectPath: string;
   codexHome: string;
+  piAgentDir: string;
   env: Record<string, string>;
 };
 
@@ -96,11 +98,45 @@ const result = (dataDir: string, projectPath: string, codexHome: string): RealSe
   dataDir,
   projectPath,
   codexHome,
+  piAgentDir: join(dataDir, "pi-agent"),
   env: {
     CODEX_HOME: codexHome,
-    CODEX_SQLITE_HOME: join(dataDir, "codex-sqlite")
+    CODEX_SQLITE_HOME: join(dataDir, "codex-sqlite"),
+    PI_CODING_AGENT_DIR: join(dataDir, "pi-agent")
   }
 });
+
+/**
+ * pi 的模型、认证与扩展都要落在隔离目录里；扩展包一并复制，
+ * 免得孤立实例启动时去联网安装 pi-subagents。
+ */
+const copyPiAgentState = async (source: string, target: string): Promise<void> => {
+  await mkdir(target, { recursive: true });
+  for (const file of ["models.json", "auth.json", "settings.json"]) {
+    if (await exists(join(source, file))) {
+      await copyFile(join(source, file), join(target, file));
+    }
+  }
+  for (const directory of ["skills", "npm"]) {
+    if (await exists(join(source, directory))) {
+      await cp(join(source, directory), join(target, directory), {
+        recursive: true,
+        force: true
+      });
+    }
+  }
+  const modelsPath = join(target, "models.json");
+  if (!(await exists(modelsPath))) {
+    throw new Error("real-session requires models.json in the pi agent directory: " + source);
+  }
+  const models = await readJson<{ providers?: Record<string, { models?: unknown[] }> }>(modelsPath);
+  const hasModel = Object.values(models.providers ?? {}).some(
+    (provider) => Array.isArray(provider.models) && provider.models.length > 0
+  );
+  if (!hasModel) {
+    throw new Error("real-session requires a non-empty pi model catalog: " + modelsPath);
+  }
+};
 
 export const prepareRealSessionFixture = async (
   dataDirInput: string,
@@ -114,7 +150,8 @@ export const prepareRealSessionFixture = async (
   if (await exists(markerPath)) {
     const marker = await readJson<FixtureMarker>(markerPath);
     if (marker.version !== fixtureVersion || resolve(marker.projectPath ?? "") !== resolve(projectPath) ||
-      resolve(marker.codexHome ?? "") !== resolve(codexHome)) {
+      resolve(marker.codexHome ?? "") !== resolve(codexHome) ||
+      resolve(marker.piAgentDir ?? "") !== resolve(join(dataDir, "pi-agent"))) {
       throw new Error("real-session fixture metadata does not match this dataDir");
     }
     await assertGitProject(projectPath);
@@ -122,6 +159,9 @@ export const prepareRealSessionFixture = async (
     const modelCache = await exists(modelCachePath) ? await readJson<{ models?: unknown }>(modelCachePath) : undefined;
     if (!(await exists(join(codexHome, "config.toml"))) || !Array.isArray(modelCache?.models) || !modelCache.models.length) {
       throw new Error("real-session fixture codex state is incomplete; use a fresh dataDir");
+    }
+    if (!(await exists(join(dataDir, "pi-agent", "models.json")))) {
+      throw new Error("real-session fixture pi state is incomplete; use a fresh dataDir");
     }
     return result(dataDir, projectPath, codexHome);
   }
@@ -132,12 +172,17 @@ export const prepareRealSessionFixture = async (
 
   const source = resolve(codexConfigSourceInput?.trim() || process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"));
   await copyInitialCodexState(source, codexHome);
+  await copyPiAgentState(
+    resolve(process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent")),
+    join(dataDir, "pi-agent")
+  );
   await createGitProject(projectPath);
   const createdAt = new Date().toISOString();
   await writeFile(markerPath, JSON.stringify({
     version: fixtureVersion,
     projectPath,
     codexHome,
+    piAgentDir: join(dataDir, "pi-agent"),
     createdAt
   }, null, 2) + "\n", "utf8");
   await assertGitProject(projectPath);

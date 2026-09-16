@@ -31,6 +31,8 @@ import {
 export type CreateWorkbenchRuntimeServiceOptions = {
   /** 装配期覆盖引擎启动命令；用户侧的程序路径仍由 workspace 注册表设置提供。 */
   engineCommands?: Record<string, { path: string; args?: string[] }>;
+  /** 随包附带的 pi 扩展入口，由应用壳解析后传入。 */
+  piExtensionPath?: string;
   persistenceBaseDir?: string;
   pickWorkspaceDirectory?: () => Promise<{
     canceled: boolean;
@@ -90,6 +92,8 @@ export const createSessionRuntimeService = (
   };
   const integrations: EngineIntegration[] = engineIntegrations.map((factory) =>
     factory({
+      persistenceBaseDir: options.persistenceBaseDir,
+      piExtensionPath: options.piExtensionPath,
       workspaceRegistry,
       sessionIndexStore,
       hostTools,
