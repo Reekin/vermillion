@@ -84,6 +84,8 @@ type PiSessionRuntime = {
   appliedModel?: { provider: string; modelId: string };
   appliedThinking?: string;
   lastStopReason?: string;
+  /** 工作台发出的中断：pi 会把被中断的轮次报告成 error，需要按用户意图归类。 */
+  abortRequested?: boolean;
   toolText: Map<string, string>;
 };
 
@@ -411,6 +413,8 @@ export class PiRuntimePort
     if (!runtime?.process?.running) {
       return { id: payload.id, ok: true, result: {} };
     }
+    // pi 会先把被中断的轮次报告成 error 再回执 abort，所以意图要在发命令前记下。
+    runtime.abortRequested = true;
     const response = await this.sendCommand(runtime, payload.id, { type: "abort" });
     return response.success === true
       ? { id: payload.id, ok: true, result: {} }
@@ -917,6 +921,7 @@ export class PiRuntimePort
     runtime.currentTurnId = turnId;
     runtime.assistantCount = 0;
     runtime.lastStopReason = undefined;
+    runtime.abortRequested = false;
     this.emit("turn.started", {
       sessionId: runtime.sessionId,
       turnId,
@@ -1011,13 +1016,15 @@ export class PiRuntimePort
         engineId: this.engineId
       });
       if (runtime.lastStopReason === "error") {
-        this.emit("runtime.error", {
-          sessionId: runtime.sessionId,
-          turnId,
-          code: "pi_turn_error",
-          message: summarize(payload?.errorMessage) ?? "pi reported a failed turn.",
-          recoverable: true
-        });
+        if (!runtime.abortRequested) {
+          this.emit("runtime.error", {
+            sessionId: runtime.sessionId,
+            turnId,
+            code: "pi_turn_error",
+            message: summarize(payload?.errorMessage) ?? "pi reported a failed turn.",
+            recoverable: true
+          });
+        }
       }
     }
   }
@@ -1112,10 +1119,12 @@ export class PiRuntimePort
       return;
     }
     const finishReason =
-      runtime.lastStopReason === "error"
-        ? "failed"
-        : runtime.lastStopReason === "aborted" || runtime.lastStopReason === "interrupted"
-          ? "interrupted"
+      runtime.abortRequested ||
+      runtime.lastStopReason === "aborted" ||
+      runtime.lastStopReason === "interrupted"
+        ? "interrupted"
+        : runtime.lastStopReason === "error"
+          ? "failed"
           : "completed";
     this.emit("turn.completed", {
       sessionId: runtime.sessionId,

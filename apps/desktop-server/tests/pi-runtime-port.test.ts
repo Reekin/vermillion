@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +184,39 @@ describe.skipIf(!enabled)("pi runtime port", () => {
     expect(
       snapshot?.messageBlocks.filter((block) => block.role === "assistant").length
     ).toBeGreaterThan(0);
+
+    // 角色正文只在变化时重新送达；扩展每轮开始时都读这份文件。
+    const second = await port.request({
+      id: "send-2",
+      method: "sendUserMessage",
+      params: {
+        sessionId,
+        messageId: "message-pi-e2e-0002",
+        content: "Reply with exactly PI_PORT_OK_2.",
+        attachments: [],
+        developerInstructions: "You are a Vermillion test session (v2).",
+        deliveredDeveloperInstructions: "You are a Vermillion test session."
+      }
+    });
+    expect(second.ok, JSON.stringify(second.error)).toBe(true);
+    expect(second.result?.developerInstructions).toBe(
+      "You are a Vermillion test session (v2)."
+    );
+    expect(
+      await readFile(
+        join(port.sessionDirectory(sessionId), "role-instructions.md"),
+        "utf8"
+      )
+    ).toBe("You are a Vermillion test session (v2).");
+    await waitFor(() =>
+      events.find(
+        (event) =>
+          event.method === "turn.completed" &&
+          event.params.turnId === second.result?.turnId
+      )
+    );
+    const afterSecond = await provider.hydrateSession(entry);
+    expect(afterSecond?.turns).toHaveLength(2);
   }, 180_000);
 
   it("streams tool and terminal output, then forks the session at a turn", async () => {
@@ -411,5 +444,41 @@ describe.skipIf(!enabled)("pi runtime port", () => {
       `${sessionId}:message-pi-steer-0001`,
       `${sessionId}:message-pi-steer-0002`
     ]);
+
+    const long = await port.request({
+      id: "send-interrupt",
+      method: "sendUserMessage",
+      params: {
+        sessionId,
+        messageId: "message-pi-steer-0003",
+        content:
+          "Use the bash tool to run `sleep 120` and then reply with exactly NEVER_DONE.",
+        attachments: []
+      }
+    });
+    expect(long.ok, JSON.stringify(long.error)).toBe(true);
+    const longTurnId = long.result?.turnId as string;
+    await waitFor(() =>
+      events.find(
+        (event) =>
+          event.method === "tool.started" &&
+          event.params.turnId === longTurnId
+      )
+    );
+    const interrupted = await port.request({
+      id: "interrupt-1",
+      method: "interruptTurn",
+      params: { sessionId, turnId: longTurnId, reason: "acceptance check" }
+    });
+    expect(interrupted.ok, JSON.stringify(interrupted.error)).toBe(true);
+    const completion = await waitFor(() =>
+      events.find(
+        (event) =>
+          event.method === "turn.completed" &&
+          event.params.turnId === longTurnId
+      )
+    );
+    expect(completion.params.finishReason).toBe("interrupted");
+    expect(port.getActiveTurnId(sessionId)).toBeUndefined();
   }, 240_000);
 });
