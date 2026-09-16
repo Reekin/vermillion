@@ -14,22 +14,24 @@
 
 实例运行的是本 worktree 构建：CDP 目标为 `file:///I:/gpt-projects/vermillion-worktrees/sidebar-status-light/apps/desktop/dist-web/index.html`，`runtime.info` 返回 pid 76900、`buildId sha256:5310aec6…`、`schedulerOnline true`。
 
+该实例在独立验收期间保持运行供 Verifier 复用，最终由 Worker 用 `app.stop` 结束，并在本记录末尾补记停止结果与端口释放情况。
+
 ## 检查
 
 | 命令 | 结果 |
 |---|---|
 | `pnpm -r --workspace-concurrency=1 typecheck` | 6 个 workspace 包全部通过 |
-| `pnpm -r --workspace-concurrency=1 test` | 50 个测试文件、299 条测试通过 |
+| `pnpm -r --workspace-concurrency=1 test` | 6 个包合计 134 个测试文件、976 条通过（desktop-server 另有 4 条 skipped）；逐包：shared 4/8、workbench 20/150、adapters 3/22、core 4/60、desktop-server 53/437(+4 skipped)、desktop 50/299 |
 | `pnpm --filter @vermillion/desktop lint:ui` | `ui: ok` |
 
 新增 `apps/desktop/tests/session-sidebar-status.test.tsx`：三种取值各自的槽位与状态色类名、`none` 仍保留固定宽度槽位、灯在标题之前、折叠时子会话不向父行透传状态。
 
 ## 逐条观察
 
-1. 三态并存：`shots/03-three-states.png`。同一时刻列表同时存在运行中的会话（黄灯 `rgb(207,183,106)`）、未打开的已完成未读会话（绿灯 `rgb(143,188,152)`）与已读完成的会话（无灯）。运行中状态先由真实发送产生（`shots/01-running-yellow.png`），未读由“会话未选中时完成一轮”产生（`shots/02-unread-green.png`）。
-2. 成员分支：`shots/04-branch-running-yellow.png` → `shots/05-branch-unread-green.png` → `shots/06-read-light-cleared.png`。在会话 A 的第 1 轮节点上提问 fork 出成员分支，读者停在其他会话：分支运行期间该树行显示黄灯；分支完成且读者仍在别处时转为绿灯；打开该树读完后灯消失。该行标题、排序、置顶与展开状态在此期间不变。
-3. subagent 行：`shots/08-subagent-lights.png` → `shots/09-subagent-unread.png`。父会话派生真实 subagent（会话索引中 `relationType: subagent`）。父行保持自身状态（无灯），缩进的 subagent 行在运行期间显示黄灯、完成后未读转为绿灯，两行互不覆盖。
-4. 行内共存：`shots/10-pin-collapse.png`、`shots/11-archived.png`、`shots/12-role-badge.png`。依次执行置顶、折叠、归档，并用隔离工作台上被调度器拉起的 Worker 会话（带角色标记）对照：所有顶层行的状态槽位左边缘都是 92px、标题左边缘 106px，缩进行分别为 106px / 139px，相对时间右边缘统一为 327px；折叠后仅隐藏缩进行，归档后该行从列表消失，槽位与标题位置不随灯的明灭或这些操作移动。
+1. 三态并存：`03-three-states.png`。同一时刻列表同时存在运行中的会话（黄灯 `rgb(207,183,106)`）、未打开的已完成未读会话（绿灯 `rgb(143,188,152)`）与已读完成的会话（无灯）。运行中状态先由真实发送产生（`01-running-yellow.png`），未读由“会话未选中时完成一轮”产生（`02-unread-green.png`）。
+2. 成员分支：`04-branch-running-yellow.png` → `05-branch-unread-green.png` → `06-read-light-cleared.png`。在会话 A 的第 1 轮节点上提问 fork 出成员分支，读者停在其他会话：分支运行期间该树行显示黄灯；分支完成且读者仍在别处时转为绿灯；打开该树读完后灯消失。该行标题、排序、置顶与展开状态在此期间不变。
+3. subagent 行：`08-subagent-lights.png` → `09-subagent-unread.png`。父会话派生真实 subagent（会话索引中 `relationType: subagent`）。父行保持自身状态（无灯），缩进的 subagent 行在运行期间显示黄灯、完成后未读转为绿灯，两行互不覆盖。
+4. 行内共存：`10-pin-collapse.png`、`11-archived.png`、`12-role-badge.png`。依次执行置顶、折叠、归档，并用隔离工作台上被调度器拉起的 Worker 会话（带角色标记）对照：顶层行的状态槽位左边缘统一为 92px、缩进行为 106px，相对时间右边缘统一为 327px；因此灯的明灭不移动槽位与尾部。标题左边缘只在同一类行之间一致——不带角色标记的顶层行标题为 106px、缩进行为 139px，带角色标记的 Worker 行标题排在角色标记之后（168px），这是角色标记本身占位造成的既有差异，不是状态灯引入的位移。折叠后仅隐藏缩进行，归档后该行从列表消失。
 
 第 4 条的“重命名”入口由另一张未合入的工单提供，本候选不包含该菜单项；本轮以置顶、折叠、归档和长中文标题对照代替，未覆盖重命名本身。
 
