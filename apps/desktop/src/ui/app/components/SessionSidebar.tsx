@@ -6,7 +6,7 @@ import type { SessionMenu, SessionRenameController } from "../use-session-action
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { SessionRenameDialog } from "./SessionRenameDialog.js";
-import { Badge, Button, Field, IconButton, ListRow } from "./ui.js";
+import { Badge, Button, Field, IconButton, ListRow, StatusDot } from "./ui.js";
 import { roleLabel } from "./workflow-display.js";
 
 type SessionSidebarProps = {
@@ -57,6 +57,7 @@ export const SessionSidebar = ({ sessions, hasMore, loading, loadMore, selectedS
         onContextMenu={(event) => onOpenMenu(event, session.sessionId, session.title)}
         leading={
           <>
+            <StatusDot status={session.statusDot} />
             {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
             {session.role && session.role !== "design-partner" && <Badge>{roleLabel[session.role] ?? session.role}</Badge>}
           </>
