@@ -420,3 +420,62 @@ describe("MessageMarkdownView", () => {
     expect(html).not.toContain("start=326");
   });
 });
+
+describe("message file links", () => {
+  const renderText = (text: string): string => renderToStaticMarkup(
+    <MessageMarkdownView
+      block={{
+        blockId: "message-link:md",
+        messageId: "message-link",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "assistant",
+        kind: "markdown",
+        text,
+        actor: {
+          participantId: "participant-1",
+          engineId: "agent-codex"
+        },
+        startedAt: "2026-04-17T00:00:00.000Z",
+        completedAt: "2026-04-17T00:00:01.000Z"
+      }}
+    />
+  );
+
+  it("keeps the location out of the opened path and shows the full target on hover", () => {
+    const html = renderText("[domain-service.ts:397](I:\\repo\\src\\domain-service.ts:397)");
+    expect(html).toContain('href="file:///I:/repo/src/domain-service.ts:397"');
+    expect(html).toContain('title="I:\\repo\\src\\domain-service.ts:397"');
+    expect(html).not.toContain("awb-message__unsupported-link");
+  });
+
+  it("accepts a stray leading slash and hash line references", () => {
+    const html = renderText(
+      "[orchestrator.ts:381](/I:/repo/src/orchestrator.ts:381) [state.rs](I:/repo/src/state.rs#L47)"
+    );
+    expect(html).toContain('href="file:///I:/repo/src/orchestrator.ts:381"');
+    expect(html).toContain('title="I:\\repo\\src\\orchestrator.ts:381"');
+    expect(html).toContain('href="file:///I:/repo/src/state.rs%23L47"');
+    expect(html).toContain('title="I:\\repo\\src\\state.rs#L47"');
+  });
+
+  it("keeps relative targets readable instead of linking them", () => {
+    const html = renderText("[PRD](.vermillion/docs/Workbench/Think/PRD.md)");
+    expect(html).toContain('class="awb-message__unsupported-link"');
+    expect(html).toContain(".vermillion/docs/Workbench/Think/PRD.md");
+    expect(html).not.toContain('href=".vermillion');
+  });
+
+  it("treats an anchor target as one path and still shows it in full", () => {
+    const html = renderText("[手工](<I:/repo/manual.md#角色部件对位-sop>)");
+    expect(html).toContain('title="I:\\repo\\manual.md#角色部件对位-sop"');
+    expect(html).not.toContain("awb-message__unsupported-link");
+  });
+
+  it("keeps file URLs outside the drive-path shapes openable", () => {
+    const html = renderText("[script](file:///home/repo/run.sh)");
+    expect(html).toContain('href="file:///home/repo/run.sh"');
+    expect(html).toContain('title="/home/repo/run.sh"');
+    expect(html).not.toContain("awb-message__unsupported-link");
+  });
+});

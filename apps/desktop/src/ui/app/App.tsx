@@ -4,6 +4,7 @@ import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { SessionPane } from "../chat-shell/SessionPane.js";
+import type { MessageFileLinkMenuProps } from "../chat-shell/MessageMarkdownView.js";
 import { WorkbenchChatTree } from "./components/WorkbenchChatTree.js";
 import { DocsPanel } from "./components/DocsPanel.js";
 import { StartWorkButton } from "./components/StartWorkButton.js";
@@ -91,6 +92,15 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     store.getState().showTask({ workspaceId: hit.workspaceId, kind: "workItem", id: hit.workItemId });
   }, [store]);
   const clearSearchWorkItemTarget = useCallback(() => setSearchWorkItemTarget(undefined), []);
+  const renderFileLinkContextMenu = useCallback(({ path, location, target, onCopy, ...props }: MessageFileLinkMenuProps) => (
+    <ContextMenu {...props} zIndex={1001}
+      items={[
+        { key: "copy-path", label: "复制路径", onSelect: () => onCopy(path) },
+        ...(location
+          ? [{ key: "copy-location", label: "复制文件位置", onSelect: () => onCopy(target) }]
+          : [])
+      ]} />
+  ), []);
   const openSearchDoc = useCallback((hit: SearchHit) => {
     if (!hit.path) return;
     setSearchOpen(false);
@@ -287,6 +297,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} transport={transport} />}
                   renderImageContextMenu={({ onCopy, ...props }) => <ContextMenu {...props} zIndex={1001}
                     items={[{ key: "copy-image", label: "复制图片", onSelect: onCopy }]} />}
+                  renderFileLinkContextMenu={renderFileLinkContextMenu}
                   composerExtras={<>
                     <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                     {discussionIssue && sessionWorkspaceId && <Button size="sm" variant="ghost" outlined onClick={() => store.getState().showIssue({ workspaceId: sessionWorkspaceId, issueId: discussionIssue.issueId })}>Issue</Button>}

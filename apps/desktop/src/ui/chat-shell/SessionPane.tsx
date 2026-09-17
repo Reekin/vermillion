@@ -42,7 +42,10 @@ import type {
 import { connectDesktopTransportToStore } from "../../transport/store-bridge.js";
 import { renderTurnExtensions } from "../../features/engine-extensions/turn-extension-registry.js";
 import { ImageLightbox, type ImageLightboxState, type ImageLightboxProps } from "./ImageLightbox.js";
-import { MessageMarkdownView } from "./MessageMarkdownView.js";
+import {
+  MessageMarkdownView,
+  type RenderMessageFileLinkMenu
+} from "./MessageMarkdownView.js";
 import {
   resolveProcessExpanded,
   toggleProcessVisibility,
@@ -100,6 +103,7 @@ const autoRefreshBacklogStreamThreshold = 500;
 
 export type SessionPaneProps = {
   renderImageContextMenu?: ImageLightboxProps["renderContextMenu"];
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
   renderTurnNavigation?: (position: { sessionId: string; turnId: string }) => ReactNode;
   renderChatTree?: (props: ChatTreePanelProps & {
     onSelectSession: (sessionId: string) => void;
@@ -151,6 +155,7 @@ type TranscriptPaneProps = {
   processVisibilityByTurnId: Readonly<Record<string, ProcessVisibilityOverride>>;
   onToggleProcess: (turnId: string, defaultExpanded: boolean) => void;
   onPreviewImage?: (input: ImageLightboxState) => void;
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
   onRespondApproval?: (input: {
     sessionId: string;
     requestId: string;
@@ -402,6 +407,7 @@ const TranscriptPane = memo(
     processVisibilityByTurnId,
     onToggleProcess,
     onPreviewImage,
+    renderFileLinkContextMenu,
     onRespondApproval,
     onRespondInteraction,
     pendingSend,
@@ -536,6 +542,7 @@ const TranscriptPane = memo(
                       hiddenRows={hiddenRows}
                       participantDirectory={participantDirectory}
                       onPreviewImage={onPreviewImage}
+                      renderFileLinkContextMenu={renderFileLinkContextMenu}
                       onRespondApproval={onRespondApproval}
                       onRespondInteraction={onRespondInteraction}
                     />
@@ -549,6 +556,7 @@ const TranscriptPane = memo(
                     hiddenRows={[]}
                     participantDirectory={participantDirectory}
                     onPreviewImage={onPreviewImage}
+                    renderFileLinkContextMenu={renderFileLinkContextMenu}
                     onRespondApproval={onRespondApproval}
                     onRespondInteraction={onRespondInteraction}
                   />
@@ -571,6 +579,7 @@ const TranscriptPane = memo(
                           : undefined
                       }
                       onPreviewImage={onPreviewImage}
+                      renderFileLinkContextMenu={renderFileLinkContextMenu}
                     />
                   ))}
                 </div>
@@ -592,7 +601,7 @@ const TranscriptPane = memo(
             </article>
           );
         })}
-        {pendingSend && <PendingBranchMessage operation={pendingSend} onRetry={onRetrySend} onPreviewImage={onPreviewImage} />}
+        {pendingSend && <PendingBranchMessage operation={pendingSend} onRetry={onRetrySend} onPreviewImage={onPreviewImage} renderFileLinkContextMenu={renderFileLinkContextMenu} />}
       </div>
     </section>
   ),
@@ -615,7 +624,8 @@ const TranscriptPane = memo(
     previous.processVisibilityByTurnId === next.processVisibilityByTurnId &&
     previous.transcriptRef === next.transcriptRef &&
     previous.transcriptContentRef === next.transcriptContentRef &&
-    previous.onPreviewImage === next.onPreviewImage
+    previous.onPreviewImage === next.onPreviewImage &&
+    previous.renderFileLinkContextMenu === next.renderFileLinkContextMenu
 );
 
 export const SessionPane = ({
@@ -634,6 +644,7 @@ export const SessionPane = ({
   onViewChange,
   renderChatTree,
   renderImageContextMenu,
+  renderFileLinkContextMenu,
   renderTurnNavigation,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
@@ -1198,6 +1209,7 @@ export const SessionPane = ({
             processVisibilityByTurnId={processVisibilityByTurnId}
             onToggleProcess={onToggleProcess}
             onPreviewImage={onPreviewImage}
+            renderFileLinkContextMenu={renderFileLinkContextMenu}
             onRespondApproval={onRespondApproval}
             onRespondInteraction={onRespondInteraction}
           />

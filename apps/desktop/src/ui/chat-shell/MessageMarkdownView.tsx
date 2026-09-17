@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type ReactElement
 } from "react";
@@ -14,14 +15,31 @@ import remarkGfm from "remark-gfm";
 import type { MessageBlock } from "@vermillion/shared";
 import { fileUriToPath } from "@vermillion/shared";
 import { createDesktopTransport } from "../../transport/desktop-transport.js";
-import { localMarkdownFileUrl } from "./local-markdown-target.js";
+import { localMarkdownFileUrl, parseLocalFileTarget } from "./local-markdown-target.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { writeClipboardText } from "./clipboard.js";
+
+/** What the application shell needs to render the right-click menu of a message file link. */
+export type MessageFileLinkMenuProps = {
+  x: number;
+  y: number;
+  /** Path the link opens; relative and unsupported targets pass the raw target. */
+  path: string;
+  /** Location as written by the agent, e.g. `:397` or `#L42-L50`. */
+  location?: string;
+  /** Full target as written, used for the hover title and for copying a location. */
+  target: string;
+  onClose: () => void;
+  onCopy: (text: string) => void;
+};
+
+export type RenderMessageFileLinkMenu = (props: MessageFileLinkMenuProps) => ReactNode;
 
 export type MessageMarkdownViewProps = {
   block: MessageBlock;
   copyBlocks?: readonly MessageBlock[];
   onPreviewImage?: (input: { src: string; alt: string }) => void;
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
 };
 
 const sanitizeSchema = {
@@ -428,31 +446,146 @@ type MarkdownRendererProps = {
   text: string;
   cacheKey: string;
   onPreviewImage?: (input: { src: string; alt: string }) => void;
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
 };
 
-const LocalFileLink = ({ href, children }: { href: string; children: ReactNode }): ReactElement => {
+type FileLinkMenuTarget = {
+  path: string;
+  location?: string;
+  target: string;
+};
+
+/** Shared right-click menu state for local file references; the menu itself is rendered by the shell. */
+const useFileLinkMenu = (
+  renderMenu: RenderMessageFileLinkMenu | undefined,
+  target: FileLinkMenuTarget
+) => {
+  const [position, setPosition] = useState<{ x: number; y: number }>();
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current !== undefined) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const copy = (text: string): void => {
+    void writeClipboardText(text).then(() => {
+      if (resetTimerRef.current !== undefined) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+      setCopied(true);
+      resetTimerRef.current = window.setTimeout(() => {
+        resetTimerRef.current = undefined;
+        setCopied(false);
+      }, copyFeedbackDurationMs);
+    }).catch((cause: unknown) => {
+      if (!window.sessionDesktop) {
+        console.error("File link clipboard write failed.", cause);
+      }
+    });
+  };
+
+  const openMenu = (event: ReactMouseEvent<HTMLElement>): void => {
+    if (!renderMenu) {
+      return;
+    }
+    event.preventDefault();
+    setPosition({ x: event.clientX, y: event.clientY });
+  };
+
+  return {
+    openMenu,
+    note: copied ? (
+      <span className="awb-message__file-link-note" role="status">已复制</span>
+    ) : null,
+    menu: position && renderMenu
+      ? renderMenu({
+          ...position,
+          path: target.path,
+          location: target.location,
+          target: target.target,
+          onClose: () => setPosition(undefined),
+          onCopy: copy
+        })
+      : null
+  };
+};
+
+const LocalFileLink = ({ href, children, renderFileLinkContextMenu }: {
+  href: string;
+  children: ReactNode;
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
+}): ReactElement => {
   const [error, setError] = useState<string>();
+  const hrefPath = fileUriToPath(href);
+  // Targets outside the drive-path shapes the agents write still open as one plain path.
+  const target = hrefPath === undefined
+    ? undefined
+    : parseLocalFileTarget(hrefPath) ?? { path: hrefPath, target: hrefPath };
+  const { openMenu, note, menu } = useFileLinkMenu(
+    renderFileLinkContextMenu,
+    target ?? { path: href, target: href }
+  );
   const open = async (): Promise<void> => {
     setError(undefined);
     try {
-      const path = fileUriToPath(href);
-      if (!window.session || !path) throw new Error("无法打开本地文件。");
-      const result = await createDesktopTransport(window.session).file.runAction({ path, action: "open" });
+      if (!window.session || !target) throw new Error("无法打开本地文件。");
+      const result = await createDesktopTransport(window.session).file.runAction({ path: target.path, action: "open" });
       if (!result.ok) throw new Error(result.errorMessage ?? "无法打开本地文件。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法打开本地文件。");
     }
   };
   return <>
-    <a href={href} onClick={(event) => { event.preventDefault(); void open(); }}>{children}</a>
-    {error && <span role="alert">{error}</span>}
+    <a
+      href={href}
+      title={target?.target}
+      onContextMenu={openMenu}
+      onClick={(event) => { event.preventDefault(); void open(); }}
+    >{children}</a>
+    {note}
+    {menu}
+    {error && (
+      <span className="awb-message__file-link-failure" role="alert">
+        <code className="awb-message__unsupported-link-target">{target?.target ?? href}</code>
+        {error}
+      </span>
+    )}
   </>;
+};
+
+/** Relative and anchor targets cannot be located from a message, so they stay readable and copyable. */
+const UnsupportedFileLink = ({ target, children, renderFileLinkContextMenu }: {
+  target: string;
+  children: ReactNode;
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
+}): ReactElement => {
+  const { openMenu, note, menu } = useFileLinkMenu(
+    renderFileLinkContextMenu,
+    { path: target, target }
+  );
+  return (
+    <span className="awb-message__unsupported-link" onContextMenu={openMenu}>
+      {children}
+      <code className="awb-message__unsupported-link-target" title={target}>
+        {target}
+      </code>
+      {note}
+      {menu}
+    </span>
+  );
 };
 
 const MarkdownRenderer = memo(({
   text,
   cacheKey,
-  onPreviewImage
+  onPreviewImage,
+  renderFileLinkContextMenu
 }: MarkdownRendererProps): ReactElement => (
   <ReactMarkdown
     remarkPlugins={[remarkGfm]}
@@ -461,19 +594,23 @@ const MarkdownRenderer = memo(({
     components={{
       a: ({ href, children, node: _ignoredNode, ...props }) => {
         if (href && fileUriToPath(href) !== undefined) {
-          return <LocalFileLink href={href}>{children}</LocalFileLink>;
+          return (
+            <LocalFileLink href={href} renderFileLinkContextMenu={renderFileLinkContextMenu}>
+              {children}
+            </LocalFileLink>
+          );
         }
         const unsupportedTarget = href?.startsWith(unsupportedLinkHrefPrefix)
           ? decodeURIComponent(href.slice(unsupportedLinkHrefPrefix.length))
           : undefined;
         if (unsupportedTarget) {
           return (
-            <span className="awb-message__unsupported-link">
+            <UnsupportedFileLink
+              target={unsupportedTarget}
+              renderFileLinkContextMenu={renderFileLinkContextMenu}
+            >
               {children}
-              <code className="awb-message__unsupported-link-target">
-                {unsupportedTarget}
-              </code>
-            </span>
+            </UnsupportedFileLink>
           );
         }
         if (href && isExternalLinkHref(href)) {
@@ -599,7 +736,8 @@ const StreamingPlainTextTail = ({ text }: { text: string }): ReactElement => (
 export const MessageMarkdownView = memo(({
   block,
   copyBlocks,
-  onPreviewImage
+  onPreviewImage,
+  renderFileLinkContextMenu
 }: MessageMarkdownViewProps): ReactElement => {
   const [isCopied, setIsCopied] = useState(false);
   const copyResetTimerRef = useRef<number | undefined>(undefined);
@@ -676,6 +814,7 @@ export const MessageMarkdownView = memo(({
                 text={userMessageParts.attachmentMarkdown}
                 cacheKey={`${block.blockId}:attachments`}
                 onPreviewImage={onPreviewImage}
+                renderFileLinkContextMenu={renderFileLinkContextMenu}
               />
             ) : null}
             {block.role !== "user" && renderableSegments.map((segment, index) => {
@@ -686,6 +825,7 @@ export const MessageMarkdownView = memo(({
                     text={segment.text}
                     cacheKey={`${block.blockId}:markdown:${index}`}
                     onPreviewImage={onPreviewImage}
+                    renderFileLinkContextMenu={renderFileLinkContextMenu}
                   />
                 );
               }
@@ -720,6 +860,7 @@ export const MessageMarkdownView = memo(({
                         text={segment.directive.title}
                         cacheKey={`${block.blockId}:directive:${index}:title`}
                         onPreviewImage={onPreviewImage}
+                        renderFileLinkContextMenu={renderFileLinkContextMenu}
                       />
                     </div>
                   )}
@@ -729,6 +870,7 @@ export const MessageMarkdownView = memo(({
                         text={segment.directive.body}
                         cacheKey={`${block.blockId}:directive:${index}:body`}
                         onPreviewImage={onPreviewImage}
+                        renderFileLinkContextMenu={renderFileLinkContextMenu}
                       />
                     </div>
                   )}
