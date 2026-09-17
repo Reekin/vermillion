@@ -463,6 +463,7 @@ describe("message file links", () => {
     const html = renderText("[PRD](.vermillion/docs/Workbench/Think/PRD.md)");
     expect(html).toContain('class="awb-message__unsupported-link"');
     expect(html).toContain(".vermillion/docs/Workbench/Think/PRD.md");
+    expect(html).toContain("无法直接打开");
     expect(html).not.toContain('href=".vermillion');
   });
 

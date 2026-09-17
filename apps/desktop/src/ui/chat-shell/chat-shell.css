@@ -665,6 +665,10 @@ button:disabled {
   gap: 0.35em;
 }
 
+.awb-message__file-link-note.is-error {
+  color: var(--awb-danger);
+}
+
 .awb-message__file-link-failure .awb-message__unsupported-link-target {
   margin-left: 0;
 }

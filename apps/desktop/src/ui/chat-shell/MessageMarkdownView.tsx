@@ -461,7 +461,7 @@ const useFileLinkMenu = (
   target: FileLinkMenuTarget
 ) => {
   const [position, setPosition] = useState<{ x: number; y: number }>();
-  const [copied, setCopied] = useState(false);
+  const [note, setNote] = useState<{ message: string; error?: boolean }>();
   const resetTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(
@@ -473,20 +473,28 @@ const useFileLinkMenu = (
     []
   );
 
+  const showNote = (next: { message: string; error?: boolean }): void => {
+    if (resetTimerRef.current !== undefined) {
+      window.clearTimeout(resetTimerRef.current);
+    }
+    setNote(next);
+    resetTimerRef.current = window.setTimeout(() => {
+      resetTimerRef.current = undefined;
+      setNote(undefined);
+    }, copyFeedbackDurationMs);
+  };
+
   const copy = (text: string): void => {
-    void writeClipboardText(text).then(() => {
-      if (resetTimerRef.current !== undefined) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-      setCopied(true);
-      resetTimerRef.current = window.setTimeout(() => {
-        resetTimerRef.current = undefined;
-        setCopied(false);
-      }, copyFeedbackDurationMs);
-    }).catch((cause: unknown) => {
+    void writeClipboardText(text)
+      .then(() => showNote({ message: "已复制" }))
+      .catch((cause: unknown) => {
       if (!window.sessionDesktop) {
         console.error("File link clipboard write failed.", cause);
       }
+      showNote({
+        message: `复制失败：${cause instanceof Error ? cause.message : String(cause)}`,
+        error: true
+      });
     });
   };
 
@@ -500,8 +508,11 @@ const useFileLinkMenu = (
 
   return {
     openMenu,
-    note: copied ? (
-      <span className="awb-message__file-link-note" role="status">已复制</span>
+    note: note ? (
+      <span
+        className={`awb-message__file-link-note${note.error ? " is-error" : ""}`}
+        role="status"
+      >{note.message}</span>
     ) : null,
     menu: position && renderMenu
       ? renderMenu({
@@ -575,6 +586,7 @@ const UnsupportedFileLink = ({ target, children, renderFileLinkContextMenu }: {
       <code className="awb-message__unsupported-link-target" title={target}>
         {target}
       </code>
+      <span className="awb-message__file-link-note">无法直接打开</span>
       {note}
       {menu}
     </span>
