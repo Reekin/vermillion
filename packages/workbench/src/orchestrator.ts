@@ -11,7 +11,7 @@ export type AgentRunner = {
   /** The caller supplies the message id so it can recognize the turn this message opens. */
   send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content"> & { messageId?: string }) => Promise<void | { turnId?: string; messageId?: string }>;
   /** Delivers into the running turn when there is one, otherwise starts the next message. */
-  steer: (sessionId: string, content: string, messageId?: string) => Promise<{ turnId?: string; delivery?: "steered" | "started" }>;
+  steer: (sessionId: string, content: string, messageId?: string) => Promise<{ turnId?: string; messageId?: string; delivery?: "steered" | "started" }>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
   resume: (sessionId: string, options?: { cwd?: string; modelConfig?: RoleExecutionOverrides; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
