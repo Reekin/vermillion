@@ -15,7 +15,7 @@ import remarkGfm from "remark-gfm";
 import type { MessageBlock } from "@vermillion/shared";
 import { fileUriToPath } from "@vermillion/shared";
 import { createDesktopTransport } from "../../transport/desktop-transport.js";
-import { localMarkdownFileUrl, parseLocalFileTarget } from "./local-markdown-target.js";
+import { localMarkdownFileUrl, resolveLocalFileLinkTarget } from "./local-markdown-target.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { writeClipboardText } from "./clipboard.js";
 
@@ -488,14 +488,14 @@ const useFileLinkMenu = (
     void writeClipboardText(text)
       .then(() => showNote({ message: "已复制" }))
       .catch((cause: unknown) => {
-      if (!window.sessionDesktop) {
-        console.error("File link clipboard write failed.", cause);
-      }
-      showNote({
-        message: `复制失败：${cause instanceof Error ? cause.message : String(cause)}`,
-        error: true
+        if (!window.sessionDesktop) {
+          console.error("File link clipboard write failed.", cause);
+        }
+        showNote({
+          message: `复制失败：${cause instanceof Error ? cause.message : String(cause)}`,
+          error: true
+        });
       });
-    });
   };
 
   const openMenu = (event: ReactMouseEvent<HTMLElement>): void => {
@@ -533,11 +533,7 @@ const LocalFileLink = ({ href, children, renderFileLinkContextMenu }: {
   renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
 }): ReactElement => {
   const [error, setError] = useState<string>();
-  const hrefPath = fileUriToPath(href);
-  // Targets outside the drive-path shapes the agents write still open as one plain path.
-  const target = hrefPath === undefined
-    ? undefined
-    : parseLocalFileTarget(hrefPath) ?? { path: hrefPath, target: hrefPath };
+  const target = resolveLocalFileLinkTarget(href);
   const { openMenu, note, menu } = useFileLinkMenu(
     renderFileLinkContextMenu,
     target ?? { path: href, target: href }

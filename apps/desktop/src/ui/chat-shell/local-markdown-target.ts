@@ -44,6 +44,16 @@ export const parseLocalFileTarget = (target: string): LocalFileTarget | undefine
   return { path, location: match[0], target: decoded };
 };
 
+/**
+ * Resolves the file reference a rendered link points at, i.e. the values the link menu receives.
+ * Targets outside the drive-path shapes the agents write stay one plain path so they keep opening.
+ */
+export const resolveLocalFileLinkTarget = (href: string): LocalFileTarget | undefined => {
+  const path = fileUriToPath(href);
+  if (path === undefined) return undefined;
+  return parseLocalFileTarget(path) ?? { path, target: path };
+};
+
 /** Markdown parsers URI-encode destinations before passing them to renderers. */
 export const localMarkdownFileUrl = (target: string): string | undefined => {
   if (fileUriToPath(target) !== undefined) return target;

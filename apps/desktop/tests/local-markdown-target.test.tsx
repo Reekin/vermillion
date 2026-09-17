@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MessageMarkdownView } from "../src/ui/chat-shell/MessageMarkdownView.js";
 import {
   localMarkdownFileUrl,
-  parseLocalFileTarget
+  parseLocalFileTarget,
+  resolveLocalFileLinkTarget
 } from "../src/ui/chat-shell/local-markdown-target.js";
 import { fileUriToPath } from "@vermillion/shared";
 
@@ -115,5 +116,26 @@ describe("local file targets", () => {
       location: "#L42",
       target: "I:\\repo\\src\\x.ts#L42"
     });
+  });
+
+  it("hands the link menu the openable path and the written location", () => {
+    const located = resolveLocalFileLinkTarget("file:///I:/repo/src/x.ts%3A397")!;
+    expect(located.path).toBe("I:\\repo\\src\\x.ts");
+    expect(located.location).toBe(":397");
+    expect(located.target).toBe("I:\\repo\\src\\x.ts:397");
+
+    const hashLocated = resolveLocalFileLinkTarget("file:///I:/repo/src/x.ts%23L42")!;
+    expect(hashLocated.location).toBe("#L42");
+    expect(hashLocated.target).toBe("I:\\repo\\src\\x.ts#L42");
+
+    expect(resolveLocalFileLinkTarget("file:///I:/repo/docs/x.md")).toEqual({
+      path: "I:\\repo\\docs\\x.md",
+      target: "I:\\repo\\docs\\x.md"
+    });
+    expect(resolveLocalFileLinkTarget("file:///home/repo/run.sh")).toEqual({
+      path: "/home/repo/run.sh",
+      target: "/home/repo/run.sh"
+    });
+    expect(resolveLocalFileLinkTarget("https://example.com/src/x.ts:12")).toBeUndefined();
   });
 });
