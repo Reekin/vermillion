@@ -649,6 +649,30 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.awb-message__file-link-note,
+.awb-message__file-link-failure {
+  margin-left: 0.35em;
+  font-weight: 400;
+  font-size: var(--awb-text-caption);
+  line-height: 1.45;
+  color: var(--awb-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.awb-message__file-link-failure {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+}
+
+.awb-message__file-link-note.is-error {
+  color: var(--awb-danger);
+}
+
+.awb-message__file-link-failure .awb-message__unsupported-link-target {
+  margin-left: 0;
+}
+
 .awb-message__content pre {
   padding: 0.82rem 0.92rem;
   border-radius: 6px;

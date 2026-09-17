@@ -1,11 +1,15 @@
 import { appendAttachmentMarkdown, type ChatTreeSendOperation } from "@vermillion/shared";
 import { Button } from "./Button.js";
-import { MessageMarkdownView } from "./MessageMarkdownView.js";
+import {
+  MessageMarkdownView,
+  type RenderMessageFileLinkMenu
+} from "./MessageMarkdownView.js";
 
-export const PendingBranchMessage = ({ operation, onRetry, onPreviewImage }: {
+export const PendingBranchMessage = ({ operation, onRetry, onPreviewImage, renderFileLinkContextMenu }: {
   operation: ChatTreeSendOperation;
   onRetry: (operationId: string) => Promise<void>;
   onPreviewImage?: (input: { src: string; alt: string }) => void;
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
 }) => (
   <article className="awb-chat-entry is-user" aria-label="待发送消息">
     <MessageMarkdownView block={{
@@ -17,7 +21,7 @@ export const PendingBranchMessage = ({ operation, onRetry, onPreviewImage }: {
       kind: "plain_text",
       text: appendAttachmentMarkdown(operation.content, operation.attachments),
       startedAt: ""
-    }} onPreviewImage={onPreviewImage} />
+    }} onPreviewImage={onPreviewImage} renderFileLinkContextMenu={renderFileLinkContextMenu} />
     {operation.status === "failed" && <>
       <p role="alert" className="awb-pending-message-error">{operation.error}</p>
       {!operation.cleanupPending && <Button onClick={() => void onRetry(operation.operationId)}>重试发送</Button>}

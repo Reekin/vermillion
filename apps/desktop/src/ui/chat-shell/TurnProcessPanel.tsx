@@ -5,7 +5,10 @@ import type {
 } from "@vermillion/shared";
 import { Fragment, type ReactElement } from "react";
 import type { ImageLightboxState } from "./ImageLightbox.js";
-import { MessageMarkdownView } from "./MessageMarkdownView.js";
+import {
+  MessageMarkdownView,
+  type RenderMessageFileLinkMenu
+} from "./MessageMarkdownView.js";
 import type { ParticipantDirectory } from "./participant-directory.js";
 import type { TurnTranscriptRow } from "./transcript-view-model.js";
 import { ApprovalFlowView, type ApprovalAction } from "./ApprovalFlowView.js";
@@ -25,6 +28,7 @@ export type TurnProcessPanelProps = {
   hiddenRows?: TurnTranscriptRow[];
   participantDirectory: ParticipantDirectory;
   onPreviewImage?: (input: ImageLightboxState) => void;
+  renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
   onRespondApproval?: (input: {
     sessionId: string;
     requestId: string;
@@ -148,6 +152,7 @@ export const TurnProcessPanel = ({
   hiddenRows = [],
   participantDirectory,
   onPreviewImage,
+  renderFileLinkContextMenu,
   onRespondApproval,
   onRespondInteraction
 }: TurnProcessPanelProps): ReactElement => {
@@ -207,6 +212,7 @@ export const TurnProcessPanel = ({
                           : undefined
                       }
                       onPreviewImage={onPreviewImage}
+                      renderFileLinkContextMenu={renderFileLinkContextMenu}
                     />
                   ))}
                 </Fragment>
