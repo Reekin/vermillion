@@ -8,9 +8,10 @@ export type AgentRunner = {
   resolveSourceTurn?: (sessionId: string) => Promise<string | undefined>;
   fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
   open: (input: { workspaceId: string; cwd: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string }>;
-  send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content">) => Promise<void | { turnId?: string }>;
-  /** Delivers into the running turn when there is one (returns its id), otherwise starts the next message. */
-  steer: (sessionId: string, content: string) => Promise<{ turnId?: string }>;
+  /** The caller supplies the message id so it can recognize the turn this message opens. */
+  send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content"> & { messageId?: string }) => Promise<void | { turnId?: string; messageId?: string }>;
+  /** Delivers into the running turn when there is one, otherwise starts the next message. */
+  steer: (sessionId: string, content: string, messageId?: string) => Promise<{ turnId?: string; delivery?: "steered" | "started" }>;
   interrupt: (sessionId: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
   resume: (sessionId: string, options?: { cwd?: string; modelConfig?: RoleExecutionOverrides; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
@@ -19,7 +20,7 @@ export type AgentRunner = {
   /** True while the runtime is executing a turn, including tool/model waits. */
   isActive?: (sessionId: string) => boolean;
   getActiveTurnId?: (sessionId: string) => string | undefined;
-  onTurnStarted?: (listener: (event: { sessionId: string; turnId: string }) => void) => () => void;
+  onTurnStarted?: (listener: (event: { sessionId: string; turnId: string; messageId?: string }) => void) => () => void;
   onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed"; failure?: string }) => void) => () => void;
 };
 
@@ -35,7 +36,8 @@ export type OrchestratorOptions = {
 };
 
 type WorkerBinding = { workspaceId: string; run: AgentRun; actionId: string };
-type WorkerTurn = { turnId?: string; scheduled: boolean; settled?: boolean; bound?: WorkerBinding };
+type TurnOrigin = "scheduler" | "user";
+type WorkerTurn = { turnId?: string; origin: TurnOrigin; settled?: boolean; bound?: WorkerBinding };
 type PatrolBinding = { workspaceId: string; patrolRunId: string; sessionId: string };
 const createId = (prefix: string): string => prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
@@ -54,6 +56,8 @@ export class Orchestrator {
   private readonly disposers: Array<() => void> = [];
   private readonly runsBySession = new Map<string, WorkerBinding>();
   private readonly turnsBySession = new Map<string, WorkerTurn>();
+  /** Message ids this orchestrator sent, until the turn they opened reports them back. */
+  private readonly sentMessages = new Set<string>();
   private readonly unsettledTurns = new Map<string, Set<WorkerTurn>>();
   private readonly settling = new Map<string, number>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
@@ -121,10 +125,7 @@ export class Orchestrator {
         void this.enqueue(event.workspaceId, async () => { await this.runner.interrupt(sessionId); await this.service.releaseIdleWorkers(event.workspaceId); await this.reconcile(event.workspaceId); });
       }
     }));
-    if (this.runner.onTurnStarted) this.disposers.push(this.runner.onTurnStarted((event) => {
-      if (this.turnsBySession.get(event.sessionId)?.turnId === event.turnId) return;
-      this.trackTurn(event.sessionId, { turnId: event.turnId, scheduled: false });
-    }));
+    if (this.runner.onTurnStarted) this.disposers.push(this.runner.onTurnStarted((event) => this.attributeTurn(event)));
     this.disposers.push(this.runner.onTurnCompleted((event) => {
       // Install the barrier synchronously: a queued reconcile may run before this event is processed.
       this.settling.set(event.sessionId, (this.settling.get(event.sessionId) ?? 0) + 1);
@@ -222,6 +223,37 @@ export class Orchestrator {
     const pending = this.unsettledTurns.get(sessionId) ?? new Set<WorkerTurn>();
     pending.add(turn);
     this.unsettledTurns.set(sessionId, pending);
+  }
+
+  /**
+   * Turn attribution is explicit: a turn belongs to the scheduler when the message that opened it is
+   * one the scheduler sent. Everything else, including turns the engine reports on its own, is the
+   * user's.
+   */
+  private attributeTurn(event: { sessionId: string; turnId: string; messageId?: string }): void {
+    const scheduled = event.messageId ? this.sentMessages.delete(event.messageId) : false;
+    const tracked = this.turnsBySession.get(event.sessionId);
+    if (tracked?.turnId === event.turnId) {
+      if (scheduled) tracked.origin = "scheduler";
+      return;
+    }
+    this.trackTurn(event.sessionId, { turnId: event.turnId, origin: scheduled ? "scheduler" : "user" });
+  }
+
+  /** A delivery that joins a running turn makes that turn the scheduler's, whatever opened it. */
+  private adoptTurn(sessionId: string, turnId: string): void {
+    const tracked = this.turnsBySession.get(sessionId);
+    if (tracked?.turnId === turnId) tracked.origin = "scheduler";
+    else this.trackTurn(sessionId, { turnId, origin: "scheduler" });
+  }
+
+  /**
+   * Restart recovery: a turn that is still running was opened before this process existed, so the
+   * persisted delivery is the only record of who sent it. Without that record the run keeps its
+   * ownership; only a delivery naming a different turn marks the active turn as the user's.
+   */
+  private recoveredOrigin(turnId: string | undefined, scheduledTurnId: string | undefined): TurnOrigin {
+    return !turnId || !scheduledTurnId || turnId === scheduledTurnId ? "scheduler" : "user";
   }
 
   private async reconcile(workspaceId: string): Promise<void> {
@@ -327,9 +359,12 @@ export class Orchestrator {
       const bound = sessionId ? this.runsBySession.get(sessionId) : undefined;
       if (sessionId && this.settling.has(sessionId)) return;
       const priorTurn = sessionId ? this.turnsBySession.get(sessionId) : undefined;
+      const outstanding = !!priorTurn && priorTurn.origin === "scheduler" && !priorTurn.settled;
+      // The user drives the session until they stop: a turn they opened is not a reason to deliver.
+      const userOwnsSession = priorTurn?.origin === "user";
       // A returned submission belongs to the old turn until its completion has settled.
-      if (bound?.run.status === "running" && priorTurn?.scheduled && !priorTurn.settled &&
-          (item.status === "queued" || (priorTurn.turnId && !this.runner.isActive?.(sessionId!)))) return;
+      if (bound?.run.status === "running" && outstanding &&
+          (item.status === "queued" || (priorTurn!.turnId && !this.runner.isActive?.(sessionId!)))) return;
       if (sessionId && (!bound || bound.run.status !== "running")) {
         const role = await this.service.resolveWorkerRole(workspaceId);
         if (!await this.runner.resume(sessionId, { cwd, modelConfig: role.modelConfig, title: "Worker · " + item.title, metadata: { role: "worker", workItemId: item.workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId, treeId: item.treeId } })) throw new Error("原执行会话无法恢复：" + sessionId);
@@ -362,13 +397,11 @@ export class Orchestrator {
       if (tracked && !tracked.settled) tracked.bound = this.runsBySession.get(sessionId);
       if (wasActive && !this.turnsBySession.has(sessionId)) {
         const turnId = this.runner.getActiveTurnId?.(sessionId);
-        this.trackTurn(sessionId, {
-          turnId, scheduled: !turnId || !action.scheduledTurnId || turnId === action.scheduledTurnId
-        });
+        this.trackTurn(sessionId, { turnId, origin: this.recoveredOrigin(turnId, action.scheduledTurnId) });
       }
       const wasQueued = item.status === "queued";
       if (item.status === "queued") item = await this.service.startWorkItem(workspaceId, item.workItemId, { sessionId, heartbeatAt: this.now() });
-      if (action.stage === "execute" && !wasQueued && (wasActive || priorTurn?.scheduled === false)) return;
+      if (action.stage === "execute" && !wasQueued && (wasActive || userOwnsSession)) return;
       if (wasQueued && action.stage === "execute") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending" }));
       if (action.stage === "execute") {
         // An unbound inactive execute stage is a restart recovery, not evidence of failure.
@@ -380,28 +413,25 @@ export class Orchestrator {
       const message = await this.actionMessage(workspaceId, action, cwd);
       const delivered = action.notices.length;
       let scheduledTurnId: string | undefined;
+      const messageId = createId("message");
+      this.sentMessages.add(messageId);
       // Delivery is durable even when send throws. The same session and message are retried.
-      if (wasActive) {
-        const before = this.turnsBySession.get(sessionId);
-        const { turnId } = await this.runner.steer(sessionId, message);
-        const turn = this.turnsBySession.get(sessionId);
-        // Accepting the takeover gives this turn execution responsibility, even if the user opened it.
-        if (action.integrationActionId && !action.deliveredAt && turn) {
-          turn.scheduled = true;
-          scheduledTurnId = turnId ?? turn.turnId;
+      try {
+        if (wasActive) {
+          const receipt = await this.runner.steer(sessionId, message, messageId);
+          scheduledTurnId = receipt.turnId;
+          // Steering joins a turn that is already running, so no turn-start event names our message;
+          // the receipt itself hands that turn to this run.
+          if (receipt.delivery !== "started") {
+            this.sentMessages.delete(messageId);
+            if (receipt.turnId) this.adoptTurn(sessionId, receipt.turnId);
+          }
+        } else {
+          scheduledTurnId = (await this.runner.send(sessionId, message, { messageId }))?.turnId;
         }
-        if (!turnId && turn && turn !== before) {
-          turn.scheduled = true;
-          scheduledTurnId = turn.turnId;
-        }
-      } else {
-        const before = this.turnsBySession.get(sessionId);
-        const sent = await this.runner.send(sessionId, message);
-        const turn = this.turnsBySession.get(sessionId);
-        const turnId = sent?.turnId ?? (turn !== before ? turn?.turnId : undefined) ?? this.runner.getActiveTurnId?.(sessionId);
-        if (!turn || turn === before) this.trackTurn(sessionId, { turnId, scheduled: true });
-        else if (turn.turnId === turnId) turn.scheduled = true;
-        scheduledTurnId = turnId;
+      } catch (error) {
+        this.sentMessages.delete(messageId);
+        throw error;
       }
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
       await this.service.updateAction(workspaceId, action, (latest) => {
@@ -433,7 +463,8 @@ export class Orchestrator {
   private async onTurn(bound: WorkerBinding, turn: WorkerTurn, finishReason: string, failure?: string): Promise<void> {
     const ownsExecution = () => this.turnsBySession.get(bound.run.sessionId) === turn && this.runsBySession.get(bound.run.sessionId) === bound;
     const result = bound.run.workItemId ? await this.service.settleWorkerTurn(bound.workspaceId, bound.run.workItemId, {
-      ownsExecution, turnId: turn.turnId, scheduled: turn.scheduled, finishReason, failure, maxIdleTurns: this.maxIdleTurns, completion: await this.completion(bound.workspaceId, bound.actionId)
+      ownsExecution, turnId: turn.turnId, scheduled: turn.origin === "scheduler", finishReason, failure,
+      maxIdleTurns: this.maxIdleTurns, completion: await this.completion(bound.workspaceId, bound.actionId)
     }) : undefined;
     // Every turn settles its own run once, even when a newer turn already owns the execution.
     bound.run = { ...bound.run, turns: bound.run.turns + 1 };

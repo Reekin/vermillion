@@ -396,7 +396,8 @@ export class DomainService {
     this.commitRuntimeEvent({
       type: "turn.started",
       sessionId: command.sessionId,
-      turnId
+      turnId,
+      messageId: command.messageId
     });
     this.commitRuntimeEvent({
       type: "message.started",

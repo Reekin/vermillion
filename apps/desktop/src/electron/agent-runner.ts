@@ -228,23 +228,26 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
       ?? (typeof session.metadata?.sourceTurnId === "string" ? session.metadata.sourceTurnId : undefined);
   },
   send: async (sessionId, content, options) => {
+    const messageId = options?.messageId ?? createId();
     const receipt = await shell.executeCommand({
       commandId: createId(),
-      command: { type: "sendUserMessage", sessionId, messageId: createId(), content,
+      command: { type: "sendUserMessage", sessionId, messageId, content,
         attachments: options?.attachments ?? [], execution: options?.execution }
     });
     if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
-    return { turnId: receipt.turnId };
+    return { turnId: receipt.turnId, messageId };
   },
-  steer: async (sessionId, content) => {
+  steer: async (sessionId, content, messageId) => {
     if (!await shell.ensureSessionLoadedForRead(sessionId)) throw new Error("Session not found: " + sessionId);
     const turnId = resolveActiveTurnId(shell, sessionId);
+    const id = messageId ?? createId();
     const command = turnId
-      ? { type: "steerTurn" as const, sessionId, turnId, messageId: createId(), content, attachments: [] }
-      : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
+      ? { type: "steerTurn" as const, sessionId, turnId, messageId: id, content, attachments: [] }
+      : { type: "sendUserMessage" as const, sessionId, messageId: id, content, attachments: [] };
     const receipt = await shell.executeCommand({ commandId: createId(), command });
     if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
-    return receipt.delivery === "steered" ? { turnId: receipt.turnId } : {};
+    return { turnId: receipt.turnId, messageId: id,
+      delivery: receipt.delivery === "steered" ? "steered" as const : "started" as const };
   },
   interrupt: async (sessionId) => {
     const turn = shell
@@ -274,7 +277,7 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
   isActive: (sessionId) => !!shell.getActiveTurnId(sessionId),
   getActiveTurnId: (sessionId) => shell.getActiveTurnId(sessionId),
   onTurnStarted: (listener) => shell.subscribe(({ event }) => {
-    if (event.type === "turn.started") listener({ sessionId: event.sessionId, turnId: event.turnId });
+    if (event.type === "turn.started") listener({ sessionId: event.sessionId, turnId: event.turnId, messageId: event.messageId });
   }, { eventTypes: ["turn.started"] }),
   release: (sessionId) => shell.releaseSessionExecution(sessionId),
   onTurnCompleted: (listener) => {

@@ -110,6 +110,8 @@ const zTurnStartedEvent = z.object({
   type: z.literal("turn.started"),
   sessionId: zSessionId,
   turnId: zTurnId,
+  /** Sender's message that opened this turn; absent for turns the engine opened on its own. */
+  messageId: zMessageId.optional(),
   executionProfile: zTurnExecutionProfileSchema.optional()
 });
 

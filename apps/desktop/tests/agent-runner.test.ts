@@ -114,14 +114,18 @@ describe("AgentRunner recovery", () => {
   });
 
   it.each([
-    { delivery: "start_or_steer", expected: {} },
-    { delivery: "steered", expected: { turnId: "actual" } }
+    { delivery: "start_or_steer", expected: { turnId: "actual", delivery: "started" } },
+    { delivery: "steered", expected: { turnId: "actual", delivery: "steered" } }
   ])("uses confirmed shared delivery instead of the requested turn: $delivery", async ({ delivery, expected }) => {
     const shell = { ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true), getActiveTurnId: () => "ended", executeCommand: vi.fn()
       .mockResolvedValueOnce({ accepted: true, turnId: "actual", delivery }) };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
-    await expect(runner.steer("worker", "update")).resolves.toEqual(expected);
+    const receipt = await runner.steer("worker", "update");
+    expect(receipt).toMatchObject(expected);
+    // The caller supplies the message id so the receipt stays the only record of who opened the turn.
+    expect(receipt.messageId).toEqual(expect.any(String));
     expect(shell.executeCommand.mock.calls.map(([input]) => input.command.type)).toEqual(["steerTurn"]);
+    expect(vi.mocked(shell.executeCommand).mock.calls[0]![0].command).toMatchObject({ messageId: receipt.messageId });
   });
 
   it.each(["connection lost", "no active turn to steer"])("leaves shared delivery failures to the caller without retrying: %s", async (message) => {
@@ -145,9 +149,10 @@ describe("AgentRunner recovery", () => {
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     const options = { attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png" }],
       execution: { modelId: "selected", reasoningOptionId: "high", serviceTierId: null } };
-    await expect(runner.send("worker", "User input\n\nPreparation prompt", options)).resolves.toEqual({ turnId: "started" });
+    const receipt = await runner.send("worker", "User input\n\nPreparation prompt", { ...options, messageId: "caller-message" });
+    expect(receipt).toEqual({ turnId: "started", messageId: "caller-message" });
     expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
-      type: "sendUserMessage", sessionId: "worker", content: "User input\n\nPreparation prompt", ...options
+      type: "sendUserMessage", sessionId: "worker", messageId: "caller-message", content: "User input\n\nPreparation prompt", ...options
     }) }));
   });
 
