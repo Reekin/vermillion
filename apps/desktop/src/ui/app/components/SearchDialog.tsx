@@ -1,5 +1,5 @@
 import { ArrowUpRight, FileText, ListTodo, MessageSquare } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { SearchHit, SearchResult, WorkbenchClient } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
 import { Badge, Button, EmptyState, Field, InlineNotice, ListRow, SectionLabel } from "./ui.js";
@@ -11,6 +11,9 @@ type SearchDialogProps = {
   onOpenDoc: (hit: SearchHit) => void;
   onOpenSession: (hit: SearchHit) => void;
 };
+
+/** Keystrokes settle before a scan starts; composed input waits for the IME to commit. */
+const QUERY_DEBOUNCE_MS = 150;
 
 const kindLabel: Record<SearchHit["kind"], string> = {
   workItem: "工单",
@@ -27,7 +30,7 @@ const kindIcon: Record<SearchHit["kind"], typeof FileText> = {
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
-  return `${Math.round(bytes / (102.4 * 102.4)) / 10} MB`;
+  return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
 };
 
 const resultMeta = (hit: SearchHit): string =>
@@ -77,7 +80,7 @@ const SearchResultRow = ({ hit, selected, onSelect, onOpen }: { hit: SearchHit; 
       <ListRow
         leading={<Icon size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
         title={<span title={hit.title}>{hit.title}</span>}
-        meta={hit.kind === "session" ? `${hit.workspaceLabel} · 第 ${hit.line} 行` : `${hit.workspaceLabel} · 第 ${hit.line} 行`}
+        meta={`${hit.workspaceLabel} · 第 ${hit.line} 行`}
         trailing={<><Badge>{kindLabel[hit.kind]}</Badge><ArrowUpRight size={13} className="text-muted-foreground" aria-label="打开" /></>}
         selected={selected}
         onClick={onOpen}
@@ -88,81 +91,84 @@ const SearchResultRow = ({ hit, selected, onSelect, onOpen }: { hit: SearchHit; 
 
 export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpenSession }: SearchDialogProps) => {
   const [query, setQuery] = useState("");
-  const [result, setResult] = useState<SearchResult>();
+  const [composing, setComposing] = useState(false);
+  const [queryId, setQueryId] = useState<string>();
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [stats, setStats] = useState<SearchResult["stats"]>();
+  const [scanning, setScanning] = useState(false);
   const [selectedId, setSelectedId] = useState<string>();
   const [expandedKinds, setExpandedKinds] = useState<Set<SearchHit["kind"]>>(() => new Set());
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const latestQuery = useRef("");
-  const queuedQuery = useRef("");
-  const changedAt = useRef(0);
-  const running = useRef(false);
-  const mounted = useRef(true);
 
-  const runSearch = useCallback(async () => {
-    if (running.current || !queuedQuery.current) return;
-    running.current = true;
-    try {
-      while (queuedQuery.current) {
-        const waitFor = Math.max(0, 180 - (Date.now() - changedAt.current));
-        if (waitFor > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, waitFor));
-        const value = queuedQuery.current;
-        queuedQuery.current = "";
-        if (!value) break;
-        try {
-          const next = await client.request("search.query", { query: value, contextLines: 3, maxResults: 200 });
-          if (mounted.current && latestQuery.current === value) {
-            setResult(next);
-            setSelectedId(next.hits[0]?.id);
-            setLoading(false);
-          }
-        } catch (caught: unknown) {
-          if (mounted.current && latestQuery.current === value) {
-            setError(caught instanceof Error ? caught.message : String(caught));
-            setLoading(false);
-          }
-        }
-      }
-    } finally {
-      running.current = false;
-      if (queuedQuery.current) void runSearch();
-    }
-  }, [client]);
+  const trimmed = query.trim();
 
+  // Each keyword starts one scan. Dropping the previous queryId stops its scan, so a slow query is
+  // never in front of the current one.
   useEffect(() => {
-    const value = query.trim();
-    latestQuery.current = value;
-    queuedQuery.current = value;
-    changedAt.current = Date.now();
-    setResult(undefined);
+    setHits([]);
+    setStats(undefined);
     setSelectedId(undefined);
     setExpandedKinds(new Set());
     setError(undefined);
-    if (!value) {
-      setLoading(false);
+    setQueryId(undefined);
+    if (!trimmed || composing) {
+      setScanning(false);
       return;
     }
-    setLoading(true);
-    void runSearch();
-  }, [query, runSearch]);
+    setScanning(true);
+    let dropped = false;
+    const timer = window.setTimeout(() => {
+      void client.request("search.start", { query: trimmed, contextLines: 3, maxResults: 200 })
+        .then((started) => {
+          if (dropped) {
+            void client.request("search.cancel", { queryId: started.queryId });
+            return;
+          }
+          setQueryId(started.queryId);
+        })
+        .catch((caught: unknown) => {
+          if (dropped) return;
+          setError(caught instanceof Error ? caught.message : String(caught));
+          setScanning(false);
+        });
+    }, QUERY_DEBOUNCE_MS);
+    return () => {
+      dropped = true;
+      window.clearTimeout(timer);
+    };
+  }, [client, trimmed, composing]);
 
-  useEffect(() => () => {
-    mounted.current = false;
-    queuedQuery.current = "";
-  }, []);
+  // Stops the scan behind a superseded keyword and when the dialog closes.
+  useEffect(() => {
+    if (!queryId) return;
+    return () => { void client.request("search.cancel", { queryId }); };
+  }, [client, queryId]);
+
+  useEffect(() => client.subscribe((event) => {
+    if (event.type === "search.hits") {
+      if (event.queryId !== queryId) return;
+      setHits((current) => [...current, ...event.hits]);
+      setSelectedId((current) => current ?? event.hits[0]?.id);
+    } else if (event.type === "search.completed") {
+      if (event.queryId !== queryId) return;
+      setStats(event.stats);
+      setScanning(false);
+      if (event.error) setError(event.error);
+    }
+  }), [client, queryId]);
 
   const selected = useMemo(
-    () => result?.hits.find((hit) => hit.id === selectedId) ?? result?.hits[0],
-    [result, selectedId]
+    () => hits.find((hit) => hit.id === selectedId) ?? hits[0],
+    [hits, selectedId]
   );
   const groups = useMemo(() => {
     const grouped = new Map<SearchHit["kind"], SearchHit[]>();
-    for (const hit of result?.hits ?? []) grouped.set(hit.kind, [...(grouped.get(hit.kind) ?? []), hit]);
+    for (const hit of hits) grouped.set(hit.kind, [...(grouped.get(hit.kind) ?? []), hit]);
     return (["workItem", "session", "doc"] as const).flatMap((kind) => {
-      const hits = grouped.get(kind);
-      return hits?.length ? [{ kind, hits }] : [];
+      const items = grouped.get(kind);
+      return items?.length ? [{ kind, hits: items }] : [];
     });
-  }, [result]);
+  }, [hits]);
 
   return (
     <Modal title="搜索" onClose={onClose} width={980} height="74vh" contentClassName="overflow-hidden">
@@ -172,6 +178,11 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
             aria-label="搜索工单、会话和文档"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={(event) => {
+              setQuery(event.currentTarget.value);
+              setComposing(false);
+            }}
             placeholder="搜索工单、会话和文档"
             autoFocus
           />
@@ -179,13 +190,13 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.15fr)]">
           <div className="vm-scrollbar-hidden min-h-0 overflow-y-auto border-b border-border md:border-b-0 md:border-r">
             {error && <InlineNotice tone="error" className="pt-3">{error}</InlineNotice>}
-            {!query.trim() && <EmptyState title="输入关键词开始搜索" />}
-            {loading && <InlineNotice className="pt-3">搜索中…</InlineNotice>}
-            {!loading && query.trim() && result && result.hits.length === 0 && <EmptyState title="没有找到匹配内容" hint="换一个关键词试试。" />}
-            {groups.map(({ kind, hits }) => (
+            {!trimmed && <EmptyState title="输入关键词开始搜索" />}
+            {scanning && hits.length === 0 && <InlineNotice className="pt-3">搜索中…</InlineNotice>}
+            {!scanning && trimmed && stats && hits.length === 0 && <EmptyState title="没有找到匹配内容" hint="换一个关键词试试。" />}
+            {groups.map(({ kind, hits: kindHits }) => (
               <section key={kind}>
-                <SectionLabel>{kindLabel[kind]} <span className="font-mono text-faint-foreground">{hits.length}</span></SectionLabel>
-                <ul>{(expandedKinds.has(kind) ? hits : hits.slice(0, 10)).map((hit) => <SearchResultRow
+                <SectionLabel>{kindLabel[kind]} <span className="font-mono text-faint-foreground">{kindHits.length}</span></SectionLabel>
+                <ul>{(expandedKinds.has(kind) ? kindHits : kindHits.slice(0, 10)).map((hit) => <SearchResultRow
                   key={hit.id}
                   hit={hit}
                   selected={hit.id === selected?.id}
@@ -196,7 +207,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
                     else onOpenSession(hit);
                   }}
                 />)}</ul>
-                {hits.length > 10 && !expandedKinds.has(kind) && (
+                {kindHits.length > 10 && !expandedKinds.has(kind) && (
                   <div className="px-3 pb-2">
                     <Button
                       size="sm"
@@ -214,7 +225,11 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
           <SearchPreview hit={selected} />
         </div>
         <footer className="shrink-0 border-t border-border px-4 py-2 text-caption text-muted-foreground">
-          {result ? `扫描 ${result.stats.sourcesScanned} 项 · ${formatBytes(result.stats.bytesScanned)} · ${result.stats.durationMs} ms${result.stats.truncated ? " · 结果已截断" : ""}` : "搜索结果将在这里显示。"}
+          {stats
+            ? `扫描 ${stats.sourcesScanned} 项 · ${formatBytes(stats.bytesScanned)} · ${stats.durationMs} ms${stats.truncated ? " · 结果已截断" : ""}`
+            : scanning
+              ? `已找到 ${hits.length} 条`
+              : "搜索结果将在这里显示。"}
         </footer>
       </div>
     </Modal>

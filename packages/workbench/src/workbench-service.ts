@@ -165,6 +165,7 @@ export class WorkbenchService {
   private readonly patrolScans = new Map<string, Promise<unknown>>();
   private readonly decisionDeliveries = new Map<string, Promise<void>>();
   private schedulerOwner?: object;
+  private activeSearch?: { queryId: string; controller: AbortController };
   private sourceTurnResolver?: (sessionId: string) => Promise<string | undefined>;
   private sessionTreeResolver?: (sessionId: string) => Promise<string | undefined>;
   private workerActive?: (sessionId: string) => boolean;
@@ -231,6 +232,8 @@ export class WorkbenchService {
   }
 
   async dispose(): Promise<void> {
+    this.activeSearch?.controller.abort();
+    this.activeSearch = undefined;
     await Promise.allSettled([...this.contextLoads.values()]);
     for (const context of this.contexts.values()) context.watcher?.close();
     await Promise.allSettled([...this.integrations.values(), ...this.patrolScans.values()]);
@@ -920,6 +923,58 @@ export class WorkbenchService {
       sessionSearch: this.sessionSearch,
       rolloutsDir: this.rolloutsDir
     });
+  }
+
+  /**
+   * Starts a streaming search and returns right away. Hits arrive as `search.hits` events and the
+   * scan reports `search.completed`. Only one streaming search runs at a time: starting another one
+   * stops the previous scan, so a superseded keystroke never holds up the current query.
+   */
+  startSearch(input: SearchQuery): { queryId: string } {
+    this.activeSearch?.controller.abort();
+    const queryId = createId("search");
+    const controller = new AbortController();
+    this.activeSearch = { queryId, controller };
+    void this.streamSearch(queryId, input, controller.signal);
+    return { queryId };
+  }
+
+  cancelSearch(queryId: string): { cancelled: boolean } {
+    if (this.activeSearch?.queryId !== queryId) return { cancelled: false };
+    this.activeSearch.controller.abort();
+    this.activeSearch = undefined;
+    return { cancelled: true };
+  }
+
+  private async streamSearch(queryId: string, input: SearchQuery, signal: AbortSignal): Promise<void> {
+    const started = Date.now();
+    try {
+      const result = await searchWorkbench({
+        query: input,
+        workspaces: await this.listWorkspaces(),
+        listWorkItems: (workspaceId) => this.listWorkItems(workspaceId),
+        listDocs: (workspaceId) => this.listDocs(workspaceId),
+        readDoc: (workspaceId, path) => this.readDoc(workspaceId, path),
+        sessionSearch: this.sessionSearch,
+        rolloutsDir: this.rolloutsDir,
+        signal,
+        onHits: (hits) => {
+          if (!signal.aborted) this.emit({ type: "search.hits", queryId, hits });
+        }
+      });
+      if (signal.aborted) return;
+      this.emit({ type: "search.completed", queryId, stats: result.stats });
+    } catch (error) {
+      if (signal.aborted) return;
+      this.emit({
+        type: "search.completed",
+        queryId,
+        stats: { sourcesScanned: 0, bytesScanned: 0, durationMs: Math.max(0, Date.now() - started), truncated: false },
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      if (this.activeSearch?.queryId === queryId) this.activeSearch = undefined;
+    }
   }
 
   async askSource(workspaceId: string, workItemId: string, sessionId: string, question: string): Promise<SourceAskResult> {

@@ -25,6 +25,8 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "docs.rebase": (p) => service.rebaseDocDraft(p.workspaceId, p.sessionId),
     "docs.commit": (p) => service.commitDocs(p.workspaceId, p),
     "search.query": (p) => service.search(p),
+    "search.start": async (p) => service.startSearch(p),
+    "search.cancel": async (p) => service.cancelSearch(p.queryId),
 
     "role.list": (p) => service.listRoles(p.workspaceId),
     "role.read": (p) => service.readRole(p.workspaceId, p.roleId),

@@ -37,7 +37,7 @@ import {
   zSessionNavigation,
   type WorkbenchEvent
 } from "./contracts.js";
-import { zSearchQuery, zSearchResult } from "./search-contract.js";
+import { zSearchCancel, zSearchCancelResult, zSearchQuery, zSearchResult, zSearchStartResult } from "./search-contract.js";
 export type { SearchHit, SearchQuery, SearchResult } from "./search-contract.js";
 
 const zWs = z.object({ workspaceId: z.string().min(1) });
@@ -100,6 +100,8 @@ export const workbenchRpc = {
     result: zDocCommit
   },
   "search.query": { params: zSearchQuery, result: zSearchResult },
+  "search.start": { params: zSearchQuery, result: zSearchStartResult },
+  "search.cancel": { params: zSearchCancel, result: zSearchCancelResult },
 
   "role.list": { params: zWs, result: z.array(zRoleFile) },
   "role.read": { params: zWs.extend({ roleId: z.string().min(1) }), result: z.object({ content: z.string(), source: zRoleFile.shape.source }) },
