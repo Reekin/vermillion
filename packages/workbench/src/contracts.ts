@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zSearchHit, zSearchStats } from "./search-contract.js";
 
 export const zWorkspace = z.object({
   workspaceId: z.string().min(1),
@@ -488,6 +489,10 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   /** A preparation request was cancelled; sessionId identifies its preparation branch when one exists. */
   z.object({ type: z.literal("workRequest.cancelled"), workspaceId: z.string(), requestId: z.string(), sessionId: z.string().optional() }),
   z.object({ type: z.literal("runs.changed"), workspaceId: z.string() }),
-  z.object({ type: z.literal("actions.changed"), workspaceId: z.string() })
+  z.object({ type: z.literal("actions.changed"), workspaceId: z.string() }),
+  /** Streaming search results for the query started by `search.start`. */
+  z.object({ type: z.literal("search.hits"), queryId: z.string(), hits: z.array(zSearchHit) }),
+  /** The scan for `queryId` finished; a cancelled or superseded query never reports completion. */
+  z.object({ type: z.literal("search.completed"), queryId: z.string(), stats: zSearchStats, error: z.string().optional() })
 ]);
 export type WorkbenchEvent = z.infer<typeof zWorkbenchEvent>;

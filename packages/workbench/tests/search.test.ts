@@ -1,8 +1,9 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WorkbenchService } from "../src/workbench-service.js";
 import { setup } from "./workflow-fixture.js";
+import type { WorkbenchEvent } from "../src/contracts.js";
 
 describe("workbench search", () => {
   it("searches work item content and registered rollout files with context", async () => {
@@ -101,6 +102,61 @@ describe("workbench search", () => {
         column: 1
       });
       expect(result.hits[0]!.context.map((line) => line.line)).toEqual([1, 2, 3]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("keeps context bounded when a rollout line is far larger than the preview", async () => {
+    const fixture = await setup();
+    try {
+      const rolloutPath = join(fixture.root, "oversized.jsonl");
+      const filler = "x".repeat(2_000_000);
+      await writeFile(rolloutPath, [
+        JSON.stringify({ type: "session_meta", payload: { originator: "vermillion" } }),
+        `{"turn_id":"turn-huge","head":"${filler}","needle":"oversized-needle","tail":"${filler}"}`,
+        JSON.stringify({ type: "event_msg", payload: { type: "item_completed" } })
+      ].join("\n"), "utf8");
+      const service = new WorkbenchService({
+        ...fixture.options,
+        sessionSearch: async () => [{ sessionId: "huge-session", workspaceId: fixture.workspaceId, providerKind: "codex-thread", rolloutPath }],
+        rolloutsDir: fixture.root
+      });
+      try {
+        const result = await service.search({ query: "oversized-needle", contextLines: 2 });
+        expect(result.hits).toHaveLength(1);
+        const hit = result.hits[0]!;
+        expect(hit).toMatchObject({ kind: "session", line: 2, turnId: "turn-huge" });
+        for (const line of hit.context) expect(line.text.length).toBeLessThanOrEqual(4_100);
+        const hitLine = hit.context.find((line) => line.line === 2)!;
+        expect(hitLine.matches).toHaveLength(1);
+        expect(hitLine.text.slice(hitLine.matches[0]!.start, hitLine.matches[0]!.end)).toBe("oversized-needle");
+      } finally {
+        await service.dispose();
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("streams hits for the active query and drops the one it replaced", async () => {
+    const fixture = await setup();
+    try {
+      await fixture.service.writeDoc(fixture.workspaceId, ".vermillion/docs/stream.md", "streamed-needle\n");
+      const events: WorkbenchEvent[] = [];
+      const unsubscribe = fixture.service.subscribe((event) => { events.push(event); });
+      try {
+        const replaced = fixture.service.startSearch({ query: "streamed-needle" });
+        const active = fixture.service.startSearch({ query: "streamed-needle" });
+        await vi.waitFor(() => expect(events.some((event) =>
+          event.type === "search.completed" && event.queryId === active.queryId)).toBe(true));
+        const hits = events.flatMap((event) =>
+          event.type === "search.hits" && event.queryId === active.queryId ? event.hits : []);
+        expect(hits.map((hit) => hit.path)).toContain(".vermillion/docs/stream.md");
+        expect(events.some((event) => event.queryId === replaced.queryId)).toBe(false);
+      } finally {
+        unsubscribe();
+      }
     } finally {
       await fixture.cleanup();
     }

@@ -33,6 +33,8 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "steer": "桌面在线；向任意可访问会话追加当前轮或启动该会话的新轮。sessionId 接受工作台会话 ID 或引擎会话标识（如子代理返回的 id）。",
   "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。",
   "search.query": "只读查询；搜索已登记的 workspace 工单和 Vermillion rollout 文件，返回命中上下文。",
+  "search.start": "只读查询；开始一次流式搜索，命中通过 search.hits 事件推送，结束时推送 search.completed。发起新的流式搜索会终止上一次。",
+  "search.cancel": "停止指定 queryId 的流式搜索及其扫描进程。",
   "issue.discuss": "桌面在线；为 Issue 创建或返回已有设计伙伴讨论会话。",
   "issue.update": "更新 Issue 分诊、证据或处理结果；关闭和重复需要处理原因。",
   "domain.config.set": "用户管理领域巡检与自动开单授权；按领域独立保存。",

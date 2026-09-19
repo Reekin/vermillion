@@ -44,6 +44,13 @@ await copy(
   resolve(appDir, "pi-extension")
 );
 
+// Search scans rollout files with ripgrep; the runtime looks for it next to dist-electron/ and cli/.
+const ripgrepExecutable = process.platform === "win32" ? "rg.exe" : "rg";
+const ripgrepSource = createRequire(resolve(repoRoot, "package.json"))
+  .resolve(`@vscode/ripgrep-${process.platform}-${process.arch}/bin/${ripgrepExecutable}`);
+await mkdir(resolve(appDir, "ripgrep"), { recursive: true });
+await copy(ripgrepSource, resolve(appDir, "ripgrep", ripgrepExecutable));
+
 // CLI: bundle to a single file so the package runs it with the system node and no node_modules.
 await mkdir(resolve(appDir, "cli"), { recursive: true });
 execFileSync(
