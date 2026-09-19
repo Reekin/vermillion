@@ -178,6 +178,37 @@ describe("Codex app-server runtime port", () => {
     expect(rpc).toHaveBeenCalledWith("thread/inject_items", expect.objectContaining({ threadId: "child" }));
   });
 
+  it("returns a detached copy of the current thread execution profile", async () => {
+    const port = createCodexAppServerRuntimePort({
+      commandPath: process.execPath,
+      commandArgs: [],
+      resolveConversationIdBySessionId: () => "conversation-1"
+    });
+    vi.spyOn(port, "start").mockResolvedValue();
+    vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockResolvedValue({
+        thread: { id: "thread-profile" },
+        model: "deepseek-flash",
+        reasoningEffort: "high",
+        serviceTier: "standard"
+      });
+
+    await port.resumeThread("thread-profile");
+
+    const profile = port.getThreadExecutionProfile("thread-profile");
+    expect(profile).toEqual({
+      modelId: "deepseek-flash",
+      reasoningOptionId: "high",
+      serviceTierId: "standard"
+    });
+    profile!.modelId = "fable-5";
+    expect(port.getThreadExecutionProfile("thread-profile")).toEqual({
+      modelId: "deepseek-flash",
+      reasoningOptionId: "high",
+      serviceTierId: "standard"
+    });
+  });
+
   it("uses current role instructions at first start and injects each later revision once", async () => {
     const rebuilt = vi.fn();
     const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1",

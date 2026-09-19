@@ -128,7 +128,14 @@ afterEach(async () => {
 });
 
 describe("cold history hydration", () => {
-  const setupHistory = async (mode: "full" | "page", loaded = false) => {
+  const setupHistory = async (
+    mode: "full" | "page",
+    loaded = false,
+    options: {
+      metadata?: Record<string, unknown>;
+      resumeProfile?: Record<string, unknown>;
+    } = {}
+  ) => {
     const root = await createTempDir();
     const thread = createThread({ id: "thread-history", cwd: join(root, "removed-worktree") });
     thread.turns = [{
@@ -139,7 +146,8 @@ describe("cold history hydration", () => {
     const entry = {
       workspaceId: "workspace-history", sessionId: "worker-history", conversationId: "conversation-history",
       engineId: "codex", providerKind: "codex-thread", providerSessionId: thread.id,
-      createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z"
+      createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z",
+      ...(options.metadata ? { metadata: options.metadata } : {})
     };
     const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [] });
     vi.spyOn(port, "start").mockResolvedValue();
@@ -154,7 +162,7 @@ describe("cold history hydration", () => {
           return { thread: params.includeTurns ? thread : { ...thread, status: { type: loaded ? "idle" : "notLoaded" }, turns: [] } };
         case "thread/resume":
           await resumeGate;
-          return { thread: { ...thread, cwd: root } };
+          return { thread: { ...thread, cwd: root }, ...(options.resumeProfile ?? {}) };
         case "thread/turns/list":
           return { data: thread.turns, nextCursor: "older", backwardsCursor: null };
         case "thread/goal/get": return { goal: null };
@@ -191,6 +199,56 @@ describe("cold history hydration", () => {
       }, { timeoutMs: 120_000 });
     }
     expect(port.isThreadExecutionReleased("thread-history")).toBe(true);
+  });
+
+  it("hydrates a missing session profile from the resumed thread configuration", async () => {
+    const { rpc, hydrate, finishResume } = await setupHistory("full", false, {
+      resumeProfile: {
+        model: "deepseek-flash",
+        reasoningEffort: "high",
+        serviceTier: "standard"
+      }
+    });
+    const pending = hydrate();
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith("thread/resume", expect.anything(), expect.anything()));
+    finishResume();
+
+    const result = await pending;
+    expect(result?.session.metadata?.sessionProfile).toEqual({
+      engineId: "codex",
+      modelId: "deepseek-flash",
+      reasoningOptionId: "high",
+      serviceTierId: "standard"
+    });
+  });
+
+  it("preserves an existing session profile when the thread reports another configuration", async () => {
+    const { rpc, hydrate, finishResume } = await setupHistory("full", false, {
+      metadata: {
+        sessionProfile: {
+          engineId: "codex",
+          modelId: "fable-5",
+          reasoningOptionId: "high",
+          serviceTierId: "priority"
+        }
+      },
+      resumeProfile: {
+        model: "deepseek-flash",
+        reasoningEffort: "high",
+        serviceTier: "standard"
+      }
+    });
+    const pending = hydrate();
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledWith("thread/resume", expect.anything(), expect.anything()));
+    finishResume();
+
+    const result = await pending;
+    expect(result?.session.metadata?.sessionProfile).toEqual({
+      engineId: "codex",
+      modelId: "fable-5",
+      reasoningOptionId: "high",
+      serviceTierId: "priority"
+    });
   });
 
   it.each(["full", "page"] as const)("leaves already loaded %s history subscribed", async (mode) => {

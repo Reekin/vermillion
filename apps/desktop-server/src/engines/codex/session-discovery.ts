@@ -16,7 +16,11 @@ import {
   parseToolCall,
   parseTurn
 } from "@vermillion/shared";
-import { readTurnExecutionProfiles } from "@vermillion/shared";
+import {
+  readSessionExecutionProfile,
+  readTurnExecutionProfiles,
+  writeSessionExecutionProfile
+} from "@vermillion/shared";
 import { isPathInsideWorkspace } from "@vermillion/shared";
 import { pathToFileURL } from "node:url";
 import type { Thread } from "../../codex-app-server-generated/v2/Thread.js";
@@ -974,6 +978,23 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         createdAt: isoFromUnixSeconds(thread.createdAt),
         updatedAt: isoFromUnixSeconds(thread.updatedAt)
       });
+      const baseMetadata = {
+        ...(entry.metadata ?? {}),
+        providerKind: codexProviderKind,
+        providerSessionId: thread.id,
+        rolloutPath: thread.path ?? undefined,
+        cwd: thread.cwd
+      };
+      let metadata = baseMetadata;
+      if (!readSessionExecutionProfile(baseMetadata)) {
+        const executionProfile = this.codexRuntimePort.getThreadExecutionProfile?.(thread.id);
+        if (executionProfile) {
+          metadata = writeSessionExecutionProfile(baseMetadata, {
+            engineId: codexAgentId,
+            ...executionProfile
+          });
+        }
+      }
       const session = parseChatSession({
         sessionId: entry.sessionId,
         conversationId: entry.conversationId,
@@ -984,13 +1005,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         updatedAt: isoFromUnixSeconds(thread.updatedAt),
         archivedAt: entry.archivedAt,
         lastTurnId: thread.turns.at(-1)?.id,
-        metadata: {
-          ...(entry.metadata ?? {}),
-          providerKind: codexProviderKind,
-          providerSessionId: thread.id,
-          rolloutPath: thread.path ?? undefined,
-          cwd: thread.cwd
-        }
+        metadata
       });
 
       const hydratedTurns = await hydrateCodexTurnEntities({
