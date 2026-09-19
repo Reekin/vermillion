@@ -112,9 +112,10 @@ describe("workbench search", () => {
     try {
       const rolloutPath = join(fixture.root, "oversized.jsonl");
       const filler = "x".repeat(2_000_000);
+      const oversizedLine = `{"turn_id":"turn-huge","head":"${filler}","needle":"oversized-needle","tail":"${filler}"}`;
       await writeFile(rolloutPath, [
         JSON.stringify({ type: "session_meta", payload: { originator: "vermillion" } }),
-        `{"turn_id":"turn-huge","head":"${filler}","needle":"oversized-needle","tail":"${filler}"}`,
+        oversizedLine,
         JSON.stringify({ type: "event_msg", payload: { type: "item_completed" } })
       ].join("\n"), "utf8");
       const service = new WorkbenchService({
@@ -127,6 +128,8 @@ describe("workbench search", () => {
         expect(result.hits).toHaveLength(1);
         const hit = result.hits[0]!;
         expect(hit).toMatchObject({ kind: "session", line: 2, turnId: "turn-huge" });
+        // The match sits far past the context window, so the column still counts from the line start.
+        expect(hit.column).toBe(oversizedLine.indexOf("oversized-needle") + 1);
         for (const line of hit.context) expect(line.text.length).toBeLessThanOrEqual(4_100);
         const hitLine = hit.context.find((line) => line.line === 2)!;
         expect(hitLine.matches).toHaveLength(1);

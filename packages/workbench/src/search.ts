@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import type { DocFile, WorkItem } from "./contracts.js";
 import { zSearchResult } from "./search-contract.js";
-import type { SearchContextLine, SearchHit, SearchQuery, SearchResult } from "./search-contract.js";
+import type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchStats } from "./search-contract.js";
 export type { SearchContextLine, SearchHit, SearchQuery, SearchResult } from "./search-contract.js";
 
 export type SearchSessionEntry = {
@@ -47,13 +47,6 @@ type SearchAccumulator = {
   onHits?: (hits: SearchHit[]) => void;
 };
 
-type SearchStats = {
-  sourcesScanned: number;
-  bytesScanned: number;
-  durationMs: number;
-  truncated: boolean;
-};
-
 const MAX_CONTEXT_LINE_CHARS = 4_000;
 /** Windows caps a command line around 32k characters, so rollout paths go to ripgrep in batches. */
 const MAX_BATCH_ARGV_CHARS = 24_000;
@@ -63,6 +56,8 @@ const MAX_BATCH_MATCH_LINES = 5_000;
 const CONTEXT_WINDOW_BYTES = 32_768;
 /** A session_meta header carries the originator; this covers it without reading the whole file. */
 const HEADER_PROBE_BYTES = 262_144;
+/** Prefix decoded to place a hit that sits beyond the context window of an oversized line. */
+const COLUMN_PREFIX_LIMIT = 4_194_304;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -303,6 +298,7 @@ const runRipgrepBatch = async (input: {
     child.kill();
   };
   input.signal?.addEventListener("abort", kill, { once: true });
+  if (input.signal?.aborted) kill();
 
   const readStats = (line: string): void => {
     const files = /^(\d+) files searched$/.exec(line);
@@ -483,6 +479,18 @@ const readTurnIdOnLine = async (path: string, start: number, end: number): Promi
   return scanTurnId(await readChunk(path, end - CONTEXT_WINDOW_BYTES, CONTEXT_WINDOW_BYTES));
 };
 
+/**
+ * Column of a hit whose line reaches past the context window. The window alone cannot tell how far
+ * the match sits from the line start, so the prefix is decoded; past the limit the byte distance is
+ * reported rather than reading megabytes for a number nobody can act on.
+ */
+const columnInLine = async (path: string, lineStart: number, byteOffset: number): Promise<number> => {
+  const length = byteOffset - lineStart;
+  if (length <= 0) return 1;
+  if (length > COLUMN_PREFIX_LIMIT) return length + 1;
+  return (await readChunk(path, lineStart, length)).length + 1;
+};
+
 const listRolloutFiles = async (root: string): Promise<string[]> => {
   const files: string[] = [];
   const walk = async (directory: string): Promise<void> => {
@@ -575,7 +583,7 @@ const searchRollouts = async (input: {
   const vermillionByPath = new Map<string, boolean>();
   const lineStartsByPath = new Map<string, Promise<number[]>>();
 
-  const turnIdForCutLine = async (path: string, line: number): Promise<string | undefined> => {
+  const cutLineBounds = async (path: string, line: number): Promise<{ start: number; end: number } | undefined> => {
     let starts = lineStartsByPath.get(path);
     if (!starts) {
       starts = readLineStarts(executable, path, input.signal);
@@ -586,7 +594,7 @@ const searchRollouts = async (input: {
     if (start === undefined) return undefined;
     const next = offsets[line + 1];
     const end = next === undefined ? (await stat(path).catch(() => undefined))?.size ?? start : next - 1;
-    return readTurnIdOnLine(path, start, end);
+    return { start, end };
   };
 
   for (const batch of batchPaths(paths)) {
@@ -629,9 +637,19 @@ const searchRollouts = async (input: {
         if (input.signal?.aborted) return;
         const window = await readHitWindow(path, byteOffset);
         const built = buildHitContext(window, line, input.query, input.contextLines);
-        const turnId = built.hitComplete
-          ? extractTurnId(built.hitText)
-          : await turnIdForCutLine(path, line);
+        let column = built.column;
+        let turnId: string | undefined;
+        if (built.hitComplete) {
+          turnId = extractTurnId(built.hitText);
+        } else {
+          // The window holds only part of this line, so its start is needed for both the turn and
+          // the column; one ripgrep pass over the file provides every line start.
+          const bounds = await cutLineBounds(path, line);
+          if (bounds) {
+            turnId = await readTurnIdOnLine(path, bounds.start, bounds.end);
+            column = await columnInLine(path, bounds.start, byteOffset);
+          }
+        }
         const hit = {
           id: `session:${entry.workspaceId}:${entry.sessionId}:${line}`,
           kind: "session" as const,
@@ -640,7 +658,7 @@ const searchRollouts = async (input: {
           title: entry.title?.trim() || basename(path),
           path,
           line,
-          column: built.column,
+          column,
           context: built.context,
           sessionId: entry.sessionId,
           ...(turnId ? { turnId } : {})

@@ -228,7 +228,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
           {stats
             ? `扫描 ${stats.sourcesScanned} 项 · ${formatBytes(stats.bytesScanned)} · ${stats.durationMs} ms${stats.truncated ? " · 结果已截断" : ""}`
             : scanning
-              ? `搜索中… 已找到 ${hits.length} 条`
+              ? `已找到 ${hits.length} 条`
               : "搜索结果将在这里显示。"}
         </footer>
       </div>
