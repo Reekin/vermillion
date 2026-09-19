@@ -107,7 +107,11 @@ export default function vermillionExtension(pi) {
     parameters: {
       type: "object",
       properties: {
-        sessionId: { type: "string", description: "Vermillion session id to read." },
+        sessionId: {
+          type: "string",
+          description:
+            "Vermillion session id, or the engine session id an engine tool reported for it, such as the id returned when spawning a subagent."
+        },
         limit: {
           type: "number",
           description: "Return the most recent N messages, ordered oldest first."
