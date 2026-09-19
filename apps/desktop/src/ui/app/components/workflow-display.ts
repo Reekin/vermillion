@@ -105,6 +105,8 @@ const rejectionSummary = (reason: string) => {
   return line.length > 160 ? line.slice(0, 157) + "…" : line;
 };
 
+const readableRunNote = (note?: string) => note && /工单已进入\s+\w+/i.test(note) ? "本轮执行已交接后续处理。" : note;
+
 const matchingRun = (item: WorkItem, run?: AgentRun) => run && (!item.run.sessionId || run.sessionId === item.run.sessionId) ? run : undefined;
 
 /** One deterministic user-facing explanation shared by the board row and the detail panel. */
@@ -210,7 +212,7 @@ export const workItemEvents = (item: WorkItem, actions: WorkflowAction[], runs: 
   for (const notice of execute?.notices ?? []) events.push({ at: notice.at, title: notice.kind === "rejected" ? "退回说明等待送达" : "续做消息等待送达", detail: notice.kind === "rejected" ? "退回原因已记录，等待交给 Worker。" : "续做说明已记录，等待送达。" });
   for (const run of runs.filter((entry) => entry.workItemId === item.workItemId)) {
     events.push({ at: run.startedAt, title: "Worker 开始执行", detail: run.turns ? `${run.turns} 个 turn` : undefined });
-    if (run.endedAt) events.push({ at: run.endedAt, title: "本轮执行结束", detail: run.note });
+    if (run.endedAt) events.push({ at: run.endedAt, title: "本轮执行结束", detail: readableRunNote(run.note) });
   }
   if (execute?.deliveredAt && item.rejections.some((entry) => entry.at <= execute.deliveredAt!)) events.push({ at: execute.deliveredAt, title: "退回后的执行消息已送达", detail: "Worker 已收到处理说明。" });
   if (item.merge?.mergedAt) events.push({ at: item.merge.mergedAt, title: "合入完成", detail: item.merge.commit ? `成果已进入主分支 · ${item.merge.commit.slice(0, 8)}` : undefined });

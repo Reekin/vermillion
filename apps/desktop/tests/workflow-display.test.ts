@@ -69,6 +69,7 @@ describe("execution and integration presentation", () => {
       { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: "工单已进入 merging" }
     ] } as WorkflowAction];
     expect(workItemEvents(item, actions, [])[0]?.detail).toBe("本轮执行已交接后续处理。");
+    expect(workItemEvents(item, [], [{ runId: "run", sessionId: "worker", workItemId: "one", status: "done", turns: 1, startedAt: "2026-01-01T00:00:00.000Z", endedAt: "2026-01-01T00:00:02.000Z", note: "工单已进入 merging" } as AgentRun])[0]?.detail).toBe("本轮执行已交接后续处理。");
   });
 
   it("labels a resolved handoff caused by a merge failure as a failed check", () => {
