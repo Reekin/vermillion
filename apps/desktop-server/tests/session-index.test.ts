@@ -672,7 +672,7 @@ describe("SessionIndexStore", () => {
     expect(store.getEntry("codex-thread:thread-1")?.archivedAt).toBe("2026-04-18T00:00:03Z");
   });
 
-  it("archives subagent descendants recursively without archiving forks", async () => {
+  it("archives the whole session tree: fork branches and subagent descendants", async () => {
     const store = new SessionIndexStore({ baseDir: await createTempDir() });
     const sessionIds = ["root", "child", "grandchild", "fork"];
     await store.applyWorkspaceRepair({
@@ -704,10 +704,11 @@ describe("SessionIndexStore", () => {
 
     expect(archived.map((entry) => entry.sessionId).sort()).toEqual([
       "child",
+      "fork",
       "grandchild",
       "root"
     ]);
-    expect(store.getEntry("fork")?.archivedAt).toBeUndefined();
+    expect(store.getEntry("fork")?.archivedAt).toBe("2026-08-09T00:10:00Z");
   });
 
   it("rejects invalid persisted data without replacing it", async () => {

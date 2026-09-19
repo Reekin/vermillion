@@ -168,17 +168,22 @@ type MutationResult<T> = {
   changed: boolean;
 };
 
-const archiveSubagentSessions = (
+/**
+ * 归档级联。显式归档以整棵会话树为单位（fork + subagent），不留下祖先已归档、后代仍活跃的成员；
+ * 载入时的归一化只沿 subagent 关系补标记，不追加归档既有的活跃分支。
+ */
+const cascadeArchivedSessions = (
   document: SessionIndexDocument,
   rootSessionIds: readonly string[],
-  archivedAt?: string
+  archivedAt: string | undefined,
+  relationTypes: readonly SessionRelationIndex["relationType"][]
 ): MutationResult<SessionIndexDocument> & { archivedEntries: SessionIndexEntry[] } => {
   const entriesBySessionId = new Map(
     document.entries.map((entry) => [entry.sessionId, entry] as const)
   );
   const childrenByParentId = new Map<string, string[]>();
   for (const relation of document.relations) {
-    if (relation.relationType !== "subagent") {
+    if (!relationTypes.includes(relation.relationType)) {
       continue;
     }
     const children = childrenByParentId.get(relation.parentSessionId) ?? [];
@@ -564,7 +569,7 @@ export class SessionIndexStore {
     if (sessionIds.length === 0) {
       return [];
     }
-    const result = archiveSubagentSessions(this.document, sessionIds, archivedAt);
+    const result = cascadeArchivedSessions(this.document, sessionIds, archivedAt, ["fork", "subagent"]);
     this.document = result.value;
     await this.persist();
     return result.archivedEntries;
@@ -729,14 +734,16 @@ export class SessionIndexStore {
     if (!parsed.success) {
       throw new PersistentStoreCorruptionError(this.filePath, parsed.error);
     }
-    const normalized = archiveSubagentSessions(
+    const normalized = cascadeArchivedSessions(
       {
         ...parsed.data,
         entries: sortEntries(parsed.data.entries)
       },
       parsed.data.entries
         .filter((entry) => entry.archivedAt)
-        .map((entry) => entry.sessionId)
+        .map((entry) => entry.sessionId),
+      undefined,
+      ["subagent"]
     );
     this.document = normalized.value;
     this.revision += 1;

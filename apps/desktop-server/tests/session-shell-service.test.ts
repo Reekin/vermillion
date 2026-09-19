@@ -220,7 +220,7 @@ const buildHistoryRefreshOpenHarness = (input: {
 
 describe("SessionShellService", () => {
   it("runs a rollout action against the session that owns the selected tree node", async () => {
-    const getNodeTarget = vi.fn().mockResolvedValue({ sessionId: "branch-session", canArchive: false });
+    const getNodeTarget = vi.fn().mockResolvedValue({ sessionId: "branch-session", canHide: false });
     const runAction = vi.fn().mockResolvedValue({
       action: "open_rollout",
       rolloutPath: "C:/rollouts/branch.jsonl",
