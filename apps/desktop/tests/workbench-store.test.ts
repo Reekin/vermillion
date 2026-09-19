@@ -223,4 +223,53 @@ describe("workspace view invalidation", () => {
     ]);
     expect(store.getState().workspaces).toEqual([]);
   });
+
+  it("starts a new Inbox request after reconnect without waiting for the old connection", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
+    let releaseOld!: (value: InboxItem[]) => void;
+    let inboxCalls = 0;
+    const request = vi.fn((method: string) => {
+      if (method === "workspace.list") return Promise.resolve([]);
+      if (method === "inbox.list") {
+        inboxCalls += 1;
+        if (inboxCalls === 1) {
+          return new Promise<InboxItem[]>((resolve) => { releaseOld = resolve; });
+        }
+      }
+      return Promise.resolve([]);
+    });
+    const store = createWorkbenchStore({
+      request,
+      subscribe: () => () => undefined
+    } as unknown as WorkbenchClient);
+
+    const disconnectOld = store.getState().connect();
+    await vi.waitFor(() => expect(releaseOld).toBeTypeOf("function"));
+    disconnectOld();
+    const disconnectNew = store.getState().connect();
+    await vi.waitFor(() => expect(inboxCalls).toBe(2));
+    releaseOld([]);
+    disconnectNew();
+  });
+
+  it("starts a new task summary request after reconnect without waiting for the old connection", async () => {
+    const data = { a: { items: [item("old", "running")] } };
+    const { store, request, emit, disconnect } = setup(data);
+    await vi.waitFor(() => expect(store.getState().tasks.map((task) => task.id)).toEqual(["old"]));
+    let releaseOld!: (value: WorkItem[]) => void;
+    request.mockImplementationOnce(() => new Promise<WorkItem[]>((resolve) => {
+      releaseOld = resolve;
+    }));
+    emit({ type: "workItems.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(releaseOld).toBeTypeOf("function"));
+
+    disconnect();
+    data.a.items = [item("new", "running")];
+    const disconnectNew = store.getState().connect();
+    await vi.waitFor(() => expect(store.getState().tasks.map((task) => task.id)).toEqual(["new"]));
+    releaseOld([item("stale", "running")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getState().tasks.map((task) => task.id)).toEqual(["new"]);
+    disconnectNew();
+  });
 });

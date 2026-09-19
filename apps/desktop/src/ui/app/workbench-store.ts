@@ -118,11 +118,11 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       running: boolean;
     };
     const viewRefreshes = new Map<string, ViewRefresh>();
-    let inboxLoadScheduled = false;
-    let inboxLoadRunning = false;
+    let inboxLoadScheduledEpoch: number | undefined;
+    let inboxLoadRunningEpoch: number | undefined;
     let inboxDirty = false;
-    let taskLoadScheduled = false;
-    let taskLoadRunning = false;
+    let taskLoadScheduledEpoch: number | undefined;
+    let taskLoadRunningEpoch: number | undefined;
     const pendingTaskWorkspaceIds = new Set<string>();
     let connected = false;
     let connectionEpoch = 0;
@@ -149,9 +149,13 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     };
 
     const drainTasks = async () => {
-      if (!connected || taskLoadRunning || pendingTaskWorkspaceIds.size === 0) return;
+      if (
+        !connected ||
+        taskLoadRunningEpoch === connectionEpoch ||
+        pendingTaskWorkspaceIds.size === 0
+      ) return;
       const epoch = connectionEpoch;
-      taskLoadRunning = true;
+      taskLoadRunningEpoch = epoch;
       const workspaceIds = [...pendingTaskWorkspaceIds];
       pendingTaskWorkspaceIds.clear();
       try {
@@ -179,7 +183,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           set({ tasksError: (error as Error).message });
         }
       } finally {
-        taskLoadRunning = false;
+        if (taskLoadRunningEpoch === epoch) taskLoadRunningEpoch = undefined;
         if (connected && epoch === connectionEpoch && pendingTaskWorkspaceIds.size > 0) {
           scheduleTasks([]);
         }
@@ -189,10 +193,16 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     const scheduleTasks = (workspaceIds: readonly string[]) => {
       if (!connected) return;
       for (const workspaceId of workspaceIds) pendingTaskWorkspaceIds.add(workspaceId);
-      if (taskLoadScheduled || taskLoadRunning || pendingTaskWorkspaceIds.size === 0) return;
-      taskLoadScheduled = true;
+      if (
+        taskLoadScheduledEpoch === connectionEpoch ||
+        taskLoadRunningEpoch === connectionEpoch ||
+        pendingTaskWorkspaceIds.size === 0
+      ) return;
+      const epoch = connectionEpoch;
+      taskLoadScheduledEpoch = epoch;
       queueMicrotask(() => {
-        taskLoadScheduled = false;
+        if (taskLoadScheduledEpoch !== epoch) return;
+        taskLoadScheduledEpoch = undefined;
         void drainTasks();
       });
     };
@@ -326,9 +336,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     const loadView = () => scheduleView(allWorkspaceViewFields);
 
     const drainInbox = async () => {
-      if (!connected || inboxLoadRunning || !inboxDirty) return;
+      if (!connected || inboxLoadRunningEpoch === connectionEpoch || !inboxDirty) return;
       const epoch = connectionEpoch;
-      inboxLoadRunning = true;
+      inboxLoadRunningEpoch = epoch;
       inboxDirty = false;
       try {
         const inboxHistory = await client.request("inbox.list", { includeProcessed: true });
@@ -340,7 +350,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           set({ inboxError: (error as Error).message });
         }
       } finally {
-        inboxLoadRunning = false;
+        if (inboxLoadRunningEpoch === epoch) inboxLoadRunningEpoch = undefined;
         if (connected && epoch === connectionEpoch && inboxDirty) scheduleInbox();
       }
     };
@@ -348,10 +358,15 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     const scheduleInbox = () => {
       if (!connected) return;
       inboxDirty = true;
-      if (inboxLoadScheduled || inboxLoadRunning) return;
-      inboxLoadScheduled = true;
+      if (
+        inboxLoadScheduledEpoch === connectionEpoch ||
+        inboxLoadRunningEpoch === connectionEpoch
+      ) return;
+      const epoch = connectionEpoch;
+      inboxLoadScheduledEpoch = epoch;
       queueMicrotask(() => {
-        inboxLoadScheduled = false;
+        if (inboxLoadScheduledEpoch !== epoch) return;
+        inboxLoadScheduledEpoch = undefined;
         void drainInbox();
       });
     };
