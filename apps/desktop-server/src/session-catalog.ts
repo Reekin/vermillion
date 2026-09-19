@@ -185,9 +185,29 @@ export class SessionCatalogService {
 
   public async markSessionRead(sessionId: string): Promise<void> {
     const item = await this.get(sessionId);
-    for (const memberId of item?.memberSessionIds ?? [sessionId]) {
-      await this.sessionIndexStore.markSessionRead(memberId);
+    const memberIds = new Set(item?.memberSessionIds ?? [sessionId]);
+    const notices = new Map<string, { turnId: string; completedAt: string }>();
+    for (const turn of this.runtimeService.getSnapshot().turns) {
+      if (!memberIds.has(turn.sessionId) || turn.status !== "completed" || !turn.completedAt) continue;
+      const current = notices.get(turn.sessionId);
+      if (!current || turn.completedAt > current.completedAt ||
+        (turn.completedAt === current.completedAt && turn.turnId > current.turnId)) {
+        notices.set(turn.sessionId, { turnId: turn.turnId, completedAt: turn.completedAt });
+      }
     }
+    for (const memberId of memberIds) {
+      if (notices.has(memberId)) continue;
+      const entry = this.sessionIndexStore.getEntry(memberId);
+      if (entry?.latestCompletionNotice) {
+        notices.set(memberId, entry.latestCompletionNotice);
+      } else if (entry?.lastTurnId && entry.lastCompletedTurnAt) {
+        notices.set(memberId, {
+          turnId: entry.lastTurnId,
+          completedAt: entry.lastCompletedTurnAt
+        });
+      }
+    }
+    await this.sessionIndexStore.markTreeRead(sessionId, notices);
   }
 
   /** Rename works for every listed session: loaded ones through session state, the rest through the index entry. */
@@ -355,11 +375,9 @@ export class SessionCatalogService {
         statusDot:
           seed.runtimeStatus === "running" || seed.runtimeStatus === "awaiting_approval"
             ? "running"
-            : registryState.lastActiveSessionId === seed.sessionId
-              ? "none"
-              : seed.unreadState === "unread_completed"
-                ? "unread_completed"
-                : "none",
+            : seed.unreadState === "unread_completed"
+              ? "unread_completed"
+              : "none",
         isActive: registryState.lastActiveSessionId === seed.sessionId,
         isPinned: registryState.pinnedSessionIds.includes(seed.sessionId),
         role: typeof seed.metadata?.role === "string" ? seed.metadata.role : undefined,

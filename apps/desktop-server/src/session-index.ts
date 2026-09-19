@@ -10,6 +10,10 @@ import {
 } from "./persistence-store.js";
 
 const unreadStateSchema = z.enum(["read", "unread_completed"]);
+const completionNoticeSchema = z.object({
+  turnId: z.string().min(1),
+  completedAt: z.string().min(1)
+});
 
 const sessionIndexEntrySchema = z.object({
   workspaceId: z.string().min(1),
@@ -29,6 +33,8 @@ const sessionIndexEntrySchema = z.object({
   hiddenAt: z.string().min(1).optional(),
   lastTurnId: z.string().min(1).optional(),
   unreadState: unreadStateSchema.default("read"),
+  latestCompletionNotice: completionNoticeSchema.optional(),
+  acknowledgedCompletionNotice: completionNoticeSchema.optional(),
   readTurnIds: z.array(z.string().min(1)).optional(),
   source: z.enum(["registry", "discovery", "reconciled"]).default("registry"),
   metadata: z.record(z.string(), z.unknown()).optional()
@@ -58,6 +64,7 @@ export type SessionIndexEntry = z.infer<typeof sessionIndexEntrySchema>;
 export type SessionRelationIndex = z.infer<typeof sessionRelationIndexSchema>;
 export type SessionIndexDocument = z.infer<typeof sessionIndexDocumentSchema>;
 export type SessionUnreadState = z.infer<typeof unreadStateSchema>;
+export type CompletionNotice = z.infer<typeof completionNoticeSchema>;
 
 type Clock = () => string;
 
@@ -136,6 +143,8 @@ const isSameSessionEntry = (
   left.hiddenAt === right.hiddenAt &&
   left.lastTurnId === right.lastTurnId &&
   left.unreadState === right.unreadState &&
+  isDeepStrictEqual(left.latestCompletionNotice, right.latestCompletionNotice) &&
+  isDeepStrictEqual(left.acknowledgedCompletionNotice, right.acknowledgedCompletionNotice) &&
   isDeepStrictEqual(left.readTurnIds, right.readTurnIds) &&
   left.source === right.source &&
   isDeepStrictEqual(left.metadata, right.metadata);
@@ -167,6 +176,23 @@ type MutationResult<T> = {
   value: T;
   changed: boolean;
 };
+
+const compareCompletionNotices = (
+  left: CompletionNotice | undefined,
+  right: CompletionNotice | undefined
+): number => {
+  if (!left) return right ? -1 : 0;
+  if (!right) return 1;
+  if (left.turnId === right.turnId) return 0;
+  const byTime = left.completedAt.localeCompare(right.completedAt);
+  return byTime || left.turnId.localeCompare(right.turnId);
+};
+
+const laterCompletionNotice = (
+  left: CompletionNotice | undefined,
+  right: CompletionNotice | undefined
+): CompletionNotice | undefined =>
+  compareCompletionNotices(left, right) >= 0 ? left : right;
 
 /**
  * 归档级联。显式归档以整棵会话树为单位（fork + subagent），不留下祖先已归档、后代仍活跃的成员；
@@ -390,6 +416,13 @@ export class SessionIndexStore {
     input: UpsertSessionIndexInput,
     existing?: SessionIndexEntry
   ): SessionIndexEntry {
+    const latestCompletionNotice = existing?.latestCompletionNotice;
+    const acknowledgedCompletionNotice = existing?.acknowledgedCompletionNotice;
+    const unreadState = latestCompletionNotice || acknowledgedCompletionNotice
+      ? compareCompletionNotices(latestCompletionNotice, acknowledgedCompletionNotice) > 0
+        ? "unread_completed"
+        : "read"
+      : input.unreadState ?? existing?.unreadState ?? "read";
     return sessionIndexEntrySchema.parse({
       workspaceId: input.workspaceId,
       sessionId: input.session.sessionId,
@@ -409,7 +442,9 @@ export class SessionIndexStore {
       archivedAt: input.session.archivedAt ?? existing?.archivedAt,
       hiddenAt: existing?.hiddenAt,
       lastTurnId: input.session.lastTurnId,
-      unreadState: input.unreadState ?? existing?.unreadState ?? "read",
+      unreadState,
+      latestCompletionNotice,
+      acknowledgedCompletionNotice,
       readTurnIds: existing?.readTurnIds,
       source: input.source ?? existing?.source ?? "registry",
       metadata:
@@ -608,27 +643,68 @@ export class SessionIndexStore {
     await this.persist();
   }
 
-  public async markSessionRead(sessionId: string): Promise<SessionIndexEntry | undefined> {
+  public async markSessionRead(
+    sessionId: string,
+    notice?: CompletionNotice
+  ): Promise<SessionIndexEntry | undefined> {
     await this.ready();
     const existing = this.getEntry(sessionId);
     if (!existing) {
       return undefined;
     }
-    if (existing.unreadState === "read") {
+    const acknowledgedCompletionNotice = laterCompletionNotice(
+      existing.acknowledgedCompletionNotice,
+      notice ?? existing.latestCompletionNotice
+    );
+    const unreadState = compareCompletionNotices(
+      existing.latestCompletionNotice,
+      acknowledgedCompletionNotice
+    ) > 0 ? "unread_completed" : "read";
+    if (
+      existing.unreadState === unreadState &&
+      isDeepStrictEqual(existing.acknowledgedCompletionNotice, acknowledgedCompletionNotice)
+    ) {
       return existing;
     }
     const updated = sessionIndexEntrySchema.parse({
       ...existing,
-      unreadState: "read"
+      unreadState,
+      acknowledgedCompletionNotice
     });
-    this.document = {
-      ...this.document,
-      entries: this.document.entries.map((entry) =>
-        entry.sessionId === sessionId ? updated : entry
-      )
-    };
-    await this.persist();
-    return updated;
+    const mutation = this.replaceEntryInMemory(existing, updated);
+    await this.persistMutation(mutation.changed);
+    return mutation.value;
+  }
+
+  public async markTreeRead(
+    sessionId: string,
+    notices: ReadonlyMap<string, CompletionNotice> = new Map()
+  ): Promise<void> {
+    await this.ready();
+    const memberIds = new Set(this.getTreeMembers(sessionId).filter((memberId) => {
+      const entry = this.getEntry(memberId);
+      return entry && !entry.hiddenAt;
+    }));
+    let changed = false;
+    const entries = this.document.entries.map((entry) => {
+      if (!memberIds.has(entry.sessionId)) return entry;
+      const acknowledgedCompletionNotice = laterCompletionNotice(
+        entry.acknowledgedCompletionNotice,
+        notices.get(entry.sessionId)
+      );
+      const unreadState = compareCompletionNotices(
+        entry.latestCompletionNotice,
+        acknowledgedCompletionNotice
+      ) > 0 ? "unread_completed" : "read";
+      if (
+        entry.unreadState === unreadState &&
+        isDeepStrictEqual(entry.acknowledgedCompletionNotice, acknowledgedCompletionNotice)
+      ) return entry;
+      changed = true;
+      return sessionIndexEntrySchema.parse({ ...entry, unreadState, acknowledgedCompletionNotice });
+    });
+    if (changed) this.document = { ...this.document, entries };
+    await this.persistMutation(changed);
   }
 
   public async markTurnsRead(turns: readonly { sessionId: string; turnId: string }[]): Promise<boolean> {
@@ -636,10 +712,32 @@ export class SessionIndexStore {
     let changed = false;
     const entries = this.document.entries.map((entry) => {
       const readTurnIds = new Set(entry.readTurnIds);
-      for (const turn of turns) if (turn.sessionId === entry.sessionId) readTurnIds.add(turn.turnId);
-      if (readTurnIds.size === (entry.readTurnIds?.length ?? 0)) return entry;
+      const newlyReadTurnIds = new Set<string>();
+      for (const turn of turns) if (turn.sessionId === entry.sessionId) {
+        readTurnIds.add(turn.turnId);
+        newlyReadTurnIds.add(turn.turnId);
+      }
+      const acknowledgedCompletionNotice = entry.latestCompletionNotice &&
+        newlyReadTurnIds.has(entry.latestCompletionNotice.turnId)
+        ? laterCompletionNotice(entry.acknowledgedCompletionNotice, entry.latestCompletionNotice)
+        : entry.acknowledgedCompletionNotice;
+      const unreadState = entry.latestCompletionNotice || acknowledgedCompletionNotice
+        ? compareCompletionNotices(entry.latestCompletionNotice, acknowledgedCompletionNotice) > 0
+          ? "unread_completed"
+          : "read"
+        : entry.unreadState;
+      if (
+        readTurnIds.size === (entry.readTurnIds?.length ?? 0) &&
+        entry.unreadState === unreadState &&
+        isDeepStrictEqual(entry.acknowledgedCompletionNotice, acknowledgedCompletionNotice)
+      ) return entry;
       changed = true;
-      return { ...entry, readTurnIds: [...readTurnIds] };
+      return sessionIndexEntrySchema.parse({
+        ...entry,
+        unreadState,
+        acknowledgedCompletionNotice,
+        readTurnIds: [...readTurnIds]
+      });
     });
     if (changed) this.document = { ...this.document, entries };
     await this.persistMutation(changed);
@@ -647,28 +745,33 @@ export class SessionIndexStore {
   }
 
   public async markSessionUnreadCompleted(
-    sessionId: string
+    sessionId: string,
+    notice?: CompletionNotice,
+    acknowledged = false
   ): Promise<SessionIndexEntry | undefined> {
     await this.ready();
     const existing = this.getEntry(sessionId);
     if (!existing) {
       return undefined;
     }
-    if (existing.unreadState === "unread_completed") {
-      return existing;
-    }
+    const latestCompletionNotice = laterCompletionNotice(existing.latestCompletionNotice, notice);
+    const acknowledgedCompletionNotice = acknowledged
+      ? laterCompletionNotice(existing.acknowledgedCompletionNotice, notice)
+      : existing.acknowledgedCompletionNotice;
+    const unreadState = notice
+      ? compareCompletionNotices(latestCompletionNotice, acknowledgedCompletionNotice) > 0
+        ? "unread_completed"
+        : "read"
+      : "unread_completed";
     const updated = sessionIndexEntrySchema.parse({
       ...existing,
-      unreadState: "unread_completed"
+      unreadState,
+      latestCompletionNotice,
+      acknowledgedCompletionNotice
     });
-    this.document = {
-      ...this.document,
-      entries: this.document.entries.map((entry) =>
-        entry.sessionId === sessionId ? updated : entry
-      )
-    };
-    await this.persist();
-    return updated;
+    const mutation = this.replaceEntryInMemory(existing, updated);
+    await this.persistMutation(mutation.changed);
+    return mutation.value;
   }
 
   public async upsertRelation(

@@ -28,7 +28,11 @@ export type DomainServiceOptions = {
   assertEngineRegistered: (engineId: string) => void;
   resolveEngineCapabilities: (engineId: string) => readonly string[];
   publishRuntimeEvent: (event: RuntimeEvent) => void;
-  markSessionUnreadCompleted?: (sessionId: string) => void;
+  markSessionUnreadCompleted?: (input: {
+    sessionId: string;
+    turnId: string;
+    completedAt: string;
+  }) => void;
   now?: Clock;
   createRelationId?: IdFactory;
   createSessionId?: IdFactory;
@@ -74,7 +78,7 @@ export class DomainService {
   private readonly assertEngineRegistered: (engineId: string) => void;
   private readonly resolveEngineCapabilities: (engineId: string) => readonly string[];
   private readonly publishRuntimeEvent: (event: RuntimeEvent) => void;
-  private readonly markSessionUnreadCompleted?: (sessionId: string) => void;
+  private readonly markSessionUnreadCompleted?: DomainServiceOptions["markSessionUnreadCompleted"];
   private readonly now: Clock;
   private readonly createRelationId: IdFactory;
   private readonly createSessionId: IdFactory;
@@ -503,7 +507,11 @@ export class DomainService {
   private applyRuntimeEvent(event: RuntimeEvent, occurredAt?: string): void {
     this.domainReplica.apply(event, occurredAt);
     if (event.type === "turn.completed") {
-      this.markSessionUnreadCompleted?.(event.sessionId);
+      this.markSessionUnreadCompleted?.({
+        sessionId: event.sessionId,
+        turnId: event.turnId,
+        completedAt: this.domainReplica.getTurn(event.turnId)?.completedAt ?? occurredAt ?? this.now()
+      });
     }
   }
 

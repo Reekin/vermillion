@@ -501,6 +501,48 @@ describe("SessionRuntimeService", () => {
     );
   });
 
+  it("acknowledges only completions on the active tree's visible tip", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir, createWorkspaceId: () => "workspace-1" });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "D:/workspace/vermillion" });
+    const service = createService({ persistenceBaseDir: baseDir });
+    await service.executeCommand({ commandId: "cmd-create-1",
+      command: { type: "createSession", engineId: "codex", workspaceId: "workspace-1" } });
+    await service.executeCommand({ commandId: "cmd-create-2",
+      command: { type: "createSession", engineId: "codex", workspaceId: "workspace-1" } });
+    const index = service.getSessionIndexStore()!;
+    const registry = service.getWorkspaceRegistry()!;
+    await registry.setLastActiveSelection({ workspaceId: "workspace-1", sessionId: "session-1" });
+    await index.setTreeView("session-1", { sessionId: "session-2", followTip: true });
+
+    service.applyRuntimeEvent({ type: "turn.completed", sessionId: "session-2",
+      turnId: "turn-visible", finishReason: "completed" }, "2026-04-18T00:00:10Z");
+    await flushAsyncEffects();
+    expect(index.getEntry("session-2")).toMatchObject({
+      unreadState: "read",
+      latestCompletionNotice: { turnId: "turn-visible" },
+      acknowledgedCompletionNotice: { turnId: "turn-visible" }
+    });
+
+    await index.upsertRelation({ workspaceId: "workspace-1", parentSessionId: "session-1",
+      childSessionId: "session-2", relationType: "fork" });
+    await index.setTreeView("session-1", { sessionId: "session-1", followTip: true });
+    service.applyRuntimeEvent({ type: "turn.completed", sessionId: "session-2",
+      turnId: "turn-background", finishReason: "completed" }, "2026-04-18T00:00:11Z");
+    await flushAsyncEffects();
+    expect(index.getEntry("session-2")).toMatchObject({
+      unreadState: "unread_completed",
+      latestCompletionNotice: { turnId: "turn-background" },
+      acknowledgedCompletionNotice: { turnId: "turn-visible" }
+    });
+
+    service.applyRuntimeEvent({ type: "turn.completed", sessionId: "session-2",
+      turnId: "turn-visible", finishReason: "completed" }, "2026-04-18T00:00:10Z");
+    await flushAsyncEffects();
+    expect(index.getEntry("session-2")?.latestCompletionNotice?.turnId).toBe("turn-background");
+    expect(index.getEntry("session-2")?.unreadState).toBe("unread_completed");
+  });
+
   it("creates, lists, archives, and resumes sessions while maintaining participants", async () => {
     const service = createService();
 

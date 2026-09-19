@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { invalidatesSessionBrowser } from "./events.js";
 
 describe("invalidatesSessionBrowser", () => {
+  it("refreshes when a chat tree projection changes", () => {
+    expect(invalidatesSessionBrowser({
+      type: "conversationGraph.updated",
+      sessionId: "session-1",
+      currentNodeId: "turn-1",
+      visibleNodeIds: ["turn-1"],
+      visibleTurnIds: ["turn-1"]
+    })).toBe(true);
+  });
+
   it("refreshes for user messages without refreshing for assistant output", () => {
     expect(invalidatesSessionBrowser({
       type: "message.started",
