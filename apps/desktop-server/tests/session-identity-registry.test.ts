@@ -135,4 +135,66 @@ describe("SessionIdentityRegistry", () => {
       })
     ).toBe("session-runtime");
   });
+
+  it("resolves an identifier given as a workbench id or as an engine session id", () => {
+    const runtimeService = {
+      listSessions: vi.fn().mockReturnValue([
+        {
+          sessionId: "codex-thread:thread-subagent",
+          conversationId: "conversation-1",
+          engineId: "codex",
+          status: "idle",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          metadata: {
+            providerKind: "codex-thread",
+            providerSessionId: "thread-subagent"
+          }
+        }
+      ])
+    } as unknown as SessionRuntimeService;
+    const registry = new SessionIdentityRegistry({
+      runtimeService,
+      sessionIndexStore: {
+        getEntry: vi.fn((sessionId: string) =>
+          sessionId === "session-pi"
+            ? {
+                sessionId,
+                workspaceId: "workspace-1",
+                conversationId: "conversation-2",
+                engineId: "pi",
+                providerKind: "pi-session",
+                providerSessionId: "pi-subagent",
+                createdAt: "2026-04-20T00:00:00.000Z",
+                updatedAt: "2026-04-20T00:00:00.000Z",
+                source: "reconciled"
+              }
+            : undefined
+        ),
+        listEntries: vi.fn().mockReturnValue([
+          {
+            sessionId: "session-pi",
+            workspaceId: "workspace-1",
+            conversationId: "conversation-2",
+            engineId: "pi",
+            providerKind: "pi-session",
+            providerSessionId: "pi-subagent",
+            createdAt: "2026-04-20T00:00:00.000Z",
+            updatedAt: "2026-04-20T00:00:00.000Z",
+            source: "reconciled"
+          }
+        ])
+      } as never
+    });
+
+    expect(registry.resolveSessionIdentifier("session-pi")).toBe("session-pi");
+    expect(registry.resolveSessionIdentifier("codex-thread:thread-subagent")).toBe(
+      "codex-thread:thread-subagent"
+    );
+    expect(registry.resolveSessionIdentifier("thread-subagent")).toBe(
+      "codex-thread:thread-subagent"
+    );
+    expect(registry.resolveSessionIdentifier("pi-subagent")).toBe("session-pi");
+    expect(registry.resolveSessionIdentifier("thread-unknown")).toBeUndefined();
+  });
 });

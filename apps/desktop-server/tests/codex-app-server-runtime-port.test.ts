@@ -2768,7 +2768,8 @@ describe("Codex app-server runtime port", () => {
   it("invokes read_session through the Codex dynamic tool path", async () => {
     const hostTools = new HostToolRegistry([
       createReadSessionHostTool({
-        getSnapshot: () => readSessionSnapshot
+        getSnapshot: () => readSessionSnapshot,
+        resolveSessionId: (sessionId) => sessionId
       })
     ]);
     const port = createCodexAppServerRuntimePort({

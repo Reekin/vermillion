@@ -224,6 +224,7 @@ export const createSessionRuntimeService = (
   hostTools.register(
     createReadSessionHostTool({
       getSnapshot: () => runtimeService.getSnapshot(),
+      resolveSessionId: (sessionId) => shellService.resolveSessionIdentifier(sessionId),
       ensureSessionLoaded: (sessionId, options) =>
         shellService.ensureSessionLoadedForRead(sessionId, options),
       isSessionPartiallyHydrated: (sessionId) =>

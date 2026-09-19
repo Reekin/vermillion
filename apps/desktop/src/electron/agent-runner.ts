@@ -57,9 +57,10 @@ const lastAssistantText = (shell: SessionShell, sessionId: string): string | und
 };
 
 /** Deliver a message to an active turn, or start a new turn in the same session. */
-export const createSessionSteerer = (shell: SessionShell) => async (sessionId: string, content: string): Promise<SessionSteerResult> => {
-  if (!await shell.ensureSessionLoadedForRead(sessionId)) {
-    throw new Error("Session not found: " + sessionId);
+export const createSessionSteerer = (shell: SessionShell) => async (target: string, content: string): Promise<SessionSteerResult> => {
+  const sessionId = shell.resolveSessionIdentifier(target);
+  if (!sessionId || !await shell.ensureSessionLoadedForRead(sessionId)) {
+    throw new Error("Session not found: " + target);
   }
   const activeTurnId = resolveActiveTurnId(shell, sessionId);
   const command = activeTurnId

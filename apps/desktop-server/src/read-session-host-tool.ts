@@ -13,6 +13,7 @@ export const readSessionToolName = "read_session";
 
 export type ReadSessionRuntime = {
   getSnapshot: () => DomainSnapshot;
+  resolveSessionId: (sessionId: string) => string | undefined;
   ensureSessionLoaded?: (
     sessionId: string,
     options?: { force?: boolean }
@@ -102,7 +103,8 @@ export const createReadSessionHostTool = (
       sessionId: {
         type: "string",
         minLength: 1,
-        description: "Vermillion sessionId to read."
+        description:
+          "Vermillion sessionId, or the engine session id an engine tool reported for it, such as the id returned when spawning a subagent."
       },
       limit: {
         type: "integer",
@@ -126,25 +128,31 @@ export const createReadSessionHostTool = (
   handle: async (invocation) => {
     try {
       const args = parseArgs(invocation.arguments);
+      const sessionId = runtime.resolveSessionId(args.sessionId);
+      if (!sessionId) {
+        throw new Error(
+          `Unknown session: ${args.sessionId}. Tried it as a Vermillion sessionId and as an engine session id.`
+        );
+      }
       let snapshot = runtime.getSnapshot();
-      const hadSession = snapshotHasSession(snapshot, args.sessionId);
+      const hadSession = snapshotHasSession(snapshot, sessionId);
       const needsFullHydration =
-        hadSession && runtime.isSessionPartiallyHydrated?.(args.sessionId) === true;
+        hadSession && runtime.isSessionPartiallyHydrated?.(sessionId) === true;
       if ((!hadSession || needsFullHydration) && runtime.ensureSessionLoaded) {
-        const loaded = await runtime.ensureSessionLoaded(args.sessionId, {
+        const loaded = await runtime.ensureSessionLoaded(sessionId, {
           force: needsFullHydration
         });
         if (loaded) {
           snapshot = runtime.getSnapshot();
         } else if (needsFullHydration) {
-          throw new Error(`Session could not be fully loaded: ${args.sessionId}`);
+          throw new Error(`Session could not be fully loaded: ${sessionId}`);
         }
       } else if (needsFullHydration) {
-        throw new Error(`Session could not be fully loaded: ${args.sessionId}`);
+        throw new Error(`Session could not be fully loaded: ${sessionId}`);
       }
       const transcript = buildReadSessionTranscript({
         snapshot,
-        sessionId: args.sessionId,
+        sessionId,
         limit: args.limit,
         maxTextChars: args.maxChars
       });

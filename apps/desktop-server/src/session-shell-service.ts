@@ -415,6 +415,11 @@ export class SessionShellService {
     return this.partiallyHydratedSessionIds.has(sessionId);
   }
 
+  /** Accepts a workbench sessionId or the engine session id recorded for it. */
+  public resolveSessionIdentifier(sessionId: string): string | undefined {
+    return this.sessionIdentity.resolveSessionIdentifier(sessionId);
+  }
+
   public async ensureSessionLoadedForRead(
     sessionId: string,
     input: {
