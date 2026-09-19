@@ -12,7 +12,9 @@
   "scripts": {
     "build": "pnpm exec tsc -b tsconfig.json",
     "typecheck": "pnpm exec tsc -b tsconfig.json --pretty false",
-    "test": "pnpm exec vitest run",
+    "test": "pnpm run test:fast && pnpm run test:git",
+    "test:fast": "pnpm exec vitest run --exclude tests/fixtures/** --exclude tests/app-launcher.test.ts --exclude tests/docs-diff.test.ts --exclude tests/docs-discard.test.ts --exclude tests/docs-draft.test.ts --exclude tests/integration-git.test.ts --exclude tests/workflow-git.test.ts --exclude tests/worktree-cleanup.test.ts",
+    "test:git": "node tests/run-git-tests.mjs",
     "lint": "pnpm exec tsc -b tsconfig.json --pretty false"
   },
   "dependencies": {

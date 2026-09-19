@@ -90,6 +90,6 @@ const executeCli = async (argv: string[]): Promise<number> => {
     process.stdout.write(JSON.stringify(response.result, null, 2) + "\n");
     return 0;
   } finally {
-    service?.dispose();
+    await service?.dispose();
   }
 };

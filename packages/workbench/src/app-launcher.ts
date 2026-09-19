@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -55,6 +55,8 @@ export type AcceptanceLaunchRecord = {
   targetPath: string;
   buildId: string;
   logPath: string;
+  desktopOwnerPid?: number;
+  exitFile?: string;
 };
 export type AppLauncherOptions = { desktop?: string; timeoutMs?: number };
 type AppCommand = { exe: string; args: string[]; cwd: string };
@@ -88,6 +90,11 @@ const tcpPortOpen = (port: number): Promise<boolean> => new Promise((resolveOpen
 });
 const logLine = async (path: string, stage: string, detail: object = {}) =>
   appendFile(path, JSON.stringify({ at: new Date().toISOString(), stage, ...detail }) + "\n", "utf8");
+const readJsonFile = async <T>(path: string): Promise<T> =>
+  JSON.parse((await readFile(path, "utf8")).replace(/^\uFEFF/, "")) as T;
+type HiddenLaunch = { pid: number; ownerPid: number; desktop: string; exitFile: string };
+type HiddenLaunchResult = { pid?: unknown; ownerPid?: unknown; desktop?: unknown; error?: unknown };
+type HiddenExit = { pid?: unknown; exitCode?: unknown };
 const waitUntil = async (check: () => Promise<boolean>, pid: number, timeoutMs: number): Promise<"ready" | "exited" | "timeout"> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -186,6 +193,8 @@ export class AppLauncher {
     await writeFile(logPath, "", "utf8");
     let stage = "target";
     let pid: number | undefined;
+    let desktopOwnerPid: number | undefined;
+    let exitFile: string | undefined;
     try {
       const target = await resolveAppTarget(input.targetPath, input.expectedRevision);
       await logLine(logPath, stage, { targetPath: target.rootPath, targetKind: target.kind, revision: target.revision });
@@ -198,14 +207,23 @@ export class AppLauncher {
       const fixture = input.fixture === "session-tree" ? await prepareSessionTreeFixture(dataDir, target.packageRoot)
         : input.fixture === "real-session" ? await prepareRealSessionFixture(dataDir, input.codexConfigSource) : undefined;
       const instanceId = randomUUID();
+      const desktop = process.platform === "win32" ? `${this.desktop}-${instanceId}` : "";
       const configuredCodexPath = await resolveConfiguredCodexPath();
       const env: Record<string, string> = { ...input.env, ...(fixture?.env ?? {}), VERMILLION_PERSISTENCE_BASE_DIR: dataDir,
-        VERMILLION_USER_DATA_DIR: userDataDir, VERMILLION_REMOTE_DEBUGGING_PORT: String(input.port), VERMILLION_ACCEPTANCE_LAUNCH_TOKEN: instanceId };
+        VERMILLION_USER_DATA_DIR: userDataDir, VERMILLION_REMOTE_DEBUGGING_PORT: String(input.port),
+        VERMILLION_ACCEPTANCE_LAUNCH_TOKEN: instanceId, VERMILLION_ACCEPTANCE_DESKTOP: desktop };
       if (!env.VERMILLION_CODEX_BIN && !env.CODEX_BIN && !env.CODEX_PATH && configuredCodexPath) env.VERMILLION_CODEX_BIN = configuredCodexPath;
       const args = process.platform === "win32" ? [...target.command.args, ...hiddenDesktopChromiumArgs] : target.command.args;
       stage = "process";
-      pid = process.platform === "win32" ? await this.startHidden(target.command, target.packageRoot, env, args) : await this.startPlain(target.command, env, args);
-      await logLine(logPath, stage, { pid });
+      if (process.platform === "win32") {
+        const launched = await this.startHidden(target.command, target.packageRoot, dataDir, instanceId, desktop, env, args);
+        pid = launched.pid;
+        desktopOwnerPid = launched.ownerPid;
+        exitFile = launched.exitFile;
+      } else {
+        pid = await this.startPlain(target.command, env, args);
+      }
+      await logLine(logPath, stage, { pid, desktopOwnerPid, desktop });
       stage = "cdp";
       const cdp = await waitUntil(() => cdpReady(input.port), pid, this.timeoutMs);
       if (cdp !== "ready") throw new Error(cdp === "exited" ? "The app process exited before opening CDP" : "The app did not open CDP within " + this.timeoutMs / 1000 + "s");
@@ -222,8 +240,8 @@ export class AppLauncher {
         const catalog = await callLocalEndpoint<EngineModelCatalogResult>(dataDir, pid, instanceId, "engine.listModels", { engineId: "codex" });
         if (catalog.catalog?.engineId !== "codex" || !Array.isArray(catalog.catalog.models) || !catalog.catalog.models.length) throw new Error("The real-session Codex engine did not return a usable model catalog");
       }
-      const record: AcceptanceLaunchRecord = { kind: "vermillion-acceptance", pid, port: input.port, desktop: process.platform === "win32" ? this.desktop : "",
-        token: instanceId, targetPath: target.rootPath, buildId: runtime.buildId, logPath };
+      const record: AcceptanceLaunchRecord = { kind: "vermillion-acceptance", pid, port: input.port, desktop,
+        token: instanceId, targetPath: target.rootPath, buildId: runtime.buildId, logPath, desktopOwnerPid, exitFile };
       await writeFile(join(dataDir, launchRecordFile), JSON.stringify(record) + "\n", "utf8");
       const targetDescriptor = join(dataDir, `acceptance-target-${instanceId}.json`);
       await writeFile(targetDescriptor, JSON.stringify({ dataDir, pid, instanceId }) + "\n", "utf8");
@@ -238,9 +256,11 @@ export class AppLauncher {
     } catch (error) {
       const failedPid = pid;
       const running = failedPid ? processRunning(failedPid) : false;
-      const cleanupWarnings = failedPid ? await this.terminate(failedPid) : [];
+      const observedExit = exitFile ? await this.readExit(exitFile, 500) : undefined;
+      const cleanupWarnings = failedPid ? await this.terminate(failedPid, undefined, desktopOwnerPid) : [];
       const cleanup = failedPid ? !processRunning(failedPid) : true;
-      const exit = failedPid && !running ? "exited (exit code unavailable)" : failedPid ? "running" : "not-created";
+      const exit = observedExit !== undefined ? `exited (code ${observedExit})`
+        : failedPid && !running ? "exited (exit code unavailable)" : failedPid ? "running" : "not-created";
       await logLine(logPath, "failed", { failedStage: stage, pid, processStatus: exit, cleanup, cleanupWarnings, error: error instanceof Error ? error.message : String(error) });
       throw new Error(`app.start failed at ${stage}: ${error instanceof Error ? error.message : String(error)}; log=${logPath}; process=${failedPid ?? "not-created"}; status=${exit}; cleanup=${cleanup ? "complete" : "failed"}`);
     }
@@ -259,14 +279,14 @@ export class AppLauncher {
         if (runtime.pid !== input.pid) throw new Error("runtime PID mismatch");
       }
       catch { throw new Error("app.stop refused to terminate a running PID whose live instance identity cannot be confirmed"); }
-      warnings = await this.terminate(input.pid, record.port);
+      warnings = await this.terminate(input.pid, record.port, record.desktopOwnerPid);
     }
     if (processRunning(input.pid)) throw new Error("app.stop could not confirm process exit: " + input.pid);
     if (await tcpPortOpen(record.port)) throw new Error("app.stop could not confirm port release: " + record.port);
     await logLine(record.logPath, "stopped", { pid: input.pid, port: record.port });
     return { dataDir, pid: input.pid, stopped: true, portReleased: true, ...(warnings.length ? { warnings } : {}) };
   }
-  private async terminate(pid: number, port?: number): Promise<string[]> {
+  private async terminate(pid: number, port?: number, ownerPid?: number): Promise<string[]> {
     const warnings: string[] = [];
     if (processRunning(pid)) {
       if (process.platform === "win32") {
@@ -278,17 +298,94 @@ export class AppLauncher {
     }
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline && (processRunning(pid) || (port !== undefined && await tcpPortOpen(port)))) await sleep(100);
+    if (ownerPid) {
+      const ownerDeadline = Date.now() + 2_000;
+      while (Date.now() < ownerDeadline && processRunning(ownerPid)) await sleep(50);
+      if (processRunning(ownerPid) && process.platform === "win32") {
+        try { await execFileAsync("taskkill", ["/PID", String(ownerPid), "/T", "/F"]); }
+        catch (error) { warnings.push(error instanceof Error ? error.message : String(error)); }
+      }
+    }
     return warnings;
   }
-  private async startHidden(command: AppCommand, packageRoot: string, env: Record<string, string>, args: string[]): Promise<number> {
+  private async readExit(path: string, timeoutMs = 0): Promise<number | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      try {
+        const result = await readJsonFile<HiddenExit>(path);
+        return typeof result.exitCode === "number" ? result.exitCode : undefined;
+      } catch {}
+      if (Date.now() < deadline) await sleep(25);
+    } while (Date.now() < deadline);
+    return undefined;
+  }
+  private async startHidden(command: AppCommand, packageRoot: string, dataDir: string, instanceId: string,
+    desktop: string, env: Record<string, string>, args: string[]): Promise<HiddenLaunch> {
     const script = join(packageRoot, "scripts", "start-on-hidden-desktop.ps1");
+    const ownerScript = join(packageRoot, "scripts", "hidden-desktop-owner.ps1");
     if (!existsSync(script)) throw new Error("Launcher script missing: " + script);
+    if (!existsSync(ownerScript)) throw new Error("Hidden desktop owner script missing: " + ownerScript);
     const quoted = args.map((value) => /[\s"]/.test(value) ? '"' + value.replace(/"/g, '\\"') + '"' : value).join(" ");
-    const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
-      "-Desktop", this.desktop, "-Exe", command.exe, "-Args", quoted, "-Cwd", command.cwd, "-EnvJson", JSON.stringify(env)], { env: { ...process.env, ...env } });
-    const pid = Number(stdout.trim().split(/\r?\n/).at(-1));
-    if (!Number.isInteger(pid) || pid <= 0) throw new Error("Launcher did not return a pid: " + stdout);
-    return pid;
+    const requestFile = join(dataDir, `desktop-owner-${instanceId}.request.json`);
+    const resultFile = join(dataDir, `desktop-owner-${instanceId}.result.json`);
+    const exitFile = join(dataDir, `desktop-owner-${instanceId}.exit.json`);
+    const ownerLogFile = join(dataDir, `desktop-owner-${instanceId}.log`);
+    const ownerPidFile = join(dataDir, `desktop-owner-${instanceId}.pid`);
+    await writeFile(requestFile, JSON.stringify({ desktop, exe: command.exe, args: quoted, cwd: command.cwd, env }), "utf8");
+    const starter = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+      "-OwnerScript", ownerScript, "-RequestFile", requestFile, "-ResultFile", resultFile,
+      "-ExitFile", exitFile, "-OwnerLog", ownerLogFile, "-OwnerPidFile", ownerPidFile], {
+      cwd: command.cwd, env: { ...process.env, ...env }, stdio: "ignore", windowsHide: true
+    });
+    starter.unref();
+    let ownerPid = 0;
+    const starterDeadline = Date.now() + Math.min(this.timeoutMs, 5_000);
+    while (Date.now() < starterDeadline) {
+      try { ownerPid = Number((await readFile(ownerPidFile, "utf8")).trim()); } catch {}
+      if (Number.isInteger(ownerPid) && ownerPid > 0) break;
+      if (starter.pid && !processRunning(starter.pid)) await sleep(25);
+      else await sleep(25);
+    }
+    if (!Number.isInteger(ownerPid) || ownerPid <= 0) {
+      if (starter.pid) await this.terminate(starter.pid);
+      await sleep(100);
+      try { ownerPid = Number((await readFile(ownerPidFile, "utf8")).trim()); } catch {}
+      if (Number.isInteger(ownerPid) && ownerPid > 0) await this.terminate(ownerPid);
+      throw new Error("Hidden desktop starter did not publish an owner PID");
+    }
+    const deadline = Date.now() + Math.min(this.timeoutMs, 10_000);
+    while (Date.now() < deadline) {
+      try {
+        const result = await readJsonFile<HiddenLaunchResult>(resultFile);
+        if (typeof result.error === "string") throw new Error(result.error);
+        if (typeof result.pid === "number" && typeof result.ownerPid === "number" && typeof result.desktop === "string") {
+          return { pid: result.pid, ownerPid: result.ownerPid, desktop: result.desktop, exitFile };
+        }
+      } catch (error) {
+        if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") {
+          // The owner publishes atomically enough for the next poll to retry a partial/missing file.
+        } else {
+          if (processRunning(ownerPid)) await this.terminate(ownerPid);
+          throw error;
+        }
+      }
+      if (!processRunning(ownerPid)) {
+        await sleep(50);
+        try {
+          const result = await readJsonFile<HiddenLaunchResult>(resultFile);
+          if (typeof result.error === "string") throw new Error(result.error);
+          if (typeof result.pid === "number" && typeof result.ownerPid === "number" && typeof result.desktop === "string") {
+            return { pid: result.pid, ownerPid: result.ownerPid, desktop: result.desktop, exitFile };
+          }
+        } catch (error) {
+          if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        throw new Error("Hidden desktop owner exited before launching the app; ownerLog=" + ownerLogFile);
+      }
+      await sleep(50);
+    }
+    await this.terminate(ownerPid);
+    throw new Error("Hidden desktop owner did not publish the app process");
   }
   private async startPlain(command: AppCommand, env: Record<string, string>, args: string[]): Promise<number> {
     const { spawn } = await import("node:child_process");

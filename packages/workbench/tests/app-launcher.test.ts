@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { copyFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,9 +8,58 @@ import { AppLauncher, resolveAppTarget, type AcceptanceLaunchRecord } from "../s
 import { startLocalEndpoint } from "../src/local-endpoint.js";
 
 const dirs: string[] = [];
-afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) =>
+  rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))); });
 
 describe("acceptance app target and lifecycle", () => {
+  it.skipIf(process.platform !== "win32")("keeps the hidden desktop owner alive until its app exits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "verm desktop owner-"));
+    dirs.push(root);
+    const requestFile = join(root, "request.json"), resultFile = join(root, "result.json"), exitFile = join(root, "exit.json");
+    const childScript = join(root, "child.cjs");
+    await writeFile(childScript, "setInterval(() => {}, 1000);\n", "utf8");
+    await writeFile(requestFile, JSON.stringify({ desktop: `verm-test-${Date.now()}`, exe: process.execPath,
+      args: `\"${childScript}\"`, cwd: root, env: {} }), "utf8");
+    const ownerLog = join(root, "owner.log"), ownerPidFile = join(root, "owner.pid");
+    const starter = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+      join(import.meta.dirname, "..", "scripts", "start-on-hidden-desktop.ps1"),
+      "-OwnerScript", join(import.meta.dirname, "..", "scripts", "hidden-desktop-owner.ps1"),
+      "-RequestFile", requestFile, "-ResultFile", resultFile, "-ExitFile", exitFile,
+      "-OwnerLog", ownerLog, "-OwnerPidFile", ownerPidFile], { windowsHide: true, stdio: "ignore" });
+    starter.unref();
+    let ownerPid = 0;
+    let appPid: number | undefined;
+    let launchError: unknown;
+    try {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        try {
+          ownerPid ||= Number((await readFile(ownerPidFile, "utf8")).trim());
+          const result = JSON.parse((await readFile(resultFile, "utf8")).replace(/^\uFEFF/, "")) as { pid?: number; error?: string };
+          if (result.error) throw new Error(result.error);
+          if (typeof result.pid !== "number") throw new SyntaxError("owner result is incomplete");
+          appPid = result.pid;
+          break;
+        } catch (error) { launchError = error; await new Promise((done) => setTimeout(done, 25)); }
+      }
+      if (!appPid && launchError) throw launchError;
+      expect(appPid).toBeTypeOf("number");
+      expect(() => process.kill(ownerPid, 0)).not.toThrow();
+      expect(() => process.kill(appPid!, 0)).not.toThrow();
+      execFileSync("taskkill", ["/PID", String(appPid), "/T", "/F"]);
+      const ownerDeadline = Date.now() + 5_000;
+      while (Date.now() < ownerDeadline) {
+        try { process.kill(ownerPid, 0); } catch { break; }
+        await new Promise((done) => setTimeout(done, 25));
+      }
+      expect(() => process.kill(ownerPid, 0)).toThrow();
+      expect(JSON.parse((await readFile(exitFile, "utf8")).replace(/^\uFEFF/, ""))).toMatchObject({ pid: appPid });
+    } finally {
+      if (appPid) try { process.kill(appPid, 0); execFileSync("taskkill", ["/PID", String(appPid), "/T", "/F"]); } catch {}
+      try { process.kill(ownerPid, 0); execFileSync("taskkill", ["/PID", String(ownerPid), "/T", "/F"]); } catch {}
+    }
+  });
+
   it("rejects missing targets and a source revision mismatch before launch", async () => {
     await expect(resolveAppTarget(join(tmpdir(), "missing-vermillion-target"))).rejects.toThrow("does not exist");
     const root = join(import.meta.dirname, "..", "..", "..");
@@ -97,7 +146,7 @@ describe("acceptance app target and lifecycle", () => {
     } finally {
       await new Promise<void>((done) => server.close(() => done()));
     }
-  }, 15_000);
+  });
 
   it.skipIf(process.platform !== "win32")("reports an early process exit with its stage and cleans it up", async () => {
     const release = await mkdtemp(join(tmpdir(), "verm-failing-release-"));
@@ -107,8 +156,29 @@ describe("acceptance app target and lifecycle", () => {
     const scripts = join(release, "resources", "app", "scripts");
     await mkdir(scripts, { recursive: true });
     await copyFile(join(import.meta.dirname, "..", "scripts", "start-on-hidden-desktop.ps1"), join(scripts, "start-on-hidden-desktop.ps1"));
+    await copyFile(join(import.meta.dirname, "..", "scripts", "hidden-desktop-owner.ps1"), join(scripts, "hidden-desktop-owner.ps1"));
     const launcher = new AppLauncher({ timeoutMs: 2_000 });
     await expect(launcher.start({ targetPath: release, expectedBuildId: "sha256:test", dataDir, port: 14979 }))
-      .rejects.toThrow(/app\.start failed at cdp: The app process exited.*cleanup=complete/);
+      .rejects.toThrow(/app\.start failed at (process|cdp): .*(exited|CreateProcess).*cleanup=complete/);
+  });
+
+  it.skipIf(process.platform !== "win32")("terminates a starter that does not publish ownership before its deadline", async () => {
+    const release = await mkdtemp(join(tmpdir(), "verm-stalled-release-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "verm-stalled-launch-"));
+    dirs.push(release, dataDir);
+    await copyFile(process.execPath, join(release, "Vermillion.exe"));
+    const scripts = join(release, "resources", "app", "scripts"), marker = join(dataDir, "late-starter.txt");
+    await mkdir(scripts, { recursive: true });
+    await writeFile(join(scripts, "hidden-desktop-owner.ps1"), "# fixture\n", "utf8");
+    await writeFile(join(scripts, "start-on-hidden-desktop.ps1"), [
+      "param([string]$OwnerScript,[string]$RequestFile,[string]$ResultFile,[string]$ExitFile,[string]$OwnerLog,[string]$OwnerPidFile)",
+      "Start-Sleep -Seconds 2",
+      `$PID | Set-Content -LiteralPath '${marker.replace(/'/g, "''")}'`
+    ].join("\n"), "utf8");
+    const launcher = new AppLauncher({ timeoutMs: 300 });
+    await expect(launcher.start({ targetPath: release, expectedBuildId: "sha256:test", dataDir, port: 14978 }))
+      .rejects.toThrow(/app\.start failed at process: Hidden desktop starter did not publish an owner PID.*cleanup=complete/);
+    await new Promise((done) => setTimeout(done, 2_100));
+    await expect(stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
