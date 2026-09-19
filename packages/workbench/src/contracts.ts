@@ -92,6 +92,8 @@ export type PatrolRun = z.infer<typeof zPatrolRun>;
 export const zDocRef = z.object({
   path: z.string().min(1),
   section: z.string().optional(),
+  /** Human-readable context; never participates in heading lookup or change detection. */
+  description: z.string().trim().min(1).optional(),
   commit: z.string().min(1)
 });
 

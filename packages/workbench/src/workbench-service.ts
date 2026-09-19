@@ -458,30 +458,46 @@ export class WorkbenchService {
     const { docs } = await this.context(workspaceId);
     for (const item of await this.listWorkItems(workspaceId)) {
       if (["closed", "cancelled"].includes(item.status)) continue;
-      const moved: { path: string; diff: string }[] = [];
-      for (const ref of item.refs) {
+      const moved: { index: number; path: string; section?: string; diff: string }[] = [];
+      for (const [index, ref] of item.refs.entries()) {
         if (ref.commit === input.commit || (input.paths && !input.paths.includes(ref.path))) continue;
-        if (ref.section && await docs.sectionChanged(ref.path, ref.commit, input.commit, ref.section) === false) continue;
-        const diff = await docs.committedDiff(ref.path, ref.commit, input.commit);
-        if (diff.trim()) moved.push({ path: ref.path, diff });
+        const change = await docs.referenceChange(ref, input.commit);
+        if (change.changed && change.diff) moved.push({ index, path: ref.path, section: ref.section, diff: change.diff });
       }
       if (!moved.length) continue;
+      const movedIndexes = new Set(moved.map((entry) => entry.index));
       const sessionId = item.run.sessionId;
       const notify = !!sessionId && sessionId !== input.originatorSessionId;
       await this.mutateRecord(workspaceId, item.workItemId, (record) => {
         const now = this.now();
         return { ...record,
           item: { ...record.item,
-            refs: record.item.refs.map((ref) => moved.some((entry) => entry.path === ref.path) ? { ...ref, commit: input.commit } : ref),
+            refs: record.item.refs.map((ref, index) => movedIndexes.has(index) ? { ...ref, commit: input.commit } : ref),
             contractRevision: record.item.contractRevision + 1, updatedAt: now },
           execution: { ...record.execution, updatedAt: now,
             notices: notify ? [...record.execution.notices, pendingNotice("docs",
               "引用文档已提交 " + input.commit + "\n" + moved.map((entry) => entry.diff).join("\n") + "\n" + rereadContract, now)] : record.execution.notices,
-            history: [...record.execution.history, { at: now, event: "docs.updated", message: "引用文档已提交 " + input.commit + "：" + moved.map((entry) => entry.path).join("、") }] }
+            history: [...record.execution.history, { at: now, event: "docs.updated", message: "引用文档已提交 " + input.commit + "：" + moved.map((entry) => entry.path + (entry.section ? "#" + entry.section : "")).join("、") }] }
         };
       });
       if (notify && sessionId) this.emit({ type: "workItem.updated", workspaceId, workItemId: item.workItemId, sessionId });
     }
+  }
+
+  private async validateWorkItemRefs(workspaceId: string, refs: WorkItem["refs"]): Promise<WorkItem["refs"]> {
+    const { docs } = await this.context(workspaceId);
+    return Promise.all(refs.map(async (ref) => {
+      try { return await docs.validateReference(ref); }
+      catch (error) {
+        throw new Error(`引用 ${ref.path}${ref.section ? "#" + ref.section : ""} 无效：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }));
+  }
+
+  async invalidWorkItemRefs(workspaceId: string, workItemId: string): Promise<Array<{ path: string; section?: string; commit: string; reason: string }>> {
+    const [item, context] = await Promise.all([this.getWorkItem(workspaceId, workItemId), this.context(workspaceId)]);
+    const inspected = await Promise.all(item.refs.map(async (ref) => ({ ref, reason: await context.docs.referenceProblem(ref) })));
+    return inspected.flatMap(({ ref, reason }) => reason ? [{ path: ref.path, section: ref.section, commit: ref.commit, reason }] : []);
   }
 
   // ---- sessions ----
@@ -1099,8 +1115,9 @@ export class WorkbenchService {
     const declared = new Set(input.workItemIds);
     if (actual.size !== declared.size || [...actual].some((id) => !declared.has(id)))
       throw new Error("准备交接必须登记本请求的完整工单清单。");
+    const refs = input.refs ? await this.validateWorkItemRefs(workspaceId, input.refs) : [];
     const saved = await this.putWorkRequest(workspaceId, { ...request, control: request.control === "manual" ? "manual" : "auto",
-      handoff: { sessionId: input.sessionId, workItemIds: [...declared], refs: input.refs ?? [], at: this.now() },
+      handoff: { sessionId: input.sessionId, workItemIds: [...declared], refs, at: this.now() },
       failure: undefined, waitReason: undefined, retryAt: undefined });
     return saved;
   }
@@ -1429,12 +1446,13 @@ export class WorkbenchService {
   }
 
   private async createWorkItemIntegrated(workspaceId: string, input: WorkItemCreateInput): Promise<WorkItem> {
+    const refs = input.refs ? await this.validateWorkItemRefs(workspaceId, input.refs) : undefined;
     const explicitIssue = input.issueId ? await this.getIssue(workspaceId, input.issueId) : undefined;
     const request = input.requestId ? await (await this.context(workspaceId)).store.workRequests.get(input.requestId) : undefined;
     const sourceSessionId = request?.sourceSessionId ?? input.sourceSessionId;
     const linkedIssue = explicitIssue ?? (sourceSessionId ? (await this.listIssues(workspaceId)).find((issue) => issue.discussionSessionId === sourceSessionId) : undefined);
     if (linkedIssue && ["closed", "duplicate"].includes(linkedIssue.status)) throw new Error("已关闭或重复的 Issue 不能创建关联工单。");
-    const item = await this.createWorkItemRecord(workspaceId, { ...input, issueId: linkedIssue?.issueId });
+    const item = await this.createWorkItemRecord(workspaceId, { ...input, refs, issueId: linkedIssue?.issueId });
     if (!linkedIssue) return item;
     const now = this.now();
     await (await this.context(workspaceId)).store.transactIssue(linkedIssue.issueId, (current) => {
@@ -2103,7 +2121,8 @@ export class WorkbenchService {
   }
 
   private async updateWorkItemRecord(workspaceId: string, workItemId: string, input: Parameters<WorkbenchService["updateWorkItem"]>[2]): Promise<WorkItem> {
-    const { note, worktreePath, branch, sessionId, ...changes } = input;
+    const { note, worktreePath, branch, sessionId, ...rawChanges } = input;
+    const changes = rawChanges.refs === undefined ? rawChanges : { ...rawChanges, refs: await this.validateWorkItemRefs(workspaceId, rawChanges.refs) };
     if (!!worktreePath !== !!branch) throw new Error("worktreePath 与 branch 必须同时提供。");
     if (changes.needs?.some((need) => ["browser", "desktop"].includes(need.trim()))) throw new Error("needs 必须指明具体共享实例。");
     const current = await this.getWorkItem(workspaceId, workItemId);
