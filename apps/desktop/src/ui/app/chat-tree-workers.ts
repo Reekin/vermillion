@@ -28,14 +28,11 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
     if (item.run.sessionId) workerSessionIds.add(item.run.sessionId);
   }
   const workers = [...workerSessionIds].map((sessionId) => {
-    const window = tree.windows?.find((entry) => entry.sessionId === sessionId);
-    const session = window?.snapshot.sessions.find((entry) => entry.sessionId === sessionId);
     const request = relevantRequests.find((entry) => entry.workerSessionId === sessionId);
     const item = relevantItems.find((entry) => entry.run.sessionId === sessionId && !["closed", "cancelled"].includes(entry.status))
       ?? relevantItems.find((entry) => entry.run.sessionId === sessionId);
-    const turnIds = new Set(window?.snapshot.turns.filter((turn) => turn.sessionId === sessionId).map((turn) => turn.turnId));
-    const nodes = tree.nodes.filter((node) => node.turnId && turnIds.has(node.turnId)).sort((a, b) => a.order - b.order);
-    return { key: sessionId, requestId: request?.requestId ?? item?.requestId, sessionId: sessionId as string | undefined, title: item?.title ?? request?.scope ?? session?.title ?? "Worker", status: item?.status ?? (request ? requestWorkerStatus(request.status) : "preparing"), failure: request?.failure,
+    const nodes = tree.nodes.filter((node) => node.sessionId === sessionId).sort((a, b) => a.order - b.order);
+    return { key: sessionId, requestId: request?.requestId ?? item?.requestId, sessionId: sessionId as string | undefined, title: item?.title ?? request?.scope ?? "Worker", status: item?.status ?? (request ? requestWorkerStatus(request.status) : "preparing"), failure: request?.failure,
       nodeId: nodes.at(-1)?.nodeId, nodeIds: nodes.map((node) => node.nodeId) };
   });
   for (const request of relevantRequests) {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { HostToolRegistry } from "./host-tools.js";
-import type { WrapperChatTreeService } from "./wrapper-chat-tree.js";
+import type { ChatTreeScope, WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import type {
   ChatInteractionCapabilitiesRpc,
   ChatSession,
@@ -893,8 +893,8 @@ export class SessionShellService {
     return this.sessionCatalog.renameSession(input);
   }
 
-  public async getChatTree(sessionId: string): Promise<ChatTreeSnapshot> {
-    if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId);
+  public async getChatTree(sessionId: string, scope?: ChatTreeScope): Promise<ChatTreeSnapshot> {
+    if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId, scope);
     return this.capabilities
       ? this.capabilities.getConversationGraph(sessionId)
       : this.requireChatTreeProvider().get(sessionId);

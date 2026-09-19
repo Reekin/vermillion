@@ -744,6 +744,7 @@ export const SessionPane = ({
 
   const {
     chatTree: activeChatTree,
+    chatTreeGraph,
     chatTreeError,
     isChatTreeLoading,
     viewSessionId,
@@ -1219,9 +1220,9 @@ export const SessionPane = ({
               <section className="awb-detail__graph">
                 {(renderChatTree ?? ((props) => <ChatTreePanel {...props} />))({
                   operations,
-                  chatTree: activeChatTree,
+                  chatTree: chatTreeGraph,
                   loading: isChatTreeLoading,
-                  error: activeChatTree ? undefined : chatTreeError,
+                  error: chatTreeGraph ? undefined : chatTreeError,
                   onSelectSession: (id) => {
                     void transport.sessionBrowser.activate(id, { focusTree: true }).then(() => refreshChatTree());
                   },

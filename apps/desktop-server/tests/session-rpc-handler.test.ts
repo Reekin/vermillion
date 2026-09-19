@@ -1129,7 +1129,7 @@ describe("createWorkbenchRpcHandler", () => {
       limit: 8
     });
     expect((shellService as any).removeWorkspace).toHaveBeenCalledWith("workspace-1");
-    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1");
+    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", undefined);
     expect((shellService as any).getWorktree).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getCheckpoint).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getDiagnostics).toHaveBeenCalledWith("session-1");

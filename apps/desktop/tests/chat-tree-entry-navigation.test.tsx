@@ -16,7 +16,10 @@ const setup = (navigationEntry?: ChatTreeNavigationEntry) => {
   const tree = { treeId: "root", currentSessionId: "worker", currentNodeId: "latest", nodes: [], windows: [], visibleTurnIds: [] } as unknown as ChatTreeSnapshotRpc;
   const open = vi.fn(async () => { calls.push("open:worker"); });
   const activate = vi.fn(async () => { calls.push("activate:worker"); });
-  const get = vi.fn(async () => { calls.push("get:worker"); return tree; });
+  const get = vi.fn(async (_sessionId: string, options?: { scope?: "tree" | "path" }) => {
+    calls.push(`get:${options?.scope ?? "tree"}:worker`);
+    return tree;
+  });
   const jump = vi.fn(async ({ nodeId }: { nodeId: string }) => { calls.push(`jump:${nodeId}`); tree.currentNodeId = nodeId; });
   const transport = {
     sessionBrowser: { open, activate },
@@ -38,7 +41,10 @@ describe("chat tree entry navigation", () => {
     expect(test.controller.isChatTreeLoading).toBe(true);
     expect(test.controller.chatTreeError).toBeUndefined();
     await test.controller.refreshChatTree();
-    expect(test.calls).toEqual(["open:worker", "activate:worker", "jump:historical", "get:worker"]);
+    // 路径先到达供消息区展示，整棵树随后到达。
+    expect(test.calls).toEqual([
+      "open:worker", "activate:worker", "jump:historical", "get:path:worker", "get:tree:worker"
+    ]);
     expect(test.activate).toHaveBeenCalledWith("worker", { focusTree: true });
     await test.controller.refreshChatTree();
     expect(test.open).toHaveBeenCalledTimes(1);
@@ -56,13 +62,15 @@ describe("chat tree entry navigation", () => {
     finish();
     await Promise.all([first, second]);
     expect(test.activate).toHaveBeenCalledTimes(1);
-    expect(test.get).toHaveBeenCalledTimes(1);
+    expect(test.get).toHaveBeenCalledTimes(2);
   });
 
   it("preserves the saved tree position for ordinary sidebar entry", async () => {
     const test = setup({});
     await test.controller.refreshChatTree();
-    expect(test.calls).toEqual(["open:worker", "get:worker", "activate:worker"]);
+    expect(test.calls).toEqual([
+      "open:worker", "get:path:worker", "activate:worker", "get:tree:worker"
+    ]);
     expect(test.activate).toHaveBeenCalledWith("worker");
     expect(test.jump).not.toHaveBeenCalled();
   });

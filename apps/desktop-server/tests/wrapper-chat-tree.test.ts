@@ -144,7 +144,7 @@ describe("wrapper session trees", () => {
     const tree = await f.service.get("branch");
     expect(tree.treeId).toBe("root");
     expect(tree.nodes.map((n) => [n.nodeId, n.parentNodeId])).toEqual([["a", undefined], ["b", "a"], ["c", "a"]]);
-    expect(tree.windows?.map((window) => window.sessionId)).toEqual(["root", "branch"]);
+    expect(tree.windows).toBeUndefined();
     expect(f.load).toHaveBeenCalledTimes(2);
     await f.service.jump("root", "a");
     expect((await f.service.get("root")).visibleTurnIds).toEqual(["a"]);
@@ -152,6 +152,24 @@ describe("wrapper session trees", () => {
     expect((await f.service.get("branch")).visibleTurnIds).toEqual(["a", "c"]);
     expect(f.load).toHaveBeenCalledTimes(2);
     expect(f.fork).not.toHaveBeenCalled();
+    f.service.dispose();
+  });
+
+  it("loads only the viewed path and carries its windows", async () => {
+    const f = await fixture();
+    await f.index.upsertRelation({ workspaceId: "workspace", parentSessionId: "root", childSessionId: "other",
+      relationType: "fork", sourceTurnId: "a" });
+    const path = await f.service.get("branch", "path");
+    expect(path.windows?.map((window) => window.sessionId)).toEqual(["root", "branch"]);
+    expect(path.currentSessionId).toBe("branch");
+    expect(path.visibleTurnIds).toEqual(["a", "c"]);
+    // 同级分支 other 不在该路径上，路径查询不加载它。
+    expect(f.load.mock.calls.map(([memberId]) => memberId)).toEqual(["root", "branch"]);
+    expect((await f.service.get("root")).nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c", "x"]);
+    await f.service.jump("root", "b");
+    const rootPath = await f.service.get("root", "path");
+    expect(rootPath.windows?.map((window) => window.sessionId)).toEqual(["root"]);
+    expect(rootPath.visibleTurnIds).toEqual(["a", "b"]);
     f.service.dispose();
   });
 

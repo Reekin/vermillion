@@ -20,6 +20,9 @@ type TreeProjection = {
   turnsById: Map<string, Turn>;
 };
 
+/** `tree` 只给树结构，`path` 给当前查看路径的位置与正文窗口。 */
+export type ChatTreeScope = "tree" | "path";
+
 type TreeLoad = {
   controller: AbortController;
   promise: Promise<void>;
@@ -215,7 +218,11 @@ export class WrapperChatTreeService {
     }));
   }
 
-  private buildProjection(sessionId: string, loaded: ReadonlySet<string>): TreeProjection {
+  private buildProjection(
+    sessionId: string,
+    loaded: ReadonlySet<string>,
+    withWindows = false
+  ): TreeProjection {
     const { runtimeService, sessionIndexStore: index } = this.options;
     const treeId = index.getTreeId(sessionId);
     const treeMembers = index.getTreeMembers(sessionId);
@@ -293,7 +300,7 @@ export class WrapperChatTreeService {
     const currentNodeId = stored?.followTip === false ? stored.nodeId : paths.get(currentSessionId)?.at(-1);
     const currentPath = paths.get(currentSessionId) ?? [];
     const visibleTurnIds = currentNodeId ? currentPath.slice(0, currentPath.indexOf(currentNodeId) + 1) : [];
-    const windows = members.flatMap((memberId) => {
+    const windows = !withWindows ? undefined : members.flatMap((memberId) => {
       const memberSession = sessionsById.get(memberId);
       if (!memberSession) return [];
       return [buildSessionWindowSnapshotFromPage({
@@ -315,6 +322,7 @@ export class WrapperChatTreeService {
     });
     const tree: ChatTreeSnapshot = {
       sessionId, treeId, currentSessionId, memberSessionIds: treeMembers,
+      workspaceId: index.getEntry(treeId)?.workspaceId ?? index.getEntry(sessionId)?.workspaceId,
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
       supportsJump: true, currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
       nodes: visibleNodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
@@ -360,8 +368,9 @@ export class WrapperChatTreeService {
    * 读取会话树：没有快照时等待本代加载完成；快照稳定时从已加载成员派生新投影；
    * 刷新进行中或刷新失败时保持已发布快照，不让中间结果覆盖已显示的树。
    */
-  public async get(sessionId: string): Promise<ChatTreeSnapshot> {
+  public async get(sessionId: string, scope: ChatTreeScope = "tree"): Promise<ChatTreeSnapshot> {
     await this.options.sessionIndexStore.ready();
+    if (scope === "path") return this.getViewPath(sessionId);
     const state = this.treeState(sessionId);
     if (state.published) {
       await this.rebuildIfSettled(sessionId, state);
@@ -378,6 +387,42 @@ export class WrapperChatTreeService {
       this.applyPublishedView(sessionId, view);
     }
     return this.publishedProjection(sessionId).tree;
+  }
+
+  /**
+   * 读取当前查看路径：只加载被查看分支及其 fork 祖先，并附带这些成员的正文窗口，
+   * 使消息区不必等待整棵树的其余分支。
+   */
+  private async getViewPath(sessionId: string): Promise<ChatTreeSnapshot> {
+    const index = this.options.sessionIndexStore;
+    const chain = this.viewPathMembers(sessionId);
+    const members = new Set<string>();
+    if (chain.some((memberId) => index.getEntry(memberId)?.archivedAt)) {
+      // 归档成员的历史借用依赖祖先先就绪，按祖先到分支的顺序加载。
+      for (const memberId of chain) await this.loadMember(members, memberId, undefined, false);
+    } else {
+      await Promise.all(chain.map((memberId) => this.loadMember(members, memberId, undefined, false)));
+    }
+    return this.buildProjection(sessionId, members, true).tree;
+  }
+
+  /** 查看路径的成员：被查看分支及其 fork 祖先，按祖先在前排列。 */
+  private viewPathMembers(sessionId: string): string[] {
+    const index = this.options.sessionIndexStore;
+    const members = new Set(index.getTreeMembers(sessionId));
+    const view = index.getTreeView(index.getTreeId(sessionId));
+    const viewed = view && members.has(view.sessionId) ? view.sessionId
+      : members.has(sessionId) ? sessionId
+        : [...members][0];
+    const parentByChild = new Map(index.listRelations()
+      .filter((relation) => relation.relationType === "fork")
+      .map((relation) => [relation.childSessionId, relation.parentSessionId] as const));
+    const chain: string[] = [];
+    for (let current = viewed; current && members.has(current) && !chain.includes(current);) {
+      chain.unshift(current);
+      current = parentByChild.get(current)!;
+    }
+    return chain;
   }
 
   /**

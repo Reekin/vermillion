@@ -12,21 +12,15 @@ const tree = (currentSessionId = "design"): ChatTreeSnapshotRpc => ({
   sessionId: "design", treeId: "design", currentSessionId, currentNodeId: currentSessionId === "design" ? "source" : "worker-tip",
   memberSessionIds: ["design", "worker", "other-worker"], supportsJump: true, engineId: "codex", fetchedAt: "now",
   nodes: [
-    { nodeId: "source", turnId: "source", order: 0, isCurrent: currentSessionId === "design", label: "设计讨论" },
-    { nodeId: "worker-tip", turnId: "worker-tip", parentNodeId: "source", order: 1, isCurrent: currentSessionId === "worker", label: "执行详情" },
-    { nodeId: "other-tip", turnId: "other-tip", parentNodeId: "source", order: 2, isCurrent: false, label: "其他执行详情" }
-  ],
-  windows: [
-    { sessionId: "design", snapshot: { sessions: [{ sessionId: "design", title: "设计讨论" }], turns: [{ sessionId: "design", turnId: "source" }] } },
-    { sessionId: "worker", snapshot: { sessions: [{ sessionId: "worker", title: "Worker A", metadata: { role: "worker" } }], turns: [{ sessionId: "worker", turnId: "worker-tip" }] } },
-    { sessionId: "other-worker", snapshot: { sessions: [{ sessionId: "other-worker", title: "Worker B", metadata: { role: "worker" } }], turns: [{ sessionId: "other-worker", turnId: "other-tip" }] } }
+    { nodeId: "source", turnId: "source", sessionId: "design", order: 0, isCurrent: currentSessionId === "design", label: "设计讨论" },
+    { nodeId: "worker-tip", turnId: "worker-tip", sessionId: "worker", parentNodeId: "source", order: 1, isCurrent: currentSessionId === "worker", label: "执行详情" },
+    { nodeId: "other-tip", turnId: "other-tip", sessionId: "other-worker", parentNodeId: "source", order: 2, isCurrent: false, label: "其他执行详情" }
   ]
 } as ChatTreeSnapshotRpc);
 
 describe("Worker branch presentation", () => {
   it("lists the preparation branch without assigning it a Worker role", () => {
     const source = tree();
-    source.windows![1]!.snapshot.sessions[0]!.metadata = { role: "work-preparation" };
     const request = { requestId: "prep", sourceSessionId: "design", workerSessionId: "worker", status: "preparing" } as WorkRequest;
     const result = projectChatTreeWorkers(source, [boundItems[1]!], [request]);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ nodeId: "worker-tip", status: "preparing" });
@@ -35,7 +29,6 @@ describe("Worker branch presentation", () => {
 
   it("keeps an unbound preparation visible while a request awaits its explicit session binding", () => {
     const source = tree();
-    source.windows![1]!.snapshot.sessions[0]!.metadata = { role: "work-preparation", requestId: "prep" };
     const request = { requestId: "prep", sourceSessionId: "design", status: "preparing", scope: "Prepare this work" } as WorkRequest;
     const result = projectChatTreeWorkers(source, [], [request]);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "other-tip"]);
@@ -46,9 +39,8 @@ describe("Worker branch presentation", () => {
     expect(result.workers.some((worker) => worker.sessionId === "worker")).toBe(false);
   });
 
-  it.each(["worker", "work-preparation"])("keeps ordinary branches with stale %s metadata visible after preparation is ready", (role) => {
+  it("keeps ordinary branches visible after their preparation request is ready", () => {
     const source = tree();
-    source.windows![2]!.snapshot.sessions[0]!.metadata = { role, requestId: "ready", workItemId: "old-item" };
     const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     const result = projectChatTreeWorkers(source, [], requests);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "other-tip"]);
@@ -59,6 +51,7 @@ describe("Worker branch presentation", () => {
     source.currentNodeId = "other-tip";
     expect(projectChatTreeWorkers(source, [], requests).tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "other-tip"]);
   });
+
   it("keeps kickoff source selected and hides worker nodes while listing every worker", () => {
     const source = tree();
     const result = projectChatTreeWorkers(source, boundItems);
@@ -89,10 +82,9 @@ describe("Worker branch presentation", () => {
     expect(source.nodes).toHaveLength(3);
   });
 
-  it("selects a worker from its own viewed turn even when the provider window contains source turns", () => {
+  it("attributes only a worker's own nodes, never the ancestors it inherited", () => {
     const source = tree("worker");
     source.currentNodeId = "source";
-    source.windows![1]!.snapshot.turns.unshift({ sessionId: "design", turnId: "source" } as typeof source.windows[0]["snapshot"]["turns"][number]);
     const result = projectChatTreeWorkers(source, boundItems);
     expect(result.workers.find((worker) => worker.sessionId === "worker")?.nodeIds).toEqual(["worker-tip"]);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
@@ -111,14 +103,9 @@ describe("Worker branch presentation", () => {
   it("retains worker ancestors of ordinary forks while hiding later execution and sibling workers", () => {
     const source = tree();
     source.nodes.push(
-      { nodeId: "ordinary", turnId: "ordinary", parentNodeId: "worker-tip", order: 3, isCurrent: false, label: "Follow-up" },
-      { nodeId: "worker-later", turnId: "worker-later", parentNodeId: "worker-tip", order: 4, isCurrent: false, label: "Execution" }
+      { nodeId: "ordinary", turnId: "ordinary", sessionId: "ordinary", parentNodeId: "worker-tip", order: 3, isCurrent: false, label: "Follow-up" },
+      { nodeId: "worker-later", turnId: "worker-later", sessionId: "worker", parentNodeId: "worker-tip", order: 4, isCurrent: false, label: "Execution" }
     );
-    source.windows![1]!.snapshot.turns.push({ sessionId: "worker", turnId: "worker-later" } as typeof source.windows[0]["snapshot"]["turns"][number]);
-    source.windows.push({ sessionId: "ordinary", snapshot: {
-      sessions: [{ sessionId: "ordinary", metadata: { role: "work-preparation", requestId: "ready" } }],
-      turns: [{ sessionId: "ordinary", turnId: "ordinary" }]
-    } } as typeof source.windows[number]);
     const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     for (const currentNodeId of ["source", "ordinary"]) {
       const result = projectChatTreeWorkers({ ...source, currentNodeId }, [boundItems[1]!], requests);
@@ -150,8 +137,7 @@ describe("Worker branch presentation", () => {
 
   it("opens each worker's latest own node regardless of snapshot array order", () => {
     const source = tree();
-    source.nodes.unshift({ nodeId: "worker-latest", turnId: "worker-latest", parentNodeId: "worker-tip", order: 5, isCurrent: false, label: "Latest work" });
-    source.windows![1]!.snapshot.turns.unshift({ sessionId: "worker", turnId: "worker-latest" } as typeof source.windows[0]["snapshot"]["turns"][number]);
+    source.nodes.unshift({ nodeId: "worker-latest", turnId: "worker-latest", sessionId: "worker", parentNodeId: "worker-tip", order: 5, isCurrent: false, label: "Latest work" });
     const result = projectChatTreeWorkers(source, boundItems);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ nodeId: "worker-latest", nodeIds: ["worker-tip", "worker-latest"] });
     expect(result.workers.find((worker) => worker.sessionId === "other-worker")?.nodeId).toBe("other-tip");
@@ -160,8 +146,7 @@ describe("Worker branch presentation", () => {
   it("forks only after the design session itself advances beyond the viewed source turn", () => {
     const source = tree();
     expect(isHistoricalChatTreePosition(source)).toBe(false);
-    source.nodes.push({ nodeId: "design-next", turnId: "design-next", parentNodeId: "source", order: 3, isCurrent: false, label: "继续讨论" });
-    source.windows![0]!.snapshot.turns.push({ sessionId: "design", turnId: "design-next" } as typeof source.windows[0]["snapshot"]["turns"][number]);
+    source.nodes.push({ nodeId: "design-next", turnId: "design-next", sessionId: "design", parentNodeId: "source", order: 3, isCurrent: false, label: "继续讨论" });
     expect(isHistoricalChatTreePosition(source)).toBe(true);
     source.currentNodeId = "design-next";
     expect(isHistoricalChatTreePosition(source)).toBe(false);
@@ -195,7 +180,7 @@ describe("Worker branch presentation", () => {
     const result = projectChatTreeWorkers(tree(), items, requests);
     expect(result.workers).toHaveLength(1);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "实际工单", status: "decision" });
-    const partialTree = { ...tree(), memberSessionIds: ["design", "worker"], nodes: [tree().nodes[0]!], windows: [tree().windows![0]!] };
+    const partialTree = { ...tree(), memberSessionIds: ["design", "worker"], nodes: [tree().nodes[0]!] };
     const partialItems = [{ ...items[0], treeId: "design", sourceSessionId: "design" }] as WorkItem[];
     const partialRequests = [{ ...requests[0], treeId: "design" }] as WorkRequest[];
     const waitingForTree = projectChatTreeWorkers(partialTree, partialItems, partialRequests);
@@ -207,7 +192,6 @@ describe("Worker branch presentation", () => {
     const source = tree();
     source.memberSessionIds = ["design"];
     source.nodes = [source.nodes[0]!];
-    source.windows = [source.windows![0]!];
     const items = [{ ...boundItems[0], treeId: "design", sourceSessionId: "design" }] as WorkItem[];
     const result = projectChatTreeWorkers(source, items);
     expect(result.workers).toEqual([]);
@@ -219,7 +203,6 @@ describe("Worker branch presentation", () => {
     const source = tree();
     source.memberSessionIds = ["design"];
     source.nodes = [source.nodes[0]!];
-    source.windows = [source.windows![0]!];
     const requests = [{ requestId: "archived", sourceSessionId: "design", workerSessionId: "worker", status: "failed" }] as WorkRequest[];
     const result = projectChatTreeWorkers(source, [], requests);
     expect(result.workers).toEqual([]);
@@ -242,7 +225,6 @@ describe("Worker branch presentation", () => {
 
   it("ends a ready preparation branch while keeping its actual worker in the unfinished list", () => {
     const source = tree();
-    source.windows![1]!.snapshot.sessions[0]!.metadata = { role: "work-preparation" };
     const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready", scope: "Preparation" }] as WorkRequest[];
     const items = [{ requestId: "ready", title: "Actual work", status: "decision", run: { sessionId: "other-worker" } }] as WorkItem[];
     const result = projectChatTreeWorkers(source, items, requests);

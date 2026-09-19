@@ -59,10 +59,14 @@ it("archives an entire fork but retains its shared prefix, early descendants and
   try {
     const result = await cold.get("root");
     expect(result.nodes.map((node) => node.nodeId)).toEqual(["root-1", "root-2", "branch-1", "sibling-1", "sibling-2", "descendant-1", "descendant-2"]);
-    expect(result.windows!.flatMap((window) => window.snapshot.turns).map((turn) => turn.turnId)).not.toContain("branch-2");
+    expect(result.windows).toBeUndefined();
     expect(await cold.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canArchive: false });
     await cold.jump("root", "branch-1");
     expect(await cold.get("root")).toMatchObject({ currentSessionId: "descendant", visibleTurnIds: ["root-1", "branch-1"] });
+    // 查看路径带上归档祖先的共享历史，但不带该分支已归档的末端。
+    const path = await cold.get("root", "path");
+    expect(path.windows!.map((window) => window.sessionId)).toEqual(["root", "branch", "descendant"]);
+    expect(path.windows!.flatMap((window) => window.snapshot.turns).map((turn) => turn.turnId)).not.toContain("branch-2");
     await cold.jump("root", "descendant-2");
     expect(await cold.prepareSend("root")).toEqual({ sessionId: "descendant" });
     await cold.jump("root", "sibling-2");

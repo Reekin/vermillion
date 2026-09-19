@@ -337,6 +337,7 @@ const zConversationGraphSnapshotSchema = z.object({
 const zChatTreeSnapshotSchema = z.object({
   sessionId: zSessionId,
   treeId: zSessionId.optional(),
+  workspaceId: z.string().min(1).optional(),
   currentSessionId: zSessionId.optional(),
   memberSessionIds: z.array(zSessionId).optional(),
   windows: z.array(z.lazy(() => zSessionWindowSchema)).optional(),
@@ -754,7 +755,9 @@ const zChatTreeGetRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("chatTree.get"),
   params: z.object({
-    sessionId: zSessionId
+    sessionId: zSessionId,
+    /** tree：树结构；path：当前查看路径的位置与正文窗口。 */
+    scope: z.enum(["tree", "path"]).optional()
   })
 });
 

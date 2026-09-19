@@ -62,7 +62,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
     }
   };
   const showAll = !!treeId && expandedTree === treeId;
-  const workspaceId = props.chatTree?.windows?.flatMap((window) => window.snapshot.conversations).find((conversation) => conversation.workspaceId)?.workspaceId;
+  const workspaceId = props.chatTree?.workspaceId;
   const [records, setRecords] = useState<{ workspaceId?: string; items: WorkItem[]; requests: WorkRequest[]; error?: string }>({ items: [], requests: [] });
   useEffect(() => {
     if (!workspaceId) return;
