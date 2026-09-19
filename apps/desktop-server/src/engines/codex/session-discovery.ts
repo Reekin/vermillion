@@ -855,6 +855,29 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     }
   }
 
+  private hydratedMetadata(
+    entry: SessionIndexEntry,
+    thread: Thread
+  ): Record<string, unknown> {
+    const metadata = {
+      ...(entry.metadata ?? {}),
+      providerKind: codexProviderKind,
+      providerSessionId: thread.id,
+      rolloutPath: thread.path ?? undefined,
+      cwd: thread.cwd
+    };
+    if (readSessionExecutionProfile(metadata)) {
+      return metadata;
+    }
+    const executionProfile = this.codexRuntimePort.getThreadExecutionProfile?.(thread.id);
+    return executionProfile
+      ? writeSessionExecutionProfile(metadata, {
+          engineId: codexAgentId,
+          ...executionProfile
+        })
+      : metadata;
+  }
+
   public async discoverWorkspaces(
     workspaces: readonly WorkspaceRecord[]
   ): Promise<ReadonlyMap<string, DiscoveredWorkspaceResult>> {
@@ -978,23 +1001,6 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         createdAt: isoFromUnixSeconds(thread.createdAt),
         updatedAt: isoFromUnixSeconds(thread.updatedAt)
       });
-      const baseMetadata = {
-        ...(entry.metadata ?? {}),
-        providerKind: codexProviderKind,
-        providerSessionId: thread.id,
-        rolloutPath: thread.path ?? undefined,
-        cwd: thread.cwd
-      };
-      let metadata = baseMetadata;
-      if (!readSessionExecutionProfile(baseMetadata)) {
-        const executionProfile = this.codexRuntimePort.getThreadExecutionProfile?.(thread.id);
-        if (executionProfile) {
-          metadata = writeSessionExecutionProfile(baseMetadata, {
-            engineId: codexAgentId,
-            ...executionProfile
-          });
-        }
-      }
       const session = parseChatSession({
         sessionId: entry.sessionId,
         conversationId: entry.conversationId,
@@ -1005,7 +1011,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         updatedAt: isoFromUnixSeconds(thread.updatedAt),
         archivedAt: entry.archivedAt,
         lastTurnId: thread.turns.at(-1)?.id,
-        metadata
+        metadata: this.hydratedMetadata(entry, thread)
       });
 
       const hydratedTurns = await hydrateCodexTurnEntities({
@@ -1130,13 +1136,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         updatedAt: isoFromUnixSeconds(thread.updatedAt),
         archivedAt: entry.archivedAt,
         lastTurnId: entry.lastTurnId ?? pageTurns[0]?.id,
-        metadata: {
-          ...(entry.metadata ?? {}),
-          providerKind: codexProviderKind,
-          providerSessionId: thread.id,
-          rolloutPath: thread.path ?? undefined,
-          cwd: thread.cwd
-        }
+        metadata: this.hydratedMetadata(entry, thread)
       });
       const hydratedTurns = await hydrateCodexTurnEntities({
         entry,

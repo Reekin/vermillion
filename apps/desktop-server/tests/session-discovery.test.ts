@@ -201,8 +201,8 @@ describe("cold history hydration", () => {
     expect(port.isThreadExecutionReleased("thread-history")).toBe(true);
   });
 
-  it("hydrates a missing session profile from the resumed thread configuration", async () => {
-    const { rpc, hydrate, finishResume } = await setupHistory("full", false, {
+  it.each(["full", "page"] as const)("hydrates a missing session profile from the resumed thread configuration (%s)", async (mode) => {
+    const { rpc, hydrate, finishResume } = await setupHistory(mode, false, {
       resumeProfile: {
         model: "deepseek-flash",
         reasoningEffort: "high",
@@ -222,8 +222,8 @@ describe("cold history hydration", () => {
     });
   });
 
-  it("preserves an existing session profile when the thread reports another configuration", async () => {
-    const { rpc, hydrate, finishResume } = await setupHistory("full", false, {
+  it.each(["full", "page"] as const)("preserves an existing session profile when the thread reports another configuration (%s)", async (mode) => {
+    const { rpc, hydrate, finishResume } = await setupHistory(mode, false, {
       metadata: {
         sessionProfile: {
           engineId: "codex",
