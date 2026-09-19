@@ -39,7 +39,7 @@ describe("Worker branch presentation", () => {
     expect(result.workers.some((worker) => worker.sessionId === "worker")).toBe(false);
   });
 
-  it.each(["worker", "work-preparation"])("keeps ordinary branches with stale %s metadata visible after preparation is ready", (role) => {
+  it("keeps ordinary branches visible after their preparation request is ready", () => {
     const source = tree();
     const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     const result = projectChatTreeWorkers(source, [], requests);
@@ -51,6 +51,7 @@ describe("Worker branch presentation", () => {
     source.currentNodeId = "other-tip";
     expect(projectChatTreeWorkers(source, [], requests).tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "other-tip"]);
   });
+
   it("keeps kickoff source selected and hides worker nodes while listing every worker", () => {
     const source = tree();
     const result = projectChatTreeWorkers(source, boundItems);
