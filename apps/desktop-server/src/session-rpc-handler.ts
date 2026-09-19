@@ -434,7 +434,7 @@ export const createWorkbenchRpcHandler = (
               method: request.method,
               ok: true,
               result: {
-                chatTree: await shellService.getChatTree(request.params.sessionId)
+                chatTree: await shellService.getChatTree(request.params.sessionId, request.params.scope)
               }
             });
           case "chatTree.submit":
