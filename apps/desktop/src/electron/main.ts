@@ -93,8 +93,9 @@ type WindowRecoveryState = {
   reloadedCauses: Set<string>;
 };
 
-const diagnostics = createElectronDiagnosticsLogger();
-const runJournal = createElectronRunJournal({ logger: diagnostics });
+const diagnosticsBaseDir = process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion");
+const diagnostics = createElectronDiagnosticsLogger({ baseDir: diagnosticsBaseDir });
+const runJournal = createElectronRunJournal({ logger: diagnostics, baseDir: diagnosticsBaseDir });
 const recoveryState: WindowRecoveryState = {
   isQuitting: false,
   reloadInFlight: false,
@@ -801,7 +802,7 @@ const boot = async (): Promise<void> => {
       }
       if (launch.kind !== "vermillion-acceptance" || launch.pid !== process.pid ||
         !launch.token || launch.token !== process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN ||
-        launch.desktop !== (process.platform === "win32" ? "vermillion-qa" : "")) {
+        launch.desktop !== (process.platform === "win32" ? process.env.VERMILLION_ACCEPTANCE_DESKTOP : "")) {
         throw new Error("app.window is only available for an app.start acceptance instance");
       }
       if (window.isDestroyed()) throw new Error("The main window is no longer available");

@@ -52,7 +52,7 @@ test("freezes target, keeps worktree, and resumes completed merge and cleanup", 
   await docs.dropWorktree(worker, "worker");
   await expect(access(worker)).rejects.toThrow();
   expect(await docs.mergeWorktree(worker, "worker", "retry after cleanup", snapshot.target)).toEqual({ diffStat: "" });
-}, 20_000);
+});
 
 test("unrelated main workspace changes survive integration; Git operations and locks block it without changing files", async () => {
   const { main, worker, docs } = await fixture();
