@@ -79,4 +79,12 @@ describe("execution and integration presentation", () => {
     ] } as WorkflowAction];
     expect(workItemEvents(item, actions, [])[0]?.title).toBe("合入检查未通过");
   });
+
+  it("puts the closed result, commit, and verification count in current progress", () => {
+    const item = { workItemId: "one", status: "closed", dependsOn: [], acceptance: [{ text: "one" }, { text: "two" }], evidence: { summary: "成果摘要", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [], submittedAt: "2026-01-01T00:00:00.000Z" }, verify: { items: [{ index: 0, status: "pass", evidence: "ok" }], verdict: "pass", verifiedAt: "2026-01-01T00:00:00.000Z" }, merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:01.000Z" }, rejections: [], run: {} } as WorkItem;
+    const progress = workItemProgress(item, []);
+    expect(progress.reason).toContain("成果摘要");
+    expect(progress.reason).toContain("abcdef0123456789");
+    expect(progress.reason).toContain("1 / 2 通过");
+  });
 });
