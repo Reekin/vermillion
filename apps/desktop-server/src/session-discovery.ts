@@ -559,7 +559,8 @@ export class SessionReconciliationService {
       if (!provider.isSessionArchivedError?.(entry, error)) {
         throw error;
       }
-      await this.sessionIndexStore.archiveSessions([entry.sessionId]);
+      // Provider 对账只记录实际确认已归档的成员；整树级联只属于用户显式归档。
+      await this.sessionIndexStore.archiveSession(entry.sessionId);
       return false;
     }
     if (!hydrated || input.signal?.aborted) {
