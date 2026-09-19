@@ -11,6 +11,7 @@ export const zDiagnosis = z.object({
   decisions: z.array(zDecisionCard),
   scheduler: zScheduler.extend({ online: z.boolean(), running: z.number() }),
   resources: z.array(z.object({ name: z.string(), workItemId: z.string(), sessionId: z.string().optional() })),
+  invalidRefs: z.array(z.object({ path: z.string(), section: z.string().optional(), commit: z.string(), reason: z.string() })),
   lastFailure: zWorkflowAction.optional(), nextRetryAt: z.string().optional(),
   waiting: z.array(z.string()), availableActions: z.array(z.object({ method: z.string(), condition: z.string() }))
 });
@@ -27,9 +28,9 @@ const nextFor = (action: WorkflowAction): string => {
 /** Read-only projection of the same persisted actions used by the scheduler. */
 export async function diagnose(service: WorkbenchService, workspaceId: string, workItemId: string, online: boolean): Promise<z.infer<typeof zDiagnosis>> {
   const item = await service.getWorkItem(workspaceId, workItemId);
-  const [items, allActions, cards, scheduler] = await Promise.all([
+  const [items, allActions, cards, scheduler, invalidRefs] = await Promise.all([
     service.listWorkItems(workspaceId), service.listActions(workspaceId),
-    service.listDecisions(workspaceId), service.getScheduler(workspaceId)
+    service.listDecisions(workspaceId), service.getScheduler(workspaceId), service.invalidWorkItemRefs(workspaceId, workItemId)
   ]);
   const related = allActions.filter((a) => a.workItemId === workItemId);
   const actions = related.filter(actionIsOpen);
@@ -64,7 +65,8 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
   if (integration && !integration.agent && ["retry", "decision"].includes(integration.status)) {
     availableActions.push({ method: "workItem.integration.retry", condition: "立即重试当前合入。" }, { method: "workItem.integration.takeover", condition: "附说明交给原 Worker 处理合入。" });
   }
-  return { workItemId, phase: item.status, sessionId: item.run.sessionId, actions, blockers, dependencies, decisions,
+  for (const ref of invalidRefs) waiting.push(`引用定位失效：${ref.path}${ref.section ? "#" + ref.section : ""}（${ref.reason}）`);
+  return { workItemId, phase: item.status, sessionId: item.run.sessionId, actions, blockers, dependencies, decisions, invalidRefs,
     scheduler: { ...scheduler, online, running: items.filter((entry) => entry.status === "running").length }, resources, waiting, availableActions,
     lastFailure: related.filter((a) => a.failure).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0],
     nextRetryAt: actions.flatMap((a) => a.retryAt ? [a.retryAt] : []).sort()[0] };

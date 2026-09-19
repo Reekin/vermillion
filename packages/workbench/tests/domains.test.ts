@@ -96,7 +96,7 @@ describe("domain owner patrols", () => {
     const head = await git(fixture.root, "rev-parse", "HEAD");
     const issue = await fixture.client.request("issue.create", { workspaceId: fixture.workspaceId, title: "Draft disappears", summary: "Observed mismatch",
       domainId: domain.domainId, source: "maintainer", patrolRunId: run.patrolRunId,
-      requirement: { text: "Keep the draft", path: ".vermillion/docs/Foundation/UIUX/Standards.md", section: "Draft", commit: head },
+      requirement: { text: "Keep the draft", path: ".vermillion/docs/Foundation/UIUX/Standards.md", section: "UI/UX 规范", commit: head },
       evidence: [{ kind: "reproduced", text: "Draft cleared after tab switch", path: "Session -> Domain -> Session" }] });
     expect(issue).toMatchObject({ sourceSessionId: "maintainer-session" });
     const work = { workspaceId: fixture.workspaceId, patrolRunId: run.patrolRunId, sessionId: "maintainer-session", issueId: issue.issueId,

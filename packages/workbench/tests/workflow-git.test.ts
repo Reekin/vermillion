@@ -219,30 +219,93 @@ it("rejects a root commit mixing owned and unrelated files", async () => {
   await expect(docs.rootResult(await git(root, "rev-parse", "HEAD"), base, ["owned.txt"])).rejects.toThrow("混合");
 });
 
-it("follows a section-scoped ref only when the referenced section changes", async () => {
+it("moves only the exact changed reference when one file supplies several sections", async () => {
   const { service, workspaceId } = await fixture();
   const path = ".vermillion/docs/Spec/PRD.md";
-  const document = (alpha: string, beta: string) => "# Spec\n\n## Alpha\n\n" + alpha + "\n\n## Beta\n\n" + beta + "\n";
-  await service.writeDoc(workspaceId, path, document("Alpha text", "Beta text"));
+  const document = (alpha: string, beta: string, gamma: string) => "# Spec\n\n## Alpha\n\n" + alpha + "\n\n### Detail\n\nNested\n\n## Beta\n\n" + beta + "\n\n## Gamma\n\n" + gamma + "\n";
+  await service.writeDoc(workspaceId, path, document("Alpha text", "Beta text", "Gamma text"));
   const initial = await service.commitDocs(workspaceId, { message: "Initial" });
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker",
-    refs: [{ path, section: "Spec / Alpha（L3）", commit: initial.commit }] });
+    refs: [
+      { path, section: "Spec / Alpha", description: "alpha requirement", commit: initial.commit },
+      { path, section: "Spec / Beta", description: "beta requirement", commit: initial.commit }
+    ] });
 
-  await service.writeDoc(workspaceId, path, document("Alpha text", "Beta changed"));
-  await service.commitDocs(workspaceId, { message: "Beta change", paths: [path] });
+  await service.writeDoc(workspaceId, path, document("Alpha text", "Beta changed", "Gamma text"));
+  const betaCommit = await service.commitDocs(workspaceId, { message: "Beta change", paths: [path] });
+  const betaMoved = await service.getWorkItem(workspaceId, item.workItemId);
+  expect(betaMoved.refs.map((ref) => ref.commit)).toEqual([initial.commit, betaCommit.commit]);
+  expect(betaMoved.contractRevision).toBe(1);
+  expect(betaMoved.run.resumeMessage).toContain("#Spec / Beta");
+  expect(betaMoved.run.resumeMessage).toContain("+Beta changed");
+  expect(betaMoved.run.resumeMessage).not.toContain("Alpha text");
+
+  await service.writeDoc(workspaceId, path, document("Alpha text", "Beta changed", "Gamma changed"));
+  await service.commitDocs(workspaceId, { message: "Unreferenced change", paths: [path] });
   const untouched = await service.getWorkItem(workspaceId, item.workItemId);
-  expect(untouched.refs[0]!.commit).toBe(initial.commit);
-  expect(untouched.contractRevision).toBe(0);
-  expect(untouched.run.resumeMessage).toBeUndefined();
+  expect(untouched.refs.map((ref) => ref.commit)).toEqual([initial.commit, betaCommit.commit]);
+  expect(untouched.contractRevision).toBe(1);
 
-  await service.writeDoc(workspaceId, path, document("Alpha changed", "Beta changed"));
+  await service.writeDoc(workspaceId, path, document("Alpha changed", "Beta changed", "Gamma changed"));
   const committed = await service.commitDocs(workspaceId, { message: "Alpha change", paths: [path] });
   const moved = await service.getWorkItem(workspaceId, item.workItemId);
-  expect(moved.refs).toEqual([{ path, section: "Spec / Alpha（L3）", commit: committed.commit }]);
-  expect(moved.contractRevision).toBe(1);
-  expect(moved.run.resumeMessage).toContain("【文档合入】");
-  expect(moved.run.resumeMessage).toContain("+Alpha changed");
+  expect(moved.refs.map((ref) => ref.commit)).toEqual([committed.commit, betaCommit.commit]);
+  expect(moved.contractRevision).toBe(2);
   expect(moved.decisions).toEqual([]);
+});
+
+it("validates exact sections on create and update while keeping description separate", async () => {
+  const { service, workspaceId, root } = await fixture();
+  const path = ".vermillion/docs/Spec/PRD.md";
+  const content = "# Spec\n\n## A\n\n### Item\n\nFirst\n\n## B\n\n### Item\n\nSecond\n";
+  await service.writeDoc(workspaceId, path, content);
+  const commit = await service.commitDocs(workspaceId, { message: "Sections" });
+
+  await expect(service.createWorkItem(workspaceId, { ...contract,
+    refs: [{ path, section: "Item", commit: commit.commit }] })).rejects.toThrow("不唯一");
+  await expect(service.createWorkItem(workspaceId, { ...contract,
+    refs: [{ path, section: "Spec / A / Item（L5）", commit: commit.commit }] })).rejects.toThrow("不存在");
+
+  const item = await service.createWorkItem(workspaceId, { ...contract,
+    refs: [{ path, section: "Spec / A / Item", description: "L5 · first item", commit: "HEAD" }] });
+  expect(item.refs[0]).toEqual({ path, section: "Spec / A / Item", description: "L5 · first item", commit: commit.commit });
+  await expect(service.updateWorkItem(workspaceId, item.workItemId, { note: "Wrong section",
+    refs: [{ path, section: "Missing", commit: commit.commit }] })).rejects.toThrow("不存在");
+
+  await writeFile(join(root, "AGENTS.md"), "# Rules\n\n## Checks\n\nRun them.\n");
+  await git(root, "add", "AGENTS.md"); await git(root, "commit", "-qm", "rules");
+  const rules = await git(root, "rev-parse", "HEAD");
+  const external = await service.createWorkItem(workspaceId, { ...contract,
+    refs: [{ path: "AGENTS.md", commit: rules }] });
+  expect(external.refs[0]?.commit).toBe(rules);
+
+  await service.writeDoc(workspaceId, path, content.replace("First", "First updated"));
+  await service.commitDocs(workspaceId, { message: "Unrelated docs", paths: [path] });
+  expect((await service.getWorkItem(workspaceId, external.workItemId)).refs[0]?.commit).toBe(rules);
+
+  await writeFile(join(root, "AGENTS.md"), "# Rules\n\n## Checks\n\nRun all of them.\n");
+  await git(root, "add", "AGENTS.md"); await git(root, "commit", "-qm", "update rules");
+  const updatedRules = await git(root, "rev-parse", "HEAD");
+  await service.refreshDocRefs(workspaceId);
+  expect((await service.getWorkItem(workspaceId, external.workItemId)).refs[0]?.commit).toBe(updatedRules);
+});
+
+it("retains a reference and diagnoses it when the heading disappears", async () => {
+  const { service, workspaceId } = await fixture();
+  const path = ".vermillion/docs/Spec/PRD.md";
+  await service.writeDoc(workspaceId, path, "# Spec\n\n## Alpha\n\nRequired\n\n## Beta\n\nOther\n");
+  const initial = await service.commitDocs(workspaceId, { message: "Initial" });
+  const item = await service.createWorkItem(workspaceId, { ...contract,
+    refs: [{ path, section: "Spec / Alpha", commit: initial.commit }] });
+
+  await service.writeDoc(workspaceId, path, "# Spec\n\n## Renamed\n\nRequired\n\n## Beta\n\nOther\n");
+  await service.commitDocs(workspaceId, { message: "Rename section", paths: [path] });
+  const retained = await service.getWorkItem(workspaceId, item.workItemId);
+  expect(retained.refs[0]?.commit).toBe(initial.commit);
+  expect(retained.contractRevision).toBe(0);
+  const diagnosis = await service.diagnoseWorkItem(workspaceId, item.workItemId);
+  expect(diagnosis.invalidRefs).toEqual([expect.objectContaining({ path, section: "Spec / Alpha", commit: initial.commit, reason: expect.stringContaining("不存在") })]);
+  expect(diagnosis.waiting).toContainEqual(expect.stringContaining("引用定位失效"));
 });
 
 it("moves a worker's own document commit without notifying that worker", async () => {
