@@ -476,10 +476,10 @@ export class WrapperChatTreeService {
     const index = this.options.sessionIndexStore;
     if (index.getTreeView(sessionId)?.sessionId === target.sessionId) {
       // 隐藏当前查看的分支后回到它分出来的共享祖先。
-      const parentSessionId = index.listRelations().find((relation) =>
-        relation.relationType === "fork" && relation.childSessionId === target.sessionId)?.parentSessionId;
-      if (parentSessionId) {
-        const view = { sessionId: parentSessionId, followTip: true };
+      const fork = index.listRelations().find((relation) =>
+        relation.relationType === "fork" && relation.childSessionId === target.sessionId);
+      if (fork) {
+        const view = { sessionId: fork.parentSessionId, nodeId: fork.sourceTurnId, followTip: false };
         await index.setTreeView(sessionId, view);
         this.applyPublishedView(sessionId, view);
       }

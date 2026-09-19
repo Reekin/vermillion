@@ -54,8 +54,9 @@ it("hides an entire fork but retains its shared prefix, early descendants and si
   // 隐藏只写工作台标记，引擎会话保持未归档。
   expect(index.getEntry("branch")?.hiddenAt).toBeTruthy();
   expect(index.getEntry("branch")?.archivedAt).toBeUndefined();
-  // 查看位置从被隐藏的分支回到它分出来的共享祖先。
-  expect(index.getTreeView("root")).toMatchObject({ sessionId: "root" });
+  // 父会话在 fork 后还有 root-2；查看位置必须回到分叉点 root-1，而不是父会话末端。
+  expect(index.getTreeView("root")).toEqual({ sessionId: "root", nodeId: "root-1", followTip: false });
+  expect((await tree.get("root")).visibleTurnIds).toEqual(["root-1"]);
   expect(tree.listOperations("root")).toEqual([]);
   tree.dispose();
   const reloaded = new SessionIndexStore({ baseDir });
