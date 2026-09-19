@@ -6,15 +6,18 @@ const item = (workItemId: string, status: WorkItem["status"], treeId?: string) =
 
 const setup = (data: Record<string, { items: WorkItem[] }>) => {
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
-  let listener: (event: WorkbenchEvent) => void;
+  let listener: ((event: WorkbenchEvent) => void) | undefined;
   const request = vi.fn(async (method: string, params: { workspaceId?: string }) => {
     if (method === "workspace.list") return Object.keys(data).map((workspaceId) => ({ workspaceId, label: workspaceId }));
     if (method === "workItem.list") return data[params.workspaceId!]!.items;
     return [];
   });
-  const store = createWorkbenchStore({ request, subscribe: (fn) => { listener = fn; return () => undefined; } } as WorkbenchClient);
-  store.getState().connect();
-  return { store, request, emit: (event: WorkbenchEvent) => listener(event) };
+  const store = createWorkbenchStore({ request, subscribe: (fn) => {
+    listener = fn;
+    return () => { if (listener === fn) listener = undefined; };
+  } } as WorkbenchClient);
+  const disconnect = store.getState().connect();
+  return { store, request, disconnect, emit: (event: WorkbenchEvent) => listener?.(event) };
 };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -59,12 +62,11 @@ describe("global task summary", () => {
     let release!: (value: WorkItem[]) => void;
     request.mockImplementationOnce(() => new Promise<WorkItem[]>((resolve) => { release = resolve; }));
     emit({ type: "workItems.changed", workspaceId: "b" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     data.b.items = [];
     emit({ type: "workItems.changed", workspaceId: "b" });
-    await vi.waitFor(() => expect(store.getState().tasks).toHaveLength(0));
     release([item("stale", "queued")]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(store.getState().tasks).toHaveLength(0);
+    await vi.waitFor(() => expect(store.getState().tasks).toHaveLength(0));
   });
 
   it("opens a task in its workspace without losing global commit feedback", async () => {
@@ -73,5 +75,201 @@ describe("global task summary", () => {
     store.getState().setDocCommit({ kind: "commit", commit: "abc", message: "说明" });
     store.getState().showTask({ workspaceId: "b", kind: "workItem", id: "target" });
     expect(store.getState()).toMatchObject({ panel: "workbench", workspaceSection: "workItems", overlay: undefined, browsingWorkspaceId: "b", taskTarget: { id: "target" }, docCommit: { message: "说明" } });
+  });
+});
+
+describe("workspace view invalidation", () => {
+  it("coalesces a docs burst and refreshes only document data", async () => {
+    const { store, request, emit } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    request.mockClear();
+
+    for (let index = 0; index < 10; index += 1) {
+      emit({ type: "docs.changed", workspaceId: "a" });
+    }
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls.map(([method]) => method).sort()).toEqual([
+      "docs.list",
+      "docs.pending"
+    ]);
+  });
+
+  it("reruns a category once when it changes during an in-flight request", async () => {
+    const { store, request, emit } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    request.mockClear();
+    let release!: (value: unknown[]) => void;
+    request.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => { release = resolve; }));
+
+    emit({ type: "docs.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    emit({ type: "docs.changed", workspaceId: "a" });
+    release([]);
+
+    await vi.waitFor(() => {
+      const methods = request.mock.calls.map(([method]) => method);
+      expect(methods.filter((method) => method === "docs.list")).toHaveLength(2);
+      expect(methods.filter((method) => method === "docs.pending")).toHaveLength(2);
+    });
+  });
+
+  it("loads a newly selected workspace without waiting for the old workspace", async () => {
+    const { store, request, emit } = setup({ a: { items: [] }, b: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view?.workspaceId).toBe("a"));
+    request.mockClear();
+    let release!: (value: unknown[]) => void;
+    request.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => { release = resolve; }));
+
+    emit({ type: "docs.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    store.getState().browseWorkspace("b");
+
+    await vi.waitFor(() => expect(store.getState().view?.workspaceId).toBe("b"));
+    expect(request.mock.calls.some(([method, params]) =>
+      method === "docs.list" && (params as { workspaceId?: string }).workspaceId === "b"
+    )).toBe(true);
+    release([]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getState().view?.workspaceId).toBe("b");
+  });
+
+  it("commits successful categories when another category in the batch fails", async () => {
+    const { store, request, emit } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    request.mockImplementation(async (method: string) => {
+      if (method === "docs.list") throw new Error("docs unavailable");
+      if (method === "decision.list") return [{ decisionId: "decision-new" }];
+      return [];
+    });
+
+    emit({ type: "docs.changed", workspaceId: "a" });
+    emit({ type: "decisions.changed", workspaceId: "a" });
+
+    await vi.waitFor(() => expect(store.getState().view?.decisions).toEqual([
+      { decisionId: "decision-new" }
+    ]));
+    expect(store.getState().viewError).toBe("docs unavailable");
+  });
+
+  it("keeps task, view, and Inbox refreshes while avoiding unrelated view queries", async () => {
+    const { store, request, emit } = setup({ a: { items: [] }, b: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    request.mockClear();
+
+    emit({ type: "workItems.changed", workspaceId: "b" });
+    await vi.waitFor(() => {
+      const methods = request.mock.calls.map(([method]) => method);
+      expect(methods).toContain("workItem.list");
+      expect(methods).toContain("inbox.list");
+    });
+    expect(request.mock.calls.filter(([method, params]) =>
+      method === "workItem.list" && (params as { workspaceId?: string }).workspaceId === "b"
+    )).toHaveLength(1);
+    expect(request.mock.calls.some(([method]) => [
+      "docs.list",
+      "docs.pending",
+      "role.list",
+      "scheduler.get"
+    ].includes(method))).toBe(false);
+  });
+
+  it("recovers a failed category on its next invalidation", async () => {
+    const { store, request, emit } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    request.mockClear();
+    request.mockImplementationOnce(async () => { throw new Error("docs unavailable"); });
+
+    emit({ type: "docs.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(store.getState().viewError).toBe("docs unavailable"));
+    emit({ type: "docs.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(store.getState().viewError).toBeUndefined());
+  });
+
+  it("does not query after its subscription is disconnected", async () => {
+    const { store, request, disconnect, emit } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    request.mockClear();
+    disconnect();
+
+    emit({ type: "docs.changed", workspaceId: "a" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("does not start view or task queries from a late workspace response after disconnect", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
+    let release!: (value: Array<{ workspaceId: string; label: string }>) => void;
+    const request = vi.fn((method: string) => {
+      if (method === "workspace.list") {
+        return new Promise<Array<{ workspaceId: string; label: string }>>((resolve) => {
+          release = resolve;
+        });
+      }
+      return Promise.resolve([]);
+    });
+    const store = createWorkbenchStore({
+      request,
+      subscribe: () => () => undefined
+    } as unknown as WorkbenchClient);
+    const disconnect = store.getState().connect();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    disconnect();
+    release([{ workspaceId: "a", label: "a" }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(request.mock.calls.map(([method]) => method).sort()).toEqual([
+      "inbox.list",
+      "workspace.list"
+    ]);
+    expect(store.getState().workspaces).toEqual([]);
+  });
+
+  it("starts a new Inbox request after reconnect without waiting for the old connection", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
+    let releaseOld!: (value: InboxItem[]) => void;
+    let inboxCalls = 0;
+    const request = vi.fn((method: string) => {
+      if (method === "workspace.list") return Promise.resolve([]);
+      if (method === "inbox.list") {
+        inboxCalls += 1;
+        if (inboxCalls === 1) {
+          return new Promise<InboxItem[]>((resolve) => { releaseOld = resolve; });
+        }
+      }
+      return Promise.resolve([]);
+    });
+    const store = createWorkbenchStore({
+      request,
+      subscribe: () => () => undefined
+    } as unknown as WorkbenchClient);
+
+    const disconnectOld = store.getState().connect();
+    await vi.waitFor(() => expect(releaseOld).toBeTypeOf("function"));
+    disconnectOld();
+    const disconnectNew = store.getState().connect();
+    await vi.waitFor(() => expect(inboxCalls).toBe(2));
+    releaseOld([]);
+    disconnectNew();
+  });
+
+  it("starts a new task summary request after reconnect without waiting for the old connection", async () => {
+    const data = { a: { items: [item("old", "running")] } };
+    const { store, request, emit, disconnect } = setup(data);
+    await vi.waitFor(() => expect(store.getState().tasks.map((task) => task.id)).toEqual(["old"]));
+    let releaseOld!: (value: WorkItem[]) => void;
+    request.mockImplementationOnce(() => new Promise<WorkItem[]>((resolve) => {
+      releaseOld = resolve;
+    }));
+    emit({ type: "workItems.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(releaseOld).toBeTypeOf("function"));
+
+    disconnect();
+    data.a.items = [item("new", "running")];
+    const disconnectNew = store.getState().connect();
+    await vi.waitFor(() => expect(store.getState().tasks.map((task) => task.id)).toEqual(["new"]));
+    releaseOld([item("stale", "running")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getState().tasks.map((task) => task.id)).toEqual(["new"]);
+    disconnectNew();
   });
 });

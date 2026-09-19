@@ -31,6 +31,23 @@ export type WorkspaceView = {
   actions: WorkflowAction[];
 };
 
+type WorkspaceViewField = Exclude<keyof WorkspaceView, "workspaceId">;
+
+const allWorkspaceViewFields: readonly WorkspaceViewField[] = [
+  "workItems",
+  "workRequests",
+  "decisions",
+  "issues",
+  "domains",
+  "patrolRuns",
+  "docs",
+  "pendingDocChanges",
+  "roles",
+  "scheduler",
+  "runs",
+  "actions"
+];
+
 /** What the text editor modal is showing: a doc under .vermillion/docs or a role prompt override. */
 export type EditorTarget = { kind: "doc"; path: string; line?: number; column?: number; nonce?: number; sessionId?: string }
   | { kind: "maintainer"; domainId: string; path: string; nonce?: number }
@@ -92,75 +109,266 @@ const LAST_WORKSPACE_KEY = "vermillion.draftWorkspaceId";
 
 export const createWorkbenchStore = (client: WorkbenchClient) =>
   create<WorkbenchState>((set, get) => {
-    let viewGeneration = 0;
-    let tasksGeneration = 0;
+    type ViewRefresh = {
+      workspaceId: string;
+      docsSessionId: string | undefined;
+      epoch: number;
+      pending: Set<WorkspaceViewField>;
+      scheduled: boolean;
+      running: boolean;
+    };
+    const viewRefreshes = new Map<string, ViewRefresh>();
+    let inboxLoadScheduledEpoch: number | undefined;
+    let inboxLoadRunningEpoch: number | undefined;
+    let inboxDirty = false;
+    let taskLoadScheduledEpoch: number | undefined;
+    let taskLoadRunningEpoch: number | undefined;
+    const pendingTaskWorkspaceIds = new Set<string>();
+    let connected = false;
+    let connectionEpoch = 0;
 
-    const loadTasks = async () => {
-      const generation = ++tasksGeneration;
+    const readViewField = async (
+      field: WorkspaceViewField,
+      workspaceId: string,
+      docsSessionId: string | undefined
+    ): Promise<Partial<WorkspaceView>> => {
+      switch (field) {
+        case "workItems": return { workItems: await client.request("workItem.list", { workspaceId }) };
+        case "workRequests": return { workRequests: await client.request("work.list", { workspaceId }) };
+        case "decisions": return { decisions: await client.request("decision.list", { workspaceId }) };
+        case "issues": return { issues: await client.request("issue.list", { workspaceId }) };
+        case "domains": return { domains: await client.request("domain.list", { workspaceId }) };
+        case "patrolRuns": return { patrolRuns: await client.request("domain.patrol.list", { workspaceId }) };
+        case "docs": return { docs: await client.request("docs.list", { workspaceId, sessionId: docsSessionId }) };
+        case "pendingDocChanges": return { pendingDocChanges: await client.request("docs.pending", { workspaceId, sessionId: docsSessionId }) };
+        case "roles": return { roles: await client.request("role.list", { workspaceId }) };
+        case "scheduler": return { scheduler: await client.request("scheduler.get", { workspaceId }) };
+        case "runs": return { runs: await client.request("run.list", { workspaceId }) };
+        case "actions": return { actions: await client.request("action.list", { workspaceId }) };
+      }
+    };
+
+    const drainTasks = async () => {
+      if (
+        !connected ||
+        taskLoadRunningEpoch === connectionEpoch ||
+        pendingTaskWorkspaceIds.size === 0
+      ) return;
+      const epoch = connectionEpoch;
+      taskLoadRunningEpoch = epoch;
+      const workspaceIds = [...pendingTaskWorkspaceIds];
+      pendingTaskWorkspaceIds.clear();
       try {
-        const groups = await Promise.all(get().workspaces.map(async ({ workspaceId }) => {
+        const groups = await Promise.all(workspaceIds.map(async (workspaceId) => {
           const workItems = await client.request("workItem.list", { workspaceId });
           const tasks: TaskSummary[] = workItems
             .filter((item) => item.status !== "closed" && item.status !== "cancelled")
             .map((item) => ({ workspaceId, kind: "workItem", id: item.workItemId, title: item.title, status: item.status, sessionId: item.run?.sessionId }));
-          return tasks;
+          return { workspaceId, tasks };
         }));
-        if (generation === tasksGeneration) set({ tasks: groups.flat(), tasksError: undefined });
+        if (!connected || epoch !== connectionEpoch) return;
+        const freshGroups = groups.filter(({ workspaceId }) =>
+          !pendingTaskWorkspaceIds.has(workspaceId)
+        );
+        const refreshed = new Set(freshGroups.map(({ workspaceId }) => workspaceId));
+        set((state) => ({
+          tasks: [
+            ...state.tasks.filter((task) => !refreshed.has(task.workspaceId)),
+            ...freshGroups.flatMap(({ tasks }) => tasks)
+          ],
+          tasksError: undefined
+        }));
       } catch (error) {
-        if (generation === tasksGeneration) set({ tasksError: (error as Error).message });
+        if (connected && epoch === connectionEpoch) {
+          set({ tasksError: (error as Error).message });
+        }
+      } finally {
+        if (taskLoadRunningEpoch === epoch) taskLoadRunningEpoch = undefined;
+        if (connected && epoch === connectionEpoch && pendingTaskWorkspaceIds.size > 0) {
+          scheduleTasks([]);
+        }
       }
     };
 
-    const loadWorkspaces = async () => {
+    const scheduleTasks = (workspaceIds: readonly string[]) => {
+      if (!connected) return;
+      for (const workspaceId of workspaceIds) pendingTaskWorkspaceIds.add(workspaceId);
+      if (
+        taskLoadScheduledEpoch === connectionEpoch ||
+        taskLoadRunningEpoch === connectionEpoch ||
+        pendingTaskWorkspaceIds.size === 0
+      ) return;
+      const epoch = connectionEpoch;
+      taskLoadScheduledEpoch = epoch;
+      queueMicrotask(() => {
+        if (taskLoadScheduledEpoch !== epoch) return;
+        taskLoadScheduledEpoch = undefined;
+        void drainTasks();
+      });
+    };
+
+    const loadWorkspaces = async (epoch = connectionEpoch) => {
       const workspaces = await client.request("workspace.list", {});
+      if (!connected || epoch !== connectionEpoch) return;
       const remembered = get().draftWorkspaceId ?? localStorage.getItem(LAST_WORKSPACE_KEY) ?? undefined;
       const draftWorkspaceId = workspaces.some((w) => w.workspaceId === remembered) ? remembered : workspaces[0]?.workspaceId;
       const browsing = get().browsingWorkspaceId;
       const browsingWorkspaceId = workspaces.some((w) => w.workspaceId === browsing) ? browsing : draftWorkspaceId;
-      set({ workspaces, draftWorkspaceId, browsingWorkspaceId });
+      const workspaceIds = new Set(workspaces.map((workspace) => workspace.workspaceId));
+      set((state) => ({
+        workspaces,
+        draftWorkspaceId,
+        browsingWorkspaceId,
+        tasks: state.tasks.filter((task) => workspaceIds.has(task.workspaceId))
+      }));
       if (draftWorkspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, draftWorkspaceId);
-      await Promise.all([loadView(), loadTasks()]);
+      loadView();
+      scheduleTasks(workspaces.map((workspace) => workspace.workspaceId));
     };
 
-    const loadView = async () => {
-      const workspaceId = get().browsingWorkspaceId;
-      const docsSessionId = get().docsSessionId;
-      const generation = ++viewGeneration;
+    const viewRefreshKey = (
+      workspaceId: string,
+      docsSessionId: string | undefined
+    ) => JSON.stringify([workspaceId, docsSessionId ?? null]);
+
+    const drainView = async (refresh: ViewRefresh) => {
+      if (
+        !connected ||
+        refresh.epoch !== connectionEpoch ||
+        refresh.running ||
+        refresh.pending.size === 0
+      ) return;
+      const fields = [...refresh.pending];
+      refresh.pending.clear();
+      refresh.running = true;
+      try {
+        const results = await Promise.allSettled(
+          fields.map((field) =>
+            readViewField(field, refresh.workspaceId, refresh.docsSessionId)
+          )
+        );
+        if (
+          !connected ||
+          refresh.epoch !== connectionEpoch ||
+          refresh.workspaceId !== get().browsingWorkspaceId ||
+          refresh.docsSessionId !== get().docsSessionId
+        ) return;
+        const freshPatches: Partial<WorkspaceView>[] = [];
+        const freshFields: WorkspaceViewField[] = [];
+        const errors: unknown[] = [];
+        results.forEach((result, index) => {
+          const field = fields[index]!;
+          if (result.status === "rejected") {
+            errors.push(result.reason);
+          } else if (!refresh.pending.has(field)) {
+            freshFields.push(field);
+            freshPatches.push(result.value);
+          }
+        });
+        const patch = Object.assign({}, ...freshPatches) as Partial<WorkspaceView>;
+        set((state) => {
+          const current = state.view?.workspaceId === refresh.workspaceId
+            ? state.view
+            : undefined;
+          if (!current && freshFields.length !== allWorkspaceViewFields.length) {
+            if (fields.length < allWorkspaceViewFields.length || refresh.pending.size > 0) {
+              for (const field of allWorkspaceViewFields) refresh.pending.add(field);
+            }
+            return {
+              viewError: errors.length > 0
+                ? String(errors[0] instanceof Error ? errors[0].message : errors[0])
+                : undefined
+            };
+          }
+          return {
+            view: {
+              ...(current ?? {}),
+              ...patch,
+              workspaceId: refresh.workspaceId
+            } as WorkspaceView,
+            viewError: errors.length > 0
+              ? String(errors[0] instanceof Error ? errors[0].message : errors[0])
+              : undefined
+          };
+        });
+      } finally {
+        refresh.running = false;
+        if (
+          connected &&
+          refresh.epoch === connectionEpoch &&
+          refresh.pending.size > 0
+        ) {
+          scheduleView([], refresh);
+        }
+      }
+    };
+
+    const scheduleView = (
+      fields: readonly WorkspaceViewField[],
+      existingRefresh?: ViewRefresh
+    ) => {
+      if (!connected) return;
+      const workspaceId = existingRefresh?.workspaceId ?? get().browsingWorkspaceId;
+      const docsSessionId = existingRefresh?.docsSessionId ?? get().docsSessionId;
       if (!workspaceId) {
         set({ view: undefined });
         return;
       }
-      try {
-        const [workItems, workRequests, decisions, issues, domains, patrolRuns, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
-          client.request("workItem.list", { workspaceId }),
-          client.request("work.list", { workspaceId }),
-          client.request("decision.list", { workspaceId }),
-          client.request("issue.list", { workspaceId }),
-          client.request("domain.list", { workspaceId }),
-          client.request("domain.patrol.list", { workspaceId }),
-          client.request("docs.list", { workspaceId, sessionId: docsSessionId }),
-          client.request("docs.pending", { workspaceId, sessionId: docsSessionId }),
-          client.request("role.list", { workspaceId }),
-          client.request("scheduler.get", { workspaceId }),
-          client.request("run.list", { workspaceId }),
-          client.request("action.list", { workspaceId })
-        ]);
-        if (generation !== viewGeneration) return;
-        set({ view: { workspaceId, workItems, workRequests, decisions, issues, domains, patrolRuns, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
-      } catch (error) {
-        if (generation !== viewGeneration) return;
-        set({ viewError: (error as Error).message });
-      }
+      const key = viewRefreshKey(workspaceId, docsSessionId);
+      const refresh = existingRefresh ?? viewRefreshes.get(key) ?? {
+        workspaceId,
+        docsSessionId,
+        epoch: connectionEpoch,
+        pending: new Set<WorkspaceViewField>(),
+        scheduled: false,
+        running: false
+      };
+      viewRefreshes.set(key, refresh);
+      for (const field of fields) refresh.pending.add(field);
+      if (refresh.scheduled || refresh.running || refresh.pending.size === 0) return;
+      refresh.scheduled = true;
+      queueMicrotask(() => {
+        refresh.scheduled = false;
+        void drainView(refresh);
+      });
     };
 
-    const loadInbox = async () => {
+    const loadView = () => scheduleView(allWorkspaceViewFields);
+
+    const drainInbox = async () => {
+      if (!connected || inboxLoadRunningEpoch === connectionEpoch || !inboxDirty) return;
+      const epoch = connectionEpoch;
+      inboxLoadRunningEpoch = epoch;
+      inboxDirty = false;
       try {
         const inboxHistory = await client.request("inbox.list", { includeProcessed: true });
+        if (!connected || epoch !== connectionEpoch || inboxDirty) return;
         const inbox = inboxHistory.filter((item) => item.kind === "decision" ? !item.card.answer && !item.card.withdrawn : !item.workItem.merge?.acknowledgedAt);
         set({ inbox, inboxHistory, inboxError: undefined });
       } catch (error) {
-        set({ inboxError: (error as Error).message });
+        if (connected && epoch === connectionEpoch) {
+          set({ inboxError: (error as Error).message });
+        }
+      } finally {
+        if (inboxLoadRunningEpoch === epoch) inboxLoadRunningEpoch = undefined;
+        if (connected && epoch === connectionEpoch && inboxDirty) scheduleInbox();
       }
+    };
+
+    const scheduleInbox = () => {
+      if (!connected) return;
+      inboxDirty = true;
+      if (
+        inboxLoadScheduledEpoch === connectionEpoch ||
+        inboxLoadRunningEpoch === connectionEpoch
+      ) return;
+      const epoch = connectionEpoch;
+      inboxLoadScheduledEpoch = epoch;
+      queueMicrotask(() => {
+        if (inboxLoadScheduledEpoch !== epoch) return;
+        inboxLoadScheduledEpoch = undefined;
+        void drainInbox();
+      });
     };
 
     return {
@@ -230,38 +438,60 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
 
       connect: () => {
-        void loadWorkspaces();
-        void loadInbox();
-        return client.subscribe((event) => {
+        connected = true;
+        const epoch = ++connectionEpoch;
+        void loadWorkspaces(epoch);
+        scheduleInbox();
+        const unsubscribe = client.subscribe((event) => {
+          if (!connected || epoch !== connectionEpoch) return;
           switch (event.type) {
             case "workspaces.changed":
-              void loadWorkspaces();
+              void loadWorkspaces(epoch);
               return;
             case "docs.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["docs", "pendingDocChanges"]);
+              return;
             case "roles.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["roles"]);
+              return;
             case "domains.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["domains", "patrolRuns"]);
+              return;
             case "scheduler.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["scheduler"]);
+              return;
             case "runs.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["runs"]);
+              return;
             case "actions.changed":
-              void loadInbox();
-              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["actions"]);
               return;
             case "workItems.changed":
-              void loadTasks();
-              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
-              void loadInbox();
+              scheduleTasks([event.workspaceId]);
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["workItems"]);
+              scheduleInbox();
+              return;
+            case "issues.changed":
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["issues"]);
               return;
             case "workRequests.changed":
-              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
-              void loadInbox();
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["workRequests"]);
               return;
             case "decisions.changed":
-            case "issues.changed":
-              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
-              void loadInbox();
+              if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["decisions"]);
+              scheduleInbox();
               return;
           }
         });
+        return () => {
+          unsubscribe();
+          if (epoch !== connectionEpoch) return;
+          connected = false;
+          connectionEpoch += 1;
+          viewRefreshes.clear();
+          pendingTaskWorkspaceIds.clear();
+          inboxDirty = false;
+        };
       }
     };
   });

@@ -89,7 +89,7 @@ const getStoredEntity = (
   ]?.get(id);
 
 describe("DomainStore", () => {
-  it("stages several session-window replacements from one global snapshot", () => {
+  it("stages several session-window replacements without a global snapshot", () => {
     const store = new DomainStore({
       snapshot: {
         conversations: [{
@@ -145,9 +145,59 @@ describe("DomainStore", () => {
       }
     ]);
 
-    expect(getSnapshot).toHaveBeenCalledTimes(2);
+    expect(getSnapshot).not.toHaveBeenCalled();
     expect(store.getTurn("turn-a")).toBeDefined();
     expect(store.getTurn("turn-b")).toBeDefined();
+  });
+
+  it("rejects a multi-window relation migration before changing live state", () => {
+    const store = new DomainStore({
+      snapshot: {
+        conversations: [{
+          ...conversation("conversation-a"),
+          sessionIds: ["session-parent", "session-child"]
+        }],
+        sessions: [
+          session("session-parent", "conversation-a"),
+          session("session-child", "conversation-a")
+        ],
+        turns: [],
+        messageBlocks: [],
+        toolCalls: [],
+        terminalStreams: [],
+        approvalRequests: [],
+        runtimeInteractions: [],
+        participants: [],
+        threadGoals: [],
+        sessionRelations: [relation("relation-a", "session-parent", "session-child")]
+      }
+    });
+    const baseline = store.getSnapshot();
+    const movedSnapshot = (sessionId: string) => ({
+      conversations: [{
+        ...conversation("conversation-b"),
+        sessionIds: ["session-parent", "session-child"]
+      }],
+      sessions: [session(sessionId, "conversation-b")],
+      turns: [],
+      messageBlocks: [],
+      toolCalls: [],
+      terminalStreams: [],
+      approvalRequests: [],
+      runtimeInteractions: [],
+      participants: [],
+      threadGoals: [],
+      sessionRelations: []
+    });
+
+    expectRelationError(
+      () => store.replaceSessionWindowSnapshots([
+        { sessionId: "session-parent", snapshot: movedSnapshot("session-parent") },
+        { sessionId: "session-child", snapshot: movedSnapshot("session-child") }
+      ]),
+      "conversation_mismatch"
+    );
+    expect(store.getSnapshot()).toEqual(baseline);
   });
 
   it("replaces complete session history and removes entities absent from the source", () => {

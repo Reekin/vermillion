@@ -223,18 +223,17 @@ export class DomainReplica {
   public mergeSnapshot(
     snapshot: DomainSnapshot | unknown,
     options: DomainSnapshotMergeOptions = {}
-  ): DomainSnapshot {
+  ): void {
     const parsedSnapshot = parseDomainSnapshot(snapshot);
-    const result = this.store.mergeSnapshot(parsedSnapshot, options);
+    this.store.mergeSnapshot(parsedSnapshot, options);
     this.commitSnapshotScopes([parsedSnapshot]);
-    return result;
   }
 
   public replaceSessionWindowSnapshot(
     sessionId: string,
     snapshot: DomainSnapshot | unknown
-  ): DomainSnapshot {
-    return this.replaceSessionWindowSnapshots([{ sessionId, snapshot }]);
+  ): void {
+    this.replaceSessionWindowSnapshots([{ sessionId, snapshot }]);
   }
 
   public replaceSessionWindowSnapshots(
@@ -242,30 +241,28 @@ export class DomainReplica {
       sessionId: string;
       snapshot: DomainSnapshot | unknown;
     }>
-  ): DomainSnapshot {
+  ): void {
     const parsedWindows = windows.map((window) => ({
       sessionId: window.sessionId,
       snapshot: parseDomainSnapshot(window.snapshot)
     }));
-    const result = this.store.replaceSessionWindowSnapshots(parsedWindows);
+    this.store.replaceSessionWindowSnapshots(parsedWindows);
     if (parsedWindows.length === 0) {
-      return result;
+      return;
     }
     this.commitSnapshotScopes(
       parsedWindows.map((window) => window.snapshot),
       parsedWindows.map((window) => window.sessionId)
     );
-    return result;
   }
 
   public replaceSessionHistorySnapshot(
     sessionId: string,
     snapshot: DomainSnapshot | unknown
-  ): DomainSnapshot {
+  ): void {
     const parsedSnapshot = parseDomainSnapshot(snapshot);
-    const result = this.store.replaceSessionHistorySnapshot(sessionId, parsedSnapshot);
+    this.store.replaceSessionHistorySnapshot(sessionId, parsedSnapshot);
     this.commitSnapshotScopes([parsedSnapshot], [sessionId]);
-    return result;
   }
 
   public deleteSessionCascade(sessionId: string): boolean {
