@@ -18,8 +18,9 @@ export const zDiagnosis = z.object({
 const nextFor = (action: WorkflowAction): string => {
   if (action.kind === "integration" && action.agent) return "Agent 正在处理合入；完成 rebase 后登记最终合入。";
   if (isUserPaused(action)) return "用户明确恢复后，从原会话继续执行。";
+  if (action.kind === "execute" && action.control === "manual") return "人工接管当前执行；用户可继续发消息或恢复自动推进。";
   if (action.status === "decision") return "等待用户答复决策卡。";
-  if (action.status === "retry") return "等待重试时间；自动重试用尽后由用户决策。";
+  if (action.status === "retry") return "等待重试时间；自动恢复用尽后由用户选择重试、暂停或取消。";
   return "工作台续接当前未完成阶段。";
 };
 
@@ -34,8 +35,8 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
   const actions = related.filter(actionIsOpen);
   const decisions = cards.filter((c) => !c.answer && !c.withdrawn && (c.workItemId === workItemId || actions.some((a) => a.actionId === c.actionId)));
   const dependencies = item.dependsOn.map((id) => ({ workItemId: id, status: items.find((i) => i.workItemId === id)?.status ?? "missing" }));
-  const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => (a.kind === "integration" && !a.agent) || ["retry", "decision"].includes(a.status))
-    .map((a) => ({ reason: isUserPaused(a) ? "用户已暂停 Worker" : a.failure ?? actionNote(a), role: a.kind === "execute" ? "worker" : "workbench", sessionId: a.kind === "execute" ? a.sessionId : undefined, actionId: a.actionId, next: nextFor(a) }));
+  const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => (a.kind === "integration" && !a.agent) || ["retry", "decision"].includes(a.status) || (a.kind === "execute" && a.control === "manual"))
+    .map((a) => ({ reason: isUserPaused(a) ? "用户已暂停 Worker" : a.kind === "execute" && a.control === "manual" ? a.waitReason ?? "人工接管当前执行" : a.failure ?? actionNote(a), role: a.kind === "execute" ? "worker" : "workbench", sessionId: a.kind === "execute" ? a.sessionId : undefined, actionId: a.actionId, next: nextFor(a) }));
   for (const dependency of dependencies.filter((d) => d.status !== "closed"))
     blockers.push({ reason: `前置 ${dependency.workItemId}: ${dependency.status}`, role: dependency.status === "cancelled" ? "worker" : "workbench", next: dependency.status === "cancelled" ? "用户调整依赖或取消。" : "等待前置关闭。" });
   for (const card of decisions) blockers.push({ reason: card.question, role: "user", sessionId: card.sessionId, actionId: card.actionId, next: "用户答复 decision.answer。" });
@@ -54,8 +55,10 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
     }
   }
   const availableActions = [{ method: "workItem.diagnose", condition: "随时查询当前状态。" }];
+  if (item.run.pendingMessageId) availableActions.push({ method: "workItem.confirm", condition: "核对引擎实际消息/轮次后再继续。" });
   if (decisions.length) availableActions.push({ method: "decision.answer", condition: "获得用户实际答复后选择重试、取消或给出具体说明。" });
   if (item.run.pauseReason === "user") availableActions.push({ method: "workItem.resume", condition: "确认继续执行时，从原会话恢复。" });
+  if (item.run.control === "manual") availableActions.push({ method: "workItem.retry", condition: "明确恢复自动推进并从当前成果继续。" });
   if (!["closed", "cancelled"].includes(item.status)) availableActions.push({ method: "workItem.update", condition: "调整合同或 dependsOn；并在 note 说明修改。" }, { method: "workItem.cancel", condition: "取消当前工作。" });
   const integration = related.find((action): action is Extract<WorkflowAction, { kind: "integration" }> => action.kind === "integration" && action.stage === "merge" && actionIsOpen(action));
   if (integration && !integration.agent && ["retry", "decision"].includes(integration.status)) {

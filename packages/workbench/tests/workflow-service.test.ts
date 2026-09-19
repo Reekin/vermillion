@@ -60,19 +60,15 @@ it("registers optional isolation separately from allowedPaths and rejects generi
   await expect(service.updateWorkItem(workspaceId, item.workItemId, { note: "invalid", needs: ["desktop"] })).rejects.toThrow("具体");
 });
 
-it("retains the preparation session through failure backoff and exposes exhausted recovery in Inbox", async () => {
+it("retains the preparation session through failure backoff and exposes exhausted recovery as work state", async () => {
   const { service, workspaceId } = await fixture();
   const request = await service.startWork(workspaceId, { sessionId: "source", turnId: "turn" });
   await service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: "preparing-worker" });
   for (let attempt = 0; attempt < 5; attempt++) await service.failWorkRequest(workspaceId, request.requestId, "preparation failed");
   expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "failed", attempts: 5, workerSessionId: "preparing-worker" });
-  const card = (await service.listDecisions(workspaceId))[0]!;
-  expect(card.requestId).toBe(request.requestId);
-  await expect(service.answerDecision(workspaceId, card.decisionId, { note: "继续" })).rejects.toThrow("请选择重试或取消");
-  await expect(service.answerDecision(workspaceId, card.decisionId, { key: "retry", note: "继续" })).rejects.toThrow("不接受备注答复");
-  expect((await service.listDecisions(workspaceId))[0]!.answer).toBeUndefined();
-  expect(await service.listInbox()).toMatchObject([{ kind: "decision", card: { requestId: request.requestId } }]);
-  await service.answerDecision(workspaceId, card.decisionId, { key: "retry" });
+  expect(await service.listDecisions(workspaceId)).toEqual([]);
+  expect(await service.listInbox()).toEqual([]);
+  await service.retryWork(workspaceId, request.requestId);
   expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "preparing", attempts: 0, workerSessionId: "preparing-worker" });
 });
 
@@ -126,10 +122,10 @@ it("persists 1/5/30/300 minute retry deadlines and the fifth-failure decision in
     now += minutes * 60_000;
   }
   await service.failAction(workspaceId, action.actionId, "failure five");
-  const card = (await service.listDecisions(workspaceId))[0]!;
-  expect(card.details).toContain("failure five");
+  expect((await service.listDecisions(workspaceId))).toEqual([]);
+  expect((await service.listActions(workspaceId))[0]).toMatchObject({ status: "decision", control: "manual", waitReason: "自动恢复次数已用尽", failure: "failure five" });
   expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("decision");
-  await service.answerDecision(workspaceId, card.decisionId, { key: "retry" });
+  await service.retryWorkItem(workspaceId, item.workItemId);
   expect((await service.listActions(workspaceId))[0]).toMatchObject({ attempts: 0, sessionId: "original", status: "pending" });
 });
 
@@ -527,8 +523,8 @@ it("publishes coherent execution and business states for failure, decision, answ
   });
   try {
     for (let index = 0; index < 5; index++) await service.failAction(workspaceId, action.actionId, "temporarily unavailable");
-    const exhausted = (await service.listDecisions(workspaceId))[0]!;
-    await service.answerDecision(workspaceId, exhausted.decisionId, { key: "retry" });
+    expect(await service.listDecisions(workspaceId)).toEqual([]);
+    await service.retryWorkItem(workspaceId, item.workItemId);
     const question = await service.createDecision(workspaceId, { workItemId: item.workItemId, question: "Continue?", context: "User choice", options: [{ key: "cancel", label: "Cancel" }] });
     await service.answerDecision(workspaceId, question.decisionId, { key: "cancel" });
     await Promise.all(observations);

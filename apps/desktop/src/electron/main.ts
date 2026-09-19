@@ -778,9 +778,14 @@ const boot = async (): Promise<void> => {
       const sent = await agentRunner.send(opened.sessionId, content);
       return { sessionId: opened.sessionId, ...(sent?.turnId ? { turnId: sent.turnId } : {}) };
     },
-    sessionSteerer: async ({ sessionId, content }) => {
-      return sessionSteerer(sessionId, content);
+    sessionSteerer: async ({ sessionId, content, messageId }) => {
+      return sessionSteerer(sessionId, content, messageId);
     },
+    executionTransfer: {
+      interrupt: (sessionId) => agentRunner.interrupt(sessionId),
+      fork: (input) => agentRunner.fork({ ...input, modelConfig: undefined })
+    },
+    deliveryConfirmer: (sessionId, messageId) => agentRunner.confirmMessage!(sessionId, messageId),
     sessionSearch: () => service.listSessionSearchEntries(),
     rolloutsDir: defaultCodexRolloutsDir(),
     sessionNavigation: createSessionNavigation(service, persistenceBaseDir),

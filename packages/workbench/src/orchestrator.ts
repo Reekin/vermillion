@@ -20,6 +20,7 @@ export type AgentRunner = {
   /** True while the runtime is executing a turn, including tool/model waits. */
   isActive?: (sessionId: string) => boolean;
   getActiveTurnId?: (sessionId: string) => string | undefined;
+  confirmMessage?: (sessionId: string, messageId: string) => Promise<{ accepted: boolean; turnId?: string }>;
   onTurnStarted?: (listener: (event: { sessionId: string; turnId: string; messageId?: string }) => void) => () => void;
   onTurnCompleted: (listener: (event: { sessionId: string; turnId: string; finishReason: "completed" | "interrupted" | "failed"; failure?: string }) => void) => () => void;
 };
@@ -62,6 +63,8 @@ export class Orchestrator {
   private readonly settling = new Map<string, number>();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly preparing = new Map<string, string>();
+  private readonly manualSessions = new Set<string>();
+  private readonly manualAdoptions = new Map<string, Promise<void>>();
   private readonly patrolsBySession = new Map<string, PatrolBinding>();
   private readonly patrolQueues = new Map<string, Promise<void>>();
   private readonly patrolRequested = new Set<string>();
@@ -145,6 +148,7 @@ export class Orchestrator {
   async dispose(): Promise<void> {
     this.disposed = true;
     for (const dispose of this.disposers.splice(0)) dispose();
+    await Promise.allSettled(this.manualAdoptions.values());
     for (const timer of this.retryTimers.values()) clearTimeout(timer);
     this.retryTimers.clear();
     await Promise.allSettled([...workspaceQueues.values(), ...this.patrolQueues.values()]);
@@ -177,6 +181,7 @@ export class Orchestrator {
     const bound = turn?.bound;
     const workspaces = await this.service.listWorkspaces();
     try {
+      if (turn?.origin === "user") await this.service.settleManualTurn(event.sessionId, event.turnId);
       const patrol = this.patrolsBySession.get(event.sessionId);
       if (patrol) {
         const run = await this.service.getPatrolRun(patrol.workspaceId, patrol.patrolRunId);
@@ -196,10 +201,13 @@ export class Orchestrator {
             (!turn?.turnId || turn.turnId === event.turnId) && this.turnsBySession.get(event.sessionId) === turn) {
           this.preparing.delete(event.sessionId);
           const request = (await this.service.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === event.sessionId && entry.status === "preparing");
-          const items = await this.service.listWorkItems(workspaceId);
-          if (request && (event.finishReason !== "completed" || !items.some((item) => item.requestId === request.requestId)))
-            await this.service.failWorkRequest(workspaceId, request.requestId, event.failure ?? "准备轮未完成工单登记，请核对当前准备进度并继续。");
-          else await this.service.finishPreparation(workspaceId, event.sessionId, event.turnId);
+          if (request && request.control === "paused")
+            await this.service.holdPreparation(workspaceId, request.requestId, request.waitReason ?? "用户已暂停当前准备");
+          else if (request && event.finishReason !== "completed")
+            await this.service.failWorkRequest(workspaceId, request.requestId, event.failure ?? "准备轮未完成，请核对当前准备进度并继续。");
+          else if (request && !request.handoff)
+            await this.service.holdPreparation(workspaceId, request.requestId, "准备轮结束但尚未登记完整交接，等待手动继续。");
+          else await this.service.finishPreparation(workspaceId, event.sessionId, event.turnId, false);
         }
       })));
     } finally {
@@ -235,9 +243,17 @@ export class Orchestrator {
     const tracked = this.turnsBySession.get(event.sessionId);
     if (tracked?.turnId === event.turnId) {
       if (scheduled) tracked.origin = "scheduler";
+      else { this.manualSessions.add(event.sessionId); this.rememberManualAdoption(event.sessionId, event.turnId); }
       return;
     }
     this.trackTurn(event.sessionId, { turnId: event.turnId, origin: scheduled ? "scheduler" : "user" });
+    if (!scheduled) { this.manualSessions.add(event.sessionId); this.rememberManualAdoption(event.sessionId, event.turnId); }
+  }
+
+  private rememberManualAdoption(sessionId: string, turnId: string): void {
+    const adoption = this.service.adoptManualTurn(sessionId, turnId);
+    this.manualAdoptions.set(sessionId, adoption);
+    void adoption.finally(() => { if (this.manualAdoptions.get(sessionId) === adoption) this.manualAdoptions.delete(sessionId); });
   }
 
   /** A delivery that joins a running turn makes that turn the scheduler's, whatever opened it. */
@@ -258,11 +274,19 @@ export class Orchestrator {
 
   private async reconcile(workspaceId: string): Promise<void> {
     if (this.disposed) return;
-    await this.prepareRequests(workspaceId);
     await this.service.refreshActions(workspaceId);
     const scheduler = await this.service.getScheduler(workspaceId);
     this.clearRetryTimer(workspaceId);
+    for (const request of await this.service.listWorkRequests(workspaceId)) {
+      if (request.control === "paused" && request.workerSessionId && this.runner.isActive?.(request.workerSessionId))
+        await this.runner.interrupt(request.workerSessionId);
+    }
+    for (const item of await this.service.listWorkItems(workspaceId)) {
+      if (item.run.control === "paused" && item.run.sessionId && this.runner.isActive?.(item.run.sessionId))
+        await this.runner.interrupt(item.run.sessionId);
+    }
     if (!scheduler.enabled) { await this.scheduleRetry(workspaceId); return; }
+    await this.prepareRequests(workspaceId);
     await this.service.continueIntegrations(workspaceId);
     let actions = await this.service.listActions(workspaceId);
     // Completed actions can still have a final turn in flight. Keep the owner until it ends.
@@ -273,15 +297,25 @@ export class Orchestrator {
       }
     }
     actions = await this.service.listActions(workspaceId);
+    const requests = await this.service.listWorkRequests(workspaceId);
+    for (const sessionId of this.manualSessions) {
+      const ownsManual = actions.some((action) => action.kind === "execute" && action.sessionId === sessionId && action.control === "manual")
+        || requests.some((request) => request.workerSessionId === sessionId && request.control === "manual");
+      if (!ownsManual) this.manualSessions.delete(sessionId);
+    }
     for (const action of actions) {
       if (this.disposed) break;
-      if (action.kind !== "execute" || !actionIsOpen(action) || action.status === "decision") continue;
+      if (action.kind !== "execute" || !actionIsOpen(action) || (action.status === "decision" && action.control !== "manual")) continue;
+      if (action.control === "manual" && action.sessionId && this.runner.isActive?.(action.sessionId) && !this.turnsBySession.has(action.sessionId))
+        this.trackTurn(action.sessionId, { turnId: this.runner.getActiveTurnId?.(action.sessionId), origin: "user" });
       if (action.retryAt && Date.parse(action.retryAt) > Date.parse(this.now())) continue;
       const items = await this.service.listWorkItems(workspaceId);
       const item = items.find((i) => i.workItemId === action.workItemId);
       if (!item || !["queued", "running"].includes(item.status) || await this.service.isWorkItemBlocked(workspaceId, item.workItemId)) continue;
+      if (action.sessionId && this.manualSessions.has(action.sessionId)) continue;
       const running = items.filter((i) => i.status === "running" && i.workItemId !== item.workItemId);
-      if (running.length >= scheduler.maxWorkers || running.some((i) => effectiveNeeds(i).some((need) => effectiveNeeds(item).includes(need)))) continue;
+      const activePreparations = requests.filter((request) => request.status === "preparing" && request.control !== "paused" && request.workerSessionId && this.runner.isActive?.(request.workerSessionId)).length;
+      if (running.length + activePreparations >= scheduler.maxWorkers || running.some((i) => effectiveNeeds(i).some((need) => effectiveNeeds(item).includes(need)))) continue;
       await this.dispatch(workspaceId, action);
     }
     await this.scheduleRetry(workspaceId);
@@ -289,6 +323,7 @@ export class Orchestrator {
 
   private async reconcilePatrol(workspaceId: string): Promise<void> {
     if (this.disposed) return;
+    if (!(await this.service.getScheduler(workspaceId)).enabled) return;
     await this.service.scanPatrols(workspaceId);
     await this.dispatchPatrol(workspaceId);
   }
@@ -330,8 +365,8 @@ export class Orchestrator {
   private async scheduleRetry(workspaceId: string): Promise<void> {
     const actions = await this.service.listActions(workspaceId);
     const requests = await this.service.listWorkRequests(workspaceId);
-    const retryAt = [...actions.filter((a) => actionIsOpen(a) && a.status === "retry" && a.retryAt),
-      ...requests.filter((request) => request.status !== "failed" && request.status !== "ready" && request.retryAt)]
+    const retryAt = [...actions.filter((a) => a.kind === "execute" && actionIsOpen(a) && a.status === "retry" && a.control !== "paused" && a.control !== "manual" && a.retryAt),
+      ...requests.filter((request) => request.control !== "paused" && request.control !== "manual" && request.status !== "failed" && request.status !== "ready" && request.retryAt)]
       .map((a) => Date.parse(a.retryAt!)).filter((at) => at > Date.parse(this.now()));
     if (!this.disposed && retryAt.length) this.retryTimers.set(workspaceId, setTimeout(() => {
       this.retryTimers.delete(workspaceId);
@@ -351,6 +386,7 @@ export class Orchestrator {
 
   private async dispatch(workspaceId: string, initial: Execution): Promise<void> {
     let action = initial;
+    if (action.control && action.control !== "auto") return;
     try {
       const root = await this.service.workspaceRoot(workspaceId);
       let item = await this.service.getWorkItem(workspaceId, action.workItemId);
@@ -410,10 +446,13 @@ export class Orchestrator {
             text: "会话已恢复。核对当前成果与持久化处置结果，继续尚未完成的动作。" }] }));
       }
       if (action.stage === "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver" }));
+      if (action.pendingMessageId) return;
       const message = await this.actionMessage(workspaceId, action, cwd);
       const delivered = action.notices.length;
       let scheduledTurnId: string | undefined;
-      const messageId = createId("message");
+      const messageId = action.pendingMessageId ?? createId("message");
+      action = await this.service.updateAction(workspaceId, action, (current) => ({ ...current,
+        pendingMessageId: messageId, attemptId: current.attemptId ?? createId("attempt"), control: "auto" }));
       this.sentMessages.add(messageId);
       // Delivery is durable even when send throws. The same session and message are retried.
       try {
@@ -431,14 +470,17 @@ export class Orchestrator {
         }
       } catch (error) {
         this.sentMessages.delete(messageId);
-        throw error;
+        await this.service.updateAction(workspaceId, action, (current) => ({ ...current, status: "decision", control: "manual",
+          waitReason: "消息受理状态不明，请核对引擎轮次后再继续", failure: error instanceof Error ? error.message : String(error),
+          pendingMessageId: messageId }), (item) => ({ ...item, status: "decision" }));
+        return;
       }
       // Sending may synchronously cause a decision/completion write: preserve its latest state.
       await this.service.updateAction(workspaceId, action, (latest) => {
         const settled = { ...(scheduledTurnId ? { scheduledTurnId } : {}),
           ...(latest.stage === "deliver" && actionIsOpen(latest) && latest.status !== "decision"
             ? { status: "running" as const, stage: "execute" as const, failure: undefined, retryAt: undefined } : {}),
-          deliveredAt: this.now() };
+          deliveredAt: this.now(), pendingMessageId: undefined };
         // Only the notices this delivery carried are consumed; append-only writers keep the rest.
         return latest.kind === "execute" ? { ...latest, ...settled, notices: latest.notices.slice(delivered) }
           : { ...latest, ...settled };
@@ -493,6 +535,7 @@ export class Orchestrator {
       ] : []),
       "",
       "先用 CLI 读取完整工单：vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "'",
+      ...(item.run.migratedFromSessionId ? ["本工单已从历史节点迁移到当前分支；调用 workItem.submit 时必须传当前 sessionId: " + item.run.sessionId] : []),
       "",
       "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create，发现依赖另一张未合入的工单时通过 workItem.update 修改 dependsOn，需要用户取舍时直接创建决策卡；调用后结束会话。"
     ].join("\n");
@@ -516,9 +559,18 @@ export class Orchestrator {
   }
 
   private async prepareRequests(workspaceId: string): Promise<void> {
+    const scheduler = await this.service.getScheduler(workspaceId);
     for (let request of await this.service.listWorkRequests(workspaceId)) {
-      if (["ready", "failed", "cancelled"].includes(request.status)) continue;
+      if (["ready", "failed", "cancelled"].includes(request.status) || request.control === "paused" || request.control === "manual") continue;
       if (request.retryAt && request.retryAt > this.now()) continue;
+      if (request.pendingMessageId) continue;
+      const existingActivePreparation = Boolean(request.workerSessionId && this.runner.isActive?.(request.workerSessionId));
+      if (!existingActivePreparation) {
+        const activePreparations = (await this.service.listWorkRequests(workspaceId)).filter((entry) =>
+          entry.status === "preparing" && entry.control !== "paused" && entry.workerSessionId && this.runner.isActive?.(entry.workerSessionId)).length;
+        const activeWorkers = (await this.service.listWorkItems(workspaceId)).filter((item) => item.status === "running").length;
+        if (activePreparations + activeWorkers >= scheduler.maxWorkers) continue;
+      }
       if (!request.workerSessionId && this.runner.isActive?.(request.sourceSessionId)) continue;
       try {
         const root = await this.service.workspaceRoot(workspaceId);
@@ -532,28 +584,35 @@ export class Orchestrator {
             title: "开工准备", metadata: { role: "work-preparation", requestId: request.requestId,
               sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId } })
             : { sessionId: request.sourceSessionId, treeId: request.sourceSessionId };
-          request = await this.service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: fork.sessionId, treeId: fork.treeId });
+          request = await this.service.putWorkRequest(workspaceId, { ...request, status: "preparing", control: "auto", workerSessionId: fork.sessionId, treeId: fork.treeId });
           if (request.status === "cancelled") continue;
         }
         const sessionId = request.workerSessionId!;
         if (this.preparing.has(sessionId)) continue;
         if (this.runner.isActive?.(sessionId)) { this.preparing.set(sessionId, workspaceId); continue; }
         if (!request.failure && (await this.service.listWorkItems(workspaceId)).some((item) => item.run.sessionId === sessionId)) {
-          if (!this.runner.isActive?.(sessionId)) await this.service.finishPreparation(workspaceId, sessionId);
+          if (!this.runner.isActive?.(sessionId)) await this.service.finishPreparation(workspaceId, sessionId, undefined, false);
           else this.preparing.set(sessionId, workspaceId);
           continue;
         }
         if (request.sourceTurnId && !await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备分支");
         this.preparing.set(sessionId, workspaceId);
-        await this.runner.send(sessionId, [request.message?.content, preparation.content,
+        const messageId = createId("prep-message");
+        request = await this.service.putWorkRequest(workspaceId, { ...request, pendingMessageId: messageId,
+          attemptId: request.attemptId ?? createId("attempt"), activeTurnId: undefined });
+        const receipt = await this.runner.send(sessionId, [request.message?.content, preparation.content,
           "workspaceId: " + workspaceId, "sessionId: " + sessionId, "requestId: " + request.requestId,
           "sourceSessionId: " + request.sourceSessionId, request.sourceTurnId ? "sourceTurnId: " + request.sourceTurnId : "",
           "开工范围: " + (request.scope ?? "根据当前讨论确定完整范围。"),
+          "建单与目录登记完成后，必须调用 vermillion work.prepare.complete --help，并用当前 requestId、sessionId、全部 workItemIds 及相关文档 refs 登记完整交接；仅回复文字不算准备完成。",
           request.failure ? "上次准备未完成：" + request.failure : ""].filter(Boolean).join("\n\n"),
-          request.message ? { attachments: request.message.attachments, execution: request.message.execution } : undefined);
+          request.message ? { attachments: request.message.attachments, execution: request.message.execution, messageId } : { messageId });
+        await this.service.confirmPreparationDelivery(workspaceId, request.requestId, messageId, receipt?.turnId, true, request.workerSessionId, request.attemptId);
       } catch (error) {
         if (request.workerSessionId) this.preparing.delete(request.workerSessionId);
-        await this.service.failWorkRequest(workspaceId, request.requestId, error instanceof Error ? error.message : String(error));
+        const reason = error instanceof Error ? error.message : String(error);
+        if (request.pendingMessageId) await this.service.markPreparationDeliveryUnknown(workspaceId, request.requestId, request.pendingMessageId, reason);
+        else await this.service.failWorkRequest(workspaceId, request.requestId, reason);
       }
     }
   }

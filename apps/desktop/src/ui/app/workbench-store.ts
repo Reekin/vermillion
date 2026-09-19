@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, DecisionCard, DocChange, DocFile, DomainDefinition, InboxItem, Issue, PatrolRun, RoleFile, Scheduler, WorkItem, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
+import type { AgentRun, DecisionCard, DocChange, DocFile, DomainDefinition, InboxItem, Issue, PatrolRun, RoleFile, Scheduler, WorkItem, WorkRequest, Workspace, WorkbenchClient, WorkflowAction } from "@vermillion/workbench/client";
 
 /** Full-area panels: the workbench, and Inbox when it is expanded out of its popup. */
 export type Panel = "workbench" | "inbox";
@@ -18,6 +18,7 @@ export type TaskSummary = TaskTarget & { title: string; status: WorkItem["status
 export type WorkspaceView = {
   workspaceId: string;
   workItems: WorkItem[];
+  workRequests: WorkRequest[];
   decisions: DecisionCard[];
   issues: Issue[];
   domains: DomainDefinition[];
@@ -130,8 +131,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         return;
       }
       try {
-        const [workItems, decisions, issues, domains, patrolRuns, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
+        const [workItems, workRequests, decisions, issues, domains, patrolRuns, docs, pendingDocChanges, roles, scheduler, runs, actions] = await Promise.all([
           client.request("workItem.list", { workspaceId }),
+          client.request("work.list", { workspaceId }),
           client.request("decision.list", { workspaceId }),
           client.request("issue.list", { workspaceId }),
           client.request("domain.list", { workspaceId }),
@@ -144,7 +146,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           client.request("action.list", { workspaceId })
         ]);
         if (generation !== viewGeneration) return;
-        set({ view: { workspaceId, workItems, decisions, issues, domains, patrolRuns, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
+        set({ view: { workspaceId, workItems, workRequests, decisions, issues, domains, patrolRuns, docs, pendingDocChanges, roles, scheduler, runs, actions }, viewError: undefined });
       } catch (error) {
         if (generation !== viewGeneration) return;
         set({ viewError: (error as Error).message });
@@ -246,6 +248,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
               return;
             case "workItems.changed":
               void loadTasks();
+              if (event.workspaceId === get().browsingWorkspaceId) void loadView();
+              void loadInbox();
+              return;
+            case "workRequests.changed":
               if (event.workspaceId === get().browsingWorkspaceId) void loadView();
               void loadInbox();
               return;
