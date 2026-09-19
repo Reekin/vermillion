@@ -531,6 +531,154 @@ describe("SessionIndexStore", () => {
     expect(persistenceState.saveCalls).toBe(readSaveCalls);
   });
 
+  it("keeps completion notifications acknowledged across replay and exposes only later completions", async () => {
+    const baseDir = await createTempDir();
+    const store = new SessionIndexStore({ baseDir });
+    await store.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        createdAt: "2026-04-18T00:00:01Z",
+        updatedAt: "2026-04-18T00:00:01Z"
+      }
+    });
+
+    const first = { turnId: "turn-1", completedAt: "2026-04-18T00:00:02Z" };
+    const second = { turnId: "turn-2", completedAt: "2026-04-18T00:00:03Z" };
+    await store.markSessionUnreadCompleted("session-1", first);
+    await store.markSessionRead("session-1", first);
+    await store.markSessionUnreadCompleted("session-1", first);
+    await store.markSessionUnreadCompleted("session-1", {
+      ...first,
+      completedAt: "2026-04-18T00:00:02.008Z"
+    });
+    expect(store.getEntry("session-1")).toMatchObject({
+      unreadState: "read",
+      latestCompletionNotice: first,
+      acknowledgedCompletionNotice: first
+    });
+
+    await store.markSessionUnreadCompleted("session-1", second);
+    await store.markSessionRead("session-1", first);
+    await store.markSessionUnreadCompleted("session-1", first);
+    expect(store.getEntry("session-1")).toMatchObject({
+      unreadState: "unread_completed",
+      latestCompletionNotice: second,
+      acknowledgedCompletionNotice: first
+    });
+
+    const reloaded = new SessionIndexStore({ baseDir });
+    await reloaded.ready();
+    expect(reloaded.getEntry("session-1")).toMatchObject({
+      unreadState: "unread_completed",
+      latestCompletionNotice: second,
+      acknowledgedCompletionNotice: first
+    });
+  });
+
+  it("acknowledges one fork tree atomically without clearing hidden branches or subagent trees", async () => {
+    const baseDir = await createTempDir();
+    const store = new SessionIndexStore({ baseDir });
+    for (const sessionId of ["root", "branch", "hidden", "subagent"]) {
+      await store.upsertSession({
+        workspaceId: "workspace-1",
+        session: {
+          sessionId,
+          conversationId: `conversation-${sessionId}`,
+          engineId: "codex",
+          createdAt: "2026-04-18T00:00:01Z",
+          updatedAt: "2026-04-18T00:00:01Z"
+        },
+        unreadState: "unread_completed"
+      });
+    }
+    await store.upsertRelation({ workspaceId: "workspace-1", parentSessionId: "root",
+      childSessionId: "branch", relationType: "fork" });
+    await store.upsertRelation({ workspaceId: "workspace-1", parentSessionId: "root",
+      childSessionId: "hidden", relationType: "fork" });
+    await store.upsertRelation({ workspaceId: "workspace-1", parentSessionId: "root",
+      childSessionId: "subagent", relationType: "subagent" });
+    await store.hideSession("hidden");
+
+    await store.markTreeRead("branch");
+
+    expect(store.getEntry("root")?.unreadState).toBe("read");
+    expect(store.getEntry("branch")?.unreadState).toBe("read");
+    expect(store.getEntry("hidden")?.unreadState).toBe("unread_completed");
+    expect(store.getEntry("subagent")?.unreadState).toBe("unread_completed");
+  });
+
+  it("does not acknowledge a first completion that was absent from the caller's tree snapshot", async () => {
+    const baseDir = await createTempDir();
+    const store = new SessionIndexStore({ baseDir });
+    await store.upsertSession({
+      workspaceId: "workspace-1",
+      session: {
+        sessionId: "session-1",
+        conversationId: "conversation-1",
+        engineId: "codex",
+        createdAt: "2026-04-18T00:00:01Z",
+        updatedAt: "2026-04-18T00:00:01Z"
+      }
+    });
+    const capturedNotices = new Map();
+    const completion = { turnId: "turn-after-open", completedAt: "2026-04-18T00:00:02Z" };
+    await store.markSessionUnreadCompleted("session-1", completion);
+
+    await store.markTreeRead("session-1", capturedNotices);
+
+    expect(store.getEntry("session-1")).toMatchObject({
+      unreadState: "unread_completed",
+      latestCompletionNotice: completion
+    });
+    expect(store.getEntry("session-1")?.acknowledgedCompletionNotice).toBeUndefined();
+  });
+
+  it("acknowledges a list notification when that exact completed turn becomes visible", async () => {
+    const baseDir = await createTempDir();
+    const store = new SessionIndexStore({ baseDir });
+    await store.upsertSession({ workspaceId: "workspace-1", session: {
+      sessionId: "session-1", conversationId: "conversation-1", engineId: "codex",
+      createdAt: "2026-04-18T00:00:01Z", updatedAt: "2026-04-18T00:00:01Z"
+    } });
+    const completion = { turnId: "turn-visible", completedAt: "2026-04-18T00:00:02Z" };
+    await store.markSessionUnreadCompleted("session-1", completion);
+
+    await store.markTurnsRead([{ sessionId: "session-1", turnId: "turn-visible" }]);
+
+    expect(store.getEntry("session-1")).toMatchObject({
+      unreadState: "read",
+      latestCompletionNotice: completion,
+      acknowledgedCompletionNotice: completion,
+      readTurnIds: ["turn-visible"]
+    });
+  });
+
+  it("derives unread state from completion watermarks during delayed session updates", async () => {
+    const baseDir = await createTempDir();
+    const store = new SessionIndexStore({ baseDir });
+    const session = {
+      sessionId: "session-1", conversationId: "conversation-1", engineId: "codex",
+      createdAt: "2026-04-18T00:00:01Z", updatedAt: "2026-04-18T00:00:01Z"
+    };
+    await store.upsertSession({ workspaceId: "workspace-1", session });
+    const completion = { turnId: "turn-1", completedAt: "2026-04-18T00:00:02Z" };
+    await store.markSessionUnreadCompleted("session-1", completion);
+    await store.markSessionRead("session-1", completion);
+
+    await store.upsertSession({ workspaceId: "workspace-1", session: {
+      ...session, updatedAt: "2026-04-18T00:00:03Z"
+    }, unreadState: "unread_completed" });
+
+    expect(store.getEntry("session-1")).toMatchObject({
+      unreadState: "read",
+      latestCompletionNotice: completion,
+      acknowledgedCompletionNotice: completion
+    });
+  });
+
   it("persists session entries, relations, and unread state across reloads", async () => {
     const baseDir = await createTempDir();
     const store = new SessionIndexStore({

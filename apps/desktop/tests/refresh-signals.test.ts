@@ -125,7 +125,7 @@ describe("renderer refresh signals", () => {
     });
   });
 
-  it("keeps chat-tree-only graph updates out of the session browser", () => {
+  it("refreshes both the chat tree and its aggregated session row for graph updates", () => {
     const signals = advance([
       {
         type: "session.created",
@@ -159,7 +159,7 @@ describe("renderer refresh signals", () => {
     ]);
 
     expect(signals).toEqual({
-      sessionBrowser: 2,
+      sessionBrowser: 3,
       chatTree: 2,
       engineExtensions: 0
     });

@@ -404,6 +404,7 @@ export const invalidatesSessionBrowser = (event: RuntimeEvent): boolean => {
     case "turn.started":
     case "turn.execution.updated":
     case "turn.completed":
+    case "conversationGraph.updated":
     case "approval.requested":
     case "interaction.requested":
       return true;

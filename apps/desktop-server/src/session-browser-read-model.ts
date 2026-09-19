@@ -128,9 +128,7 @@ const collectForkTrees = (seeds: readonly SessionBrowserReadModelSeed[]): Sessio
       isActive,
       statusDot: visibleMembers.some((member) => member.statusDot === "running")
         ? "running"
-        : isActive
-          ? "none"
-          : visibleMembers.some((member) => member.statusDot === "unread_completed") ? "unread_completed" : "none",
+        : visibleMembers.some((member) => member.statusDot === "unread_completed") ? "unread_completed" : "none",
       lastCompletedTurnAt,
       activityAt,
       sortAt: activityAt ?? root.sortAt

@@ -545,7 +545,11 @@ describe("DomainService", () => {
       finishReason: "completed"
     });
 
-    expect(markSessionUnreadCompleted).toHaveBeenCalledWith("session-1");
+    expect(markSessionUnreadCompleted).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      turnId: "turn-1",
+      completedAt: "2026-04-20T00:01:06Z"
+    });
     expect(service.getSnapshot().sessions).toEqual([
       expect.objectContaining({
         sessionId: "session-1",

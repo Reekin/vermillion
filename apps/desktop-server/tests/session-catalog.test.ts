@@ -301,6 +301,43 @@ describe("SessionCatalogService", () => {
     expect(indexStore.getEntry("session-1")?.unreadState).toBe("read");
   });
 
+  it("acknowledges every visible fork member without changing node reads or a subagent tree", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const indexStore = new SessionIndexStore({ baseDir });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha" });
+    const sessions = ["root", "branch", "subagent"].map((sessionId) => ({
+      sessionId, conversationId: `conversation-${sessionId}`, engineId: "codex",
+      status: "idle" as const, createdAt: "2026-04-18T00:00:01Z", updatedAt: "2026-04-18T00:00:04Z"
+    }));
+    for (const session of sessions) {
+      await indexStore.upsertSession({ workspaceId: "workspace-1", session, unreadState: "unread_completed" });
+    }
+    await indexStore.upsertRelation({ workspaceId: "workspace-1", parentSessionId: "root",
+      childSessionId: "branch", relationType: "fork" });
+    await indexStore.upsertRelation({ workspaceId: "workspace-1", parentSessionId: "root",
+      childSessionId: "subagent", relationType: "subagent" });
+    const runtimeService = {
+      getSnapshot: () => ({ ...emptySnapshot(), sessions, turns: [
+        { turnId: "root-turn", sessionId: "root", status: "completed", startedAt: "2026-04-18T00:00:01Z", completedAt: "2026-04-18T00:00:02Z" },
+        { turnId: "branch-turn", sessionId: "branch", status: "completed", startedAt: "2026-04-18T00:00:02Z", completedAt: "2026-04-18T00:00:03Z" },
+        { turnId: "subagent-turn", sessionId: "subagent", status: "completed", startedAt: "2026-04-18T00:00:03Z", completedAt: "2026-04-18T00:00:04Z" }
+      ] }),
+      getSessionBrowserRevision: () => 1
+    } as unknown as SessionRuntimeService;
+    const service = new SessionCatalogService({ runtimeService, workspaceRegistry, sessionIndexStore: indexStore });
+
+    await service.markSessionRead("branch");
+
+    expect(indexStore.getEntry("root")).toMatchObject({ unreadState: "read",
+      acknowledgedCompletionNotice: { turnId: "root-turn" } });
+    expect(indexStore.getEntry("branch")).toMatchObject({ unreadState: "read",
+      acknowledgedCompletionNotice: { turnId: "branch-turn" } });
+    expect(indexStore.getEntry("subagent")?.unreadState).toBe("unread_completed");
+    expect(indexStore.getEntry("root")?.readTurnIds).toBeUndefined();
+    expect(indexStore.getEntry("branch")?.readTurnIds).toBeUndefined();
+  });
+
   it("orders sessions by their last completed turn, ignoring live activity", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({
@@ -640,7 +677,7 @@ describe("SessionCatalogService", () => {
     });
   });
 
-  it("does not expose an unread dot for the active session", async () => {
+  it("does not hide a new unread dot merely because the tree remains active", async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({
       baseDir
@@ -706,7 +743,7 @@ describe("SessionCatalogService", () => {
     expect(page.items[0]).toMatchObject({
       sessionId: "session-1",
       isActive: true,
-      statusDot: "none"
+      statusDot: "unread_completed"
     });
   });
 

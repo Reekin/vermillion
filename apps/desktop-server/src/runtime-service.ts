@@ -83,8 +83,8 @@ export class SessionRuntimeService {
       publishRuntimeEvent: (event) => {
         this.publishRuntimeEvent(event);
       },
-      markSessionUnreadCompleted: (sessionId) => {
-        this.trackSessionIndexTask(this.markSessionUnreadCompleted(sessionId));
+      markSessionUnreadCompleted: (input) => {
+        this.trackSessionIndexTask(this.markSessionUnreadCompleted(input));
       }
     });
     this.eventBus = new RuntimeEventBus({
@@ -220,18 +220,33 @@ export class SessionRuntimeService {
       ?? this.sessionIndexStore?.getEntry(sessionId)?.conversationId;
   }
 
-  private async markSessionUnreadCompleted(sessionId: string): Promise<void> {
+  private async markSessionUnreadCompleted(input: {
+    sessionId: string;
+    turnId: string;
+    completedAt: string;
+  }): Promise<void> {
     if (!this.sessionIndexStore) {
       return;
     }
+    let acknowledged = false;
     if (this.workspaceRegistry) {
       await this.workspaceRegistry.ready();
-      if (this.workspaceRegistry.getState().lastActiveSessionId === sessionId) {
-        await this.sessionIndexStore.markSessionRead(sessionId);
-        return;
-      }
+      const activeSessionId = this.workspaceRegistry.getState().lastActiveSessionId;
+      const view = activeSessionId
+        ? this.sessionIndexStore.getTreeView(activeSessionId)
+        : undefined;
+      acknowledged = Boolean(
+        activeSessionId &&
+        (view
+          ? view.sessionId === input.sessionId && view.followTip !== false
+          : activeSessionId === input.sessionId)
+      );
     }
-    await this.sessionIndexStore.markSessionUnreadCompleted(sessionId);
+    await this.sessionIndexStore.markSessionUnreadCompleted(
+      input.sessionId,
+      { turnId: input.turnId, completedAt: input.completedAt },
+      acknowledged
+    );
   }
 
   public resolveProviderSessionHandle(
