@@ -1,14 +1,14 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createFileWorkspaceSource } from "./file-workspace-source.js";
-import { connectLocalEndpoint } from "./local-endpoint.js";
+import { connectLocalEndpoint, type LocalEndpointTarget } from "./local-endpoint.js";
 import { workbenchRpc } from "./rpc.js";
 import { createWorkbenchRpcHandler } from "./rpc-handler.js";
 import { RoleService } from "./roles.js";
 import { WorkbenchService } from "./workbench-service.js";
-import { AppLauncher, resolveAppCommand } from "./app-launcher.js";
+import { AppLauncher } from "./app-launcher.js";
 import { methodHelp } from "./cli-help.js";
 import { createFileSessionSearchSource, defaultCodexRolloutsDir } from "./search.js";
 
@@ -37,6 +37,14 @@ export const runCli = async (argv: string[]): Promise<number> => {
 };
 
 const executeCli = async (argv: string[]): Promise<number> => {
+  let target: LocalEndpointTarget | undefined;
+  if (argv[0] === "--target") {
+    const path = argv[1];
+    if (!path) throw new Error("--target requires the descriptor returned by app.start");
+    target = JSON.parse(readFileSync(resolve(path), "utf8")) as LocalEndpointTarget;
+    if (!target.dataDir || !Number.isInteger(target.pid) || !target.instanceId) throw new Error("Invalid app.start target descriptor: " + path);
+    argv = argv.slice(2);
+  }
   const [method, rawParams] = argv;
   const helpMethod = method === "help" || method === "--help" || method === "-h" ? rawParams : rawParams === "--help" || rawParams === "-h" ? method : undefined;
   if (helpMethod) {
@@ -46,7 +54,7 @@ const executeCli = async (argv: string[]): Promise<number> => {
     return 0;
   }
   if (!method || method === "--help" || method === "-h") {
-    process.stdout.write("usage: vermillion <method> [json-params]\n单方法帮助: vermillion <method> --help\n\nmethods:\n" + [...Object.keys(workbenchRpc), ...desktopSessionMethods].map((m) => "  " + m).join("\n") + "\n");
+    process.stdout.write("usage: vermillion [--target <app.start target file>] <method> [json-params]\n单方法帮助: vermillion <method> --help\n\nmethods:\n" + [...Object.keys(workbenchRpc), ...desktopSessionMethods].map((m) => "  " + m).join("\n") + "\n");
     return method ? 0 : 1;
   }
   const desktopSessionMethod = desktopSessionMethods.includes(method);
@@ -54,22 +62,22 @@ const executeCli = async (argv: string[]): Promise<number> => {
     process.stderr.write("unknown method: " + method + "\n");
     return 1;
   }
-  const baseDir = process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion");
+  const baseDir = target?.dataDir ?? (process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion"));
   const request = { method, params: rawParams ? JSON.parse(rawParams) : {} };
   // Acceptance instances belong to the CLI's checkout/release, not a running desktop's build.
   const localAppMethod = method === "app.start" || method === "app.stop";
-  const remote = localAppMethod ? undefined : await connectLocalEndpoint(baseDir);
+  if (target && localAppMethod) throw new Error("--target is for RPC calls to a running instance; app.start/app.stop use their explicit target parameters");
+  const remote = localAppMethod ? undefined : await connectLocalEndpoint(baseDir, target);
   if (desktopSessionMethod && !remote) {
     process.stderr.write(method + " 需要运行 Vermillion 桌面应用。\n");
     return 1;
   }
   const roles = new RoleService({ globalDir: join(baseDir, "roles"), defaultsDir: shippedRoleDefaultsDir() });
-  const packageRoot = fileURLToPath(new URL("..", import.meta.url));
   const service = remote ? undefined : new WorkbenchService({
     workspaces: createFileWorkspaceSource(join(baseDir, "workspace-registry.json")), roles,
     sessionSearch: createFileSessionSearchSource(baseDir),
     rolloutsDir: defaultCodexRolloutsDir(),
-    launcher: localAppMethod ? new AppLauncher({ command: resolveAppCommand(packageRoot), packageRoot }) : undefined
+    launcher: localAppMethod ? new AppLauncher() : undefined
   });
   try {
     if (service) await roles.ensureGlobal();

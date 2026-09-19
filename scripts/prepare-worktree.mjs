@@ -48,15 +48,38 @@ for (const key of Object.keys(env)) {
 delete env.npm_config_recursive;
 delete env.PNPM_SCRIPT_SRC_DIR;
 
-const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const result = spawnSync(command, ["install", "--frozen-lockfile"], {
+const command = process.platform === "win32" && process.env.APPDATA
+  ? resolve(process.env.APPDATA, "npm", "pnpm.cmd")
+  : "pnpm";
+const run = (args) => spawnSync(command, args, {
   cwd: target,
   env,
-  shell: process.platform === "win32",
   stdio: "inherit"
 });
-if (result.error) {
-  process.stderr.write(`${result.error.message}\n`);
+const install = run(["install", "--frozen-lockfile"]);
+if (install.error) {
+  process.stderr.write(`Dependency installation failed: ${install.error.message}\n`);
   process.exit(1);
 }
-process.exit(result.status ?? 1);
+if (install.status !== 0) {
+  process.stderr.write(`Dependency installation failed with exit code ${install.status ?? 1}.\n`);
+  process.exit(install.status ?? 1);
+}
+process.stdout.write("Dependencies ready. Building workspace packages required by project checks...\n");
+const build = run([
+  "--filter", "@vermillion/shared",
+  "--filter", "@vermillion/core",
+  "--filter", "@vermillion/adapters",
+  "--filter", "@vermillion/desktop-server",
+  "--filter", "@vermillion/workbench",
+  "--workspace-concurrency=1", "build"
+]);
+if (build.error) {
+  process.stderr.write(`Workspace build failed: ${build.error.message}\n`);
+  process.exit(1);
+}
+if (build.status !== 0) {
+  process.stderr.write(`Workspace build failed with exit code ${build.status ?? 1}.\n`);
+  process.exit(build.status ?? 1);
+}
+process.stdout.write(`Worktree ready: dependencies installed and workspace packages built in ${target}\n`);

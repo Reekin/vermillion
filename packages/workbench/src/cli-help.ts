@@ -34,8 +34,8 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "workItem.integration.retry": "合入失败且尚未交给 Agent 的工单；立即重试当前合入，不等待自动重试时间。",
   "workItem.integration.takeover": "合入失败且尚未交给 Agent 的工单；停止自动合入重试，附说明交给原 Worker 处理。",
   "workItem.integration.complete": "已接管合入的原 Worker；处理 worktree/rebase 后请求工作台在串行边界执行最终合入。",
-  "app.start": "本地启动隔离验收实例；可用 fixture=session-tree 或 real-session，返回 pid、CDP、隔离路径和 fixture 身份。",
-  "app.stop": "停止 app.start 返回的验收实例。",
+  "app.start": "本地构建并启动 targetPath 指定的源码 checkout 或发布产物；可用 fixture=session-tree 或 real-session，返回候选、构建、实例、定向 CLI 与隔离引擎身份。",
+  "app.stop": "按 dataDir、pid 与 instanceId 停止 app.start 登记的实例，确认进程退出和 CDP 端口释放。",
   "app.window": "本地控制 app.start 返回实例的窗口；status 查询，minimize 最小化，restore 恢复并激活。",
   "asksource": "当前执行中工单的 Worker；从工单记录的开单位置临时询问来源设计伙伴并等待答复。",
   "steer": "桌面在线；向任意可访问会话追加当前轮或启动该会话的新轮。sessionId 接受工作台会话 ID 或引擎会话标识（如子代理返回的 id）。",
@@ -74,6 +74,16 @@ function describe(schema: z.ZodTypeAny, sample = false, key = "value"): unknown 
 }
 
 export function methodHelp(method: string): string | undefined {
+  if (method === "app.start") return [
+    "app.start",
+    "适用状态：本地构建并启动明确身份的隔离验收候选。源码 checkout 必须传 expectedRevision，且工作树干净；发布目录必须传 expectedBuildId。成功返回实际 buildId、instanceId、日志、完整隔离环境与定向 CLI 命令。",
+    "源码示例：",
+    "vermillion app.start '{\"targetPath\":\"X:/project-worktree\",\"expectedRevision\":\"<full-commit>\",\"dataDir\":\"X:/qa/data\",\"port\":14961,\"fixture\":\"session-tree\"}'",
+    "发布示例：",
+    "vermillion app.start '{\"targetPath\":\"X:/release/vermillion\",\"expectedBuildId\":\"sha256:<hash>\",\"dataDir\":\"X:/qa/data\",\"port\":14961}'",
+    "返回的 cli.executable 与 cli.args 是绑定本次实例的完整命令前缀；同一 dataDir 重启不会改写旧实例的 target descriptor。",
+    ""
+  ].join("\n");
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
     "sessionBrowser.list": { params: "workspaceId: string; kind?: user | agent", state: "桌面在线；一次返回该 workspace 会话列表的全部行与当前 revision。", example: { workspaceId: "<workspaceId>" } },
     "sessionBrowser.changes": { params: "workspaceId: string; revision: string; kind?: user | agent", state: "桌面在线；返回自该 revision 以来变化的行与被移除的行标识；revision 不可用时返回 full-required。", example: { workspaceId: "<workspaceId>", revision: "<revision>" } },

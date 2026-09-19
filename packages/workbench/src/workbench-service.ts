@@ -24,7 +24,7 @@ import { effectiveNeeds, actionIsOpen, projectWorkItem, type ExecutionNotice, ty
 import type { SessionNavigationPort } from "./session-navigation.js";
 import { DocDraftConflict, DocsService, WorktreeMergeConflict, WorktreeNotReady, draftKey, listTrackedDirectories, type DocDraft } from "./docs.js";
 import { RoleService } from "./roles.js";
-import type { AppLauncher, AppStartInput, AppStartResult, AppWindowInput, AppWindowResult } from "./app-launcher.js";
+import type { AppLauncher, AppStartInput, AppStartResult, AppStopInput, AppStopResult, AppWindowInput, AppWindowResult } from "./app-launcher.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { diagnose } from "./diagnosis.js";
 import { runtimeInfo } from "./runtime-info.js";
@@ -507,9 +507,9 @@ export class WorkbenchService {
     return this.launcher.start(input);
   }
 
-  async stopApp(pid: number): Promise<void> {
+  async stopApp(input: AppStopInput): Promise<AppStopResult> {
     if (!this.launcher) throw new Error("app.stop is only available while the desktop is running");
-    await this.launcher.stop(pid);
+    return this.launcher.stop(input);
   }
 
   async controlAppWindow(input: AppWindowInput): Promise<AppWindowResult> {

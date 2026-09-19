@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,5 +46,32 @@ describe("session-tree fixture preparation", () => {
 
     await expect(prepareSessionTreeFixture(dataDir, "I:/fixture-package"))
       .rejects.toThrow("without unrelated workspaces");
+  });
+
+  it("implements the config and skills handshake used when fixed history opens", async () => {
+    const script = join(import.meta.dirname, "..", "scripts", "session-tree-fixture-codex.mjs");
+    const child = spawn(process.execPath, [script, "app-server"], {
+      env: { ...process.env, VERMILLION_SESSION_TREE_FIXTURE_PROJECT: "I:/fixture-project" },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const responses: Array<{ id?: number; result?: unknown }> = [];
+    let pending = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) if (line.trim()) responses.push(JSON.parse(line));
+    });
+    try {
+      child.stdin.write(JSON.stringify({ id: 1, method: "config/read", params: { includeLayers: false, cwd: null } }) + "\n");
+      child.stdin.write(JSON.stringify({ id: 2, method: "skills/list", params: {} }) + "\n");
+      await expect.poll(() => responses).toEqual([
+        { id: 1, result: { config: { developer_instructions: null } } },
+        { id: 2, result: { data: [] } }
+      ]);
+    } finally {
+      child.kill();
+    }
   });
 });
