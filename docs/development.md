@@ -4,13 +4,13 @@
 
 启动、检查和打包命令见[AGENTS.md](../AGENTS.md#运行与验证)。`start.bat` 会在源码更新后自动构建。
 
-新 worktree 第一次运行检查前执行 `pnpm prepare:worktree -- --worktree "<worktree>"`，或执行 `prepare-worktree.bat "<worktree>"`。命令在目标目录使用 `pnpm install --frozen-lockfile`，清除上层 npm/pnpm 生命周期变量，不修改其他目录的依赖。
+新 worktree 第一次运行检查前执行 `pnpm prepare:worktree -- --worktree "<worktree>"`，或执行 `prepare-worktree.bat "<worktree>"`。准备完成条件见[开发环境准备](../.vermillion/docs/Foundation/Development/PRD.md)。
 
-Worker / Verifier 用 `vermillion app.start '{"dataDir":"<独立目录>","port":<可用端口>}'` 启动实例，按返回的 CDP 地址操作，用 `vermillion app.stop '{"pid":<返回的pid>}'` 结束实例。不要连接用户正在运行的验收无关实例。
+Worker / Verifier 通过 `app.start / app.stop` 启停实例，先用单方法 `--help` 查询目标、候选与隔离参数，显式指定被测 checkout 或发布目录。按启动结果的 CDP 地址与定向 CLI 调用信息操作，目标与生命周期规则见[隔离实例准备](../.vermillion/docs/Foundation/Acceptance/PRD.md)。
 
-需要会话列表父子关系时，使用 `vermillion app.start '{"dataDir":"<独立目录>","port":<可用端口>,"fixture":"session-tree"}'`。返回结果同时给出 `dataDir`、`projectPath` 和 `workspaceId`；连接返回的 CDP 地址后即可使用固定父会话、子会话和普通会话，不再手工注册项目、生成会话或重启实例。
+需要固定会话列表父子关系时，启动参数选择 `fixture: "session-tree"`，使用返回的 `projectPath`、`workspaceId` 与连接信息。
 
-需要真实发送、fork 或 Worker 时，使用 `vermillion app.start '{"dataDir":"<独立目录>","port":<可用端口>,"fixture":"real-session"}'`；指定配置来源可加 `codexConfigSource`。从返回的测试 workspace 创建真实会话与本单场景；重启沿用同一 dataDir。准备行为、返回字段与隔离边界见[隔离实例准备](../.vermillion/docs/Foundation/Acceptance/PRD.md)，不把固定历史夹具扩写成动态引擎替身。
+需要真实发送、fork 或 Worker 时，启动参数选择 `fixture: "real-session"`；指定配置来源可加 `codexConfigSource`。从返回的测试 workspace 创建真实会话与本单场景，外部引擎 CLI 复用启动结果的完整隔离环境；重启沿用同一 dataDir。准备行为、返回字段与隔离边界见[隔离实例准备](../.vermillion/docs/Foundation/Acceptance/PRD.md)。
 
 窗口隐藏／恢复使用 `vermillion app.window '{"pid":<本次实例pid>,"action":"minimize"}'` 或 `restore`，查询用 `status`；随后经 CDP 核对页面可见性及目标行为。最终仍通过 `app.stop` 结束实例。
 
