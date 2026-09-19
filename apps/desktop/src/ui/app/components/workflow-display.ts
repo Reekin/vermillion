@@ -186,7 +186,8 @@ const eventFromHistory = (entry: { at: string; event: string; message: string },
   if (entry.event.startsWith("failed:")) return { at: entry.at, title: kind === "integration" ? "合入检查未通过" : "Worker 执行遇到问题", detail: rejectionSummary(entry.message) };
   if (entry.event === "resolved") {
     if (kind === "integration" && /转回原 Worker|冲突|失败|未通过/i.test(entry.message)) return { at: entry.at, title: "合入检查未通过", detail: rejectionSummary(entry.message) };
-    return { at: entry.at, title: kind === "integration" ? "合入处置完成" : "本轮执行结束", detail: entry.message.split("\n")[0] };
+    const detail = kind === "execute" && /工单已进入\s+\w+/i.test(entry.message) ? "本轮执行已交接后续处理。" : entry.message.split("\n")[0];
+    return { at: entry.at, title: kind === "integration" ? "合入处置完成" : "本轮执行结束", detail };
   }
   if (["contract.updated", "dependency.updated"].includes(entry.event)) return { at: entry.at, title: "合同或依赖已调整", detail: entry.message.split("\n")[0] };
   return undefined;

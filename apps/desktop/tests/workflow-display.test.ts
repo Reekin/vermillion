@@ -63,6 +63,14 @@ describe("execution and integration presentation", () => {
     expect(events.every((event) => !event.title.includes("stage") && !event.title.includes("done"))).toBe(true);
   });
 
+  it("does not expose internal work-item stage messages in event details", () => {
+    const item = { workItemId: "one", status: "closed", dependsOn: [], rejections: [], run: {} } as WorkItem;
+    const actions = [{ actionId: "worker", kind: "execute", workItemId: "one", status: "done", stage: "execute", updatedAt: "2026-01-01T00:00:02.000Z", attempts: 0, notices: [], history: [
+      { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: "工单已进入 merging" }
+    ] } as WorkflowAction];
+    expect(workItemEvents(item, actions, [])[0]?.detail).toBe("本轮执行已交接后续处理。");
+  });
+
   it("labels a resolved handoff caused by a merge failure as a failed check", () => {
     const item = { workItemId: "one", status: "queued", dependsOn: [], rejections: [], run: {} } as WorkItem;
     const actions = [{ actionId: "merge", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:02.000Z", attempts: 0, history: [
