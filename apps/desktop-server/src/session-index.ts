@@ -25,6 +25,8 @@ const sessionIndexEntrySchema = z.object({
   lastCompletedTurnAt: z.string().min(1).optional(),
   lastUserMessageAt: z.string().min(1).optional(),
   archivedAt: z.string().min(1).optional(),
+  /** 分支隐藏标记：只影响会话树展示，与引擎归档状态互不影响。 */
+  hiddenAt: z.string().min(1).optional(),
   lastTurnId: z.string().min(1).optional(),
   unreadState: unreadStateSchema.default("read"),
   readTurnIds: z.array(z.string().min(1)).optional(),
@@ -131,6 +133,7 @@ const isSameSessionEntry = (
   left.lastCompletedTurnAt === right.lastCompletedTurnAt &&
   left.lastUserMessageAt === right.lastUserMessageAt &&
   left.archivedAt === right.archivedAt &&
+  left.hiddenAt === right.hiddenAt &&
   left.lastTurnId === right.lastTurnId &&
   left.unreadState === right.unreadState &&
   isDeepStrictEqual(left.readTurnIds, right.readTurnIds) &&
@@ -165,17 +168,22 @@ type MutationResult<T> = {
   changed: boolean;
 };
 
-const archiveSubagentSessions = (
+/**
+ * 归档级联。显式归档以整棵会话树为单位（fork + subagent），不留下祖先已归档、后代仍活跃的成员；
+ * 载入时的归一化只沿 subagent 关系补标记，不追加归档既有的活跃分支。
+ */
+const cascadeArchivedSessions = (
   document: SessionIndexDocument,
   rootSessionIds: readonly string[],
-  archivedAt?: string
+  archivedAt: string | undefined,
+  relationTypes: readonly SessionRelationIndex["relationType"][]
 ): MutationResult<SessionIndexDocument> & { archivedEntries: SessionIndexEntry[] } => {
   const entriesBySessionId = new Map(
     document.entries.map((entry) => [entry.sessionId, entry] as const)
   );
   const childrenByParentId = new Map<string, string[]>();
   for (const relation of document.relations) {
-    if (relation.relationType !== "subagent") {
+    if (!relationTypes.includes(relation.relationType)) {
       continue;
     }
     const children = childrenByParentId.get(relation.parentSessionId) ?? [];
@@ -290,14 +298,8 @@ export class SessionIndexStore {
         }
       }
     }
-    const retained = new Set(members.filter((id) => !this.getEntry(id)?.archivedAt));
-    for (const id of [...members].reverse()) {
-      if (!retained.has(id)) continue;
-      const parent = this.document.relations.find((relation) =>
-        relation.relationType === "fork" && relation.childSessionId === id)?.parentSessionId;
-      if (parent) retained.add(parent);
-    }
-    return members.filter((id) => retained.has(id));
+    // 隐藏分支仍是普通会话，继续作为成员提供共享历史；归档会话不再参与会话树。
+    return members.filter((id) => !this.getEntry(id)?.archivedAt);
   }
 
   public getTreeView(sessionId: string): SessionIndexDocument["treeViews"][string] | undefined {
@@ -405,6 +407,7 @@ export class SessionIndexStore {
       lastUserMessageAt:
         input.lastUserMessageAt ?? existing?.lastUserMessageAt,
       archivedAt: input.session.archivedAt ?? existing?.archivedAt,
+      hiddenAt: existing?.hiddenAt,
       lastTurnId: input.session.lastTurnId,
       unreadState: input.unreadState ?? existing?.unreadState ?? "read",
       readTurnIds: existing?.readTurnIds,
@@ -457,6 +460,7 @@ export class SessionIndexStore {
         )
       );
       const archivedAt = this.now();
+      // Repair 只记录本次扫描实际缺失的 entry；整树级联属于用户显式归档入口。
       for (const [sessionId, existing] of entriesBySessionId) {
         if (
           existing.workspaceId === input.workspaceId &&
@@ -516,6 +520,7 @@ export class SessionIndexStore {
     }
   }
 
+  /** 只记录当前实际观察到的会话归档事实，不推断或迁移 fork 后代。 */
   public async archiveSession(
     sessionId: string,
     archivedAt = this.now()
@@ -542,6 +547,23 @@ export class SessionIndexStore {
     return archived;
   }
 
+  /** 分支隐藏只改会话树展示，不触碰引擎会话和归档状态。 */
+  public async hideSession(
+    sessionId: string,
+    hiddenAt = this.now()
+  ): Promise<SessionIndexEntry | undefined> {
+    await this.ready();
+    const existing = this.getEntry(sessionId);
+    if (!existing || existing.hiddenAt) {
+      return existing;
+    }
+    const hidden = sessionIndexEntrySchema.parse({ ...existing, hiddenAt });
+    const mutation = this.replaceEntryInMemory(existing, hidden);
+    await this.persistMutation(mutation.changed);
+    return mutation.value;
+  }
+
+  /** 用户显式归档入口：把给定会话及其 fork / subagent 后代作为整棵树归档。 */
   public async archiveSessions(
     sessionIds: readonly string[],
     archivedAt = this.now()
@@ -550,7 +572,7 @@ export class SessionIndexStore {
     if (sessionIds.length === 0) {
       return [];
     }
-    const result = archiveSubagentSessions(this.document, sessionIds, archivedAt);
+    const result = cascadeArchivedSessions(this.document, sessionIds, archivedAt, ["fork", "subagent"]);
     this.document = result.value;
     await this.persist();
     return result.archivedEntries;
@@ -715,14 +737,16 @@ export class SessionIndexStore {
     if (!parsed.success) {
       throw new PersistentStoreCorruptionError(this.filePath, parsed.error);
     }
-    const normalized = archiveSubagentSessions(
+    const normalized = cascadeArchivedSessions(
       {
         ...parsed.data,
         entries: sortEntries(parsed.data.entries)
       },
       parsed.data.entries
         .filter((entry) => entry.archivedAt)
-        .map((entry) => entry.sessionId)
+        .map((entry) => entry.sessionId),
+      undefined,
+      ["subagent"]
     );
     this.document = normalized.value;
     this.revision += 1;

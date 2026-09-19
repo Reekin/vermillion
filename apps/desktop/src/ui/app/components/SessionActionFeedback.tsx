@@ -3,17 +3,19 @@ import type { SessionMenu } from "../use-session-actions.js";
 import { cn } from "../lib/cn.js";
 import { ContextMenu } from "./ContextMenu.js";
 
-type Props = {
-  menu: SessionMenu | undefined;
+type Props<TAction extends string> = {
+  menu: SessionMenu<TAction> | undefined;
   onCloseMenu: () => void;
-  onRunAction: (sessionId: string, action: SessionActionDescriptorRpc["action"]) => void;
+  onRunAction: (sessionId: string, action: TAction) => void;
   /** Session rows add a rename entry driven by the app shell; other menus leave it out. */
   onOpenRename?: (sessionId: string, title: string) => void;
   notice: { text: string; error?: boolean } | undefined;
   onClearNotice: () => void;
 };
 
-export const SessionActionFeedback = ({ menu, onCloseMenu, onRunAction, onOpenRename, notice, onClearNotice }: Props) => {
+export const SessionActionFeedback = <TAction extends string = SessionActionDescriptorRpc["action"]>(
+  { menu, onCloseMenu, onRunAction, onOpenRename, notice, onClearNotice }: Props<TAction>
+) => {
   const renameTitle = menu?.title;
   return (
     <>

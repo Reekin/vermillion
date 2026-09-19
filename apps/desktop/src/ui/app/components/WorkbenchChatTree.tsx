@@ -20,7 +20,7 @@ type Props = ChatTreePanelProps & {
 
 export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancelOperation, ...props }: Props) => {
   const [expandedTree, setExpandedTree] = useState<string>();
-  const [menu, setMenu] = useState<SessionMenu & { nodeId: string }>();
+  const [menu, setMenu] = useState<SessionMenu<ChatTreeNodeActionInput["action"]> & { nodeId: string }>();
   const [operationMenu, setOperationMenu] = useState<{
     operationId: string; action: "cancel" | "remove"; x: number; y: number;
   }>();
@@ -97,7 +97,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
         { action: "copy_session_id", label: "复制 session id" },
         { action: "copy_awb_session_id", label: "复制内部 session id" },
         { action: "open_rollout", label: "Open rollout" },
-        { action: "archive", label: "删除分支", disabled: !node.canArchive }
+        { action: "hide_branch", label: "删除分支", disabled: !node.canHide }
       ] });
     }}
     onOperationContextMenu={(event, operationId) => {
@@ -120,9 +120,8 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
       </li>)}</ul>
     </div>} />
     <SessionActionFeedback menu={menu} onCloseMenu={() => setMenu(undefined)}
-      onRunAction={(_sessionId, action) => {
-        if (action === "copy_session_id" || action === "copy_awb_session_id" || action === "open_rollout" || action === "archive") void runNodeAction(action);
-      }} notice={notice} onClearNotice={() => setNotice(undefined)} />
+      onRunAction={(_sessionId, action) => { void runNodeAction(action); }}
+      notice={notice} onClearNotice={() => setNotice(undefined)} />
     {operationMenu && <ContextMenu x={operationMenu.x} y={operationMenu.y}
       onClose={() => setOperationMenu(undefined)} items={[{
         key: operationMenu.action,

@@ -3,8 +3,17 @@ import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { writeClipboardText } from "../chat-shell/clipboard.js";
 
-/** Session rows also carry the displayed title so the rename entry can prefill the current name. */
-export type SessionMenu = { sessionId: string; title?: string; x: number; y: number; actions: SessionActionDescriptorRpc[] };
+/**
+ * 右键菜单按动作集合参数化：会话行用会话动作，会话树节点用节点动作。
+ * Session rows also carry the displayed title so the rename entry can prefill the current name.
+ */
+export type SessionMenu<TAction extends string = SessionActionDescriptorRpc["action"]> = {
+  sessionId: string;
+  title?: string;
+  x: number;
+  y: number;
+  actions: (Omit<SessionActionDescriptorRpc, "action"> & { action: TAction })[];
+};
 
 export type SessionRename = { sessionId: string; title: string; busy: boolean; error?: string };
 

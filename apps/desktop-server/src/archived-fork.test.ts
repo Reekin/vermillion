@@ -110,6 +110,15 @@ it("repairs a missing archive marker from the provider without breaking the firs
     expect(reloaded.getTreeMembers("root")).toEqual(["root"]);
     await service.get("root");
     expect(hydrate).toHaveBeenCalledTimes(1);
+
+    // Provider 对账只补当前成员的归档标记，不把仍活跃的 fork 后代迁移成归档。
+    await index.upsertSession({ workspaceId: "workspace", providerKind: "codex-thread", providerSessionId: "descendant-provider",
+      session: { ...snapshot.sessions[0]!, sessionId: "descendant" } });
+    await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "clarification", childSessionId: "descendant",
+      relationType: "fork", sourceTurnId: "root-turn" });
+    expect(await reconciliation.ensureSessionLoaded("clarification", { force: true })).toBe(false);
+    expect(index.getEntry("descendant")?.archivedAt).toBeUndefined();
+
     await index.upsertSession({ workspaceId: "workspace", providerKind: "codex-thread", providerSessionId: "live-provider",
       session: { ...snapshot.sessions[0]!, sessionId: "live" } });
     await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "root", childSessionId: "live", relationType: "fork", sourceTurnId: "root-turn" });
