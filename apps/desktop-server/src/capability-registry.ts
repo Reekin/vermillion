@@ -50,12 +50,13 @@ export type SessionActionResult =
   | { action: "pin"; pinned: true }
   | { action: "refresh"; refreshed: true; details?: string }
   | { action: "resume"; resumed: true }
+  | { action: "hide_branch"; hidden: true }
   | { action: "unpin"; pinned: false };
 
 export type ConversationGraphNodeSnapshot = {
   nodeId: string;
   sessionId?: string;
-  canArchive?: boolean;
+  canHide?: boolean;
   providerNodeId?: string;
   parentNodeId?: string;
   label: string;

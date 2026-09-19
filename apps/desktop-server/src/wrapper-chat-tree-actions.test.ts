@@ -35,22 +35,27 @@ const setup = async () => {
   return { baseDir, index, load, create };
 };
 
-it("archives an entire fork but retains its shared prefix, early descendants and siblings after reload", async () => {
+it("hides an entire fork but retains its shared prefix, early descendants and siblings after reload", async () => {
   const { baseDir, index, create } = await setup();
   const tree = create(index);
   await tree.get("root");
   await tree.jump("root", "branch-2");
   const operations = (tree as unknown as { operations: Map<string, unknown> }).operations;
-  operations.set("archive-op", { cancelRequested: false, operation: {
-    operationId: "archive-op", sessionId: "root", targetSessionId: "branch",
-    nodeId: "root-1", content: "archived branch", attachments: [], status: "sent"
+  operations.set("hide-op", { cancelRequested: false, operation: {
+    operationId: "hide-op", sessionId: "root", targetSessionId: "branch",
+    nodeId: "root-1", content: "hidden branch", attachments: [], status: "sent"
   } });
   expect(tree.listOperations("root")).toHaveLength(1);
-  expect(await tree.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canArchive: false });
-  expect(await tree.getNodeTarget("root", "root-2")).toEqual({ sessionId: "root", canArchive: false });
-  const archive = vi.fn(async (id: string) => index.archiveSessions([id]));
-  expect(await tree.archiveBranch("root", "branch-2", archive)).toEqual({ archived: true });
-  expect(archive).toHaveBeenCalledExactlyOnceWith("branch");
+  expect(await tree.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canHide: false });
+  expect(await tree.getNodeTarget("root", "root-2")).toEqual({ sessionId: "root", canHide: false });
+  const hide = vi.fn(async (id: string) => index.hideSession(id));
+  expect(await tree.hideBranch("root", "branch-2", hide)).toEqual({ hidden: true });
+  expect(hide).toHaveBeenCalledExactlyOnceWith("branch");
+  // 隐藏只写工作台标记，引擎会话保持未归档。
+  expect(index.getEntry("branch")?.hiddenAt).toBeTruthy();
+  expect(index.getEntry("branch")?.archivedAt).toBeUndefined();
+  // 查看位置从被隐藏的分支回到它分出来的共享祖先。
+  expect(index.getTreeView("root")).toMatchObject({ sessionId: "root" });
   expect(tree.listOperations("root")).toEqual([]);
   tree.dispose();
   const reloaded = new SessionIndexStore({ baseDir });
@@ -60,10 +65,10 @@ it("archives an entire fork but retains its shared prefix, early descendants and
     const result = await cold.get("root");
     expect(result.nodes.map((node) => node.nodeId)).toEqual(["root-1", "root-2", "branch-1", "sibling-1", "sibling-2", "descendant-1", "descendant-2"]);
     expect(result.windows).toBeUndefined();
-    expect(await cold.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canArchive: false });
+    expect(await cold.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canHide: false });
     await cold.jump("root", "branch-1");
     expect(await cold.get("root")).toMatchObject({ currentSessionId: "descendant", visibleTurnIds: ["root-1", "branch-1"] });
-    // 查看路径带上归档祖先的共享历史，但不带该分支已归档的末端。
+    // 查看路径带上被隐藏祖先的共享历史，但不带该分支被隐藏的末端。
     const path = await cold.get("root", "path");
     expect(path.windows!.map((window) => window.sessionId)).toEqual(["root", "branch", "descendant"]);
     expect(path.windows!.flatMap((window) => window.snapshot.turns).map((turn) => turn.turnId)).not.toContain("branch-2");
@@ -88,16 +93,16 @@ it("waits for unloaded tree members before deciding whether a node is terminal",
   load.mockImplementation(async (id) => { if (id === "descendant") await gate; return true; });
   const cold = create(index);
   try {
-    const archive = vi.fn();
-    const pending = expect(cold.archiveBranch("root", "branch-2", archive)).rejects.toThrow("Only a terminal fork");
+    const hide = vi.fn();
+    const pending = expect(cold.hideBranch("root", "branch-2", hide)).rejects.toThrow("Only a terminal fork");
     await vi.waitFor(() => expect(load).toHaveBeenCalledWith(
       "descendant",
       expect.objectContaining({ force: false })
     ));
-    expect(archive).not.toHaveBeenCalled();
+    expect(hide).not.toHaveBeenCalled();
     finish();
     await pending;
-    expect(archive).not.toHaveBeenCalled();
+    expect(hide).not.toHaveBeenCalled();
   } finally { finish(); cold.dispose(); }
 });
 

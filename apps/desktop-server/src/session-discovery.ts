@@ -103,7 +103,6 @@ export type SessionDiscoveryProvider = {
     input?: {
       signal?: AbortSignal;
       retainExecution?: boolean;
-      historySources?: { entry: SessionIndexEntry; sourceTurnIds: string[] }[];
     }
   ) => Promise<HydratedSessionSnapshot | undefined>;
   hydrateSessionWindow?: (
@@ -552,25 +551,9 @@ export class SessionReconciliationService {
   ): Promise<boolean> {
     let hydrated: HydratedSessionSnapshot | undefined;
     try {
-      const historySources: { entry: SessionIndexEntry; sourceTurnIds: string[] }[] = [];
-      if (entry.archivedAt) {
-        const forks = this.sessionIndexStore.listRelations(entry.workspaceId)
-          .filter((relation) => relation.relationType === "fork");
-        const visit = (parentSessionId: string, sourceTurnIds: string[] = []): void => {
-          for (const fork of forks.filter((relation) => relation.parentSessionId === parentSessionId)) {
-            const child = this.sessionIndexStore.getEntry(fork.childSessionId);
-            if (!child || !fork.sourceTurnId) continue;
-            const boundaries = [...sourceTurnIds, fork.sourceTurnId];
-            if (child.archivedAt) visit(child.sessionId, boundaries);
-            else historySources.push({ entry: child, sourceTurnIds: boundaries });
-          }
-        };
-        visit(entry.sessionId);
-      }
       hydrated = await provider.hydrateSession(entry, {
         signal: input.signal,
-        retainExecution: input.retainExecution,
-        historySources: entry.archivedAt ? historySources : undefined
+        retainExecution: input.retainExecution
       });
     } catch (error) {
       if (!provider.isSessionArchivedError?.(entry, error)) {

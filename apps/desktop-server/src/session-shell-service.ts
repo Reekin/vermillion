@@ -339,30 +339,14 @@ export class SessionShellService {
     return this.runtimeService.getSnapshot();
   }
 
-  private sessionTreeMembers(sessionId: string): string[] {
-    return this.runtimeService.getSessionIndexStore?.()?.getTreeMembers(sessionId) ?? [sessionId];
-  }
-
-  private async clearSessionHistoryForTree(sessionId: string): Promise<boolean> {
-    if (!this.capabilities) return false;
-    let succeeded = true;
-    for (const memberId of this.sessionTreeMembers(sessionId)) {
-      try {
-        succeeded = (await this.capabilities.clearSessionHistory(memberId)) && succeeded;
-      } catch (error) {
-        succeeded = false;
-        console.warn("[vermillion] Failed to clear session history", {
-          sessionId: memberId,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
-    return succeeded;
-  }
-
+  /**
+   * 只清理该会话自身的可重建引擎缓存：祖先缓存是后代读取继承历史的依据，
+   * 连带清除会让后代历史在不报错的情况下缺少继承前缀。
+   */
   private async tryClearSessionHistory(sessionId: string): Promise<boolean> {
+    if (!this.capabilities) return false;
     try {
-      return await this.clearSessionHistoryForTree(sessionId);
+      return await this.capabilities.clearSessionHistory(sessionId);
     } catch (error) {
       console.warn("[vermillion] Failed to clear session history", {
         sessionId,
@@ -376,7 +360,7 @@ export class SessionShellService {
     if (!this.capabilities || this.getActiveTurnId(sessionId)) return false;
     try {
       await this.releaseSessionExecutionIfSupported(sessionId);
-      const refreshed = await this.clearSessionHistoryForTree(sessionId);
+      const refreshed = await this.tryClearSessionHistory(sessionId);
       if (refreshed) {
         this.wrapperChatTree?.invalidate(sessionId);
       }
@@ -461,18 +445,15 @@ export class SessionShellService {
   }
 
   public async dispose(): Promise<void> {
-    const sessionIndex = this.runtimeService.getSessionIndexStore?.();
-    const treeIds = new Set(
-      this.runtimeService
-        .listSessions({ includeArchived: true })
-        .map((session) => sessionIndex?.getTreeId(session.sessionId) ?? session.sessionId)
-    );
+    const loadedSessionIds = this.runtimeService
+      .listSessions({ includeArchived: true })
+      .map((session) => session.sessionId);
     this.wrapperChatTree?.dispose();
     try {
       await this.runtimeService.dispose();
     } finally {
       await Promise.allSettled(
-        [...treeIds].map((sessionId) => this.clearSessionHistoryForTree(sessionId))
+        loadedSessionIds.map((sessionId) => this.tryClearSessionHistory(sessionId))
       );
     }
   }
@@ -941,10 +922,12 @@ export class SessionShellService {
 
   public async runChatTreeNodeAction(input: import("@vermillion/shared").ChatTreeNodeActionInput): Promise<SessionActionResult> {
     if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
-    if (input.action === "archive") {
-      await this.wrapperChatTree.archiveBranch(input.sessionId, input.nodeId,
-        (sessionId) => this.runSessionAction({ sessionId, action: "archive" }));
-      return { action: "archive", archived: true };
+    if (input.action === "hide_branch") {
+      const index = this.runtimeService.getSessionIndexStore?.();
+      if (!index) throw new Error("Session index is unavailable.");
+      await this.wrapperChatTree.hideBranch(input.sessionId, input.nodeId,
+        (sessionId) => index.hideSession(sessionId));
+      return { action: "hide_branch", hidden: true };
     }
     const target = await this.wrapperChatTree.getNodeTarget(input.sessionId, input.nodeId);
     return this.runSessionAction({ sessionId: target.sessionId, action: input.action });

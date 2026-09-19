@@ -1627,7 +1627,7 @@ describe("Session discovery and reconciliation", () => {
     });
   });
 
-  it.each([false, true])("cold-loads archived ancestors with original ownership (earlier inherited refork: %s)", async (earlierRefork) => {
+  it.each([false, true])("cold-loads hidden ancestors with original ownership (earlier inherited refork: %s)", async (earlierRefork) => {
     const baseDir = await createTempDir();
     const index = new SessionIndexStore({ baseDir });
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
@@ -1645,9 +1645,10 @@ describe("Session discovery and reconciliation", () => {
     }
     for (const id of Object.keys(histories)) {
       await index.upsertSession({ workspaceId: "workspace-1", session: {
-        ...buildHydratedWindow(id).session,
-        archivedAt: ["A", "B"].includes(id) ? "2026-09-10T00:00:00Z" : undefined
+        ...buildHydratedWindow(id).session
       }, providerKind: "codex-thread", providerSessionId: `thread-${id}` });
+      // 隐藏的分支仍是普通会话，只是它独有的尾部不再出现在会话树上。
+      if (["A", "B"].includes(id)) await index.hideSession(id, "2026-09-10T00:00:00Z");
     }
     const forkRelations: [string, string, string][] = [
       ["root", "A", "r"], ["A", "B", earlierRefork ? "a2" : "a1"],
@@ -1680,18 +1681,12 @@ describe("Session discovery and reconciliation", () => {
       };
     };
     const readThread = vi.fn(async (threadId: string, includeTurns: boolean) => {
-      if (includeTurns && ["thread-A", "thread-B"].includes(threadId)) {
-        throw new Error("paginated_threads is not supported yet");
-      }
       const thread = historyThread(threadId);
       return includeTurns
         ? thread
         : { ...thread, turns: [], status: { type: "notLoaded" as const } };
     });
-    const resumeThread = vi.fn(async (threadId: string) => {
-      if (["thread-A", "thread-B"].includes(threadId)) throw new Error("Archived threads cannot resume");
-      return historyThread(threadId);
-    });
+    const resumeThread = vi.fn(async (threadId: string) => historyThread(threadId));
     const provider = new CodexSessionDiscoveryProvider({ codexRuntimePort: {
       readThread, resumeThread, releaseHistoryRead: vi.fn(), attachThreadToSession: vi.fn()
     } as never });
@@ -1711,10 +1706,10 @@ describe("Session discovery and reconciliation", () => {
       expect(snapshot.messageBlocks.filter((block) => block.turnId === "a1")).toEqual([
         expect.objectContaining({ sessionId: "A", text: "a1" })
       ]);
-      expect(index.getEntry("A")).toMatchObject({ archivedAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-A" });
-      expect(index.getEntry("B")).toMatchObject({ archivedAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-B" });
-      expect(resumeThread.mock.calls.flat()).not.toContain("thread-A");
-      expect(resumeThread.mock.calls.flat()).not.toContain("thread-B");
+      expect(index.getEntry("A")).toMatchObject({ hiddenAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-A" });
+      expect(index.getEntry("B")).toMatchObject({ hiddenAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-B" });
+      expect(index.getEntry("A")?.archivedAt).toBeUndefined();
+      expect(index.getEntry("B")?.archivedAt).toBeUndefined();
       if (!earlierRefork) {
         await treeService.jump("C", "d");
         expect((await treeService.get("C")).visibleTurnIds).toEqual(["r", "a1", "a2", "d"]);

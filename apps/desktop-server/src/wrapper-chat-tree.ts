@@ -167,13 +167,6 @@ export class WrapperChatTreeService {
   ): Promise<void> {
     const index = this.options.sessionIndexStore;
     const members = index.getTreeMembers(sessionId);
-    if (members.some((id) => index.getEntry(id)?.archivedAt)) {
-      // 归档成员的历史借用依赖祖先先就绪，按顺序加载。
-      for (const memberId of members) {
-        await this.loadMember(load.members, memberId, load.controller.signal, force);
-      }
-      return;
-    }
     await Promise.all(members.map((memberId) =>
       this.loadMember(load.members, memberId, load.controller.signal, force)
     ));
@@ -256,11 +249,8 @@ export class WrapperChatTreeService {
       const relation = forkByChild.get(memberId);
       const parentPath = relation ? paths.get(relation.parentSessionId) ?? [] : [];
       const sourceIndex = relation?.sourceTurnId ? parentPath.indexOf(relation.sourceTurnId) : -1;
-      // Archived history can end before its original fork point after a descendant reforks earlier.
-      const prefixEnd = sourceIndex < 0 && index.getEntry(memberId)?.archivedAt
-        ? parentPath.length : sourceIndex + 1;
       const prefix = relation?.sourceTurnId
-        ? parentPath.slice(0, prefixEnd) : [];
+        ? parentPath.slice(0, sourceIndex + 1) : [];
       const turns = turnsBySessionId.get(memberId) ?? [];
       let parentNodeId = prefix.at(-1);
       const readTurnIds = new Set(index.getEntry(memberId)?.readTurnIds);
@@ -278,9 +268,9 @@ export class WrapperChatTreeService {
       }
       paths.set(memberId, [...prefix, ...turns.map((turn) => turn.turnId)]);
     }
-    // Archived sessions supply shared history, but never a selectable/sendable path.
+    // 隐藏分支继续提供共享历史，但自身不再是可选中、可发送的路径。
     for (const memberId of members) {
-      if (index.getEntry(memberId)?.archivedAt) paths.delete(memberId);
+      if (index.getEntry(memberId)?.hiddenAt) paths.delete(memberId);
     }
     const retained = new Set([...paths.values()].flat());
     const visibleNodes = nodes.filter((node) => retained.has(node.nodeId));
@@ -290,8 +280,8 @@ export class WrapperChatTreeService {
     const complete = treeMembers.every((id) => loaded.has(id));
     for (const node of visibleNodes) {
       const owner = turnsById.get(node.nodeId)!.sessionId;
-      Object.assign(node, { sessionId: owner, canArchive: complete && !parentIds.has(node.nodeId) &&
-        forkIds.has(owner) && !index.getEntry(owner)?.archivedAt });
+      Object.assign(node, { sessionId: owner, canHide: complete && !parentIds.has(node.nodeId) &&
+        forkIds.has(owner) && !index.getEntry(owner)?.hiddenAt });
     }
     const view = index.getTreeView(treeId);
     const stored = view && paths.has(view.sessionId) ? view : undefined;
@@ -394,15 +384,9 @@ export class WrapperChatTreeService {
    * 使消息区不必等待整棵树的其余分支。
    */
   private async getViewPath(sessionId: string): Promise<ChatTreeSnapshot> {
-    const index = this.options.sessionIndexStore;
     const chain = this.viewPathMembers(sessionId);
     const members = new Set<string>();
-    if (chain.some((memberId) => index.getEntry(memberId)?.archivedAt)) {
-      // 归档成员的历史借用依赖祖先先就绪，按祖先到分支的顺序加载。
-      for (const memberId of chain) await this.loadMember(members, memberId, undefined, false);
-    } else {
-      await Promise.all(chain.map((memberId) => this.loadMember(members, memberId, undefined, false)));
-    }
+    await Promise.all(chain.map((memberId) => this.loadMember(members, memberId, undefined, false)));
     return this.buildProjection(sessionId, members, true).tree;
   }
 
@@ -438,8 +422,7 @@ export class WrapperChatTreeService {
       .map((operation) => operation.targetSessionId!));
     const missing = index.getTreeMembers(sessionId).filter((memberId) =>
       !state.members.has(memberId) &&
-      !pendingTargets.has(memberId) &&
-      !index.getEntry(memberId)?.archivedAt);
+      !pendingTargets.has(memberId));
     await Promise.all(missing.map((memberId) =>
       this.loadMember(state.members, memberId, undefined, false)
     ));
@@ -471,36 +454,38 @@ export class WrapperChatTreeService {
     this.options.runtimeService.notifyChatTreeChanged(sessionId, paths.get(sessionId) ?? []);
   }
 
-  public async getNodeTarget(sessionId: string, nodeId: string): Promise<{ sessionId: string; canArchive: boolean }> {
+  public async getNodeTarget(sessionId: string, nodeId: string): Promise<{ sessionId: string; canHide: boolean }> {
     await this.options.sessionIndexStore.ready();
     await this.get(sessionId);
     const { tree, turnsById } = this.publishedProjection(sessionId);
     if (!tree.nodes.some((node) => node.nodeId === nodeId)) throw new Error(`Unknown tree node: ${nodeId}`);
     const owner = turnsById.get(nodeId)!.sessionId;
     const index = this.options.sessionIndexStore;
-    return { sessionId: owner, canArchive: !index.getEntry(owner)?.archivedAt &&
+    return { sessionId: owner, canHide: !index.getEntry(owner)?.hiddenAt &&
       index.listRelations().some((relation) => relation.relationType === "fork" && relation.childSessionId === owner) &&
       !tree.nodes.some((node) => node.parentNodeId === nodeId) };
   }
 
-  public async archiveBranch(sessionId: string, nodeId: string, archive: (memberId: string) => Promise<unknown>): Promise<{ archived: true }> {
+  public async hideBranch(sessionId: string, nodeId: string, hide: (memberId: string) => Promise<unknown>): Promise<{ hidden: true }> {
     const target = await this.getNodeTarget(sessionId, nodeId);
-    if (!target.canArchive) throw new Error("Only a terminal fork node can be archived.");
-    await archive(target.sessionId);
+    if (!target.canHide) throw new Error("Only a terminal fork node can be hidden.");
+    await hide(target.sessionId);
     for (const [operationId, state] of this.operations) {
       if (state.operation.targetSessionId === target.sessionId) this.operations.delete(operationId);
     }
     const index = this.options.sessionIndexStore;
     if (index.getTreeView(sessionId)?.sessionId === target.sessionId) {
-      const { tree } = this.publishedProjection(sessionId);
-      const view = {
-        sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true
-      };
-      await index.setTreeView(sessionId, view);
-      this.applyPublishedView(sessionId, view);
+      // 隐藏当前查看的分支后回到它分出来的共享祖先。
+      const parentSessionId = index.listRelations().find((relation) =>
+        relation.relationType === "fork" && relation.childSessionId === target.sessionId)?.parentSessionId;
+      if (parentSessionId) {
+        const view = { sessionId: parentSessionId, followTip: true };
+        await index.setTreeView(sessionId, view);
+        this.applyPublishedView(sessionId, view);
+      }
     }
     this.changed(sessionId);
-    return { archived: true };
+    return { hidden: true };
   }
 
   public async jump(sessionId: string, nodeId: string): Promise<{ jumped: boolean }> {
