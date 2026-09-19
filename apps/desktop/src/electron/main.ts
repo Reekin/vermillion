@@ -850,16 +850,33 @@ const boot = async (): Promise<void> => {
   const inboxKey = (item: InboxItem): string => item.kind === "decision"
     ? `${item.workspaceId}:${item.card.decisionId}`
     : `${item.workspaceId}:${item.workItem.workItemId}:${item.workItem.merge?.mergedAt}`;
-  let knownInbox = new Set((await workbenchService.listInbox()).map(inboxKey));
+  // Reading the inbox touches every registered workspace, so one unreadable workspace must not take
+  // the app down; the Inbox panel reports the same failure itself. Until a read succeeds there is no
+  // baseline, and the first successful read only records keys instead of announcing every open item.
+  const readInbox = async (): Promise<InboxItem[] | undefined> => {
+    try { return await workbenchService.listInbox(); }
+    catch (error) {
+      diagnostics.logSync({
+        severity: "error",
+        source: "main-process",
+        message: "Failed to read the inbox for desktop notifications.",
+        details: describeError(error)
+      });
+      return undefined;
+    }
+  };
+  const seededInbox = await readInbox();
+  let knownInbox = seededInbox && new Set(seededInbox.map(inboxKey));
   const unsubscribeWorkbench = workbenchService.subscribe((event) => {
     if (!window.isDestroyed()) {
       window.webContents.send(WORKBENCH_IPC_EVENT_CHANNEL, event);
     }
     if (event.type === "decisions.changed" || event.type === "workItems.changed") {
-      void workbenchService.listInbox().then((items) => {
-        const fresh = items.filter((item) => !knownInbox.has(inboxKey(item)));
+      void readInbox().then((items) => {
+        if (!items) return;
+        const baseline = knownInbox;
         knownInbox = new Set(items.map(inboxKey));
-        const item = fresh[0];
+        const item = baseline && items.find((entry) => !baseline.has(inboxKey(entry)));
         if (item && isInBackground()) {
           showDesktopNotification(item.kind === "decision" ? `需要你决定：${item.card.question}` : `已合入：${item.workItem.title}`);
         }
