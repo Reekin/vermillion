@@ -98,29 +98,47 @@ export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, 
     return next;
   }), []);
   const rows = useMemo(() => flattenRows(sessions, expandedIds), [sessions, expandedIds]);
+  const selectedRowId = useMemo(
+    () => rows.find(({ session }) =>
+      session.sessionId === selectedSessionId || Boolean(selectedSessionId && session.memberSessionIds?.includes(selectedSessionId))
+    )?.session.sessionId,
+    [rows, selectedSessionId]
+  );
   const workspaceLabelFor = useCallback(
     (session: SidebarSession) => workspaceFilterId ? undefined : workspaceLabelById.get(session.workspaceId) ?? session.workspaceId,
     [workspaceFilterId, workspaceLabelById]
   );
   const listRef = useRef<HTMLUListElement | null>(null);
   const anchorRef = useRef<{ sessionId: string; offset: number; scrollTop: number } | undefined>(undefined);
+  const selectedRowRef = useRef<{ sessionId: string; index: number } | undefined>(undefined);
 
   /**
    * Keeps the row the reader is looking at in place when the list reorders or grows.
    * A reader who scrolled since the last render owns the position, so that case only re-anchors.
+   * The open session outranks that: when its row appears or moves up it is scrolled back into view,
+   * because the reorder comes from the reader's own activity in that session.
    */
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
     const top = list.getBoundingClientRect().top;
+    const domRows = [...list.querySelectorAll<HTMLElement>("[data-session-row]")];
     const anchor = anchorRef.current;
     if (anchor && list.scrollTop === anchor.scrollTop) {
-      const row = [...list.querySelectorAll<HTMLElement>("[data-session-row]")]
-        .find((item) => item.dataset.sessionRow === anchor.sessionId);
+      const row = domRows.find((item) => item.dataset.sessionRow === anchor.sessionId);
       if (row) list.scrollTop += row.getBoundingClientRect().top - top - anchor.offset;
     }
-    const leading = [...list.querySelectorAll<HTMLElement>("[data-session-row]")]
-      .find((row) => row.getBoundingClientRect().bottom > top);
+    const selectedIndex = selectedRowId ? domRows.findIndex((row) => row.dataset.sessionRow === selectedRowId) : -1;
+    if (selectedIndex >= 0 && selectedRowId) {
+      const previous = selectedRowRef.current;
+      if (!previous || previous.sessionId !== selectedRowId || selectedIndex < previous.index) {
+        domRows[selectedIndex]?.scrollIntoView({ block: "nearest" });
+      }
+      selectedRowRef.current = { sessionId: selectedRowId, index: selectedIndex };
+    } else {
+      selectedRowRef.current = undefined;
+    }
+    const leading = domRows.find((row) => row.getBoundingClientRect().bottom > top);
     anchorRef.current = leading?.dataset.sessionRow
       ? { sessionId: leading.dataset.sessionRow, offset: leading.getBoundingClientRect().top - top, scrollTop: list.scrollTop }
       : undefined;

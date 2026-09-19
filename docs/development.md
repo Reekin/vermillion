@@ -22,4 +22,6 @@ Windows 先用 `netsh interface ipv4 show excludedportrange protocol=tcp` 检查
 
 输入订阅的 Electron DOM 回归：在仓库根运行 `node apps/desktop/tests/renderer-selection-smoke.mjs`，检查后台交替输出、可见路径切换、审批与完成通知和草稿保留。
 
+会话列表滚动的 Electron DOM 回归：在仓库根运行 `node apps/desktop/tests/session-sidebar-scroll-smoke.mjs`，检查打开会话时定位到该行、其他会话重排不移动视口、当前会话置顶后视口跟随。
+
 界面验收结束后关闭对应的 agent-browser session，并通过 `app.stop` 停止本次实例，核实调试端口已释放。
