@@ -62,4 +62,12 @@ describe("execution and integration presentation", () => {
     expect(events.map((event) => event.title)).toEqual(["合入完成", "提交验收通过，开始合入", "合入检查未通过", "提交已退回", "提交验收通过，开始合入"]);
     expect(events.every((event) => !event.title.includes("stage") && !event.title.includes("done"))).toBe(true);
   });
+
+  it("labels a resolved handoff caused by a merge failure as a failed check", () => {
+    const item = { workItemId: "one", status: "queued", dependsOn: [], rejections: [], run: {} } as WorkItem;
+    const actions = [{ actionId: "merge", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:02.000Z", attempts: 0, history: [
+      { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: "转回原 Worker：Worker must commit its worktree before integration." }
+    ] } as WorkflowAction];
+    expect(workItemEvents(item, actions, [])[0]?.title).toBe("合入检查未通过");
+  });
 });

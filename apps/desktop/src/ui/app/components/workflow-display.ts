@@ -184,7 +184,10 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
 const eventFromHistory = (entry: { at: string; event: string; message: string }, kind: WorkflowAction["kind"]): WorkItemEvent | undefined => {
   if (entry.event === "created") return { at: entry.at, title: kind === "integration" ? "提交验收通过，开始合入" : "Worker 开始执行", detail: entry.message.split("\n")[0] };
   if (entry.event.startsWith("failed:")) return { at: entry.at, title: kind === "integration" ? "合入检查未通过" : "Worker 执行遇到问题", detail: rejectionSummary(entry.message) };
-  if (entry.event === "resolved") return { at: entry.at, title: kind === "integration" ? "合入处置完成" : "本轮执行结束", detail: entry.message.split("\n")[0] };
+  if (entry.event === "resolved") {
+    if (kind === "integration" && /转回原 Worker|冲突|失败|未通过/i.test(entry.message)) return { at: entry.at, title: "合入检查未通过", detail: rejectionSummary(entry.message) };
+    return { at: entry.at, title: kind === "integration" ? "合入处置完成" : "本轮执行结束", detail: entry.message.split("\n")[0] };
+  }
   if (["contract.updated", "dependency.updated"].includes(entry.event)) return { at: entry.at, title: "合同或依赖已调整", detail: entry.message.split("\n")[0] };
   return undefined;
 };
