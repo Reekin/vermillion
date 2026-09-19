@@ -14,6 +14,7 @@ import type {
   PatrolRun,
   RoleExecutionOverrides,
   WorkRequest,
+  WorkDiagnosis,
   RoleFile,
   WorkItem,
   WorkbenchEvent,
@@ -86,7 +87,15 @@ export type SessionSteerResult = {
 export type SessionSteerer = (input: {
   sessionId: string;
   content: string;
+  messageId?: string;
 }) => Promise<SessionSteerResult>;
+
+export type ExecutionTransferPort = {
+  interrupt: (sessionId: string) => Promise<void>;
+  fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
+};
+
+export type DeliveryConfirmer = (sessionId: string, messageId: string) => Promise<{ accepted: boolean; turnId?: string; active?: boolean }>;
 
 export type SourceAskResult = {
   answer: string;
@@ -132,6 +141,8 @@ export type WorkbenchServiceOptions = {
   roles: RoleService;
   sourceAsker?: SourceAsker;
   sessionSteerer?: SessionSteerer;
+  executionTransfer?: ExecutionTransferPort;
+  deliveryConfirmer?: DeliveryConfirmer;
   issueDiscussionStarter?: IssueDiscussionStarter;
   sessionNavigation?: SessionNavigationPort;
   /** Starts isolated app instances for acceptance; absent when running without a desktop build around. */
@@ -150,6 +161,8 @@ export class WorkbenchService {
   private readonly roles: RoleService;
   private readonly sourceAsker?: SourceAsker;
   private readonly sessionSteerer?: SessionSteerer;
+  private readonly executionTransfer?: ExecutionTransferPort;
+  private readonly deliveryConfirmer?: DeliveryConfirmer;
   private readonly issueDiscussionStarter?: IssueDiscussionStarter;
   private readonly sessionNavigation?: SessionNavigationPort;
   private readonly launcher?: AppLauncher;
@@ -196,6 +209,8 @@ export class WorkbenchService {
     this.roles = options.roles;
     this.sourceAsker = options.sourceAsker;
     this.sessionSteerer = options.sessionSteerer;
+    this.executionTransfer = options.executionTransfer;
+    this.deliveryConfirmer = options.deliveryConfirmer;
     this.issueDiscussionStarter = options.issueDiscussionStarter;
     this.sessionNavigation = options.sessionNavigation;
     this.launcher = options.launcher;
@@ -1011,11 +1026,33 @@ export class WorkbenchService {
     const turnId = input.turnId ?? await this.sourceTurnResolver?.(input.sessionId);
     if (!turnId && !input.message?.content.trim() && !input.message?.attachments?.length) throw new Error("空会话需要提供开工内容。");
     return this.putWorkRequest(workspaceId, { requestId: createId("work"), sourceSessionId: input.sessionId,
-      sourceTurnId: turnId, message: input.message, scope: input.scope, status: "pending", createdAt: this.now(), updatedAt: this.now() });
+      sourceTurnId: turnId, message: input.message, scope: input.scope, status: "pending", control: "auto",
+      createdAt: this.now(), updatedAt: this.now() });
   }
 
   async listWorkRequests(workspaceId: string): Promise<WorkRequest[]> {
-    return (await this.context(workspaceId)).store.workRequests.list();
+    const [requests, items] = await Promise.all([
+      (await this.context(workspaceId)).store.workRequests.list(), this.listWorkItems(workspaceId)
+    ]);
+    return requests.map((request) => ({ ...request,
+      workItemIds: items.filter((item) => item.requestId === request.requestId).map((item) => item.workItemId)
+    }));
+  }
+
+  async diagnoseWork(workspaceId: string, requestId: string): Promise<WorkDiagnosis> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
+    if (!request) throw new Error("Unknown work request: " + requestId);
+    const workItems = (await this.listWorkItems(workspaceId)).filter((item) => item.requestId === requestId);
+    const scheduler = await this.getScheduler(workspaceId);
+    const waiting = [request.waitReason, request.failure, request.retryAt ? "下次自动重试：" + request.retryAt : undefined].filter((value): value is string => Boolean(value));
+    if (!scheduler.enabled && !["ready", "cancelled"].includes(request.status)) waiting.push("自动推进已关闭");
+    const availableActions = [{ method: "work.diagnose", condition: "随时查询当前工作。" }];
+    if (request.pendingMessageId) availableActions.push({ method: "work.confirm", condition: "核对引擎实际消息/轮次后再继续。" });
+    if (request.control === "paused") availableActions.push({ method: "work.resume", condition: "恢复当前工作的自动推进。" });
+    else if (request.status !== "ready" && request.status !== "cancelled") availableActions.push({ method: "work.pause", condition: "暂停准备、重试和后续自动推进。" });
+    if (request.status === "failed") availableActions.push({ method: "work.retry", condition: "确认故障已处理后重新开始。" });
+    if (request.status !== "cancelled") availableActions.push({ method: "work.cancel", condition: "取消当前准备及尚未结束的关联工单。" });
+    return { request, workItems, scheduler, waiting, availableActions };
   }
 
   async putWorkRequest(workspaceId: string, request: WorkRequest): Promise<WorkRequest> {
@@ -1030,8 +1067,106 @@ export class WorkbenchService {
   async retryWork(workspaceId: string, requestId: string): Promise<WorkRequest> {
     const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
     if (!request || request.status !== "failed") throw new Error("只有失败的开工请求可以重试。");
-    if ((await this.listDecisions(workspaceId)).some((card) => card.requestId === requestId && !card.answer && !card.withdrawn)) throw new Error("开工请求正在等待用户答复，请通过 decision.answer 选择再试。");
-    return this.putWorkRequest(workspaceId, { ...request, status: request.workerSessionId ? "preparing" : "pending", attempts: 0, retryAt: undefined });
+    if (request.pendingMessageId) throw new Error("消息受理状态不明，请先调用 work.confirm。");
+    return this.putWorkRequest(workspaceId, { ...request, status: request.workerSessionId ? "preparing" : "pending",
+      control: "auto", attempts: 0, retryAt: undefined, failure: undefined, waitReason: undefined, pendingMessageId: undefined });
+  }
+
+  async pauseWork(workspaceId: string, requestId: string): Promise<WorkRequest> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
+    if (!request || ["cancelled"].includes(request.status)) throw new Error("当前工作不能暂停：" + requestId);
+    for (const item of (await this.listWorkItems(workspaceId)).filter((entry) => entry.requestId === requestId && !["closed", "cancelled"].includes(entry.status)))
+      await this.pauseWorkItem(workspaceId, { workItemId: item.workItemId });
+    return this.putWorkRequest(workspaceId, { ...request, control: "paused", retryAt: undefined,
+      waitReason: "用户已暂停当前工作", updatedAt: this.now() });
+  }
+
+  async resumeWork(workspaceId: string, requestId: string): Promise<WorkRequest> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
+    if (!request || !["paused", "manual"].includes(request.control ?? "")) throw new Error("当前工作不是可恢复状态：" + requestId);
+    for (const item of (await this.listWorkItems(workspaceId)).filter((entry) => entry.requestId === requestId && entry.run.pauseReason === "user"))
+      await this.resumeWorkItem(workspaceId, item.workItemId);
+    return this.putWorkRequest(workspaceId, { ...request, control: "auto", retryAt: undefined,
+      waitReason: undefined, status: request.status === "ready" ? "ready" : request.workerSessionId ? "preparing" : "pending" });
+  }
+
+  async completePreparation(workspaceId: string, input: { requestId: string; sessionId: string; workItemIds: string[]; refs?: WorkItem["refs"] }): Promise<WorkRequest> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === input.requestId);
+    if (!request || request.status !== "preparing" || request.workerSessionId !== input.sessionId)
+      throw new Error("准备请求不属于当前准备分支：" + input.requestId);
+    const items = (await this.listWorkItems(workspaceId)).filter((item) => item.requestId === input.requestId);
+    const actual = new Set(items.map((item) => item.workItemId));
+    const declared = new Set(input.workItemIds);
+    if (actual.size !== declared.size || [...actual].some((id) => !declared.has(id)))
+      throw new Error("准备交接必须登记本请求的完整工单清单。");
+    const saved = await this.putWorkRequest(workspaceId, { ...request, control: request.control === "manual" ? "manual" : "auto",
+      handoff: { sessionId: input.sessionId, workItemIds: [...declared], refs: input.refs ?? [], at: this.now() },
+      failure: undefined, waitReason: undefined, retryAt: undefined });
+    return saved;
+  }
+
+  async holdPreparation(workspaceId: string, requestId: string, reason: string): Promise<WorkRequest> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
+    if (!request || request.status === "cancelled") return request ?? (() => { throw new Error("Unknown work request: " + requestId); })();
+    return this.putWorkRequest(workspaceId, { ...request, control: request.control === "paused" ? "paused" : "manual", retryAt: undefined, waitReason: reason });
+  }
+
+  async confirmPreparationDelivery(workspaceId: string, requestId: string, messageId: string, turnId?: string, active = true, expectedSessionId?: string, expectedAttemptId?: string): Promise<WorkRequest> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
+    if (!request || request.pendingMessageId !== messageId) return request ?? (() => { throw new Error("Unknown work request: " + requestId); })();
+    if ((expectedSessionId && request.workerSessionId !== expectedSessionId) || (expectedAttemptId && request.attemptId !== expectedAttemptId) || request.control === "paused" || request.migratedToSessionId)
+      return request;
+    const recovered = request.waitReason?.includes("消息受理状态不明")
+      ? active ? { status: "preparing" as const, control: "auto" as const, failure: undefined, waitReason: undefined }
+        : { status: "preparing" as const, control: "manual" as const, failure: undefined, waitReason: "消息已确认但原轮已结束，等待手动继续" }
+      : {};
+    return this.putWorkRequest(workspaceId, { ...request, ...recovered, pendingMessageId: undefined, ...(turnId ? { activeTurnId: turnId } : {}) });
+  }
+
+  async markPreparationDeliveryUnknown(workspaceId: string, requestId: string, messageId: string, failure: string): Promise<WorkRequest> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
+    if (!request) throw new Error("Unknown work request: " + requestId);
+    if (request.control === "paused" || request.control === "manual") return this.putWorkRequest(workspaceId, { ...request, pendingMessageId: messageId });
+    return this.putWorkRequest(workspaceId, { ...request, status: "failed", control: "manual", failure,
+      waitReason: "消息受理状态不明，请核对准备分支后再继续", retryAt: undefined, pendingMessageId: messageId });
+  }
+
+  async confirmWorkRequestDelivery(workspaceId: string, requestId: string): Promise<WorkRequest> {
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
+    if (!request?.pendingMessageId) throw new Error("当前准备没有待确认的消息。");
+    if (!this.deliveryConfirmer || !request.workerSessionId) return request;
+    const expectedSessionId = request.workerSessionId;
+    const expectedAttemptId = request.attemptId;
+    const messageId = request.pendingMessageId;
+    const result = await this.deliveryConfirmer(expectedSessionId, messageId);
+    return result.accepted ? this.confirmPreparationDelivery(workspaceId, requestId, messageId, result.turnId, result.active !== false, expectedSessionId, expectedAttemptId) : request;
+  }
+
+  async confirmWorkItemDelivery(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    const item = await this.getWorkItem(workspaceId, workItemId);
+    const action = (await this.listActions(workspaceId)).find((entry): entry is Execution => entry.kind === "execute" && entry.workItemId === workItemId && actionIsOpen(entry));
+    if (!action?.pendingMessageId || !action.sessionId) return item;
+    if (!this.deliveryConfirmer) return item;
+    const result = await this.deliveryConfirmer(action.sessionId, action.pendingMessageId);
+    if (!result.accepted) return item;
+    const expectedSessionId = action.sessionId;
+    const expectedAttemptId = action.attemptId;
+    const active = result.active !== false;
+    const confirmed = await this.transactRecord(workspaceId, workItemId, (record) => {
+      if (!record) throw new Error("Unknown work item: " + workItemId);
+      const current = record.execution;
+      if (current.pendingMessageId !== action.pendingMessageId || current.sessionId !== expectedSessionId || current.attemptId !== expectedAttemptId ||
+          current.control !== "manual" || !current.waitReason?.includes("消息受理状态不明")) return { record, result: false };
+      const now = this.now();
+      return { record: { ...record,
+        item: { ...record.item, status: active && ["queued", "decision"].includes(record.item.status) ? "running" : record.item.status, updatedAt: now },
+        execution: { ...current, pendingMessageId: undefined, scheduledTurnId: result.turnId,
+          status: active ? "running" : "decision", stage: active ? "execute" : "deliver", control: active ? "auto" : "manual", deliveredAt: now,
+          waitReason: active ? undefined : "消息已确认但原轮已结束，等待手动继续", failure: undefined, updatedAt: now }
+      }, result: true };
+    });
+    if (!confirmed) return this.getWorkItem(workspaceId, workItemId);
+    return this.getWorkItem(workspaceId, workItemId);
   }
 
   async cancelWorkRequest(workspaceId: string, input: { requestId?: string; sessionId?: string }): Promise<{ cancelled: boolean; request?: WorkRequest }> {
@@ -1041,13 +1176,14 @@ export class WorkbenchService {
         : entry.workerSessionId === input.sessionId);
       if (!request) return { cancelled: false };
       if (request.status === "cancelled") return { cancelled: true, request };
-      if (request.status !== "pending" && request.status !== "preparing") return { cancelled: false, request };
+      if (!["pending", "preparing", "failed"].includes(request.status) && !(input.requestId && request.status === "ready")) return { cancelled: false, request };
       for (const item of await this.listWorkItems(workspaceId)) {
         if (item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status))
           await this.cancelResult(workspaceId, item.workItemId, false);
       }
       const saved = await this.putWorkRequest(workspaceId, {
-        ...request, status: "cancelled", failure: undefined, retryAt: undefined
+        ...request, status: "cancelled", control: "paused", failure: undefined, retryAt: undefined,
+        waitReason: "用户已取消当前工作", pendingMessageId: undefined
       });
       this.emit({ type: "workRequest.cancelled", workspaceId, requestId: request.requestId, sessionId: request.workerSessionId });
       return { cancelled: true, request: saved };
@@ -1059,24 +1195,39 @@ export class WorkbenchService {
     if (!request) throw new Error("Unknown work request: " + requestId);
     if (request.status === "cancelled") return request;
     const attempts = (request.attempts ?? 0) + 1;
-    const minutes = RETRY_MINUTES[attempts - 1];
-    const saved = await this.putWorkRequest(workspaceId, { ...request, attempts, failure,
-      status: minutes === undefined ? "failed" : request.workerSessionId ? "preparing" : "pending",
-      retryAt: minutes === undefined ? undefined : new Date(Date.parse(this.now()) + minutes * 60_000).toISOString() });
-    if (minutes === undefined && !(await this.listDecisions(workspaceId)).some((card) => card.requestId === requestId && !card.answer && !card.withdrawn))
-      await this.createDecision(workspaceId, { requestId, kind: "attempts", sessionId: request.workerSessionId,
-        question: "开工准备未能完成，要再试还是取消？", context: "准备过程已自动恢复四次，仍未完成。已有准备分支和工单保留。", details: failure,
-        options: [{ key: "retry", label: "再试" }, { key: "cancel", label: "取消" }] });
-    return saved;
+    const quotaBlocked = /quota|credit|insufficient|认证|authentication|unauthorized|forbidden/i.test(failure);
+    const minutes = quotaBlocked ? undefined : RETRY_MINUTES[attempts - 1];
+    const exhausted = minutes === undefined;
+    return this.putWorkRequest(workspaceId, { ...request, attempts, failure,
+      control: quotaBlocked || exhausted ? "manual" : "auto",
+      status: exhausted ? "failed" : request.workerSessionId ? "preparing" : "pending",
+      waitReason: quotaBlocked ? "工作受阻：额度、认证或配置需要处理" : exhausted ? "自动恢复次数已用尽" : undefined,
+      retryAt: exhausted ? undefined : new Date(Date.parse(this.now()) + minutes * 60_000).toISOString(),
+      pendingMessageId: undefined });
   }
 
-  async finishPreparation(workspaceId: string, sessionId: string, turnId?: string): Promise<void> {
-    return this.integrate(workspaceId, () => this.finishPreparationRecord(workspaceId, sessionId, turnId));
+  async finishPreparation(workspaceId: string, sessionId: string, turnId?: string, allowImplicitHandoff = true): Promise<void> {
+    return this.integrate(workspaceId, () => this.finishPreparationRecord(workspaceId, sessionId, turnId, allowImplicitHandoff));
   }
 
-  private async finishPreparationRecord(workspaceId: string, sessionId: string, turnId?: string): Promise<void> {
-    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === sessionId && entry.status === "preparing");
+  private async finishPreparationRecord(workspaceId: string, sessionId: string, turnId?: string, allowImplicitHandoff = false): Promise<void> {
+    let request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === sessionId && entry.status === "preparing");
     if (!request) return;
+    const requestId = request.requestId;
+    if (!request.handoff && allowImplicitHandoff) {
+      const implicitItems = (await this.listWorkItems(workspaceId)).filter((item) => item.requestId === requestId);
+      request = await this.putWorkRequest(workspaceId, { ...request!, handoff: { sessionId, workItemIds: implicitItems.map((item) => item.workItemId), refs: [], at: this.now() } });
+    }
+    if (!request.handoff || request.handoff.sessionId !== sessionId) {
+      await this.holdPreparation(workspaceId, request.requestId, "准备轮结束但尚未登记完整交接，等待手动继续。");
+      return;
+    }
+    const handoffIds = new Set(request.handoff.workItemIds);
+    const requestItems = (await this.listWorkItems(workspaceId)).filter((item) => item.requestId === request.requestId);
+    if (requestItems.length !== handoffIds.size || requestItems.some((item) => !handoffIds.has(item.workItemId))) {
+      await this.holdPreparation(workspaceId, request.requestId, "准备交接清单与实际工单不一致，等待修正。");
+      return;
+    }
     const forkTurnId = turnId ?? await this.sourceTurnResolver?.(sessionId);
     for (const item of await this.listWorkItems(workspaceId)) {
       if (item.status === "preparing" && item.requestId === request.requestId) {
@@ -1088,7 +1239,8 @@ export class WorkbenchService {
     }
     for (const request of await this.listWorkRequests(workspaceId)) {
       if (request.workerSessionId === sessionId && request.status === "preparing")
-        await this.putWorkRequest(workspaceId, { ...request, status: "ready", failure: undefined, retryAt: undefined });
+        await this.putWorkRequest(workspaceId, { ...request, status: "ready", control: "auto", failure: undefined, retryAt: undefined,
+          activeTurnId: undefined, waitReason: undefined });
     }
   }
 
@@ -1197,8 +1349,13 @@ export class WorkbenchService {
   async failAction(workspaceId: string, actionId: string, failure: string): Promise<WorkflowAction> {
     const action = await this.getAction(workspaceId, actionId);
     if (!actionIsOpen(action) || action.status === "decision") return action;
-    const failed = await this.updateAction(workspaceId, action, (action) => this.failedAction(action, failure),
-      action.kind === "execute" ? (item) => ({ ...item, status: RETRY_MINUTES[action.attempts] === undefined ? "decision" : "queued" }) : undefined);
+    const quotaBlocked = action.kind === "execute" && /quota|credit|insufficient|认证|authentication|unauthorized|forbidden/i.test(failure);
+    const failed = await this.updateAction(workspaceId, action, (action) => {
+      const next = this.failedAction(action, failure);
+      return next.kind === "execute" && (next.status === "decision" || quotaBlocked)
+        ? { ...next, status: "decision", control: "manual", waitReason: quotaBlocked ? "工作受阻：额度、认证或配置需要处理" : "自动恢复次数已用尽", retryAt: undefined }
+        : next;
+    }, action.kind === "execute" ? (item) => ({ ...item, status: quotaBlocked || RETRY_MINUTES[action.attempts] === undefined ? "decision" : "queued" }) : undefined);
     await this.ensureFailureDecision(workspaceId, failed);
     return this.getAction(workspaceId, actionId);
   }
@@ -1212,11 +1369,12 @@ export class WorkbenchService {
   }
 
   private async ensureFailureDecision(workspaceId: string, failed: WorkflowAction): Promise<void> {
+    if (failed.kind === "execute") return;
     if (failed.kind === "integration" && failed.stage === "merge") return;
     const action = failed;
     const actionId = action.actionId;
     if (failed.status === "decision" && !(await this.listDecisions(workspaceId)).some((card) => card.actionId === actionId && !card.answer && !card.withdrawn)) {
-      await this.createDecision(workspaceId, { actionId, kind: "attempts", workItemId: action.workItemId, sessionId: action.kind === "execute" ? action.sessionId : undefined,
+      await this.createDecision(workspaceId, { actionId, kind: "attempts", workItemId: action.workItemId,
         question: "自动恢复已用尽，要再试还是取消当前工作？", context: "工作台已尝试自动恢复四次，仍未完成当前处理。原会话与成果保留，选择再试后会从未完成的动作继续。",
         details: "阶段：" + action.stage + "\n受影响工单：" + action.workItemId + "\n" + failed.history.filter((h) => h.event.startsWith("failed:")).map((h) => h.at + " " + h.message).join("\n"),
         options: [{ key: "retry", label: "再试", detail: "清零此处理过程的失败计数，从未完成动作继续。" }, { key: "cancel", label: "取消当前工作", detail: "取消该过程关联的工单；已合入成果保持保留。" }], recommended: "retry", recommendation: "故障已排除时可沿原处理过程继续。" });
@@ -1369,7 +1527,7 @@ export class WorkbenchService {
       const record: WorkItemRecord = { workItemId: item.workItemId, item, integrations: [], cleanup: [], execution: {
         sessionId: input.sessionId, worktreePath: input.worktreePath, branch: input.branch,
         kind: "execute", actionId: "execution-" + item.workItemId, workItemId: item.workItemId,
-        status: "pending", stage: "open", notices: [], attempts: 0, idleTurns: 0, history: [], createdAt: now, updatedAt: now
+        status: "pending", stage: "open", control: "auto", notices: [], attempts: 0, idleTurns: 0, history: [], createdAt: now, updatedAt: now
       } };
       return { record, result: projectWorkItem(record) };
     });
@@ -1400,7 +1558,9 @@ export class WorkbenchService {
     return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
       item: { ...record.item, status: "running", updatedAt: this.now() },
       execution: { ...record.execution, sessionId: run.sessionId ?? record.execution.sessionId, heartbeatAt: run.heartbeatAt ?? record.execution.heartbeatAt,
-        baseCommit, retryAt: undefined, updatedAt: this.now() }
+        baseCommit, retryAt: undefined, control: record.execution.control === "paused" ? "paused" : "auto",
+        attemptId: record.execution.attemptId ?? createId("attempt"), activeTurnId: undefined,
+        waitReason: undefined, updatedAt: this.now() }
     }));
   }
 
@@ -1414,12 +1574,15 @@ export class WorkbenchService {
   async submitWorkItem(
     workspaceId: string,
     workItemId: string,
-    input: { contractRevision: number; evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: VerifySubmission }
+    input: { sessionId?: string; contractRevision: number; evidence: Omit<NonNullable<WorkItem["evidence"]>, "submittedAt">; review: WorkItem["review"]; verify: VerifySubmission }
   ): Promise<WorkItem> {
     return this.integrate(workspaceId, () => this.submitResult(workspaceId, workItemId, input));
   }
 
   private async submitResult(workspaceId: string, workItemId: string, input: Parameters<WorkbenchService["submitWorkItem"]>[2]): Promise<WorkItem> {
+    const bound = await this.getWorkItem(workspaceId, workItemId);
+    if (input.sessionId && bound.run.sessionId !== input.sessionId) throw new Error("提交会话已迁移，旧执行分支不能提交当前工单。");
+    if (bound.run.migratedFromSessionId && !input.sessionId) throw new Error("该工单已迁移执行，提交时必须传当前 sessionId。");
     if ((await this.listActions(workspaceId)).some((action) => action.kind === "execute" && action.workItemId === workItemId && action.integrationActionId))
       throw new Error("接管合入请调用 workItem.integration.complete，不重复提交开发成果。");
     const now = this.now();
@@ -1504,6 +1667,7 @@ export class WorkbenchService {
   async takeoverIntegration(workspaceId: string, workItemId: string, note?: string): Promise<WorkItem> {
     return this.integrate(workspaceId, async () => {
       const item = await this.getWorkItem(workspaceId, workItemId);
+      if (item.run.pendingMessageId) throw new Error("消息受理状态不明，请先调用 workItem.confirm。");
       const action = (await this.listActions(workspaceId)).find((entry): entry is Integration =>
         entry.kind === "integration" && entry.workItemId === workItemId && entry.stage === "merge" && actionIsOpen(entry));
       if (!action) throw new Error("当前工单没有可接管的合入动作：" + workItemId);
@@ -1683,15 +1847,19 @@ export class WorkbenchService {
     return cancelled;
   }
 
-  async pauseWorkItem(workspaceId: string, sessionId: string): Promise<{ paused: boolean; workItem?: WorkItem }> {
+  async pauseWorkItem(workspaceId: string, input: { sessionId?: string; workItemId?: string } | string): Promise<{ paused: boolean; workItem?: WorkItem }> {
     return this.integrate(workspaceId, async () => {
-      const item = (await this.listWorkItems(workspaceId)).find((entry) => entry.run.sessionId === sessionId && entry.status === "running");
+      const target = typeof input === "string" ? { sessionId: input } : input;
+      const item = (await this.listWorkItems(workspaceId)).find((entry) =>
+        (target.workItemId ? entry.workItemId === target.workItemId : entry.run.sessionId === target.sessionId) &&
+        !["closed", "cancelled"].includes(entry.status));
       if (!item) return { paused: false };
       const paused = await this.mutateRecord(workspaceId, item.workItemId, (record) => {
         const now = this.now();
         return { ...record,
           item: { ...record.item, status: "decision", updatedAt: now },
           execution: { ...record.execution, status: "decision", pauseReason: "user", retryAt: undefined, failure: undefined,
+            control: "paused", activeTurnId: undefined, waitReason: "用户已暂停当前工单",
             history: [...record.execution.history, { at: now, event: "paused:user", message: "用户已暂停 Worker" }], updatedAt: now } };
 
       });
@@ -1709,11 +1877,109 @@ export class WorkbenchService {
         return { ...record,
           item: { ...record.item, status: "queued", updatedAt: now },
           execution: { ...record.execution, status: "pending", stage: sessionId ? "deliver" : "open", pauseReason: undefined,
-            retryAt: undefined, failure: undefined, idleTurns: 0,
+            retryAt: undefined, failure: undefined, idleTurns: 0, control: "auto", waitReason: undefined,
             notices: [...record.execution.notices, pendingNotice("resumed", "用户已恢复执行。", now)],
             history: [...record.execution.history, { at: now, event: "resumed:user", message: "用户已恢复 Worker" }], updatedAt: now } };
       });
     });
+  }
+
+  async retryWorkItem(workspaceId: string, workItemId: string): Promise<WorkItem> {
+    return this.integrate(workspaceId, async () => {
+      const item = await this.getWorkItem(workspaceId, workItemId);
+      if (item.run.pendingMessageId) throw new Error("消息受理状态不明，请先调用 workItem.confirm。");
+      const action = (await this.listActions(workspaceId)).find((entry): entry is Execution => entry.kind === "execute" && entry.workItemId === workItemId && actionIsOpen(entry));
+      if (!action || (!["retry", "decision"].includes(action.status) && action.control !== "manual")) throw new Error("当前工单没有可恢复的执行故障：" + workItemId);
+      await this.updateAction(workspaceId, action, (current) => ({ ...current, status: "pending", stage: current.sessionId ? "deliver" : "open",
+        attempts: 0, retryAt: undefined, failure: undefined, control: "auto", waitReason: undefined,
+        pendingMessageId: undefined, attemptId: createId("attempt"), activeTurnId: undefined,
+        history: [...current.history, { at: this.now(), event: "retry:user", message: "用户重新开始当前执行" }] }),
+        (current) => ({ ...current, status: "queued" }));
+      return this.getWorkItem(workspaceId, workItemId);
+    });
+  }
+
+  async continueWorkItemFrom(workspaceId: string, workItemId: string, input: { sessionId: string; turnId: string }): Promise<WorkItem> {
+    return this.integrate(workspaceId, async () => {
+      const current = await this.getWorkItem(workspaceId, workItemId);
+      if (["closed", "cancelled"].includes(current.status)) throw new Error("已结束工单不能迁移执行：" + workItemId);
+      const previousSessionId = current.run.sessionId;
+      if (!this.executionTransfer) throw new Error("从历史节点继续执行需要桌面调度器在线。");
+      await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+        item: { ...record.item, status: "decision", updatedAt: this.now() },
+        execution: { ...record.execution, status: "decision", control: "paused", pauseReason: "user",
+          waitReason: "正在迁移执行，等待新分支就绪", retryAt: undefined, updatedAt: this.now() }
+      }));
+      if (current.requestId) {
+        const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === current.requestId);
+        if (request && request.status !== "cancelled") await this.putWorkRequest(workspaceId, { ...request, control: "paused", waitReason: "正在迁移执行，等待新分支就绪" });
+      }
+      const forked = await this.executionTransfer.fork({ workspaceId, sourceSessionId: input.sessionId, sourceTurnId: input.turnId,
+        title: "Worker · " + current.title, metadata: { role: "worker", workItemId, sourceSessionId: current.sourceSessionId, sourceTurnId: current.sourceTurnId } });
+      if (previousSessionId && previousSessionId !== forked.sessionId) {
+        await this.executionTransfer.interrupt(previousSessionId);
+        for (let attempt = 0; attempt < 40 && this.workerActive?.(previousSessionId); attempt++) await new Promise((resolve) => setTimeout(resolve, 25));
+        if (this.workerActive?.(previousSessionId)) throw new Error("原执行尚未退出，保持当前工作暂停状态。");
+      }
+      const moved = await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+        item: { ...record.item, status: "queued", updatedAt: this.now() },
+        execution: { ...record.execution, sessionId: forked.sessionId, forkSessionId: input.sessionId, forkTurnId: input.turnId,
+          status: "pending", stage: "deliver", control: "manual", retryAt: undefined, failure: undefined,
+          pauseReason: undefined, waitReason: "已迁移到新分支，等待人工继续", activeTurnId: undefined,
+          migratedFromSessionId: previousSessionId, pendingMessageId: undefined,
+          history: [...record.execution.history, { at: this.now(), event: "migrated:user", message: "用户从历史节点继续执行" }], updatedAt: this.now() }
+      }));
+      if (current.requestId) {
+        const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === current.requestId);
+        if (request && request.status !== "cancelled") await this.putWorkRequest(workspaceId, { ...request, workerSessionId: forked.sessionId,
+          control: "manual", activeTurnId: undefined, migratedToSessionId: forked.sessionId, waitReason: "已迁移到新分支，等待人工继续" });
+      }
+      return moved;
+    });
+  }
+
+  /** A turn started by the user on a bound preparation or worker session takes over that work. */
+  async adoptManualTurn(sessionId: string, turnId: string): Promise<void> {
+    for (const { workspaceId } of await this.listWorkspaces()) {
+      await this.integrate(workspaceId, async () => {
+        for (const request of await this.listWorkRequests(workspaceId)) {
+          if (request.workerSessionId !== sessionId || ["cancelled", "ready"].includes(request.status) || request.control === "paused") continue;
+          await this.putWorkRequest(workspaceId, { ...request, status: "preparing", control: "manual", retryAt: undefined,
+            failure: undefined, waitReason: "人工接管当前准备", activeTurnId: turnId, pendingMessageId: undefined });
+        }
+        for (const item of await this.listWorkItems(workspaceId)) {
+          if (item.run.sessionId !== sessionId || ["closed", "cancelled"].includes(item.status) || item.run.pauseReason === "user") continue;
+          const waitingDecision = (await this.listDecisions(workspaceId)).some((card) => card.workItemId === item.workItemId && !card.answer && !card.withdrawn);
+          await this.mutateRecord(workspaceId, item.workItemId, (record) => {
+            const now = this.now();
+            const canRun = !waitingDecision && record.item.status !== "merging";
+            return { ...record,
+              item: { ...record.item, status: canRun ? "running" : record.item.status, updatedAt: now },
+              execution: { ...record.execution, control: "manual", retryAt: undefined, failure: undefined,
+                waitReason: waitingDecision ? "等待业务决策答复" : "人工接管当前工单", activeTurnId: turnId,
+                status: canRun ? "running" : record.execution.status,
+                stage: canRun ? "execute" : record.execution.stage, updatedAt: now }
+            };
+          });
+        }
+      });
+    }
+  }
+
+  async settleManualTurn(sessionId: string, turnId: string): Promise<void> {
+    for (const { workspaceId } of await this.listWorkspaces()) {
+      await this.integrate(workspaceId, async () => {
+        for (const request of await this.listWorkRequests(workspaceId)) {
+          if (request.workerSessionId === sessionId && request.activeTurnId === turnId)
+            await this.putWorkRequest(workspaceId, { ...request, activeTurnId: undefined });
+        }
+        for (const item of await this.listWorkItems(workspaceId)) {
+          if (item.run.sessionId !== sessionId || item.run.activeTurnId !== turnId) continue;
+          await this.mutateRecord(workspaceId, item.workItemId, (record) => ({ ...record,
+            execution: { ...record.execution, activeTurnId: undefined, updatedAt: this.now() } }));
+        }
+      });
+    }
   }
 
   private detachWorktree(record: WorkItemRecord, discard: boolean): WorkItemRecord {
@@ -2023,7 +2289,7 @@ export class WorkbenchService {
     const action = card.actionId ? await this.getAction(workspaceId, card.actionId) : undefined;
     const cards = await this.listDecisions(workspaceId);
     const recordAnswer = (item: WorkItemRecord["item"]): WorkItemRecord["item"] => ({ ...item,
-      status: item.status === "decision" && !cards.some((other) => other.workItemId === item.workItemId && !other.answer && !other.withdrawn) ? "queued" : item.status,
+      status: item.status === "decision" && action?.kind === "execute" && action.control !== "paused" && !cards.some((other) => other.workItemId === item.workItemId && !other.answer && !other.withdrawn) ? "queued" : item.status,
       decisions: item.decisions.includes(message) ? item.decisions : [...item.decisions, message] });
     if (!action || !actionIsOpen(action)) {
       if (card.workItemId) await this.mutateRecord(workspaceId, card.workItemId, (record) => ({ ...record, item: { ...recordAnswer(record.item), updatedAt: this.now() } }));
@@ -2041,6 +2307,19 @@ export class WorkbenchService {
     }
     if (action.history.some((entry) => entry.decisionId === card.decisionId)) return;
     const waiting = cards.some((other) => other.actionId === action.actionId && !other.answer && !other.withdrawn);
+    const manualDelivery = action.kind === "execute" && action.control === "manual" && !!action.sessionId;
+    if (manualDelivery) {
+      if (!this.sessionSteerer) throw new Error("人工接管的决策答复需要桌面会话在线。");
+      const messageId = "decision-" + card.decisionId;
+      const confirmed = this.deliveryConfirmer ? await this.deliveryConfirmer(action.sessionId!, messageId) : { accepted: false };
+      if (!confirmed.accepted) await this.sessionSteerer({ sessionId: action.sessionId!, content: message, messageId });
+      const active = confirmed.accepted ? confirmed.active !== false : true;
+      await this.updateAction(workspaceId, action, (current) => ({ ...current,
+        status: waiting || !active ? "decision" : "running", stage: active ? "execute" : "deliver", deliveredAt: this.now(), control: "manual",
+        history: [...current.history, { at: this.now(), event: "decision.answered", message, decisionId: card.decisionId }]
+      }), card.workItemId ? (item) => ({ ...recordAnswer(item), status: waiting ? item.status : "running" }) : undefined);
+      return;
+    }
     await this.updateAction(workspaceId, action, (current) => {
       const now = this.now();
       const answered = { status: waiting ? "decision" as const : "pending" as const,

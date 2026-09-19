@@ -319,14 +319,20 @@ it.each([false, true])("retries a failed takeover turn through execution (user t
   if (userTurn) f.startTurn("worker", "user-turn");
   await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", integrationActionId: integration.actionId }));
   f.complete("worker", userTurn ? "user-turn" : "turn-1", "failed");
-  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run).toMatchObject({ attempts: 1, lastFailure: "turn failed: Runtime failed", retryAt: expect.any(String) }));
-  expect((await f.service.diagnoseWorkItem(f.workspaceId, item.workItemId)).nextRetryAt).toBeDefined();
-  expect(await f.service.listInbox()).toMatchObject([{ kind: "integration", workItem: { run: { attempts: 1 } } }]);
+  if (userTurn) {
+    await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run).toMatchObject({ control: "manual", attempts: 0 }));
+    expect((await f.service.diagnoseWorkItem(f.workspaceId, item.workItemId)).nextRetryAt).toBeUndefined();
+  } else {
+    await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run).toMatchObject({ attempts: 1, lastFailure: "turn failed: Runtime failed", retryAt: expect.any(String) }));
+    expect((await f.service.diagnoseWorkItem(f.workspaceId, item.workItemId)).nextRetryAt).toBeDefined();
+  }
   now += 120_000;
   await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
-  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(userTurn ? 1 : 2));
-  expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).toContain("workItem.integration.complete");
-  expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).not.toContain("workItem.submit");
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(userTurn ? 0 : 2));
+  if (!userTurn) {
+    expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).toContain("workItem.integration.complete");
+    expect(vi.mocked(f.runner.send).mock.calls.at(-1)![1]).not.toContain("workItem.submit");
+  }
   await expect(f.service.submitWorkItem(f.workspaceId, item.workItemId, submission)).rejects.toThrow("integration.complete");
   await f.service.completeIntegration(f.workspaceId, item.workItemId, integration.actionId, "worker");
   f.complete("worker");
@@ -385,10 +391,10 @@ it("sends composed input and configured preparation together after the selected 
   expect(target).toBe("fork-1");
   expect(content.startsWith(message.content + "\n\n" + (await f.roles.resolve(f.root, "work-preparation")).content)).toBe(true);
   expect(content).toContain(request.requestId);
-  expect(options).toEqual({ attachments: message.attachments, execution: message.execution });
+  expect(options).toMatchObject({ attachments: message.attachments, execution: message.execution, messageId: expect.any(String) });
 });
 
-it("prepares a verified empty New Chat in place and preserves its message for retry", async () => {
+it("prepares a verified empty New Chat in place and preserves an unconfirmed delivery", async () => {
   const f = await fixture();
   vi.mocked(f.runner.resolveSourceTurn!).mockResolvedValue(undefined);
   vi.mocked(f.runner.send).mockRejectedValueOnce(new Error("provider unavailable"));
@@ -402,9 +408,10 @@ it("prepares a verified empty New Chat in place and preserves its message for re
   const saved = (await f.service.listWorkRequests(f.workspaceId))[0]!;
   expect(saved.sourceTurnId).toBeUndefined();
   expect(saved.workerSessionId).toBe("new");
+  expect(saved.pendingMessageId).toEqual(expect.any(String));
   await f.service.putWorkRequest(f.workspaceId, { ...saved, retryAt: undefined });
-  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
-  expect(f.runner.send).toHaveBeenLastCalledWith("new", expect.stringContaining("New task"), { attachments: message.attachments, execution: undefined });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.send).toHaveBeenCalledOnce();
   expect(f.runner.fork).not.toHaveBeenCalled();
 });
 
@@ -424,15 +431,18 @@ it("waits for the source turn, prepares while execution is disabled, then resume
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(f.runner.fork).not.toHaveBeenCalled();
   f.complete("design", "source-turn");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.send).not.toHaveBeenCalled();
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(1));
   expect(f.runner.fork).toHaveBeenCalledWith(expect.objectContaining({ sourceSessionId: "design", sourceTurnId: "source-turn", metadata: expect.objectContaining({ role: "work-preparation" }) }));
   expect(vi.mocked(f.runner.send).mock.calls[0]![1]).toContain((await f.roles.resolve(f.root, "work-preparation")).content);
   const first = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "fork-1" });
   const sibling = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId });
-  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(f.runner.send).toHaveBeenCalledTimes(1);
   expect((await f.service.getWorkItem(f.workspaceId, first.workItemId)).status).toBe("preparing");
+  await f.service.completePreparation(f.workspaceId, { requestId: request.requestId, sessionId: "fork-1", workItemIds: [first.workItemId, sibling.workItemId] });
   f.complete("fork-1", "turn-1");
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, sibling.workItemId)).status).toBe("running"));
   expect(f.runner.fork).toHaveBeenLastCalledWith(expect.objectContaining({ sourceSessionId: "fork-1", sourceTurnId: "turn-1" }));
@@ -560,14 +570,14 @@ it("settles the turn that carried a delivery while a user turn is in progress, w
   expect(f.runner.resume).toHaveBeenCalledOnce();
   cleanup.mockClear();
   // The pending adjustment was steered into the user's turn, so that turn now carries the work and
-  // settles as the scheduler's when it ends without submitting.
+  // leaves it in manual control when it ends without submitting.
   f.complete("original", "user-turn");
-  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 1, attempts: 0 }));
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 0, attempts: 0, control: "manual" }));
   await f.orchestrator.dispose();
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
-  // Both turns were counted on the run that delivered them, and releasing it opened the next delivery.
-  expect((await f.service.listRuns(f.workspaceId)).filter((run) => run.status === "done").map((run) => run.turns)).toEqual([2]);
-  expect(f.runner.send).toHaveBeenCalledTimes(2);
+  // The user-owned turn is tracked separately and does not create an automatic follow-up.
+  expect((await f.service.listRuns(f.workspaceId)).filter((run) => run.status === "running").map((run) => run.turns)).toEqual([1]);
+  expect(f.runner.send).toHaveBeenCalledTimes(1);
 });
 
 it("atomically drops old idle accounting when a user starts while completion persistence is waiting", async () => {
@@ -647,7 +657,6 @@ it("counts a scheduled turn once when turn-started and completion notifications 
   await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "original" });
   f.orchestrator.start();
   await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
-  f.startTurn("original", "turn-1");
   f.complete("original", "turn-1");
   f.complete("original", "turn-1");
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
@@ -664,7 +673,8 @@ it.each(["completed", "failed"] as const)("recovers scheduled %s accounting afte
   const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
   orchestrators.push(restarted);
   restarted.start();
-  await vi.waitFor(() => expect(f.runner.resume).toHaveBeenCalledTimes(2));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.resume).toHaveBeenCalledTimes(2);
   expect(f.runner.send).toHaveBeenCalledOnce();
   f.complete("original", "turn-1", finishReason);
   if (finishReason === "failed") {
@@ -687,7 +697,8 @@ it("does not exempt an active turn of unknown origin after reconstruction", asyn
   const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
   orchestrators.push(restarted);
   restarted.start();
-  await vi.waitFor(() => expect(f.runner.resume).toHaveBeenCalledTimes(2));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.resume).toHaveBeenCalledTimes(2);
   f.complete("original", "turn-1");
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
   expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ idleTurns: 1, attempts: 0 });
@@ -705,12 +716,14 @@ it("keeps a known user followup exempt after reconstruction", async () => {
   const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
   orchestrators.push(restarted);
   restarted.start();
-  await vi.waitFor(() => expect(f.runner.resume).toHaveBeenCalledTimes(2));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.runner.resume).toHaveBeenCalledTimes(1);
   f.complete("original", "user-followup");
-  await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 2 }));
+  await vi.waitFor(async () => expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1 }));
   await restarted.dispose();
   expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", idleTurns: 0, attempts: 0, scheduledTurnId: "turn-1" });
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.control).toBe("manual");
   expect(f.runner.send).toHaveBeenCalledOnce();
   expect(f.runner.interrupt).not.toHaveBeenCalled();
 });
@@ -914,6 +927,7 @@ it("hands every pending notice over at once and consumes them with that delivery
   expect(message).toContain("【文档合入】引用文档已提交 " + committed.commit);
   expect(message.split("【合同调整】")).toHaveLength(2);
   expect(message.split("【文档合入】")).toHaveLength(2);
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]?.notices).toEqual([]));
   const [action] = await f.service.listActions(f.workspaceId);
   expect(action).toMatchObject({ notices: [] });
   expect(action!.history.map((entry) => entry.event)).toEqual(expect.arrayContaining(["contract.updated", "docs.updated"]));

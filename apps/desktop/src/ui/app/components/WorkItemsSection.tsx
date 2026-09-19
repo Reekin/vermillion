@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { type AgentRun, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction } from "@vermillion/workbench/client";
+import { type AgentRun, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction, type WorkRequest } from "@vermillion/workbench/client";
 import type { TaskTarget, WorkbenchState } from "../workbench-store.js";
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
@@ -29,9 +29,43 @@ const SessionLink = ({ sessionId, onOpenSession, children = "会话" }: { sessio
   <Button size="sm" variant="ghost" outlined onClick={() => onOpenSession(sessionId)}>{children}</Button>
 );
 
-const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onOpenSession, onCancel, onOpen }: {
+const WorkRequestRow = ({ request, requestItems, client, workspaceId, busy, onOpenSession, onOpenWorkItem }: { request: WorkRequest; requestItems: WorkItem[]; client: WorkbenchClient; workspaceId: string; busy: boolean; onOpenSession: (sessionId: string, turnId?: string) => void; onOpenWorkItem: (workItemId: string) => void }) => {
+  const paused = request.control === "paused";
+  const blocked = request.status === "failed" || request.control === "manual";
+  const title = request.scope?.trim() || "当前工作";
+  const finished = requestItems.length > 0 && requestItems.every((item) => ["closed", "cancelled"].includes(item.status));
+  const state = finished ? (requestItems.some((item) => item.status === "cancelled") ? "部分完成" : "已完成") : paused ? "已暂停" : request.status === "failed" ? "工作受阻" : request.control === "manual" ? "人工接管" : request.status === "preparing" ? "准备中" : request.status === "pending" ? "等待准备" : "已交接";
+  const itemSummary = requestItems.length ? "工单 " + requestItems.length + " · " + requestItems.slice(0, 2).map((item) => item.title).join("、") : undefined;
+  const action = async (method: "work.pause" | "work.resume" | "work.retry" | "work.cancel" | "work.confirm") => {
+    await client.request(method, { workspaceId, requestId: request.requestId });
+  };
+  return <li className="border-t border-border first:border-t-0">
+    <ListRow leading={<Badge>{"工作"}</Badge>} title={<span title={title}>{title}</span>}
+      meta={[state, itemSummary, request.waitReason, request.failure].filter(Boolean).join(" · ")}
+      columns={{ status: <Badge status={paused || blocked ? "decision" : "preparing"}>{state}</Badge>,
+        hoverAction: !finished && request.status !== "cancelled" && <IconButton icon={X} size={12} label={"取消工作：" + title} disabled={busy} onClick={() => void action("work.cancel")} />,
+        action: request.workerSessionId && <SessionLink sessionId={request.workerSessionId} onOpenSession={onOpenSession} /> }}
+      trailing={<div className="flex items-center gap-1">
+        {finished ? null : request.waitReason?.includes("受理状态不明") ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action("work.confirm")}>确认状态</Button>
+          : paused ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action("work.resume")}>恢复</Button>
+          : blocked && request.status === "failed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action("work.retry")}>重试</Button>
+          : request.control === "manual" ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action("work.resume")}>恢复自动推进</Button>
+          : <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action("work.pause")}>暂停</Button>}
+      </div>}
+    />
+    {requestItems.length > 0 && <ul className="ml-8 border-l border-border pl-2">
+      {requestItems.map((item) => <li key={item.workItemId} data-task-id={item.workItemId}>
+        <ListRow title={<span title={item.title}>{item.title}</span>} meta={item.status === "closed" || item.status === "cancelled" ? statusLabel[item.status] : item.run.waitReason ?? statusLabel[item.status]}
+          columns={{ status: <Badge status={item.status}>{statusLabel[item.status]}</Badge>, action: item.run.sessionId && <SessionLink sessionId={item.run.sessionId} onOpenSession={onOpenSession} /> }}
+          onClick={() => onOpenWorkItem(item.workItemId)} />
+      </li>)}
+    </ul>}
+  </li>;
+};
+
+const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onOpenSession, onCancel, onPause, onResume, onRetry, onOpen }: {
   item: WorkItem; run?: AgentRun; actions: WorkflowAction[]; waitingFor: string[]; compact: boolean; muted: boolean; busy: boolean;
-  onOpenSession: (sessionId: string, turnId?: string) => void; onCancel: () => void; onOpen: () => void;
+  onOpenSession: (sessionId: string, turnId?: string) => void; onCancel: () => void; onPause: () => void; onResume: () => void; onRetry: () => void; onOpen: () => void;
 }) => {
   const progress = workItemProgress(item, actions, run, waitingFor);
   const sessionId = item.run.sessionId ?? run?.sessionId;
@@ -39,6 +73,9 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
   const info = run && [!compact && roleLabel[run.role], run.turns + " turn", compact ? relativeTime(at) : new Date(at).toLocaleString("zh-CN")].filter(Boolean).join(" · ");
   const needsExplanation = item.status === "queued" || item.status === "merging" || item.status === "decision" || item.run.pauseReason === "user";
   const meta = waitingFor.length ? "等待 " + waitingFor.join("、") + " · 工作台" : needsExplanation ? [progress.reason ?? progress.title, progress.handler].filter(Boolean).join(" · ") : undefined;
+  const paused = item.run.pauseReason === "user" || item.run.control === "paused";
+  const manual = item.run.control === "manual" && !paused;
+  const retryable = item.status === "decision" && !paused && Boolean(item.run.waitReason?.includes("故障") || item.run.waitReason?.includes("工作受阻") || item.run.waitReason?.includes("次数"));
   return (
     <li data-task-id={item.workItemId} className="border-t border-border first:border-t-0">
       <ListRow
@@ -51,7 +88,13 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
           info: info && <span title={[info, item.run.lastFailure].filter(Boolean).join(" · ")}>{info}</span>,
           status: <Badge status={item.status} muted={muted}>{progress.shortLabel || statusLabel[item.status]}</Badge>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
-          action: sessionId && <SessionLink sessionId={sessionId} onOpenSession={onOpenSession} />
+          action: <div className="flex items-center gap-1">
+            {isOpenWorkItem(item) && (paused ? <Button size="sm" variant="ghost" disabled={busy} onClick={onResume}>恢复</Button>
+              : manual && item.status !== "decision" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onRetry}>恢复自动推进</Button>
+              : retryable ? <Button size="sm" variant="ghost" disabled={busy} onClick={onRetry}>重试</Button>
+              : <Button size="sm" variant="ghost" disabled={busy} onClick={onPause}>暂停</Button>)}
+            {sessionId && <SessionLink sessionId={sessionId} onOpenSession={onOpenSession} />}
+          </div>
         }}
       />
     </li>
@@ -59,7 +102,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
 };
 
 type WorkItemsSectionProps = {
-  sourceTitles: Record<string, string>; client: WorkbenchClient; workspaceId: string; scheduler: Scheduler; workItems: WorkItem[]; runs: AgentRun[]; actions: WorkflowAction[];
+  sourceTitles: Record<string, string>; client: WorkbenchClient; workspaceId: string; scheduler: Scheduler; workItems: WorkItem[]; workRequests: WorkRequest[]; runs: AgentRun[]; actions: WorkflowAction[];
   onOpenSession: (sessionId: string, turnId?: string) => void; compact: boolean; onExpand: () => void;
   expandedWorkGroups: WorkbenchState["expandedWorkGroups"];
   setWorkGroupExpanded: WorkbenchState["setWorkGroupExpanded"];
@@ -70,7 +113,7 @@ type WorkItemsSectionProps = {
   taskTarget?: TaskTarget;
 };
 
-export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, runs, actions, onOpenSession, onOpenIssue, compact, onExpand, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
+export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, workRequests, runs, actions, onOpenSession, onOpenIssue, compact, onExpand, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
   const board = useRef<HTMLDivElement>(null);
   const located = useRef<TaskTarget | undefined>(undefined);
   useEffect(() => {
@@ -110,8 +153,10 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
   };
   const setScheduler = (value: Partial<Scheduler>) => void perform(() => client.request("scheduler.set", { workspaceId, value: { ...scheduler, ...value } }));
   const latestRuns = [...runs].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  const visible = compact ? workItems.filter((item) => isOpenWorkItem(item) || item.workItemId === taskTarget?.id) : workItems;
-  const hidden = workItems.length - visible.length;
+  const attachedIds = new Set(workRequests.filter((request) => request.status !== "cancelled").flatMap((request) => request.workItemIds ?? []));
+  const groupedSourceItems = workItems.filter((item) => !attachedIds.has(item.workItemId));
+  const visible = compact ? groupedSourceItems.filter((item) => isOpenWorkItem(item) || item.workItemId === taskTarget?.id) : groupedSourceItems;
+  const hidden = groupedSourceItems.length - visible.length;
   const groups = new Map<string, WorkItem[]>();
   for (const item of visible) {
     const key = item.treeId ?? "standalone";
@@ -129,13 +174,16 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
       compact={compact} muted={muted} busy={busy} onOpenSession={onOpenSession}
       onOpen={() => openDetail(item.workItemId)}
       onCancel={() => void perform(() => client.request("workItem.cancel", { workspaceId, workItemId: item.workItemId }))}
+      onPause={() => void perform(() => client.request("workItem.pause", { workspaceId, workItemId: item.workItemId }))}
+      onResume={() => void perform(() => client.request("workItem.resume", { workspaceId, workItemId: item.workItemId }))}
+      onRetry={() => void perform(() => client.request("workItem.retry", { workspaceId, workItemId: item.workItemId }))}
     />)}</ul>
   );
   return (
     <div ref={board}>
       <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2 text-caption text-muted-foreground">
         <Button size="sm" onClick={() => setCreating(true)}>创建工单</Button>
-        <Toggle label="调度" checked={scheduler.enabled} disabled={busy} onChange={(enabled) => setScheduler({ enabled })} />
+        <Toggle label="自动推进" checked={scheduler.enabled} disabled={busy} onChange={(enabled) => setScheduler({ enabled })} />
         <Stepper label="并发" value={scheduler.maxWorkers} min={1} max={8} disabled={busy} onChange={(maxWorkers) => setScheduler({ maxWorkers })} />
         <span className="border-l border-border-strong pl-3 text-caption text-muted-foreground">
           {workItems.filter((w) => w.status === "running").length} 进行中 · {workItems.filter((w) => !isOpenWorkItem(w)).length} 已结束
@@ -143,8 +191,11 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
         {hidden > 0 && <Button size="sm" variant="ghost" className="ml-auto underline underline-offset-4" onClick={onExpand}>另有 {hidden} 项已结束</Button>}
       </div>
       {error && <InlineNotice tone="error" className="pt-2">{error}</InlineNotice>}
-      {visible.length === 0 ? <EmptyState title={hidden ? "没有进行中的工单" : "还没有工单"} hint="在会话中点击开工，或创建一张工单。" /> : (
+      {visible.length === 0 && workRequests.filter((request) => request.status !== "cancelled").length === 0 ? <EmptyState title={hidden ? "没有进行中的工作" : "还没有工作"} hint="在会话中点击开工，或创建一张工单。" /> : (
         <div className="max-w-6xl space-y-3 p-4">
+          {workRequests.filter((request) => request.status !== "cancelled").length > 0 && <DisclosureCard title="当前工作" open={true} onToggle={() => undefined} progress={<>准备 {workRequests.filter((request) => request.status === "preparing").length}</>}>
+            <ul>{workRequests.filter((request) => request.status !== "cancelled").map((request) => <WorkRequestRow key={request.requestId} request={request} requestItems={workItems.filter((item) => item.requestId === request.requestId)} client={client} workspaceId={workspaceId} busy={busy} onOpenSession={onOpenSession} onOpenWorkItem={openDetail} />)}</ul>
+          </DisclosureCard>}
           {orderedGroups.map(([groupId, items]) => <DisclosureCard key={groupId}
             title={groupId === "standalone" ? "独立工单" : sourceTitles[groupId] ?? "来源会话"}
             open={expandedWorkGroups[workspaceId + "/" + groupId] !== false}

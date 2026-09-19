@@ -23,6 +23,7 @@ import {
   zIssueType,
   zPatrolRun,
   zWorkRequest,
+  zWorkDiagnosis,
   zWorkMessage,
   zReviewDisposition,
   zRisk,
@@ -159,7 +160,12 @@ export const workbenchRpc = {
 
   "work.start": { params: zWs.extend({ sessionId: z.string().min(1), turnId: z.string().min(1).optional(), scope: z.string().optional(), message: zWorkMessage.optional() }), result: zWorkRequest },
   "work.list": { params: zWs, result: z.array(zWorkRequest) },
+  "work.diagnose": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkDiagnosis },
   "work.retry": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
+  "work.prepare.complete": { params: zWs.extend({ requestId: z.string().min(1), sessionId: z.string().min(1), workItemIds: z.array(z.string()), refs: z.array(zDocRef).optional() }), result: zWorkRequest },
+  "work.confirm": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
+  "work.pause": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
+  "work.resume": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
   "work.cancel": { params: z.union([
     zWs.extend({ requestId: z.string().min(1) }),
     zWs.extend({ sessionId: z.string().min(1) })
@@ -183,14 +189,17 @@ export const workbenchRpc = {
   "workItem.start": { params: zWi.extend({ run: z.object({ sessionId: z.string().optional(), heartbeatAt: z.string().optional() }).strict() }), result: zWorkItem },
   "workItem.heartbeat": { params: zWi.extend({ lastTurnId: z.string().optional() }), result: zWorkItem },
   "workItem.submit": {
-    params: zWi.extend({ contractRevision: z.number().int().nonnegative(), evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifySubmission }),
+    params: zWi.extend({ sessionId: z.string().min(1).optional(), contractRevision: z.number().int().nonnegative(), evidence: zEvidence.omit({ submittedAt: true }), review: z.array(zReviewDisposition), verify: zVerifySubmission }),
     result: zWorkItem
   },
   "workItem.rollback": { params: zWi.extend({ reason: z.string().trim().min(1) }), result: zWorkItem },
   "inbox.acknowledge": { params: zWi, result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
-  "workItem.pause": { params: zWs.extend({ sessionId: z.string().min(1) }), result: z.object({ paused: z.boolean(), workItem: zWorkItem.optional() }) },
+  "workItem.pause": { params: zWs.extend({ sessionId: z.string().min(1).optional(), workItemId: z.string().min(1).optional() }), result: z.object({ paused: z.boolean(), workItem: zWorkItem.optional() }) },
   "workItem.resume": { params: zWi, result: zWorkItem },
+  "workItem.retry": { params: zWi, result: zWorkItem },
+  "workItem.continueFrom": { params: zWi.extend({ sessionId: z.string().min(1), turnId: z.string().min(1) }), result: zWorkItem },
+  "workItem.confirm": { params: zWi, result: zWorkItem },
   "workItem.integration.retry": { params: zWi, result: zWorkItem },
   "workItem.integration.takeover": { params: zWi.extend({ note: z.string().trim().optional() }), result: zWorkItem },
   "workItem.integration.complete": { params: zWi.extend({ actionId: z.string().min(1), sessionId: z.string().min(1) }), result: zWorkItem },

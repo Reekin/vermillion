@@ -57,15 +57,15 @@ const lastAssistantText = (shell: SessionShell, sessionId: string): string | und
 };
 
 /** Deliver a message to an active turn, or start a new turn in the same session. */
-export const createSessionSteerer = (shell: SessionShell) => async (target: string, content: string): Promise<SessionSteerResult> => {
+export const createSessionSteerer = (shell: SessionShell) => async (target: string, content: string, messageId?: string): Promise<SessionSteerResult> => {
   const sessionId = shell.resolveSessionIdentifier(target);
   if (!sessionId || !await shell.ensureSessionLoadedForRead(sessionId)) {
     throw new Error("Session not found: " + target);
   }
   const activeTurnId = resolveActiveTurnId(shell, sessionId);
   const command = activeTurnId
-    ? { type: "steerTurn" as const, sessionId, turnId: activeTurnId, messageId: createId(), content, attachments: [] }
-    : { type: "sendUserMessage" as const, sessionId, messageId: createId(), content, attachments: [] };
+    ? { type: "steerTurn" as const, sessionId, turnId: activeTurnId, messageId: messageId ?? createId(), content, attachments: [] }
+    : { type: "sendUserMessage" as const, sessionId, messageId: messageId ?? createId(), content, attachments: [] };
   const receipt = await shell.executeCommand({ commandId: createId(), command });
   if (!receipt.accepted || !receipt.turnId) throw new Error("steer was not accepted for " + sessionId);
   return {
@@ -277,6 +277,11 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
   },
   isActive: (sessionId) => !!shell.getActiveTurnId(sessionId),
   getActiveTurnId: (sessionId) => shell.getActiveTurnId(sessionId),
+  confirmMessage: async (sessionId, messageId) => {
+    if (!await shell.ensureSessionLoadedForRead(sessionId)) return { accepted: false };
+    const block = shell.getSnapshot().messageBlocks.find((entry) => entry.sessionId === sessionId && entry.messageId === messageId);
+    return block ? { accepted: true, turnId: block.turnId, active: shell.getActiveTurnId(sessionId) === block.turnId } : { accepted: false };
+  },
   onTurnStarted: (listener) => shell.subscribe(({ event }) => {
     if (event.type === "turn.started") listener({ sessionId: event.sessionId, turnId: event.turnId, messageId: event.messageId });
   }, { eventTypes: ["turn.started"] }),

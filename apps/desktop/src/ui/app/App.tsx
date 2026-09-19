@@ -20,6 +20,7 @@ import { RoleEditor } from "./components/RoleEditor.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
+import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
 import { Button, InlineNotice, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
@@ -38,7 +39,7 @@ type AppProps = {
 
 const tabs: Array<{ id: WorkspaceSection; label: string }> = [
   { id: "sessions", label: "会话" },
-  { id: "workItems", label: "工单" },
+  { id: "workItems", label: "工作" },
   { id: "docs", label: "文档" },
   { id: "domains", label: "领域" },
   { id: "roles", label: "角色" },
@@ -69,6 +70,13 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
   const discussionIssue = store((s) => s.view?.issues.find((issue) => issue.discussionSessionId === sessionId));
+  const currentWorkRequest = store((s) => s.view?.workRequests.find((request) => {
+    const hasOpenItems = s.view?.workItems.some((item) => item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
+    return (request.workerSessionId === sessionId || (request.sourceSessionId === sessionId && ["pending", "preparing"].includes(request.status))) &&
+      (request.status !== "ready" || hasOpenItems);
+  }));
+  const currentWorkItem = store((s) => s.view?.workItems.find((item) => item.run.sessionId === sessionId && !["closed", "cancelled"].includes(item.status)));
+  const currentDecision = store((s) => s.view?.decisions.find((card) => !card.answer && !card.withdrawn && card.sessionId === sessionId));
   const [workspaceFilterId, setWorkspaceFilterId] = useState<string | undefined>();
   const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
   const [composerActions, setComposerActions] = useState<ComposerActions>();
@@ -280,11 +288,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   createSession={createSession}
                   initializeDraftExecution={initializeDraftExecution}
                   onBeforeStop={sessionWorkspaceId ? async (workerSessionId) => {
-                    const cancelled = await store.getState().client.request("work.cancel", {
-                      workspaceId: sessionWorkspaceId,
-                      sessionId: workerSessionId
-                    });
-                    if (cancelled.cancelled) return "cancelled";
+                    const preparation = store.getState().view?.workRequests.find((request) => request.workerSessionId === workerSessionId && ["pending", "preparing"].includes(request.status));
+                    if (preparation) {
+                      await store.getState().client.request("work.pause", { workspaceId: sessionWorkspaceId, requestId: preparation.requestId });
+                      return;
+                    }
                     await store.getState().client.request("workItem.pause", {
                       workspaceId: sessionWorkspaceId,
                       sessionId: workerSessionId
@@ -299,6 +307,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                     items={[{ key: "copy-image", label: "复制图片", onSelect: onCopy }]} />}
                   renderFileLinkContextMenu={renderFileLinkContextMenu}
                   composerExtras={<>
+                    {sessionWorkspaceId && <CurrentWorkBar client={store.getState().client} workspaceId={sessionWorkspaceId} sessionId={sessionId} request={currentWorkRequest} item={currentWorkItem} decision={currentDecision} />}
                     <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                     {discussionIssue && sessionWorkspaceId && <Button size="sm" variant="ghost" outlined onClick={() => store.getState().showIssue({ workspaceId: sessionWorkspaceId, issueId: discussionIssue.issueId })}>Issue</Button>}
                   </>}

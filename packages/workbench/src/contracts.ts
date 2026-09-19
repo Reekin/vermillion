@@ -167,6 +167,13 @@ export const zRun = z.object({
   retryAt: z.string().datetime().optional(),
   /** Set when the user stopped a Worker turn; only an explicit work-item resume clears it. */
   pauseReason: z.literal("user").optional(),
+  /** Automatic or user-owned execution. */
+  control: z.enum(["auto", "manual", "paused"]).optional(),
+  attemptId: z.string().optional(),
+  activeTurnId: z.string().optional(),
+  waitReason: z.string().optional(),
+  pendingMessageId: z.string().optional(),
+  migratedFromSessionId: z.string().optional(),
 });
 
 export const zWorkItem = z.object({
@@ -240,7 +247,20 @@ export const zWorkRequest = z.object({
   scope: z.string().optional(), treeId: z.string().optional(), workerSessionId: z.string().optional(),
   status: z.enum(["pending", "preparing", "ready", "failed", "cancelled"]),
   attempts: z.number().int().nonnegative().optional(), retryAt: z.string().optional(),
-  failure: z.string().optional(), createdAt: z.string(), updatedAt: z.string()
+  failure: z.string().optional(),
+  /** Automatic dispatch, explicit user continuation, or durable pause. */
+  control: z.enum(["auto", "manual", "paused"]).optional(),
+  /** Stable identity for the preparation execution currently being reconciled. */
+  attemptId: z.string().optional(),
+  activeTurnId: z.string().optional(),
+  waitReason: z.string().optional(),
+  handoff: z.object({
+    sessionId: z.string(), workItemIds: z.array(z.string()), refs: z.array(zDocRef), at: z.string()
+  }).optional(),
+  pendingMessageId: z.string().optional(),
+  workItemIds: z.array(z.string()).optional(),
+  migratedToSessionId: z.string().optional(),
+  createdAt: z.string(), updatedAt: z.string()
 });
 export type WorkRequest = z.infer<typeof zWorkRequest>;
 
@@ -329,6 +349,15 @@ export const zScheduler = z.object({
 });
 export type Scheduler = z.infer<typeof zScheduler>;
 
+export const zWorkDiagnosis = z.object({
+  request: zWorkRequest,
+  workItems: z.array(zWorkItem),
+  scheduler: zScheduler,
+  waiting: z.array(z.string()),
+  availableActions: z.array(z.object({ method: z.string(), condition: z.string() }))
+});
+export type WorkDiagnosis = z.infer<typeof zWorkDiagnosis>;
+
 export const agentRoles = ["worker"] as const;
 export const zAgentRole = z.enum(agentRoles);
 export type AgentRole = z.infer<typeof zAgentRole>;
@@ -391,7 +420,13 @@ export const zExecution = zProcess.extend({
   scheduledTurnId: z.string().optional(),
   /** Notices waiting for the next delivery; emptied by the scheduler once they are delivered. */
   notices: z.array(zExecutionNotice),
-  idleTurns: z.number().int().nonnegative()
+  idleTurns: z.number().int().nonnegative(),
+  control: z.enum(["auto", "manual", "paused"]).optional(),
+  attemptId: z.string().optional(),
+  activeTurnId: z.string().optional(),
+  waitReason: z.string().optional(),
+  pendingMessageId: z.string().optional(),
+  migratedFromSessionId: z.string().optional()
 });
 export type Execution = z.infer<typeof zExecution>;
 
