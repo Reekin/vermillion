@@ -45,7 +45,7 @@ Reviewer 意见自行判断采纳或拒绝并记录理由，最多两轮；技�
 
 ## 清理与提交
 
-验收成功、失败或中断都关闭本次浏览器连接，由 Worker 停止自己创建的实例并核实 PID 和 CDP 端口释放；不影响用户或其他任务的实例。全部要求通过后，再次读取主分支 HEAD，必要时在自己的 worktree rebase。复验范围按 rebase 结果判定：rebase 无冲突且新合入的 commit 不触及本单修改的文件时，只重跑 typecheck、test、lint 等静态检查，已有 GUI／实机证据保留并标注新 commit；发生冲突或新合入 commit 与本单修改文件有交集时，重建实例，让原 Verifier 只补涉及这些文件的验收条目，其余证据继续保留。根目录执行也只提交本单成果，不混入他人修改。
+验收成功、失败或中断都关闭本次浏览器连接，由 Worker 停止自己创建的实例并核实 PID 和 CDP 端口释放；不影响用户或其他任务的实例。全部要求通过后，再次读取主分支 HEAD，必要时在自己的 worktree rebase。复验范围按新合入内容与冲突处理的实际影响判定，不能仅以 HEAD 改变或文件有交集决定重跑。仅文档变化且未改变本单需求、被测代码、依赖及构建或测试配置时，保留已有静态检查和 GUI／实机证据，记录对照 diff 与新 commit，无需重跑。代码、依赖或配置变化时检查其对本单路径的影响并补跑相关检查；需要新构建的产品路径由原 Verifier 在更新实例上补验受影响项，其余证据保留。根目录执行也只提交本单成果，不混入他人修改。
 
 重新读取 workItem.get，把当前 contractRevision、evidence、review 处置和逐项 verify 传给 workItem.submit；代码工单带成果 commit。verify.items[].evidence 写实际操作与观察，不能用 acceptance 复述或 Worker 自述代替证据。summary 两三句说明用户可见结果，commit、命令、审阅和清理记录放 commands/附件。截图、验收记录等证据文件留在 worktree 外的隔离目录并以绝对路径引用，不作为成果提交进仓库。纯操作工单可按性质跳过 Reviewer／Verifier，直接提交对应命令与逐项结果。submit 后结束本轮；合入冲突打回时按原因在原 worktree 修复并重交。
 
