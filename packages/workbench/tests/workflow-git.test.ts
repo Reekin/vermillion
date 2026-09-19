@@ -276,8 +276,18 @@ it("validates exact sections on create and update while keeping description sepa
   await git(root, "add", "AGENTS.md"); await git(root, "commit", "-qm", "rules");
   const rules = await git(root, "rev-parse", "HEAD");
   const external = await service.createWorkItem(workspaceId, { ...contract,
-    refs: [{ path: "AGENTS.md", section: "Checks", commit: rules }] });
+    refs: [{ path: "AGENTS.md", commit: rules }] });
   expect(external.refs[0]?.commit).toBe(rules);
+
+  await service.writeDoc(workspaceId, path, content.replace("First", "First updated"));
+  await service.commitDocs(workspaceId, { message: "Unrelated docs", paths: [path] });
+  expect((await service.getWorkItem(workspaceId, external.workItemId)).refs[0]?.commit).toBe(rules);
+
+  await writeFile(join(root, "AGENTS.md"), "# Rules\n\n## Checks\n\nRun all of them.\n");
+  await git(root, "add", "AGENTS.md"); await git(root, "commit", "-qm", "update rules");
+  const updatedRules = await git(root, "rev-parse", "HEAD");
+  await service.refreshDocRefs(workspaceId);
+  expect((await service.getWorkItem(workspaceId, external.workItemId)).refs[0]?.commit).toBe(updatedRules);
 });
 
 it("retains a reference and diagnoses it when the heading disappears", async () => {

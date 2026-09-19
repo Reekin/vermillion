@@ -648,7 +648,7 @@ export class DocsService {
   }
 
   async committedDiff(path: string, from: string, to: string): Promise<string> {
-    assertDocPath(path);
+    assertReferencePath(path);
     return git(this.rootPath, ["diff", from, to, "--", ":(literal)" + path]);
   }
 
