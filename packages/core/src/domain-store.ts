@@ -303,6 +303,7 @@ export class DomainStore {
   private terminalIdsByTurn = new Map<string, string[]>();
   private approvalRequestIdsByTurn = new Map<string, string[]>();
   private interactionRequestIdsByTurn = new Map<string, string[]>();
+  private interactionRequestIdsBySession = new Map<string, string[]>();
   private participantIdsByConversation = new Map<string, string[]>();
   private activeSessionIdsByParticipant = new Map<string, string[]>();
   private parentSessionIdByChild = new Map<string, string>();
@@ -345,6 +346,7 @@ export class DomainStore {
     this.terminalIdsByTurn.clear();
     this.approvalRequestIdsByTurn.clear();
     this.interactionRequestIdsByTurn.clear();
+    this.interactionRequestIdsBySession.clear();
     this.participantIdsByConversation.clear();
     this.activeSessionIdsByParticipant.clear();
     this.parentSessionIdByChild.clear();
@@ -360,22 +362,20 @@ export class DomainStore {
   public mergeSnapshot(
     snapshot: DomainSnapshot | unknown,
     options: DomainSnapshotMergeOptions = {}
-  ): DomainSnapshot {
+  ): void {
     const parsedSnapshot = parseDomainSnapshot(snapshot);
-    const staged = DomainStore.fromSnapshot(this.getSnapshot());
-    staged.assertSnapshotWithinMergeScope(parsedSnapshot, options.scope);
-    staged.applyParsedSnapshot(parsedSnapshot, {
+    this.assertSnapshotWithinMergeScope(parsedSnapshot, options.scope);
+    this.preflightSnapshotMutation([parsedSnapshot]);
+    this.applyParsedSnapshot(parsedSnapshot, {
       merge: true
     });
-    this.swapFrom(staged);
-    return this.getSnapshot();
   }
 
   public replaceSessionWindowSnapshot(
     sessionId: string,
     snapshot: DomainSnapshot | unknown
-  ): DomainSnapshot {
-    return this.replaceSessionWindowSnapshots([{ sessionId, snapshot }]);
+  ): void {
+    this.replaceSessionWindowSnapshots([{ sessionId, snapshot }]);
   }
 
   public replaceSessionWindowSnapshots(
@@ -383,37 +383,116 @@ export class DomainStore {
       sessionId: string;
       snapshot: DomainSnapshot | unknown;
     }>
-  ): DomainSnapshot {
+  ): void {
     const parsedWindows = windows.map((window) => ({
       sessionId: window.sessionId,
       snapshot: parseDomainSnapshot(window.snapshot)
     }));
     if (parsedWindows.length === 0) {
-      return this.getSnapshot();
+      return;
     }
-    const staged = DomainStore.fromSnapshot(this.getSnapshot());
     for (const { sessionId, snapshot: parsedSnapshot } of parsedWindows) {
-      staged.assertSnapshotWithinMergeScope(parsedSnapshot, { sessionId });
-      staged.deleteSessionWindowCoverage(sessionId, parsedSnapshot);
-      staged.applyParsedSnapshot(parsedSnapshot, { merge: true });
+      this.assertSnapshotWithinMergeScope(parsedSnapshot, { sessionId });
     }
-    this.swapFrom(staged);
-    return this.getSnapshot();
+    this.preflightSnapshotMutation(parsedWindows.map((window) => window.snapshot));
+    for (const { sessionId, snapshot: parsedSnapshot } of parsedWindows) {
+      this.deleteSessionWindowCoverage(sessionId, parsedSnapshot);
+      this.applyParsedSnapshot(parsedSnapshot, { merge: true });
+    }
   }
 
   public replaceSessionHistorySnapshot(
     sessionId: string,
     snapshot: DomainSnapshot | unknown
-  ): DomainSnapshot {
+  ): void {
     const parsedSnapshot = parseDomainSnapshot(snapshot);
-    const staged = DomainStore.fromSnapshot(this.getSnapshot());
-    staged.assertSnapshotWithinMergeScope(parsedSnapshot, { sessionId });
-    staged.deleteSessionHistory(sessionId);
-    staged.applyParsedSnapshot(parsedSnapshot, {
+    this.assertSnapshotWithinMergeScope(parsedSnapshot, { sessionId });
+    this.preflightSnapshotMutation([parsedSnapshot]);
+    this.deleteSessionHistory(sessionId);
+    this.applyParsedSnapshot(parsedSnapshot, {
       merge: true
     });
-    this.swapFrom(staged);
-    return this.getSnapshot();
+  }
+
+  /** Validate every operation that can reject before a scoped snapshot mutates live state. */
+  private preflightSnapshotMutation(snapshots: readonly DomainSnapshot[]): void {
+    const sessions = new Map(this.sessions);
+    const relations = new Map(this.sessionRelations);
+
+    const parentOf = (childSessionId: string, excludedRelationId?: string) => {
+      for (const candidate of relations.values()) {
+        if (
+          candidate.relationId !== excludedRelationId &&
+          candidate.childSessionId === childSessionId
+        ) {
+          return candidate.parentSessionId;
+        }
+      }
+      return undefined;
+    };
+
+    for (const snapshot of snapshots) {
+      for (const session of snapshot.sessions) {
+        sessions.set(session.sessionId, session);
+      }
+      for (const relation of snapshot.sessionRelations) {
+        const parent = sessions.get(relation.parentSessionId);
+        const child = sessions.get(relation.childSessionId);
+        if (parent && child && parent.conversationId !== child.conversationId) {
+          throw new DomainStoreRelationError(
+            "conversation_mismatch",
+            `Session relation ${relation.relationId} crosses conversations ${parent.conversationId} and ${child.conversationId}.`
+          );
+        }
+        const existingParent = parentOf(relation.childSessionId, relation.relationId);
+        if (existingParent && existingParent !== relation.parentSessionId) {
+          throw new DomainStoreRelationError(
+            "duplicate_structural_parent",
+            `Session ${relation.childSessionId} already has parent ${existingParent}.`
+          );
+        }
+        if (relation.parentSessionId === relation.childSessionId) {
+          throw new DomainStoreRelationError(
+            "cycle",
+            `Session relation ${relation.relationId} points ${relation.parentSessionId} to itself.`
+          );
+        }
+        const visited = new Set<string>();
+        let ancestor: string | undefined = relation.parentSessionId;
+        while (ancestor) {
+          if (ancestor === relation.childSessionId) {
+            throw new DomainStoreRelationError(
+              "cycle",
+              `Session relation ${relation.relationId} creates a cycle.`
+            );
+          }
+          if (visited.has(ancestor)) break;
+          visited.add(ancestor);
+          ancestor = parentOf(ancestor, relation.relationId);
+        }
+        for (const candidate of [...relations.values()]) {
+          if (
+            candidate.relationId !== relation.relationId &&
+            candidate.parentSessionId === relation.parentSessionId &&
+            candidate.childSessionId === relation.childSessionId
+          ) {
+            relations.delete(candidate.relationId);
+          }
+        }
+        relations.set(relation.relationId, relation);
+      }
+    }
+
+    for (const relation of relations.values()) {
+      const parent = sessions.get(relation.parentSessionId);
+      const child = sessions.get(relation.childSessionId);
+      if (parent && child && parent.conversationId !== child.conversationId) {
+        throw new DomainStoreRelationError(
+          "conversation_mismatch",
+          `Session ${child.sessionId} cannot move to conversation ${child.conversationId} while parent ${parent.sessionId} belongs to ${parent.conversationId}.`
+        );
+      }
+    }
   }
 
   private applyParsedSnapshot(
@@ -493,6 +572,7 @@ export class DomainStore {
     this.terminalIdsByTurn = staged.terminalIdsByTurn;
     this.approvalRequestIdsByTurn = staged.approvalRequestIdsByTurn;
     this.interactionRequestIdsByTurn = staged.interactionRequestIdsByTurn;
+    this.interactionRequestIdsBySession = staged.interactionRequestIdsBySession;
     this.participantIdsByConversation = staged.participantIdsByConversation;
     this.activeSessionIdsByParticipant = staged.activeSessionIdsByParticipant;
     this.parentSessionIdByChild = staged.parentSessionIdByChild;
@@ -1374,8 +1454,9 @@ export class DomainStore {
             (requestId) => this.runtimeInteractions.get(requestId)
           )
         : options.sessionId !== undefined
-          ? [...this.runtimeInteractions.values()].filter(
-              (interaction) => interaction.sessionId === options.sessionId
+          ? mapIdsToValues(
+              this.interactionRequestIdsBySession.get(options.sessionId),
+              (requestId) => this.runtimeInteractions.get(requestId)
             )
           : [...this.runtimeInteractions.values()];
 
@@ -1391,12 +1472,21 @@ export class DomainStore {
   ): RuntimeInteraction {
     const parsedInteraction = parseRuntimeInteraction(runtimeInteraction);
     const existing = this.runtimeInteractions.get(parsedInteraction.requestId);
-    if (existing && existing.turnId !== parsedInteraction.turnId) {
-      removeIndexedValue(
-        this.interactionRequestIdsByTurn,
-        existing.turnId,
-        existing.requestId
-      );
+    if (existing) {
+      if (existing.turnId !== parsedInteraction.turnId) {
+        removeIndexedValue(
+          this.interactionRequestIdsByTurn,
+          existing.turnId,
+          existing.requestId
+        );
+      }
+      if (existing.sessionId !== parsedInteraction.sessionId) {
+        removeIndexedValue(
+          this.interactionRequestIdsBySession,
+          existing.sessionId,
+          existing.requestId
+        );
+      }
     }
 
     this.runtimeInteractions.set(parsedInteraction.requestId, parsedInteraction);
@@ -1407,6 +1497,11 @@ export class DomainStore {
         parsedInteraction.requestId
       );
     }
+    addUniqueValue(
+      this.interactionRequestIdsBySession,
+      parsedInteraction.sessionId,
+      parsedInteraction.requestId
+    );
     return cloneRuntimeInteraction(parsedInteraction);
   }
 
@@ -1419,6 +1514,11 @@ export class DomainStore {
     removeIndexedValue(
       this.interactionRequestIdsByTurn,
       existing.turnId,
+      existing.requestId
+    );
+    removeIndexedValue(
+      this.interactionRequestIdsBySession,
+      existing.sessionId,
       existing.requestId
     );
     return true;
@@ -1744,10 +1844,11 @@ export class DomainStore {
     messageId: string;
     excludingBlockId?: string;
   }): boolean {
-    for (const block of this.messageBlocks.values()) {
+    for (const blockId of this.messageBlockIdsByTurn.get(input.turnId) ?? []) {
+      const block = this.messageBlocks.get(blockId);
       if (
+        block &&
         block.blockId !== input.excludingBlockId &&
-        block.turnId === input.turnId &&
         block.messageId === input.messageId
       ) {
         return true;

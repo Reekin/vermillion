@@ -89,7 +89,7 @@ const getStoredEntity = (
   ]?.get(id);
 
 describe("DomainStore", () => {
-  it("stages several session-window replacements from one global snapshot", () => {
+  it("stages several session-window replacements without a global snapshot", () => {
     const store = new DomainStore({
       snapshot: {
         conversations: [{
@@ -145,7 +145,7 @@ describe("DomainStore", () => {
       }
     ]);
 
-    expect(getSnapshot).toHaveBeenCalledTimes(2);
+    expect(getSnapshot).not.toHaveBeenCalled();
     expect(store.getTurn("turn-a")).toBeDefined();
     expect(store.getTurn("turn-b")).toBeDefined();
   });

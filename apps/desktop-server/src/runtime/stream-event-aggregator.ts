@@ -15,6 +15,7 @@ type StreamEnvelope = EventEnvelope & {
 
 type PendingAggregate = {
   envelope: StreamEnvelope;
+  sessionId: string;
   fragments: string[];
   length: number;
 };
@@ -82,7 +83,11 @@ export class StreamEventAggregator {
       envelope.event.type !== "message.delta" &&
       envelope.event.type !== "terminal.output"
     ) {
-      this.flush();
+      if ("sessionId" in envelope.event && envelope.event.sessionId) {
+        this.flushSession(envelope.event.sessionId);
+      } else {
+        this.flush();
+      }
       this.emit(envelope);
       return;
     }
@@ -97,6 +102,14 @@ export class StreamEventAggregator {
     this.clearTimer();
     for (const key of [...this.pendingByKey.keys()]) {
       this.flushAggregate(key);
+    }
+  }
+
+  private flushSession(sessionId: string): void {
+    for (const [key, aggregate] of [...this.pendingByKey.entries()]) {
+      if (aggregate.sessionId === sessionId) {
+        this.flushAggregate(key);
+      }
     }
   }
 
@@ -116,6 +129,7 @@ export class StreamEventAggregator {
       if (!aggregate) {
         aggregate = {
           envelope,
+          sessionId: envelope.event.sessionId,
           fragments: [],
           length: 0
         };
@@ -135,7 +149,7 @@ export class StreamEventAggregator {
       remaining = remaining.slice(prefixLength);
 
       if (aggregate.length >= MAX_STREAM_EVENT_CHUNK_LENGTH) {
-        this.flush();
+        this.flushAggregate(key);
       }
     }
   }
