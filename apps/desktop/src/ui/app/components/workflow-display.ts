@@ -108,7 +108,7 @@ const rejectionSummary = (reason: string) => {
 const matchingRun = (item: WorkItem, run?: AgentRun) => run && (!item.run.sessionId || run.sessionId === item.run.sessionId) ? run : undefined;
 
 /** One deterministic user-facing explanation shared by the board row and the detail panel. */
-export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?: AgentRun): WorkItemProgress => {
+export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?: AgentRun, unresolvedDependencies: string[] = item.dependsOn): WorkItemProgress => {
   const execute = latestAction(actions, "execute", item.workItemId) as Execution | undefined;
   const integration = latestAction(actions, "integration", item.workItemId) as Extract<WorkflowAction, { kind: "integration" }> | undefined;
   const rejection = item.rejections.at(-1);
@@ -118,7 +118,11 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
     shortLabel: "用户暂停", title: "等待你恢复执行", handler: "你", next: "恢复后，Worker 从原会话继续执行。", userAction: "点击“恢复执行”。", at: item.updatedAt
   };
   if (item.status === "closed") return {
-    shortLabel: "已关闭", title: "工单已合入并关闭", reason: item.merge?.commit ? "成果已进入主分支。" : undefined,
+    shortLabel: "已关闭", title: "工单已合入并关闭", reason: [
+      item.evidence?.summary,
+      item.merge?.commit ? "合入 commit：" + item.merge.commit : undefined,
+      item.verify ? "验收：" + item.verify.items.filter((entry) => entry.status === "pass").length + " / " + item.acceptance.length + " 通过" : undefined
+    ].filter(Boolean).join(" · ") || undefined,
     handler: "已完成", next: item.merge?.commit ? "可查看合入 commit 和历史进展。" : "可查看验收结果和历史进展。", at: item.merge?.mergedAt ?? item.updatedAt
   };
   if (item.status === "cancelled") return {
@@ -135,7 +139,7 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
     next: integration.agent ? "Agent 处理合入后登记结果。" : integration.status === "retry" ? recoveryCondition(integration) : "工作台完成合入检查并更新结果。",
     at: integration.updatedAt
   };
-  if (item.status === "queued" && item.dependsOn.length) return {
+  if (item.status === "queued" && unresolvedDependencies.length) return {
     shortLabel: "等待前置工单", title: "等待前置工单完成", handler: "工作台",
     next: "全部前置工单关闭后，调度器会继续安排本单。", at: item.updatedAt
   };
@@ -147,6 +151,12 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
     shortLabel: "等待用户", title: "执行恢复需要你的决定", reason: execute.failure ? rejectionSummary(execute.failure) : undefined,
     handler: "你", next: recoveryCondition(execute), userAction: "在 Inbox 回复决策。", at: execute.updatedAt
   };
+  if (item.status === "queued" && rejection && execute && (execute.status === "running" || execute.stage === "execute")) {
+    return {
+      shortLabel: "退回待续做", title: "提交已退回", reason: rejectionSummary(rejection.reason), handler: "当前 Worker 会话",
+      next: "当前 turn 结束后，工作台会把处理说明送回 Worker。", userAction: "无需操作。", at: rejection.at
+    };
+  }
   if (item.status === "queued" && execute?.status === "pending" && (execute.stage === "deliver" || execute.notices.length > 0)) {
     const returned = !!rejection;
     const active = activeRun?.status === "running";
@@ -183,12 +193,12 @@ const eventFromHistory = (entry: { at: string; event: string; message: string },
 export const workItemEvents = (item: WorkItem, actions: WorkflowAction[], runs: AgentRun[]): WorkItemEvent[] => {
   const events: WorkItemEvent[] = [];
   const execute = latestAction(actions, "execute", item.workItemId) as Execution | undefined;
-  const integration = latestAction(actions, "integration", item.workItemId);
+  const integrations = actions.filter((action) => action.workItemId === item.workItemId && action.kind === "integration");
   if (execute) for (const entry of execute.history) {
     const event = eventFromHistory(entry, "execute");
     if (event) events.push(event);
   }
-  if (integration) for (const entry of integration.history) {
+  for (const integration of integrations) for (const entry of integration.history) {
     const event = eventFromHistory(entry, "integration");
     if (event) events.push(event);
   }

@@ -37,16 +37,29 @@ describe("execution and integration presentation", () => {
     const waiting = workItemProgress(item, [execute], { ...activeRun, status: "done", endedAt: "2026-01-01T00:00:02.000Z" });
     expect(waiting.shortLabel).toBe("等待调度续接");
     expect(waiting.handler).toBe("工作台");
+
+    const activeReturn = workItemProgress(item, [{ ...execute, status: "running", stage: "execute" } as WorkflowAction], activeRun, []);
+    expect(activeReturn.shortLabel).toBe("退回待续做");
+    expect(activeReturn.handler).toBe("当前 Worker 会话");
+  });
+
+  it("does not let closed dependencies hide the current queued reason", () => {
+    const item = { workItemId: "one", status: "queued", dependsOn: ["done"], rejections: [{ reason: "合入发生冲突，需要处理后继续。", at: "2026-01-01T00:00:00.000Z" }], run: { sessionId: "worker" } } as WorkItem;
+    const execute = { actionId: "worker", kind: "execute", workItemId: "one", status: "pending", stage: "deliver", updatedAt: "2026-01-01T00:00:01.000Z", notices: [] } as WorkflowAction;
+    expect(workItemProgress(item, [execute], undefined, []).shortLabel).toBe("等待调度续接");
+    expect(workItemProgress(item, [execute], undefined, ["done"]).shortLabel).toBe("等待前置工单");
   });
 
   it("turns workflow history into readable events without internal stage names", () => {
     const item = { workItemId: "one", status: "closed", rejections: [{ reason: "Worker must commit its worktree before integration.", at: "2026-01-01T00:00:02.000Z" }], merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:04.000Z" }, run: { sessionId: "worker" } } as WorkItem;
-    const actions = [{ actionId: "merge", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", attempts: 0, history: [
+    const actions = [{ actionId: "merge-old", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", attempts: 0, history: [
       { at: "2026-01-01T00:00:01.000Z", event: "created", message: "验收通过" },
       { at: "2026-01-01T00:00:02.000Z", event: "failed:merge", message: "Worker must commit its worktree before integration." }
+    ] }, { actionId: "merge-new", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", attempts: 0, history: [
+      { at: "2026-01-01T00:00:03.000Z", event: "created", message: "重新提交，验收通过" }
     ] } as WorkflowAction];
     const events = workItemEvents(item, actions, []);
-    expect(events.map((event) => event.title)).toEqual(["合入完成", "合入检查未通过", "提交已退回", "提交验收通过，开始合入"]);
+    expect(events.map((event) => event.title)).toEqual(["合入完成", "提交验收通过，开始合入", "合入检查未通过", "提交已退回", "提交验收通过，开始合入"]);
     expect(events.every((event) => !event.title.includes("stage") && !event.title.includes("done"))).toBe(true);
   });
 });

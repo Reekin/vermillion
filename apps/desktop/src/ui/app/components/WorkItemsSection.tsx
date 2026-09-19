@@ -33,7 +33,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, compact, muted, busy, onO
   item: WorkItem; run?: AgentRun; actions: WorkflowAction[]; waitingFor: string[]; compact: boolean; muted: boolean; busy: boolean;
   onOpenSession: (sessionId: string, turnId?: string) => void; onCancel: () => void; onOpen: () => void;
 }) => {
-  const progress = workItemProgress(item, actions, run);
+  const progress = workItemProgress(item, actions, run, waitingFor);
   const sessionId = item.run.sessionId ?? run?.sessionId;
   const at = run?.endedAt ?? item.run.heartbeatAt ?? run?.startedAt ?? item.updatedAt;
   const info = run && [!compact && roleLabel[run.role], run.turns + " turn", compact ? relativeTime(at) : new Date(at).toLocaleString("zh-CN")].filter(Boolean).join(" · ");

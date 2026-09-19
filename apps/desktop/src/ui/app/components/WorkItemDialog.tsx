@@ -22,12 +22,14 @@ const lines = (values: string[]) => values.map((value) => "• " + value).join("
 const time = (value?: string) => value ? new Date(value).toLocaleString("zh-CN") : "";
 const verificationLabel = (status: string) => ({ pass: "通过", defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成" }[status] ?? "未通过");
 
-const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming }: {
+const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming, onAnswer, answeringDecisionId }: {
   item: WorkItem;
   progress: ReturnType<typeof workItemProgress>;
   pendingDecisions: DecisionCard[];
   onResume: () => void;
   resuming: boolean;
+  onAnswer: (decisionId: string, key: string) => void;
+  answeringDecisionId?: string;
 }) => (
   <section className="border-l-2 border-border-strong pl-4" aria-live="polite">
     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -50,7 +52,9 @@ const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming }:
       <p className="text-label font-medium text-strong">待答复</p>
       {pendingDecisions.map((card) => <div key={card.decisionId} className="mt-2 space-y-1">
         <p className="text-label text-foreground">{card.question}</p>
-        <p className="text-caption text-muted-foreground">可选：{card.options.map((option) => option.label).join("、")}。请在 Inbox 回复。</p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {card.options.map((option) => <Button key={option.key} size="sm" variant={option.key === card.recommended ? "primary" : "secondary"} disabled={!!answeringDecisionId} onClick={() => onAnswer(card.decisionId, option.key)}>{option.label}</Button>)}
+        </div>
       </div>)}
     </div>}
   </section>
@@ -93,11 +97,20 @@ const Requirements = ({ item }: { item: WorkItem }) => <div className="space-y-4
 const Verification = ({ item }: { item: WorkItem }) => <div className="space-y-3">
   {item.verify ? <>
     <div className="flex flex-wrap items-center gap-2"><Badge>{item.verify.verdict === "pass" ? "全部通过" : "需要返工"}</Badge><span className="text-caption text-muted-foreground">{time(item.verify.verifiedAt)}</span></div>
-    {item.verify.items.map((entry) => <div key={entry.index} className="border-t border-border pt-3 first:border-t-0 first:pt-0">
-      <p className="text-label text-foreground">{entry.index + 1}. {item.acceptance[entry.index]?.text ?? "验收项"}</p>
-      <p className="mt-1 text-caption text-muted-foreground">{verificationLabel(entry.status)}：{entry.evidence}</p>
+    {item.acceptance.map((acceptance, index) => {
+      const entry = item.verify?.items.find((candidate) => candidate.index === index);
+      return <div key={index} className="border-t border-border pt-3 first:border-t-0 first:pt-0">
+        <p className="text-label text-foreground">{index + 1}. {acceptance.text}</p>
+        <p className="mt-1 text-caption text-muted-foreground">{entry ? verificationLabel(entry.status) + "：" + entry.evidence : "尚未验收"}</p>
+      </div>;
+    })}
+  </> : <>
+    <p className="text-label text-muted-foreground">尚未验收</p>
+    {item.acceptance.map((acceptance, index) => <div key={index} className="border-t border-border pt-3 first:border-t-0 first:pt-0">
+      <p className="text-label text-foreground">{index + 1}. {acceptance.text}</p>
+      <p className="mt-1 text-caption text-muted-foreground">尚未验收</p>
     </div>)}
-  </> : <p className="text-label text-muted-foreground">尚未验收</p>}
+  </>}
 </div>;
 
 const Review = ({ item }: { item: WorkItem }) => <div className="space-y-4">
@@ -135,6 +148,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   const [error, setError] = useState<string>();
   const [technicalOpen, setTechnicalOpen] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [answeringDecisionId, setAnsweringDecisionId] = useState<string>();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ requirements: false, verification: false, review: false, evidence: false, records: false, decisions: false });
   useEffect(() => {
     let active = true;
@@ -163,7 +177,8 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   const itemDecisions = decisions?.filter((card) => card.workItemId === workItemId || itemActions.some((action) => action.actionId === card.actionId) || item.decisions.includes(card.decisionId)) ?? [];
   const pendingDecisions = itemDecisions.filter((card) => !card.answer && !card.withdrawn);
   const resolvedDecisions = itemDecisions.filter((card) => card.answer || card.withdrawn);
-  const progress = workItemProgress(item, itemActions, itemRuns.find((run) => run.sessionId === item.run.sessionId) ?? itemRuns[0]);
+  const unresolvedDependencies = item.dependsOn.filter((id) => workItems.find((other) => other.workItemId === id)?.status !== "closed");
+  const progress = workItemProgress(item, itemActions, itemRuns.find((run) => run.sessionId === item.run.sessionId) ?? itemRuns[0], unresolvedDependencies);
   const events = workItemEvents(item, itemActions, itemRuns);
   const toggle = (section: string) => setOpenSections((current) => ({ ...current, [section]: !current[section] }));
   const resume = async () => {
@@ -173,10 +188,17 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setResuming(false); }
   };
+  const answerDecision = async (decisionId: string, key: string) => {
+    setAnsweringDecisionId(decisionId);
+    setError(undefined);
+    try { await client.request("decision.answer", { workspaceId, decisionId, key }); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setAnsweringDecisionId(undefined); }
+  };
   return <Modal title={item.title} onClose={onClose} width={800} contentClassName="flex min-h-0 flex-col">
     <div className="min-h-0 flex-1 overflow-auto">
       <div className="space-y-5 px-5 py-5">
-        <ProgressPanel item={item} progress={progress} pendingDecisions={pendingDecisions} onResume={() => void resume()} resuming={resuming} />
+        <ProgressPanel item={item} progress={progress} pendingDecisions={pendingDecisions} onResume={() => void resume()} resuming={resuming} onAnswer={(decisionId, key) => void answerDecision(decisionId, key)} answeringDecisionId={answeringDecisionId} />
         {error && <InlineNotice tone="error" className="whitespace-pre-wrap break-words px-0">{error}</InlineNotice>}
         <ProgressTimeline events={events} />
         {integration && <IntegrationControls client={client} workspaceId={workspaceId} workItemId={workItemId} action={integration} item={item} />}
