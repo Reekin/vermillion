@@ -284,6 +284,25 @@ it("resumes an unfinished delegated merge once after orchestrator restart", asyn
 });
 
 
+it("sends only continue with no notices when retrying the original worker", async () => {
+  const f = await fixture();
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  let now = Date.now();
+  const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner, now: () => new Date(now).toISOString() });
+  orchestrators.push(orchestrator);
+  orchestrator.start();
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  f.complete("worker", "turn-1", "failed");
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ status: "retry", attempts: 1 }));
+  expect(f.runner.send).toHaveBeenCalledOnce();
+  now += 120_000;
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  const [sessionId, message] = vi.mocked(f.runner.send).mock.calls[1]!;
+  expect(sessionId).toBe("worker");
+  expect(message).toBe("继续");
+});
+
 it.each([false, true])("retries a failed takeover turn through execution (user turn: %s)", async (userTurn) => {
   const f = await fixture();
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });

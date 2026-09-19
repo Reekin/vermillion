@@ -507,7 +507,7 @@ export class Orchestrator {
   }
 
   private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {
-    const update = [renderExecutionNotices(action.notices), action.failure].filter(Boolean).join("\n");
+    const update = [action.failure ? "继续" : "", renderExecutionNotices(action.notices)].filter(Boolean).join("\n");
     if (action.integrationActionId) return [update, await this.completion(workspaceId, action.actionId)].filter(Boolean).join("\n");
     if (action.deliveredAt) return update;
     const item = await this.service.getWorkItem(workspaceId, action.workItemId);
