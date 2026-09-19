@@ -2480,6 +2480,13 @@ export class CodexAppServerRuntimePort
     return base ? `${base}\n\n${extra}` : extra;
   }
 
+  public getThreadExecutionProfile(
+    threadId: string
+  ): TurnExecutionProfile | undefined {
+    const profile = this.executionProfileByThreadId.get(threadId);
+    return profile ? { ...profile } : undefined;
+  }
+
   private rememberThreadExecutionProfile(
     threadId: string,
     profile: TurnExecutionProfile | undefined

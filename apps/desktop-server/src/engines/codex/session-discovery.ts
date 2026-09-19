@@ -16,7 +16,11 @@ import {
   parseToolCall,
   parseTurn
 } from "@vermillion/shared";
-import { readTurnExecutionProfiles } from "@vermillion/shared";
+import {
+  readSessionExecutionProfile,
+  readTurnExecutionProfiles,
+  writeSessionExecutionProfile
+} from "@vermillion/shared";
 import { isPathInsideWorkspace } from "@vermillion/shared";
 import { pathToFileURL } from "node:url";
 import type { Thread } from "../../codex-app-server-generated/v2/Thread.js";
@@ -851,6 +855,29 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     }
   }
 
+  private hydratedMetadata(
+    entry: SessionIndexEntry,
+    thread: Thread
+  ): Record<string, unknown> {
+    const metadata = {
+      ...(entry.metadata ?? {}),
+      providerKind: codexProviderKind,
+      providerSessionId: thread.id,
+      rolloutPath: thread.path ?? undefined,
+      cwd: thread.cwd
+    };
+    if (readSessionExecutionProfile(metadata)) {
+      return metadata;
+    }
+    const executionProfile = this.codexRuntimePort.getThreadExecutionProfile?.(thread.id);
+    return executionProfile
+      ? writeSessionExecutionProfile(metadata, {
+          engineId: codexAgentId,
+          ...executionProfile
+        })
+      : metadata;
+  }
+
   public async discoverWorkspaces(
     workspaces: readonly WorkspaceRecord[]
   ): Promise<ReadonlyMap<string, DiscoveredWorkspaceResult>> {
@@ -984,13 +1011,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         updatedAt: isoFromUnixSeconds(thread.updatedAt),
         archivedAt: entry.archivedAt,
         lastTurnId: thread.turns.at(-1)?.id,
-        metadata: {
-          ...(entry.metadata ?? {}),
-          providerKind: codexProviderKind,
-          providerSessionId: thread.id,
-          rolloutPath: thread.path ?? undefined,
-          cwd: thread.cwd
-        }
+        metadata: this.hydratedMetadata(entry, thread)
       });
 
       const hydratedTurns = await hydrateCodexTurnEntities({
@@ -1115,13 +1136,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         updatedAt: isoFromUnixSeconds(thread.updatedAt),
         archivedAt: entry.archivedAt,
         lastTurnId: entry.lastTurnId ?? pageTurns[0]?.id,
-        metadata: {
-          ...(entry.metadata ?? {}),
-          providerKind: codexProviderKind,
-          providerSessionId: thread.id,
-          rolloutPath: thread.path ?? undefined,
-          cwd: thread.cwd
-        }
+        metadata: this.hydratedMetadata(entry, thread)
       });
       const hydratedTurns = await hydrateCodexTurnEntities({
         entry,
