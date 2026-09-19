@@ -433,6 +433,22 @@ export class DomainStore {
 
     for (const snapshot of snapshots) {
       for (const session of snapshot.sessions) {
+        for (const relation of relations.values()) {
+          const relatedSessionId = relation.parentSessionId === session.sessionId
+            ? relation.childSessionId
+            : relation.childSessionId === session.sessionId
+              ? relation.parentSessionId
+              : undefined;
+          const relatedSession = relatedSessionId
+            ? sessions.get(relatedSessionId)
+            : undefined;
+          if (relatedSession && relatedSession.conversationId !== session.conversationId) {
+            throw new DomainStoreRelationError(
+              "conversation_mismatch",
+              `Session ${session.sessionId} cannot move to conversation ${session.conversationId} while related session ${relatedSession.sessionId} belongs to ${relatedSession.conversationId}.`
+            );
+          }
+        }
         sessions.set(session.sessionId, session);
       }
       for (const relation of snapshot.sessionRelations) {
@@ -483,16 +499,6 @@ export class DomainStore {
       }
     }
 
-    for (const relation of relations.values()) {
-      const parent = sessions.get(relation.parentSessionId);
-      const child = sessions.get(relation.childSessionId);
-      if (parent && child && parent.conversationId !== child.conversationId) {
-        throw new DomainStoreRelationError(
-          "conversation_mismatch",
-          `Session ${child.sessionId} cannot move to conversation ${child.conversationId} while parent ${parent.sessionId} belongs to ${parent.conversationId}.`
-        );
-      }
-    }
   }
 
   private applyParsedSnapshot(

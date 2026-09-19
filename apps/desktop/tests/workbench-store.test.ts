@@ -113,6 +113,44 @@ describe("workspace view invalidation", () => {
     });
   });
 
+  it("loads a newly selected workspace without waiting for the old workspace", async () => {
+    const { store, request, emit } = setup({ a: { items: [] }, b: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view?.workspaceId).toBe("a"));
+    request.mockClear();
+    let release!: (value: unknown[]) => void;
+    request.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => { release = resolve; }));
+
+    emit({ type: "docs.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    store.getState().browseWorkspace("b");
+
+    await vi.waitFor(() => expect(store.getState().view?.workspaceId).toBe("b"));
+    expect(request.mock.calls.some(([method, params]) =>
+      method === "docs.list" && (params as { workspaceId?: string }).workspaceId === "b"
+    )).toBe(true);
+    release([]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getState().view?.workspaceId).toBe("b");
+  });
+
+  it("commits successful categories when another category in the batch fails", async () => {
+    const { store, request, emit } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    request.mockImplementation(async (method: string) => {
+      if (method === "docs.list") throw new Error("docs unavailable");
+      if (method === "decision.list") return [{ decisionId: "decision-new" }];
+      return [];
+    });
+
+    emit({ type: "docs.changed", workspaceId: "a" });
+    emit({ type: "decisions.changed", workspaceId: "a" });
+
+    await vi.waitFor(() => expect(store.getState().view?.decisions).toEqual([
+      { decisionId: "decision-new" }
+    ]));
+    expect(store.getState().viewError).toBe("docs unavailable");
+  });
+
   it("keeps task, view, and Inbox refreshes while avoiding unrelated view queries", async () => {
     const { store, request, emit } = setup({ a: { items: [] }, b: { items: [] } });
     await vi.waitFor(() => expect(store.getState().view).toBeDefined());
@@ -156,5 +194,33 @@ describe("workspace view invalidation", () => {
     emit({ type: "docs.changed", workspaceId: "a" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("does not start view or task queries from a late workspace response after disconnect", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
+    let release!: (value: Array<{ workspaceId: string; label: string }>) => void;
+    const request = vi.fn((method: string) => {
+      if (method === "workspace.list") {
+        return new Promise<Array<{ workspaceId: string; label: string }>>((resolve) => {
+          release = resolve;
+        });
+      }
+      return Promise.resolve([]);
+    });
+    const store = createWorkbenchStore({
+      request,
+      subscribe: () => () => undefined
+    } as unknown as WorkbenchClient);
+    const disconnect = store.getState().connect();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    disconnect();
+    release([{ workspaceId: "a", label: "a" }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(request.mock.calls.map(([method]) => method).sort()).toEqual([
+      "inbox.list",
+      "workspace.list"
+    ]);
+    expect(store.getState().workspaces).toEqual([]);
   });
 });

@@ -109,15 +109,23 @@ const LAST_WORKSPACE_KEY = "vermillion.draftWorkspaceId";
 
 export const createWorkbenchStore = (client: WorkbenchClient) =>
   create<WorkbenchState>((set, get) => {
-    let viewLoadScheduled = false;
-    let viewLoadRunning = false;
-    const pendingViewFields = new Set<WorkspaceViewField>();
+    type ViewRefresh = {
+      workspaceId: string;
+      docsSessionId: string | undefined;
+      epoch: number;
+      pending: Set<WorkspaceViewField>;
+      scheduled: boolean;
+      running: boolean;
+    };
+    const viewRefreshes = new Map<string, ViewRefresh>();
     let inboxLoadScheduled = false;
     let inboxLoadRunning = false;
     let inboxDirty = false;
     let taskLoadScheduled = false;
     let taskLoadRunning = false;
     const pendingTaskWorkspaceIds = new Set<string>();
+    let connected = false;
+    let connectionEpoch = 0;
 
     const readViewField = async (
       field: WorkspaceViewField,
@@ -141,7 +149,8 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     };
 
     const drainTasks = async () => {
-      if (taskLoadRunning || pendingTaskWorkspaceIds.size === 0) return;
+      if (!connected || taskLoadRunning || pendingTaskWorkspaceIds.size === 0) return;
+      const epoch = connectionEpoch;
       taskLoadRunning = true;
       const workspaceIds = [...pendingTaskWorkspaceIds];
       pendingTaskWorkspaceIds.clear();
@@ -153,6 +162,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
             .map((item) => ({ workspaceId, kind: "workItem", id: item.workItemId, title: item.title, status: item.status, sessionId: item.run?.sessionId }));
           return { workspaceId, tasks };
         }));
+        if (!connected || epoch !== connectionEpoch) return;
         const freshGroups = groups.filter(({ workspaceId }) =>
           !pendingTaskWorkspaceIds.has(workspaceId)
         );
@@ -165,14 +175,19 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           tasksError: undefined
         }));
       } catch (error) {
-        set({ tasksError: (error as Error).message });
+        if (connected && epoch === connectionEpoch) {
+          set({ tasksError: (error as Error).message });
+        }
       } finally {
         taskLoadRunning = false;
-        if (pendingTaskWorkspaceIds.size > 0) scheduleTasks([]);
+        if (connected && epoch === connectionEpoch && pendingTaskWorkspaceIds.size > 0) {
+          scheduleTasks([]);
+        }
       }
     };
 
     const scheduleTasks = (workspaceIds: readonly string[]) => {
+      if (!connected) return;
       for (const workspaceId of workspaceIds) pendingTaskWorkspaceIds.add(workspaceId);
       if (taskLoadScheduled || taskLoadRunning || pendingTaskWorkspaceIds.size === 0) return;
       taskLoadScheduled = true;
@@ -182,8 +197,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       });
     };
 
-    const loadWorkspaces = async () => {
+    const loadWorkspaces = async (epoch = connectionEpoch) => {
       const workspaces = await client.request("workspace.list", {});
+      if (!connected || epoch !== connectionEpoch) return;
       const remembered = get().draftWorkspaceId ?? localStorage.getItem(LAST_WORKSPACE_KEY) ?? undefined;
       const draftWorkspaceId = workspaces.some((w) => w.workspaceId === remembered) ? remembered : workspaces[0]?.workspaceId;
       const browsing = get().browsingWorkspaceId;
@@ -200,85 +216,137 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       scheduleTasks(workspaces.map((workspace) => workspace.workspaceId));
     };
 
-    const drainView = async () => {
-      if (viewLoadRunning || pendingViewFields.size === 0) return;
-      const workspaceId = get().browsingWorkspaceId;
-      const docsSessionId = get().docsSessionId;
-      if (!workspaceId) {
-        pendingViewFields.clear();
-        set({ view: undefined });
-        return;
-      }
-      const fields = [...pendingViewFields];
-      pendingViewFields.clear();
-      viewLoadRunning = true;
+    const viewRefreshKey = (
+      workspaceId: string,
+      docsSessionId: string | undefined
+    ) => JSON.stringify([workspaceId, docsSessionId ?? null]);
+
+    const drainView = async (refresh: ViewRefresh) => {
+      if (
+        !connected ||
+        refresh.epoch !== connectionEpoch ||
+        refresh.running ||
+        refresh.pending.size === 0
+      ) return;
+      const fields = [...refresh.pending];
+      refresh.pending.clear();
+      refresh.running = true;
       try {
-        const patches = await Promise.all(
-          fields.map((field) => readViewField(field, workspaceId, docsSessionId))
+        const results = await Promise.allSettled(
+          fields.map((field) =>
+            readViewField(field, refresh.workspaceId, refresh.docsSessionId)
+          )
         );
         if (
-          workspaceId !== get().browsingWorkspaceId ||
-          docsSessionId !== get().docsSessionId
+          !connected ||
+          refresh.epoch !== connectionEpoch ||
+          refresh.workspaceId !== get().browsingWorkspaceId ||
+          refresh.docsSessionId !== get().docsSessionId
         ) return;
-        const freshPatches = patches.filter((_, index) =>
-          !pendingViewFields.has(fields[index]!)
-        );
-        const freshFields = fields.filter((field) => !pendingViewFields.has(field));
+        const freshPatches: Partial<WorkspaceView>[] = [];
+        const freshFields: WorkspaceViewField[] = [];
+        const errors: unknown[] = [];
+        results.forEach((result, index) => {
+          const field = fields[index]!;
+          if (result.status === "rejected") {
+            errors.push(result.reason);
+          } else if (!refresh.pending.has(field)) {
+            freshFields.push(field);
+            freshPatches.push(result.value);
+          }
+        });
         const patch = Object.assign({}, ...freshPatches) as Partial<WorkspaceView>;
         set((state) => {
-          const current = state.view?.workspaceId === workspaceId ? state.view : undefined;
+          const current = state.view?.workspaceId === refresh.workspaceId
+            ? state.view
+            : undefined;
           if (!current && freshFields.length !== allWorkspaceViewFields.length) {
-            for (const field of allWorkspaceViewFields) pendingViewFields.add(field);
-            return { viewError: undefined };
+            if (fields.length < allWorkspaceViewFields.length || refresh.pending.size > 0) {
+              for (const field of allWorkspaceViewFields) refresh.pending.add(field);
+            }
+            return {
+              viewError: errors.length > 0
+                ? String(errors[0] instanceof Error ? errors[0].message : errors[0])
+                : undefined
+            };
           }
           return {
-            view: { ...(current ?? {}), ...patch, workspaceId } as WorkspaceView,
-            viewError: undefined
+            view: {
+              ...(current ?? {}),
+              ...patch,
+              workspaceId: refresh.workspaceId
+            } as WorkspaceView,
+            viewError: errors.length > 0
+              ? String(errors[0] instanceof Error ? errors[0].message : errors[0])
+              : undefined
           };
         });
-      } catch (error) {
-        if (
-          workspaceId === get().browsingWorkspaceId &&
-          docsSessionId === get().docsSessionId
-        ) {
-          set({ viewError: (error as Error).message });
-        }
       } finally {
-        viewLoadRunning = false;
-        if (pendingViewFields.size > 0) scheduleView([]);
+        refresh.running = false;
+        if (
+          connected &&
+          refresh.epoch === connectionEpoch &&
+          refresh.pending.size > 0
+        ) {
+          scheduleView([], refresh);
+        }
       }
     };
 
-    const scheduleView = (fields: readonly WorkspaceViewField[]) => {
-      for (const field of fields) pendingViewFields.add(field);
-      if (viewLoadScheduled || viewLoadRunning || pendingViewFields.size === 0) return;
-      viewLoadScheduled = true;
+    const scheduleView = (
+      fields: readonly WorkspaceViewField[],
+      existingRefresh?: ViewRefresh
+    ) => {
+      if (!connected) return;
+      const workspaceId = existingRefresh?.workspaceId ?? get().browsingWorkspaceId;
+      const docsSessionId = existingRefresh?.docsSessionId ?? get().docsSessionId;
+      if (!workspaceId) {
+        set({ view: undefined });
+        return;
+      }
+      const key = viewRefreshKey(workspaceId, docsSessionId);
+      const refresh = existingRefresh ?? viewRefreshes.get(key) ?? {
+        workspaceId,
+        docsSessionId,
+        epoch: connectionEpoch,
+        pending: new Set<WorkspaceViewField>(),
+        scheduled: false,
+        running: false
+      };
+      viewRefreshes.set(key, refresh);
+      for (const field of fields) refresh.pending.add(field);
+      if (refresh.scheduled || refresh.running || refresh.pending.size === 0) return;
+      refresh.scheduled = true;
       queueMicrotask(() => {
-        viewLoadScheduled = false;
-        void drainView();
+        refresh.scheduled = false;
+        void drainView(refresh);
       });
     };
 
     const loadView = () => scheduleView(allWorkspaceViewFields);
 
     const drainInbox = async () => {
-      if (inboxLoadRunning || !inboxDirty) return;
+      if (!connected || inboxLoadRunning || !inboxDirty) return;
+      const epoch = connectionEpoch;
       inboxLoadRunning = true;
       inboxDirty = false;
       try {
         const inboxHistory = await client.request("inbox.list", { includeProcessed: true });
-        if (inboxDirty) return;
+        if (!connected || epoch !== connectionEpoch || inboxDirty) return;
         const inbox = inboxHistory.filter((item) => item.kind === "decision" ? !item.card.answer && !item.card.withdrawn : !item.workItem.merge?.acknowledgedAt);
         set({ inbox, inboxHistory, inboxError: undefined });
       } catch (error) {
-        set({ inboxError: (error as Error).message });
+        if (connected && epoch === connectionEpoch) {
+          set({ inboxError: (error as Error).message });
+        }
       } finally {
         inboxLoadRunning = false;
-        if (inboxDirty) scheduleInbox();
+        if (connected && epoch === connectionEpoch && inboxDirty) scheduleInbox();
       }
     };
 
     const scheduleInbox = () => {
+      if (!connected) return;
       inboxDirty = true;
       if (inboxLoadScheduled || inboxLoadRunning) return;
       inboxLoadScheduled = true;
@@ -355,12 +423,15 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       },
 
       connect: () => {
-        void loadWorkspaces();
+        connected = true;
+        const epoch = ++connectionEpoch;
+        void loadWorkspaces(epoch);
         scheduleInbox();
         const unsubscribe = client.subscribe((event) => {
+          if (!connected || epoch !== connectionEpoch) return;
           switch (event.type) {
             case "workspaces.changed":
-              void loadWorkspaces();
+              void loadWorkspaces(epoch);
               return;
             case "docs.changed":
               if (event.workspaceId === get().browsingWorkspaceId) scheduleView(["docs", "pendingDocChanges"]);
@@ -399,7 +470,10 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         });
         return () => {
           unsubscribe();
-          pendingViewFields.clear();
+          if (epoch !== connectionEpoch) return;
+          connected = false;
+          connectionEpoch += 1;
+          viewRefreshes.clear();
           pendingTaskWorkspaceIds.clear();
           inboxDirty = false;
         };
