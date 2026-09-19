@@ -251,10 +251,10 @@ export const workbenchRpc = {
   "inbox.list": { params: z.object({ includeProcessed: z.boolean().optional() }), result: z.array(zInboxItem) },
 
   "app.start": {
-    params: z.object({ dataDir: z.string().min(1), userDataDir: z.string().min(1).optional(), port: z.number().int().min(1024).max(65535), fixture: z.enum(["session-tree", "real-session"]).optional(), codexConfigSource: z.string().min(1).optional(), env: z.record(z.string()).optional() }),
-    result: z.object({ pid: z.number().int(), cdpUrl: z.string(), desktop: z.string(), dataDir: z.string().optional(), projectPath: z.string().optional(), workspaceId: z.string().optional(), codexHome: z.string().optional(), piAgentDir: z.string().optional() })
+    params: z.object({ targetPath: z.string().min(1), expectedRevision: z.string().min(1).optional(), expectedBuildId: z.string().min(1).optional(), dataDir: z.string().min(1), userDataDir: z.string().min(1).optional(), port: z.number().int().min(1024).max(65535), fixture: z.enum(["session-tree", "real-session"]).optional(), codexConfigSource: z.string().min(1).optional(), env: z.record(z.string()).optional() }),
+    result: z.object({ pid: z.number().int(), instanceId: z.string(), cdpUrl: z.string(), desktop: z.string(), dataDir: z.string(), targetPath: z.string(), targetKind: z.enum(["source", "release"]), targetRevision: z.string().optional(), buildId: z.string(), logPath: z.string(), cli: z.object({ targetFile: z.string(), executable: z.string(), args: z.array(z.string()) }), engineEnv: z.record(z.string()).optional(), projectPath: z.string().optional(), workspaceId: z.string().optional(), codexHome: z.string().optional(), piAgentDir: z.string().optional() })
   },
-  "app.stop": { params: z.object({ pid: z.number().int().positive() }), result: zEmpty },
+  "app.stop": { params: z.object({ dataDir: z.string().min(1), pid: z.number().int().positive(), instanceId: z.string().min(1) }), result: z.object({ dataDir: z.string(), pid: z.number().int().positive(), stopped: z.literal(true), portReleased: z.literal(true) }) },
   "app.window": {
     params: z.object({ dataDir: z.string().min(1), pid: z.number().int().positive(), action: z.enum(["status", "minimize", "restore"]) }),
     result: z.object({ dataDir: z.string(), pid: z.number().int().positive(), action: z.enum(["status", "minimize", "restore"]), visible: z.boolean(), minimized: z.boolean() })

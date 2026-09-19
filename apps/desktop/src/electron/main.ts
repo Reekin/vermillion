@@ -26,7 +26,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
-import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, defaultCodexRolloutsDir, resolveAppCommand, startLocalEndpoint, type AcceptanceLaunchRecord, type AppWindowInput, type AppWindowResult, type InboxItem } from "@vermillion/workbench";
+import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, defaultCodexRolloutsDir, startLocalEndpoint, type AcceptanceLaunchRecord, type AppWindowInput, type AppWindowResult, type InboxItem } from "@vermillion/workbench";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "./agent-runner.js";
 import { createSessionNavigation } from "./session-navigation.js";
 import { materializeAttachmentDataUri } from "./attachment-materializer.js";
@@ -60,7 +60,6 @@ const roleDefaultsDir = [join(appRoot, "roles"), resolve(appRoot, "../../package
 // CLI entry: bundled in a release, built package output in the repo.
 const cliEntryPath = [join(appRoot, "cli", "vermillion.mjs"), resolve(appRoot, "../../packages/workbench/bin/vermillion.mjs")].find((path) => existsSync(path));
 // Launcher script: resources/app/scripts in a release, packages/workbench in the repo.
-const launcherPackageRoot = [appRoot, resolve(appRoot, "../../packages/workbench")].find((dir) => existsSync(join(dir, "scripts", "start-on-hidden-desktop.ps1")));
 // pi host extension: resources/app/pi-extension in a release, apps/desktop-server/resources in the repo.
 const piExtensionPath = process.env.VERMILLION_PI_EXTENSION?.trim() || [
   join(appRoot, "pi-extension", "index.mjs"),
@@ -789,7 +788,7 @@ const boot = async (): Promise<void> => {
     sessionSearch: () => service.listSessionSearchEntries(),
     rolloutsDir: defaultCodexRolloutsDir(),
     sessionNavigation: createSessionNavigation(service, persistenceBaseDir),
-    launcher: new AppLauncher({ command: resolveAppCommand(appRoot), packageRoot: launcherPackageRoot }),
+    launcher: new AppLauncher(),
     appWindowController: async (input: AppWindowInput): Promise<AppWindowResult> => {
       if (input.pid !== process.pid || resolve(input.dataDir) !== resolve(persistenceBaseDir)) {
         throw new Error("app.window target does not belong to this desktop instance");
@@ -903,7 +902,7 @@ const boot = async (): Promise<void> => {
         : { ok: false, error: response.error.message };
     }
     return workbenchRpc(request);
-  });
+  }, { pid: process.pid, instanceId: process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN });
   const orchestrator = new Orchestrator({
     service: workbenchService,
     roles: roleService,

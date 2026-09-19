@@ -113,7 +113,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "inbox.list": (p) => service.listInbox(p.includeProcessed),
 
     "app.start": (p) => service.startApp(p),
-    "app.stop": async (p) => { await service.stopApp(p.pid); return {}; },
+    "app.stop": (p) => service.stopApp(p),
     "app.window": (p) => service.controlAppWindow(p),
 
   };
