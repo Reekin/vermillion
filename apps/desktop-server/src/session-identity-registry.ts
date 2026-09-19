@@ -171,4 +171,51 @@ export class SessionIdentityRegistry {
       return left.localeCompare(right);
     })[0];
   }
+
+  /**
+   * Engine tools only hand out provider session ids, so agent-facing entries accept either form.
+   * Engine kinds are discovered from the recorded handles instead of matching id shapes.
+   */
+  public resolveSessionIdentifier(
+    identifier: string,
+    workspaceId?: string
+  ): string | undefined {
+    if (this.findRuntimeSession(identifier) || this.sessionIndexStore.getEntry(identifier)) {
+      return identifier;
+    }
+    for (const providerKind of this.providerKindsForProviderSessionId(identifier, workspaceId)) {
+      const resolved = this.resolveWorkbenchSessionId(
+        { providerKind, providerSessionId: identifier },
+        workspaceId
+      );
+      if (resolved) {
+        return resolved;
+      }
+    }
+    return undefined;
+  }
+
+  private providerKindsForProviderSessionId(
+    providerSessionId: string,
+    workspaceId?: string
+  ): string[] {
+    const providerKinds = new Set<string>();
+
+    for (const entry of this.sessionIndexStore.listEntries(workspaceId)) {
+      if (entry.providerKind && entry.providerSessionId === providerSessionId) {
+        providerKinds.add(entry.providerKind);
+      }
+    }
+
+    for (const session of this.runtimeService.listSessions({ includeArchived: true })) {
+      const handle =
+        this.runtimeService.resolveProviderSessionHandle?.(session.sessionId) ??
+        metadataProviderHandle(session);
+      if (handle?.providerSessionId === providerSessionId) {
+        providerKinds.add(handle.providerKind);
+      }
+    }
+
+    return [...providerKinds];
+  }
 }

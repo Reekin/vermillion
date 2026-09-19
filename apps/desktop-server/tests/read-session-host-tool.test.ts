@@ -3,6 +3,7 @@ import type { DomainSnapshot } from "@vermillion/shared";
 import { HostToolRegistry } from "../src/host-tools.js";
 import {
   createReadSessionHostTool,
+  type ReadSessionRuntime,
   readSessionToolName,
   readSessionToolNamespace
 } from "../src/read-session-host-tool.js";
@@ -81,10 +82,21 @@ const invocationContext = {
   providerSessionId: "thread-caller"
 };
 
+/** Identity resolution has its own cases; the other cases pass workbench ids straight through. */
+const createTool = (runtime: Omit<ReadSessionRuntime, "resolveSessionId"> &
+  Partial<Pick<ReadSessionRuntime, "resolveSessionId">>) =>
+  createReadSessionHostTool({
+    resolveSessionId: (sessionId) =>
+      snapshot.sessions.some((session) => session.sessionId === sessionId)
+        ? sessionId
+        : undefined,
+    ...runtime
+  });
+
 describe("createReadSessionHostTool", () => {
   it("registers as a host tool definition", async () => {
     const registry = new HostToolRegistry([
-      createReadSessionHostTool({
+      createTool({
         getSnapshot: () => snapshot
       })
     ]);
@@ -118,7 +130,7 @@ describe("createReadSessionHostTool", () => {
   });
 
   it("returns parseable message transcript JSON", async () => {
-    const tool = createReadSessionHostTool({
+    const tool = createTool({
       getSnapshot: () => snapshot
     });
 
@@ -147,7 +159,7 @@ describe("createReadSessionHostTool", () => {
 
   it("reads an already loaded non-partial session without rehydrating", async () => {
     const loadRequests: Array<{ sessionId: string; force?: boolean }> = [];
-    const tool = createReadSessionHostTool({
+    const tool = createTool({
       getSnapshot: () => snapshot,
       isSessionPartiallyHydrated: () => false,
       ensureSessionLoaded: async (sessionId, options) => {
@@ -191,7 +203,7 @@ describe("createReadSessionHostTool", () => {
       messageBlocks: []
     };
     const loadRequests: Array<{ sessionId: string; force?: boolean }> = [];
-    const tool = createReadSessionHostTool({
+    const tool = createTool({
       getSnapshot: () => (hydrated ? snapshot : unloadedSnapshot),
       ensureSessionLoaded: async (sessionId, options) => {
         loadRequests.push({ sessionId, force: options?.force });
@@ -272,7 +284,7 @@ describe("createReadSessionHostTool", () => {
       ]
     };
     const loadRequests: Array<{ sessionId: string; force?: boolean }> = [];
-    const tool = createReadSessionHostTool({
+    const tool = createTool({
       getSnapshot: () => (hydrated ? fullSnapshot : snapshot),
       isSessionPartiallyHydrated: (sessionId) => partialSessionIds.has(sessionId),
       ensureSessionLoaded: async (sessionId, options) => {
@@ -324,7 +336,7 @@ describe("createReadSessionHostTool", () => {
 
   it("fails instead of reading a partial transcript when full hydration is unavailable", async () => {
     const loadRequests: Array<{ sessionId: string; force?: boolean }> = [];
-    const tool = createReadSessionHostTool({
+    const tool = createTool({
       getSnapshot: () => snapshot,
       isSessionPartiallyHydrated: () => true,
       ensureSessionLoaded: async (sessionId, options) => {
@@ -356,7 +368,7 @@ describe("createReadSessionHostTool", () => {
   });
 
   it("returns failed host-tool results for invalid input and unknown sessions", async () => {
-    const tool = createReadSessionHostTool({
+    const tool = createTool({
       getSnapshot: () => snapshot
     });
 
@@ -394,7 +406,8 @@ describe("createReadSessionHostTool", () => {
         contentItems: [
           {
             type: "inputText",
-            text: "Unknown session: missing-session"
+            text:
+              "Unknown session: missing-session. Tried it as a Vermillion sessionId and as an engine session id."
           }
         ]
       })
@@ -420,5 +433,41 @@ describe("createReadSessionHostTool", () => {
         ]
       })
     );
+  });
+
+  it("reads a session addressed by its engine session id", async () => {
+    const loadRequests: string[] = [];
+    const tool = createTool({
+      getSnapshot: () => snapshot,
+      resolveSessionId: (sessionId) =>
+        sessionId === "thread-subagent" ? "session-1" : undefined,
+      ensureSessionLoaded: async (sessionId) => {
+        loadRequests.push(sessionId);
+        return true;
+      }
+    });
+
+    const result = await tool.handle({
+      definition: tool,
+      arguments: {
+        sessionId: "thread-subagent"
+      },
+      context: invocationContext
+    });
+
+    expect(loadRequests).toEqual([]);
+    expect(result.success).toBe(true);
+    const text = result.contentItems[0]?.type === "inputText"
+      ? result.contentItems[0].text
+      : "";
+    const parsed = JSON.parse(text) as {
+      sessionId: string;
+      messages: Array<{ sender: string; text: string }>;
+    };
+    expect(parsed.sessionId).toBe("session-1");
+    expect(parsed.messages).toEqual([
+      expect.objectContaining({ sender: "user", text: "Please summarize this session." }),
+      expect.objectContaining({ sender: "agent", text: "Session summary is ready." })
+    ]);
   });
 });

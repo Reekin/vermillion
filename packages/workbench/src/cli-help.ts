@@ -30,7 +30,7 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "app.stop": "停止 app.start 返回的验收实例。",
   "app.window": "本地控制 app.start 返回实例的窗口；status 查询，minimize 最小化，restore 恢复并激活。",
   "asksource": "当前执行中工单的 Worker；从工单记录的开单位置临时询问来源设计伙伴并等待答复。",
-  "steer": "桌面在线；向任意可访问会话追加当前轮或启动该会话的新轮。",
+  "steer": "桌面在线；向任意可访问会话追加当前轮或启动该会话的新轮。sessionId 接受工作台会话 ID 或引擎会话标识（如子代理返回的 id）。",
   "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。",
   "search.query": "只读查询；搜索已登记的 workspace 工单和 Vermillion rollout 文件，返回命中上下文。",
   "issue.discuss": "桌面在线；为 Issue 创建或返回已有设计伙伴讨论会话。",

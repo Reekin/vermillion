@@ -4,6 +4,7 @@ import { createAgentRunner, createSessionSteerer, createSourceAsker } from "../s
 describe("AgentRunner recovery", () => {
   it("returns canonical delivery for generic session steering", async () => {
     const shell = {
+      resolveSessionIdentifier: vi.fn((sessionId: string) => sessionId),
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       getActiveTurnId: vi.fn().mockReturnValue("active-turn"),
       executeCommand: vi.fn().mockResolvedValue({ accepted: true, turnId: "actual-turn", delivery: "steered" })
@@ -18,6 +19,7 @@ describe("AgentRunner recovery", () => {
 
   it("starts a new turn when generic steering finds an idle session", async () => {
     const shell = {
+      resolveSessionIdentifier: vi.fn((sessionId: string) => sessionId),
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       getActiveTurnId: vi.fn().mockReturnValue(undefined),
       getSnapshot: vi.fn().mockReturnValue({ turns: [] }),
@@ -33,6 +35,7 @@ describe("AgentRunner recovery", () => {
 
   it("steers a cold-loaded active turn from hydrated transcript state", async () => {
     const shell = {
+      resolveSessionIdentifier: vi.fn((sessionId: string) => sessionId),
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       getActiveTurnId: vi.fn().mockReturnValue(undefined),
       getSnapshot: vi.fn().mockReturnValue({ turns: [{ sessionId: "target", turnId: "cold-turn", status: "streaming" }] }),
@@ -44,6 +47,26 @@ describe("AgentRunner recovery", () => {
     expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
       type: "steerTurn", sessionId: "target", turnId: "cold-turn", content: "continue"
     }) }));
+  });
+
+  it("steers a session addressed by its engine session id", async () => {
+    const shell = {
+      resolveSessionIdentifier: vi.fn((sessionId: string) =>
+        sessionId === "thread-subagent" ? "codex-thread:thread-subagent" : undefined),
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: vi.fn().mockReturnValue("active-turn"),
+      executeCommand: vi.fn().mockResolvedValue({ accepted: true, turnId: "actual-turn", delivery: "steered" })
+    };
+    const steer = createSessionSteerer(shell as unknown as Parameters<typeof createSessionSteerer>[0]);
+
+    await expect(steer("thread-subagent", "continue")).resolves.toEqual({
+      sessionId: "codex-thread:thread-subagent", turnId: "actual-turn", delivery: "steered"
+    });
+    expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledWith("codex-thread:thread-subagent");
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
+      type: "steerTurn", sessionId: "codex-thread:thread-subagent", turnId: "active-turn", content: "continue"
+    }) }));
+    await expect(steer("thread-missing", "continue")).rejects.toThrow("Session not found: thread-missing");
   });
 
   it("asks from the recorded source turn and archives the temporary design fork", async () => {
