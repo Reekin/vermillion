@@ -74,6 +74,16 @@ function describe(schema: z.ZodTypeAny, sample = false, key = "value"): unknown 
 }
 
 export function methodHelp(method: string): string | undefined {
+  if (method === "app.start") return [
+    "app.start",
+    "适用状态：本地构建并启动明确身份的隔离验收候选。源码 checkout 必须传 expectedRevision，且工作树干净；发布目录必须传 expectedBuildId。成功返回实际 buildId、instanceId、日志、完整隔离环境与定向 CLI 命令。",
+    "源码示例：",
+    "vermillion app.start '{\"targetPath\":\"X:/project-worktree\",\"expectedRevision\":\"<full-commit>\",\"dataDir\":\"X:/qa/data\",\"port\":14961,\"fixture\":\"session-tree\"}'",
+    "发布示例：",
+    "vermillion app.start '{\"targetPath\":\"X:/release/vermillion\",\"expectedBuildId\":\"sha256:<hash>\",\"dataDir\":\"X:/qa/data\",\"port\":14961}'",
+    "返回的 cli.executable 与 cli.args 是绑定本次实例的完整命令前缀；同一 dataDir 重启不会改写旧实例的 target descriptor。",
+    ""
+  ].join("\n");
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
     "sessionBrowser.list": { params: "workspaceId: string; kind?: user | agent", state: "桌面在线；一次返回该 workspace 会话列表的全部行与当前 revision。", example: { workspaceId: "<workspaceId>" } },
     "sessionBrowser.changes": { params: "workspaceId: string; revision: string; kind?: user | agent", state: "桌面在线；返回自该 revision 以来变化的行与被移除的行标识；revision 不可用时返回 full-required。", example: { workspaceId: "<workspaceId>", revision: "<revision>" } },

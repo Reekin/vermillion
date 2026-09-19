@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -41,7 +42,7 @@ export type AppStartResult = {
   piAgentDir?: string;
 };
 export type AppStopInput = { dataDir: string; pid: number; instanceId: string };
-export type AppStopResult = { dataDir: string; pid: number; stopped: true; portReleased: true };
+export type AppStopResult = { dataDir: string; pid: number; stopped: true; portReleased: true; warnings?: string[] };
 export type AppWindowAction = "status" | "minimize" | "restore";
 export type AppWindowInput = { dataDir: string; pid: number; action: AppWindowAction };
 export type AppWindowResult = { dataDir: string; pid: number; action: AppWindowAction; visible: boolean; minimized: boolean };
@@ -65,7 +66,6 @@ type EngineModelCatalogResult = { catalog?: { engineId?: unknown; models?: unkno
 type LocalRpcResponse = { ok?: boolean; result?: unknown; error?: string };
 
 const launchRecordFile = "app-start.json";
-const targetFile = "acceptance-target.json";
 const hiddenDesktopChromiumArgs = ["--disable-features=CalculateNativeWinOcclusion", "--disable-backgrounding-occluded-windows"];
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const processRunning = (pid: number): boolean => {
@@ -76,9 +76,16 @@ const processRunning = (pid: number): boolean => {
     return false;
   }
 };
-const portOpen = async (port: number): Promise<boolean> => {
+const cdpReady = async (port: number): Promise<boolean> => {
   try { return (await fetch("http://127.0.0.1:" + port + "/json/version", { signal: AbortSignal.timeout(500) })).ok; } catch { return false; }
 };
+const tcpPortOpen = (port: number): Promise<boolean> => new Promise((resolveOpen) => {
+  const socket = createConnection({ host: "127.0.0.1", port });
+  const finish = (open: boolean) => { socket.destroy(); resolveOpen(open); };
+  socket.once("connect", () => finish(true));
+  socket.once("error", () => finish(false));
+  socket.setTimeout(500, () => finish(false));
+});
 const logLine = async (path: string, stage: string, detail: object = {}) =>
   appendFile(path, JSON.stringify({ at: new Date().toISOString(), stage, ...detail }) + "\n", "utf8");
 const waitUntil = async (check: () => Promise<boolean>, pid: number, timeoutMs: number): Promise<"ready" | "exited" | "timeout"> => {
@@ -103,7 +110,11 @@ const resolveConfiguredCodexPath = async (): Promise<string | undefined> => {
 const callLocalEndpoint = async <T>(dataDir: string, pid: number, instanceId: string, method: string, params: object): Promise<T> => {
   const endpoint = JSON.parse(await readFile(join(dataDir, "endpoint.json"), "utf8")) as LocalEndpoint;
   if (endpoint.pid !== pid || endpoint.instanceId !== instanceId || typeof endpoint.port !== "number") throw new Error("Acceptance endpoint identity changed");
-  const response = await fetch("http://127.0.0.1:" + endpoint.port, { method: "POST", body: JSON.stringify({ method, params }) });
+  const response = await fetch("http://127.0.0.1:" + endpoint.port, {
+    method: "POST",
+    headers: { "x-vermillion-instance-id": instanceId },
+    body: JSON.stringify({ method, params })
+  });
   if (!response.ok) throw new Error("Acceptance endpoint returned HTTP " + response.status);
   const payload = await response.json() as LocalRpcResponse;
   if (!payload.ok) throw new Error(payload.error ?? "Acceptance endpoint rejected " + method);
@@ -133,16 +144,19 @@ const sourceTarget = async (rootPath: string, expectedRevision?: string): Promis
     const status = (await execFileAsync("git", ["status", "--porcelain=v1", "-z"], { cwd: rootPath })).stdout;
     if (status.length) throw new Error("Acceptance target has uncommitted changes and cannot represent expectedRevision: " + rootPath);
   }
-  const built = await execFileAsync(process.execPath, [join(rootPath, "scripts", "needs-build.mjs")], { cwd: rootPath }).then(() => true, () => false);
+  const packageRoot = join(rootPath, "packages", "workbench");
+  return { kind: "source", rootPath, packageRoot, revision, command: resolveAppCommand(packageRoot) };
+};
+const prepareTargetBuild = async (target: AppTarget): Promise<void> => {
+  if (target.kind !== "source") return;
+  const built = await execFileAsync(process.execPath, [join(target.rootPath, "scripts", "needs-build.mjs")], { cwd: target.rootPath }).then(() => true, () => false);
   if (!built) {
     const pnpm = process.platform === "win32" && process.env.APPDATA ? join(process.env.APPDATA, "npm", "pnpm.cmd") : "pnpm";
     const args = ["--filter", "@vermillion/desktop...", "--workspace-concurrency=1", "build"];
     await execFileAsync(process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : pnpm,
       process.platform === "win32" ? ["/d", "/s", "/c", pnpm, ...args] : args,
-      { cwd: rootPath, maxBuffer: 16 * 1024 * 1024 });
+      { cwd: target.rootPath, maxBuffer: 16 * 1024 * 1024 });
   }
-  const packageRoot = join(rootPath, "packages", "workbench");
-  return { kind: "source", rootPath, packageRoot, revision, command: resolveAppCommand(packageRoot) };
 };
 export const resolveAppTarget = async (targetPath: string, expectedRevision?: string): Promise<AppTarget> => {
   const requested = resolve(targetPath);
@@ -175,6 +189,10 @@ export class AppLauncher {
     try {
       const target = await resolveAppTarget(input.targetPath, input.expectedRevision);
       await logLine(logPath, stage, { targetPath: target.rootPath, targetKind: target.kind, revision: target.revision });
+      if (target.kind === "source" && !input.expectedRevision) throw new Error("A source acceptance target requires expectedRevision");
+      if (target.kind === "release" && !input.expectedBuildId) throw new Error("A release acceptance target requires expectedBuildId");
+      stage = "build";
+      await prepareTargetBuild(target);
       if (input.codexConfigSource && input.fixture !== "real-session") throw new Error("codexConfigSource is only valid with fixture real-session");
       stage = "fixture";
       const fixture = input.fixture === "session-tree" ? await prepareSessionTreeFixture(dataDir, target.packageRoot)
@@ -189,7 +207,7 @@ export class AppLauncher {
       pid = process.platform === "win32" ? await this.startHidden(target.command, target.packageRoot, env, args) : await this.startPlain(target.command, env, args);
       await logLine(logPath, stage, { pid });
       stage = "cdp";
-      const cdp = await waitUntil(() => portOpen(input.port), pid, this.timeoutMs);
+      const cdp = await waitUntil(() => cdpReady(input.port), pid, this.timeoutMs);
       if (cdp !== "ready") throw new Error(cdp === "exited" ? "The app process exited before opening CDP" : "The app did not open CDP within " + this.timeoutMs / 1000 + "s");
       stage = "rpc";
       const endpoint = await waitUntil(async () => {
@@ -207,7 +225,7 @@ export class AppLauncher {
       const record: AcceptanceLaunchRecord = { kind: "vermillion-acceptance", pid, port: input.port, desktop: process.platform === "win32" ? this.desktop : "",
         token: instanceId, targetPath: target.rootPath, buildId: runtime.buildId, logPath };
       await writeFile(join(dataDir, launchRecordFile), JSON.stringify(record) + "\n", "utf8");
-      const targetDescriptor = join(dataDir, targetFile);
+      const targetDescriptor = join(dataDir, `acceptance-target-${instanceId}.json`);
       await writeFile(targetDescriptor, JSON.stringify({ dataDir, pid, instanceId }) + "\n", "utf8");
       await logLine(logPath, "ready", { pid, buildId: runtime.buildId });
       const real = fixture && "codexHome" in fixture ? fixture as RealSessionFixture : undefined;
@@ -220,9 +238,11 @@ export class AppLauncher {
     } catch (error) {
       const failedPid = pid;
       const running = failedPid ? processRunning(failedPid) : false;
-      const cleanup = failedPid ? await this.terminate(failedPid).then(() => !processRunning(failedPid), () => false) : true;
-      await logLine(logPath, "failed", { failedStage: stage, pid, processRunning: running, cleanup, error: error instanceof Error ? error.message : String(error) });
-      throw new Error(`app.start failed at ${stage}: ${error instanceof Error ? error.message : String(error)}; log=${logPath}; process=${pid ?? "not-created"}; cleanup=${cleanup ? "complete" : "failed"}`);
+      const cleanupWarnings = failedPid ? await this.terminate(failedPid) : [];
+      const cleanup = failedPid ? !processRunning(failedPid) : true;
+      const exit = failedPid && !running ? "exited (exit code unavailable)" : failedPid ? "running" : "not-created";
+      await logLine(logPath, "failed", { failedStage: stage, pid, processStatus: exit, cleanup, cleanupWarnings, error: error instanceof Error ? error.message : String(error) });
+      throw new Error(`app.start failed at ${stage}: ${error instanceof Error ? error.message : String(error)}; log=${logPath}; process=${failedPid ?? "not-created"}; status=${exit}; cleanup=${cleanup ? "complete" : "failed"}`);
     }
   }
   async stop(input: AppStopInput): Promise<AppStopResult> {
@@ -231,18 +251,34 @@ export class AppLauncher {
     try { record = JSON.parse(await readFile(join(dataDir, launchRecordFile), "utf8")) as AcceptanceLaunchRecord; }
     catch { throw new Error("app.stop target has no acceptance launch record: " + dataDir); }
     if (record.kind !== "vermillion-acceptance" || record.pid !== input.pid || record.token !== input.instanceId) throw new Error("app.stop target identity does not match the launch record");
-    await this.terminate(input.pid, record.port);
+    const wasRunning = processRunning(input.pid);
+    let warnings: string[] = [];
+    if (wasRunning) {
+      try {
+        const runtime = await callLocalEndpoint<RuntimeInfo>(dataDir, input.pid, input.instanceId, "runtime.info", {});
+        if (runtime.pid !== input.pid) throw new Error("runtime PID mismatch");
+      }
+      catch { throw new Error("app.stop refused to terminate a running PID whose live instance identity cannot be confirmed"); }
+      warnings = await this.terminate(input.pid, record.port);
+    }
     if (processRunning(input.pid)) throw new Error("app.stop could not confirm process exit: " + input.pid);
-    if (await portOpen(record.port)) throw new Error("app.stop could not confirm CDP port release: " + record.port);
+    if (await tcpPortOpen(record.port)) throw new Error("app.stop could not confirm port release: " + record.port);
     await logLine(record.logPath, "stopped", { pid: input.pid, port: record.port });
-    return { dataDir, pid: input.pid, stopped: true, portReleased: true };
+    return { dataDir, pid: input.pid, stopped: true, portReleased: true, ...(warnings.length ? { warnings } : {}) };
   }
-  private async terminate(pid: number, port?: number): Promise<void> {
+  private async terminate(pid: number, port?: number): Promise<string[]> {
+    const warnings: string[] = [];
     if (processRunning(pid)) {
-      if (process.platform === "win32") await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"]); else process.kill(pid, "SIGTERM");
+      if (process.platform === "win32") {
+        try { await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"]); }
+        catch (error) { warnings.push(error instanceof Error ? error.message : String(error)); }
+      } else {
+        process.kill(pid, "SIGTERM");
+      }
     }
     const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline && (processRunning(pid) || (port !== undefined && await portOpen(port)))) await sleep(100);
+    while (Date.now() < deadline && (processRunning(pid) || (port !== undefined && await tcpPortOpen(port)))) await sleep(100);
+    return warnings;
   }
   private async startHidden(command: AppCommand, packageRoot: string, env: Record<string, string>, args: string[]): Promise<number> {
     const script = join(packageRoot, "scripts", "start-on-hidden-desktop.ps1");

@@ -1,9 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { copyFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppLauncher, resolveAppTarget, type AcceptanceLaunchRecord } from "../src/app-launcher.js";
+import { startLocalEndpoint } from "../src/local-endpoint.js";
 
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
@@ -48,10 +50,54 @@ describe("acceptance app target and lifecycle", () => {
     await mkdir(dataDir, { recursive: true });
     await writeFile(join(dataDir, "app-start.json"), JSON.stringify(record), "utf8");
     await writeFile(logPath, "", "utf8");
+    const endpoint = await startLocalEndpoint(dataDir, async () => ({ ok: true, result: { pid: child.pid, buildId: "sha256:test" } }), { pid: child.pid, instanceId });
     const launcher = new AppLauncher();
-    await expect(launcher.stop({ dataDir, pid: child.pid, instanceId: "wrong" })).rejects.toThrow("identity does not match");
-    await expect(launcher.stop({ dataDir, pid: child.pid, instanceId })).resolves.toMatchObject({ stopped: true, portReleased: true });
+    try {
+      await expect(launcher.stop({ dataDir, pid: child.pid, instanceId: "wrong" })).rejects.toThrow("identity does not match");
+      await expect(launcher.stop({ dataDir, pid: child.pid, instanceId })).resolves.toMatchObject({ stopped: true, portReleased: true });
+    } finally {
+      await endpoint.close();
+    }
   });
+
+  it("refuses to stop a live process when runtime identity reports another PID", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "verm-stop-runtime-mismatch-"));
+    dirs.push(dataDir);
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { windowsHide: true });
+    if (!child.pid) throw new Error("test child did not start");
+    const instanceId = "runtime-mismatch", logPath = join(dataDir, "acceptance-launch.jsonl");
+    const record: AcceptanceLaunchRecord = { kind: "vermillion-acceptance", pid: child.pid, port: 65430, desktop: "vermillion-qa",
+      token: instanceId, targetPath: dataDir, buildId: "sha256:test", logPath };
+    await writeFile(join(dataDir, "app-start.json"), JSON.stringify(record), "utf8");
+    await writeFile(logPath, "", "utf8");
+    const endpoint = await startLocalEndpoint(dataDir, async () => ({ ok: true, result: { pid: child.pid + 1, buildId: "sha256:test" } }), { pid: child.pid, instanceId });
+    try {
+      await expect(new AppLauncher().stop({ dataDir, pid: child.pid, instanceId })).rejects.toThrow("live instance identity cannot be confirmed");
+      expect(() => process.kill(child.pid!, 0)).not.toThrow();
+    } finally {
+      await endpoint.close();
+      if (process.platform === "win32") execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"]);
+      else child.kill("SIGKILL");
+    }
+  });
+
+  it("does not report a port released while another listener still owns it", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "verm-stop-port-"));
+    dirs.push(dataDir);
+    const server = createServer();
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const record: AcceptanceLaunchRecord = { kind: "vermillion-acceptance", pid: 2147483646, port, desktop: "vermillion-qa",
+      token: "stopped-instance", targetPath: dataDir, buildId: "sha256:test", logPath: join(dataDir, "acceptance-launch.jsonl") };
+    await writeFile(join(dataDir, "app-start.json"), JSON.stringify(record), "utf8");
+    await writeFile(record.logPath, "", "utf8");
+    try {
+      await expect(new AppLauncher().stop({ dataDir, pid: record.pid, instanceId: record.token })).rejects.toThrow("port release");
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  }, 15_000);
 
   it.skipIf(process.platform !== "win32")("reports an early process exit with its stage and cleans it up", async () => {
     const release = await mkdtemp(join(tmpdir(), "verm-failing-release-"));
@@ -62,6 +108,7 @@ describe("acceptance app target and lifecycle", () => {
     await mkdir(scripts, { recursive: true });
     await copyFile(join(import.meta.dirname, "..", "scripts", "start-on-hidden-desktop.ps1"), join(scripts, "start-on-hidden-desktop.ps1"));
     const launcher = new AppLauncher({ timeoutMs: 2_000 });
-    await expect(launcher.start({ targetPath: release, dataDir, port: 14979 })).rejects.toThrow(/app\.start failed at cdp: The app process exited.*cleanup=complete/);
+    await expect(launcher.start({ targetPath: release, expectedBuildId: "sha256:test", dataDir, port: 14979 }))
+      .rejects.toThrow(/app\.start failed at cdp: The app process exited.*cleanup=complete/);
   });
 });

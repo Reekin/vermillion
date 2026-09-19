@@ -9,7 +9,8 @@ import { AppLauncher } from "../src/app-launcher.js";
 const dirs: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
-  delete process.env.VERMILLION_PERSISTENCE_BASE_DIR;
+    delete process.env.VERMILLION_PERSISTENCE_BASE_DIR;
+    delete process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN;
   delete process.env.CODEX_HOME;
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -66,6 +67,16 @@ describe("vermillion cli", () => {
     }
   });
 
+  it("documents the required source and release candidate identities", async () => {
+    const out: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+    expect(await runCli(["app.start", "--help"])).toBe(0);
+    expect(out.join("")).toContain("expectedRevision");
+    expect(out.join("")).toContain("expectedBuildId");
+    expect(out.join("")).toContain("源码示例");
+    expect(out.join("")).toContain("发布示例");
+  });
+
   it("runs registry methods against the persistence dir and prints JSON", async () => {
     const base = await mkdtemp(join(tmpdir(), "verm-cli-"));
     const root = await mkdtemp(join(tmpdir(), "verm-cli-ws-"));
@@ -119,6 +130,26 @@ describe("vermillion cli", () => {
       await endpoint.close();
       expect(await runCli(["--target", descriptor, "runtime.info", "{}"])).toBe(1);
       expect(errors.join("")).toContain("Target instance is not running");
+    } finally {
+      await endpoint.close();
+    }
+  });
+
+  it("uses the inherited acceptance identity for ordinary CLI calls inside the instance", async () => {
+    const base = await mkdtemp(join(tmpdir(), "verm-cli-inherited-target-"));
+    dirs.push(base);
+    const instanceId = "inherited-instance";
+    const endpoint = await startLocalEndpoint(base, async () => ({
+      ok: true as const,
+      result: { buildId: "sha256:inherited", pid: process.pid, startedAt: "t", schedulerOnline: true }
+    }), { pid: process.pid, instanceId });
+    process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+    process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN = instanceId;
+    const out: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+    try {
+      expect(await runCli(["runtime.info", "{}"])).toBe(0);
+      expect(JSON.parse(out.pop()!).buildId).toBe("sha256:inherited");
     } finally {
       await endpoint.close();
     }

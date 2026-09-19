@@ -23,6 +23,10 @@ export const startLocalEndpoint = async (
       res.writeHead(405).end();
       return;
     }
+    if (identity.instanceId && req.headers["x-vermillion-instance-id"] !== identity.instanceId) {
+      res.writeHead(403).end();
+      return;
+    }
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
@@ -57,26 +61,34 @@ export const connectLocalEndpoint = async (
   baseDir: string,
   expected?: Pick<LocalEndpointTarget, "pid" | "instanceId">
 ): Promise<((request: WorkbenchRpcRequest) => Promise<WorkbenchRpcResponse>) | undefined> => {
+  const inheritedInstanceId = process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN?.trim();
+  const instanceId = expected?.instanceId ?? inheritedInstanceId;
+  const strict = expected !== undefined || inheritedInstanceId !== undefined;
   let endpoint: { port: number; pid?: number; instanceId?: string };
   try {
     endpoint = JSON.parse(await readFile(join(baseDir, ENDPOINT_FILE), "utf8")) as typeof endpoint;
   } catch {
-    if (expected) throw new Error("Target instance is not running: " + baseDir);
+    if (strict) throw new Error("Target instance is not running: " + baseDir);
     return undefined;
   }
-  if (expected && (endpoint.pid !== expected.pid || endpoint.instanceId !== expected.instanceId)) {
+  if ((expected && endpoint.pid !== expected.pid) || (instanceId && endpoint.instanceId !== instanceId)) {
     throw new Error("Target instance identity does not match the published endpoint: " + baseDir);
   }
   const url = "http://127.0.0.1:" + endpoint.port + "/";
   try {
-    const probe = await fetch(url, { method: "POST", body: JSON.stringify({ method: "runtime.info", params: {} }) });
+    const headers = instanceId ? { "x-vermillion-instance-id": instanceId } : undefined;
+    const probe = await fetch(url, { method: "POST", headers, body: JSON.stringify({ method: "runtime.info", params: {} }) });
     if (!probe.ok) throw new Error("HTTP " + probe.status);
     const payload = await probe.json() as WorkbenchRpcResponse;
     const pid = payload.ok && typeof payload.result === "object" && payload.result ? (payload.result as { pid?: unknown }).pid : undefined;
     if (expected && pid !== expected.pid) throw new Error("Target runtime identity does not match PID " + expected.pid);
   } catch {
-    if (expected) throw new Error("Target instance endpoint is not reachable: " + baseDir);
+    if (strict) throw new Error("Target instance endpoint is not reachable: " + baseDir);
     return undefined;
   }
-  return async (request) => (await (await fetch(url, { method: "POST", body: JSON.stringify(request) })).json()) as WorkbenchRpcResponse;
+  return async (request) => (await (await fetch(url, {
+    method: "POST",
+    ...(instanceId ? { headers: { "x-vermillion-instance-id": instanceId } } : {}),
+    body: JSON.stringify(request)
+  })).json()) as WorkbenchRpcResponse;
 };
