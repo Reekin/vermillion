@@ -70,6 +70,7 @@ export type ConversationGraphNodeSnapshot = {
 export type ConversationGraphSnapshot = {
   sessionId: string;
   treeId?: string;
+  workspaceId?: string;
   currentSessionId?: string;
   memberSessionIds?: string[];
   windows?: SessionWindowSnapshot[];

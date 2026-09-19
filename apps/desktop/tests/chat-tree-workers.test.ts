@@ -12,9 +12,9 @@ const tree = (currentSessionId = "design"): ChatTreeSnapshotRpc => ({
   sessionId: "design", treeId: "design", currentSessionId, currentNodeId: currentSessionId === "design" ? "source" : "worker-tip",
   memberSessionIds: ["design", "worker", "other-worker"], supportsJump: true, engineId: "codex", fetchedAt: "now",
   nodes: [
-    { nodeId: "source", turnId: "source", order: 0, isCurrent: currentSessionId === "design", label: "设计讨论" },
-    { nodeId: "worker-tip", turnId: "worker-tip", parentNodeId: "source", order: 1, isCurrent: currentSessionId === "worker", label: "执行详情" },
-    { nodeId: "other-tip", turnId: "other-tip", parentNodeId: "source", order: 2, isCurrent: false, label: "其他执行详情" }
+    { nodeId: "source", turnId: "source", sessionId: "design", order: 0, isCurrent: currentSessionId === "design", label: "设计讨论" },
+    { nodeId: "worker-tip", turnId: "worker-tip", sessionId: "worker", parentNodeId: "source", order: 1, isCurrent: currentSessionId === "worker", label: "执行详情" },
+    { nodeId: "other-tip", turnId: "other-tip", sessionId: "other-worker", parentNodeId: "source", order: 2, isCurrent: false, label: "其他执行详情" }
   ],
   windows: [
     { sessionId: "design", snapshot: { sessions: [{ sessionId: "design", title: "设计讨论" }], turns: [{ sessionId: "design", turnId: "source" }] } },
@@ -111,14 +111,9 @@ describe("Worker branch presentation", () => {
   it("retains worker ancestors of ordinary forks while hiding later execution and sibling workers", () => {
     const source = tree();
     source.nodes.push(
-      { nodeId: "ordinary", turnId: "ordinary", parentNodeId: "worker-tip", order: 3, isCurrent: false, label: "Follow-up" },
-      { nodeId: "worker-later", turnId: "worker-later", parentNodeId: "worker-tip", order: 4, isCurrent: false, label: "Execution" }
+      { nodeId: "ordinary", turnId: "ordinary", sessionId: "ordinary", parentNodeId: "worker-tip", order: 3, isCurrent: false, label: "Follow-up" },
+      { nodeId: "worker-later", turnId: "worker-later", sessionId: "worker", parentNodeId: "worker-tip", order: 4, isCurrent: false, label: "Execution" }
     );
-    source.windows![1]!.snapshot.turns.push({ sessionId: "worker", turnId: "worker-later" } as typeof source.windows[0]["snapshot"]["turns"][number]);
-    source.windows.push({ sessionId: "ordinary", snapshot: {
-      sessions: [{ sessionId: "ordinary", metadata: { role: "work-preparation", requestId: "ready" } }],
-      turns: [{ sessionId: "ordinary", turnId: "ordinary" }]
-    } } as typeof source.windows[number]);
     const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     for (const currentNodeId of ["source", "ordinary"]) {
       const result = projectChatTreeWorkers({ ...source, currentNodeId }, [boundItems[1]!], requests);
@@ -150,8 +145,7 @@ describe("Worker branch presentation", () => {
 
   it("opens each worker's latest own node regardless of snapshot array order", () => {
     const source = tree();
-    source.nodes.unshift({ nodeId: "worker-latest", turnId: "worker-latest", parentNodeId: "worker-tip", order: 5, isCurrent: false, label: "Latest work" });
-    source.windows![1]!.snapshot.turns.unshift({ sessionId: "worker", turnId: "worker-latest" } as typeof source.windows[0]["snapshot"]["turns"][number]);
+    source.nodes.unshift({ nodeId: "worker-latest", turnId: "worker-latest", sessionId: "worker", parentNodeId: "worker-tip", order: 5, isCurrent: false, label: "Latest work" });
     const result = projectChatTreeWorkers(source, boundItems);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ nodeId: "worker-latest", nodeIds: ["worker-tip", "worker-latest"] });
     expect(result.workers.find((worker) => worker.sessionId === "other-worker")?.nodeId).toBe("other-tip");
@@ -160,8 +154,7 @@ describe("Worker branch presentation", () => {
   it("forks only after the design session itself advances beyond the viewed source turn", () => {
     const source = tree();
     expect(isHistoricalChatTreePosition(source)).toBe(false);
-    source.nodes.push({ nodeId: "design-next", turnId: "design-next", parentNodeId: "source", order: 3, isCurrent: false, label: "继续讨论" });
-    source.windows![0]!.snapshot.turns.push({ sessionId: "design", turnId: "design-next" } as typeof source.windows[0]["snapshot"]["turns"][number]);
+    source.nodes.push({ nodeId: "design-next", turnId: "design-next", sessionId: "design", parentNodeId: "source", order: 3, isCurrent: false, label: "继续讨论" });
     expect(isHistoricalChatTreePosition(source)).toBe(true);
     source.currentNodeId = "design-next";
     expect(isHistoricalChatTreePosition(source)).toBe(false);

@@ -322,6 +322,7 @@ export class WrapperChatTreeService {
     });
     const tree: ChatTreeSnapshot = {
       sessionId, treeId, currentSessionId, memberSessionIds: treeMembers,
+      workspaceId: index.getEntry(treeId)?.workspaceId ?? index.getEntry(sessionId)?.workspaceId,
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
       supportsJump: true, currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
       nodes: visibleNodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),

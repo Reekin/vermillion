@@ -337,6 +337,7 @@ const zConversationGraphSnapshotSchema = z.object({
 const zChatTreeSnapshotSchema = z.object({
   sessionId: zSessionId,
   treeId: zSessionId.optional(),
+  workspaceId: z.string().min(1).optional(),
   currentSessionId: zSessionId.optional(),
   memberSessionIds: z.array(zSessionId).optional(),
   windows: z.array(z.lazy(() => zSessionWindowSchema)).optional(),

@@ -386,8 +386,8 @@ export const useChatTreeController = (input: {
   const pendingNavigation = entry?.appliedNavigation === navigationEntry
     ? undefined
     : navigationEntry;
-  // 消息区用整棵树或先到的查看路径；树面板只用整棵树。
-  const displayedTree = entry?.tree ?? entry?.path;
+  // 消息区跟随当前查看路径，切分支时不等整棵树；树面板只用整棵树。
+  const displayedTree = entry?.path ?? entry?.tree;
   const loadedTree = canDisplayCachedChatTree(displayedTree, sessionId, pendingNavigation)
     ? displayedTree
     : undefined;
