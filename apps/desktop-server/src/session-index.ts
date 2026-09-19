@@ -460,6 +460,7 @@ export class SessionIndexStore {
         )
       );
       const archivedAt = this.now();
+      // Repair 只记录本次扫描实际缺失的 entry；整树级联属于用户显式归档入口。
       for (const [sessionId, existing] of entriesBySessionId) {
         if (
           existing.workspaceId === input.workspaceId &&
@@ -519,6 +520,7 @@ export class SessionIndexStore {
     }
   }
 
+  /** 只记录当前实际观察到的会话归档事实，不推断或迁移 fork 后代。 */
   public async archiveSession(
     sessionId: string,
     archivedAt = this.now()
@@ -561,6 +563,7 @@ export class SessionIndexStore {
     return mutation.value;
   }
 
+  /** 用户显式归档入口：把给定会话及其 fork / subagent 后代作为整棵树归档。 */
   public async archiveSessions(
     sessionIds: readonly string[],
     archivedAt = this.now()
