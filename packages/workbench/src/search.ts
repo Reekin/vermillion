@@ -22,6 +22,7 @@ export type SearchSessionEntry = {
   createdAt?: string;
   lastCompletedTurnAt?: string;
   lastUserMessageAt?: string;
+  archivedAt?: string;
   rolloutPath?: string;
 };
 
@@ -170,17 +171,19 @@ const searchTextDocument = (
 };
 
 const turnIdPattern = /"(?:turn_id|node_id)":"([^"]+)"/;
+const positionIdPattern = /"(?:node_id|id)":"([^"]+)"/;
 
 const scanTurnId = (text: string): string | undefined => turnIdPattern.exec(text)?.[1];
+const scanPositionId = (text: string): string | undefined => positionIdPattern.exec(text)?.[1];
 
-const extractTurnId = (line: string): string | undefined => {
+const extractRolloutIdentity = (line: string): { turnId?: string; positionId?: string } => {
   let value: unknown;
   try {
     value = JSON.parse(line);
   } catch {
-    return undefined;
+    return {};
   }
-  if (!isRecord(value)) return undefined;
+  if (!isRecord(value)) return {};
   const payload = isRecord(value.payload) ? value.payload : undefined;
   const item = payload && isRecord(payload.item) ? payload.item : undefined;
   const metadata = isRecord(value.internal_chat_message_metadata_passthrough)
@@ -188,14 +191,26 @@ const extractTurnId = (line: string): string | undefined => {
     : isRecord(payload?.internal_chat_message_metadata_passthrough)
       ? payload.internal_chat_message_metadata_passthrough
       : undefined;
-  return (
+  const turnId =
     asNonEmptyString(value.turn_id) ??
     asNonEmptyString(payload?.turn_id) ??
     asNonEmptyString(payload?.turnId) ??
     asNonEmptyString(item?.turn_id) ??
     asNonEmptyString(item?.turnId) ??
-    asNonEmptyString(metadata?.turn_id)
-  );
+    asNonEmptyString(metadata?.turn_id) ??
+    asNonEmptyString(value.node_id) ??
+    asNonEmptyString(payload?.node_id) ??
+    asNonEmptyString(item?.node_id);
+  const positionId =
+    asNonEmptyString(payload?.node_id) ??
+    asNonEmptyString(item?.id) ??
+    asNonEmptyString(payload?.id) ??
+    asNonEmptyString(value.id) ??
+    asNonEmptyString(item?.node_id);
+  return {
+    ...(turnId ? { turnId } : {}),
+    ...(positionId ? { positionId } : {})
+  };
 };
 
 const isVermillionRollout = (header: string): boolean => {
@@ -657,20 +672,26 @@ const searchRollouts = async (input: {
         const built = buildHitContext(window, line, input.query, input.contextLines);
         let column = built.column;
         let turnId: string | undefined;
+        let positionId: string | undefined;
         if (built.hitComplete) {
-          turnId = extractTurnId(built.hitText);
+          const identity = extractRolloutIdentity(built.hitText);
+          turnId = identity.turnId;
+          positionId = identity.positionId;
         } else {
           // The window holds only part of this line, so its start is needed for both the turn and
           // the column; one ripgrep pass over the file provides every line start.
           const bounds = await cutLineBounds(path, line);
           if (bounds) {
             turnId = await readTurnIdOnLine(path, bounds.start, bounds.end);
+            positionId = turnId;
             column = await columnInLine(path, bounds.start, byteOffset);
           }
         }
         const treeId = entry.treeId ?? entry.sessionId;
         const treeTitle = displaySessionTitle(entry.treeTitle);
-        const sharedPositionKey = turnId ? [treeId, turnId, line].join(":") : undefined;
+        const sharedPositionKey = (positionId ?? turnId)
+          ? [treeId, turnId ?? "", positionId ?? ""].join(":")
+          : undefined;
         if (sharedPositionKey && sharedPositionKeys.has(sharedPositionKey)) continue;
         if (sharedPositionKey) sharedPositionKeys.add(sharedPositionKey);
         const hit = {
@@ -744,7 +765,9 @@ const decorateSessionSearchEntries = (
     const root = entryBySessionId.get(treeId);
     metadataByTree.set(treeId, {
       title: displaySessionTitle(root?.title),
-      activityAt: latestTimestamp(members.map((entry) => entry.activityAt))
+      activityAt: latestTimestamp(
+        members.filter((entry) => !entry.archivedAt).map((entry) => entry.activityAt)
+      )
     });
   }
   return entries.map((entry) => {
@@ -799,6 +822,7 @@ const readFileSessionEntries = async (baseDir: string): Promise<SearchSessionEnt
       ...(asNonEmptyString(rawEntry.lastUserMessageAt)
         ? { lastUserMessageAt: asNonEmptyString(rawEntry.lastUserMessageAt) }
         : {}),
+      ...(asNonEmptyString(rawEntry.archivedAt) ? { archivedAt: asNonEmptyString(rawEntry.archivedAt) } : {}),
       activityAt: latestTimestamp([
         asNonEmptyString(rawEntry.lastCompletedTurnAt),
         asNonEmptyString(rawEntry.lastUserMessageAt),

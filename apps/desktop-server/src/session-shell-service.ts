@@ -551,6 +551,7 @@ export class SessionShellService {
     createdAt?: string;
     lastCompletedTurnAt?: string;
     lastUserMessageAt?: string;
+    archivedAt?: string;
     rolloutPath?: string;
   }>> {
     const index = this.runtimeService.getSessionIndexStore?.();
@@ -602,6 +603,7 @@ export class SessionShellService {
       treeMeta.set(treeId, {
         title: displayTitle(root?.title),
         activityAt: members
+          .filter((entry) => !entry.archivedAt)
           .map(activityAt)
           .reduce<string | undefined>(
             (latest, value) => value && (!latest || value > latest) ? value : latest,
@@ -626,6 +628,7 @@ export class SessionShellService {
       createdAt: entry.createdAt,
       ...(entry.lastCompletedTurnAt ? { lastCompletedTurnAt: entry.lastCompletedTurnAt } : {}),
       ...(entry.lastUserMessageAt ? { lastUserMessageAt: entry.lastUserMessageAt } : {}),
+      ...(entry.archivedAt ? { archivedAt: entry.archivedAt } : {}),
       ...(typeof entry.metadata?.rolloutPath === "string" && entry.metadata.rolloutPath.trim()
         ? { rolloutPath: entry.metadata.rolloutPath }
         : {})

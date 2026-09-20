@@ -64,6 +64,30 @@ const matchingLine = (hit: SearchHit): SearchHit["context"][number] | undefined 
   hit.context.find((line) => line.matches.length > 0) ??
   hit.context[0];
 
+const RESULT_SNIPPET_CHARS = 160;
+
+const snippetLine = (line: SearchHit["context"][number]): SearchHit["context"][number] => {
+  if (line.text.length <= RESULT_SNIPPET_CHARS || line.matches.length === 0) return line;
+  const focus = line.matches[0]!.start;
+  const start = Math.max(
+    0,
+    Math.min(focus - Math.floor(RESULT_SNIPPET_CHARS / 2), line.text.length - RESULT_SNIPPET_CHARS)
+  );
+  const end = start + RESULT_SNIPPET_CHARS;
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < line.text.length ? "…" : "";
+  return {
+    line: line.line,
+    text: prefix + line.text.slice(start, end) + suffix,
+    matches: line.matches
+      .filter((match) => match.end > start && match.start < end)
+      .map((match) => ({
+        start: prefix.length + Math.max(0, match.start - start),
+        end: prefix.length + Math.min(RESULT_SNIPPET_CHARS, match.end - start)
+      }))
+  };
+};
+
 const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
   const hitLineRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -105,6 +129,7 @@ const SearchResultRow = ({
 }) => {
   const Icon = kindIcon[hit.kind];
   const line = matchingLine(hit);
+  const shortLine = line ? snippetLine(line) : undefined;
   return (
     <li
       onDoubleClick={onOpen}
@@ -116,7 +141,7 @@ const SearchResultRow = ({
         leading={<Icon size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
         title={
           <span className="font-mono">
-            {line ? contextLineText(line) : hit.title}
+            {shortLine ? contextLineText(shortLine) : hit.title}
           </span>
         }
         titleClassName="vm-search-result-title"
