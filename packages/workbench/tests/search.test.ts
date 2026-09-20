@@ -92,8 +92,8 @@ describe("workbench search", () => {
     const fixture = await setup();
     try {
       const header = JSON.stringify({ type: "session_meta", payload: { originator: "vermillion" } });
-      const turnLine = (turnId: string, text: string) =>
-        JSON.stringify({ type: "response_item", payload: { turn_id: turnId, text } });
+      const turnLine = (turnId: string, text: string, positionId = turnId) =>
+        JSON.stringify({ type: "response_item", payload: { turn_id: turnId, id: "position-" + positionId, text } });
       const nodeLine = JSON.stringify({ type: "event_msg", payload: { node_id: "node-shared", summary: "tree-a node" } });
       const rootPath = join(fixture.root, "root.jsonl");
       const childPath = join(fixture.root, "child.jsonl");
@@ -102,6 +102,7 @@ describe("workbench search", () => {
         header,
         turnLine("turn-shared", "tree-a shared"),
         turnLine("turn-root-only", "tree-a root"),
+        turnLine("turn-shared", "tree-a independent", "turn-shared-independent"),
         nodeLine
       ].join("\n"), "utf8");
       await writeFile(childPath, [
@@ -156,10 +157,10 @@ describe("workbench search", () => {
       });
       try {
         const result = await service.search({ query: "tree", contextLines: 1 });
-        expect(result.hits.map((hit) => hit.title)).toEqual(["Tree B", "Tree A", "Tree A", "Tree A", "Tree A"]);
-        expect(result.hits.filter((hit) => hit.turnId === "turn-shared")).toHaveLength(1);
+        expect(result.hits.map((hit) => hit.title)).toEqual(["Tree B", "Tree A", "Tree A", "Tree A", "Tree A", "Tree A"]);
+        expect(result.hits.filter((hit) => hit.turnId === "turn-shared")).toHaveLength(2);
         expect(result.hits.filter((hit) => hit.turnId === "node-shared")).toHaveLength(1);
-        expect(result.hits.filter((hit) => hit.treeId === "tree-a")).toHaveLength(4);
+        expect(result.hits.filter((hit) => hit.treeId === "tree-a")).toHaveLength(5);
         expect(result.hits[1]).toMatchObject({ sessionId: "tree-a-child", treeTitle: "Tree A" });
       } finally {
         await service.dispose();

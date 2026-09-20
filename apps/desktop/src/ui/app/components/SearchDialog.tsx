@@ -64,14 +64,15 @@ const matchingLine = (hit: SearchHit): SearchHit["context"][number] | undefined 
   hit.context.find((line) => line.matches.length > 0) ??
   hit.context[0];
 
-const RESULT_SNIPPET_CHARS = 160;
+const RESULT_SNIPPET_CHARS = 96;
+const RESULT_SNIPPET_PREFIX_CHARS = 20;
 
 const snippetLine = (line: SearchHit["context"][number]): SearchHit["context"][number] => {
   if (line.text.length <= RESULT_SNIPPET_CHARS || line.matches.length === 0) return line;
   const focus = line.matches[0]!.start;
   const start = Math.max(
     0,
-    Math.min(focus - Math.floor(RESULT_SNIPPET_CHARS / 2), line.text.length - RESULT_SNIPPET_CHARS)
+    Math.min(focus - RESULT_SNIPPET_PREFIX_CHARS, line.text.length - RESULT_SNIPPET_CHARS)
   );
   const end = start + RESULT_SNIPPET_CHARS;
   const prefix = start > 0 ? "…" : "";
@@ -252,7 +253,6 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
       const existing = grouped.get(treeId);
       if (existing) {
         existing.hits.push(hit);
-        if (hit.sessionActivityAt && hit.sessionActivityAt > existing.activityAt) existing.activityAt = hit.sessionActivityAt;
         continue;
       }
       grouped.set(treeId, {

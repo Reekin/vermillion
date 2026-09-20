@@ -505,6 +505,14 @@ const readTurnIdOnLine = async (path: string, start: number, end: number): Promi
   return scanTurnId(await readChunk(path, end - CONTEXT_WINDOW_BYTES, CONTEXT_WINDOW_BYTES));
 };
 
+const readPositionIdOnLine = async (path: string, start: number, end: number): Promise<string | undefined> => {
+  const length = Math.max(0, end - start);
+  const head = await readChunk(path, start, Math.min(length, CONTEXT_WINDOW_BYTES));
+  const fromHead = scanPositionId(head);
+  if (fromHead || length <= CONTEXT_WINDOW_BYTES * 2) return fromHead;
+  return scanPositionId(await readChunk(path, end - CONTEXT_WINDOW_BYTES, CONTEXT_WINDOW_BYTES));
+};
+
 /**
  * Column of a hit whose line reaches past the context window. The window alone cannot tell how far
  * the match sits from the line start, so the prefix is decoded; past the limit the byte distance is
@@ -683,14 +691,14 @@ const searchRollouts = async (input: {
           const bounds = await cutLineBounds(path, line);
           if (bounds) {
             turnId = await readTurnIdOnLine(path, bounds.start, bounds.end);
-            positionId = turnId;
+            positionId = await readPositionIdOnLine(path, bounds.start, bounds.end);
             column = await columnInLine(path, bounds.start, byteOffset);
           }
         }
         const treeId = entry.treeId ?? entry.sessionId;
         const treeTitle = displaySessionTitle(entry.treeTitle);
-        const sharedPositionKey = (positionId ?? turnId)
-          ? [treeId, turnId ?? "", positionId ?? ""].join(":")
+        const sharedPositionKey = positionId
+          ? [treeId, turnId ?? "", positionId].join(":")
           : undefined;
         if (sharedPositionKey && sharedPositionKeys.has(sharedPositionKey)) continue;
         if (sharedPositionKey) sharedPositionKeys.add(sharedPositionKey);
