@@ -14,6 +14,8 @@ export type ComposerIntent = "send" | "steer" | "queue";
 
 export type ComposerSubmitHandler = (payload: import("../../../transport/desktop-transport.js").ChatSendInput) => Promise<void>;
 
+export type ComposerSubmitOverride = { label: string; placeholder: string; submit: ComposerSubmitHandler };
+
 export type ComposerActions = {
   hasContent: boolean;
   canSubmit: boolean;

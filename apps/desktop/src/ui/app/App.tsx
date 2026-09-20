@@ -21,7 +21,7 @@ import { SettingsPage } from "./components/SettingsPage.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
-import { Button, InlineNotice, Tabs } from "./components/ui.js";
+import { Button, Field, InlineNotice, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
@@ -69,16 +69,21 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
+  const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
+  const workSessionId = workTarget.sessionId ?? sessionId;
   const discussionIssue = store((s) => s.view?.issues.find((issue) => issue.discussionSessionId === sessionId));
   const currentWorkRequest = store((s) => s.view?.workRequests.find((request) => {
     const hasOpenItems = s.view?.workItems.some((item) => item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
-    return (request.workerSessionId === sessionId || (request.sourceSessionId === sessionId && ["pending", "preparing"].includes(request.status))) &&
+    return request.workerSessionId === workSessionId &&
       (request.status !== "ready" || hasOpenItems);
   }));
-  const currentWorkItem = store((s) => s.view?.workItems.find((item) => item.run.sessionId === sessionId && !["closed", "cancelled"].includes(item.status)));
-  const currentDecision = store((s) => s.view?.decisions.find((card) => !card.answer && !card.withdrawn && card.sessionId === sessionId));
+  const currentWorkItem = store((s) => s.view?.workItems.find((item) => item.run.sessionId === workSessionId && !["closed", "cancelled"].includes(item.status)));
+  const decisions = store((s) => s.view?.decisions);
+  const currentDecisions = (decisions ?? []).filter((card) => !card.answer && !card.withdrawn && card.sessionId === workSessionId);
+  const [decisionMode, setDecisionMode] = useState<{ sessionId?: string; decisionId?: string; ordinary: boolean }>({ ordinary: false });
+  const currentDecision = currentDecisions.find((card) => card.decisionId === decisionMode.decisionId) ?? (currentDecisions.length === 1 ? currentDecisions[0] : undefined);
+  const answeringDecision = Boolean(currentDecision && !(decisionMode.sessionId === workSessionId && decisionMode.ordinary));
   const [workspaceFilterId, setWorkspaceFilterId] = useState<string | undefined>();
-  const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
   const [composerActions, setComposerActions] = useState<ComposerActions>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
   const [sessionEntry, setSessionEntry] = useState<{ focusTree?: boolean; turnId?: string }>();
@@ -86,6 +91,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchWorkItemTarget, setSearchWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
+    setWorkTarget({});
     setSessionEntry({ focusTree: true, turnId });
     setNavigationTarget({ sessionId: targetSessionId, workspaceId });
     setSessionId(targetSessionId);
@@ -146,6 +152,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     onResumed: () => setReloadSignal((n) => n + 1)
   });
   const openSidebarSession = useCallback((id: string) => {
+    setWorkTarget({});
     setSessionEntry(undefined);
     const selected = sidebar.findSession(id);
     if (selected) setNavigationTarget({ sessionId: id, workspaceId: selected.workspaceId });
@@ -306,8 +313,31 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   renderImageContextMenu={({ onCopy, ...props }) => <ContextMenu {...props} zIndex={1001}
                     items={[{ key: "copy-image", label: "复制图片", onSelect: onCopy }]} />}
                   renderFileLinkContextMenu={renderFileLinkContextMenu}
+                  composerHeader={currentWorkRequest || currentWorkItem || currentDecisions.length > 0 ? <>
+                    {sessionWorkspaceId && <CurrentWorkBar key={currentWorkItem?.workItemId ?? currentWorkRequest?.requestId ?? workSessionId} client={store.getState().client} workspaceId={sessionWorkspaceId}
+                      sourceTitle={sidebar.findSession(currentWorkRequest?.sourceSessionId ?? workSessionId ?? "")?.title ?? openSession?.title}
+                      request={currentWorkRequest} item={currentWorkItem} hasDecision={currentDecisions.length > 0}
+                      onOpenWorkItem={currentWorkItem ? () => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: currentWorkItem.workItemId }) : undefined} />}
+                    {currentDecisions.length > 0 && <section className="vm-decision-context" aria-label="决策回复">
+                      {currentDecisions.length > 1 ? <Field kind="select" aria-label="选择待回复决策" compact value={currentDecision?.decisionId ?? ""}
+                        onChange={(event) => setDecisionMode({ sessionId: workSessionId, decisionId: event.target.value, ordinary: false })}>
+                        <option value="">选择要回复的决策</option>
+                        {currentDecisions.map((card) => <option key={card.decisionId} value={card.decisionId}>{card.question}</option>)}
+                      </Field> : <p className="vm-decision-context__question">{currentDecision?.question}</p>}
+                      <div className="vm-decision-context__modes">
+                        <Button size="sm" variant="ghost" disabled={!currentDecision} aria-pressed={answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: false })}>回复此决策</Button>
+                        <Button size="sm" variant="ghost" aria-pressed={!answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: true })}>普通消息</Button>
+                      </div>
+                    </section>}
+                  </> : undefined}
+                  composerSubmitOverride={answeringDecision && currentDecision && sessionWorkspaceId ? {
+                    label: "发送决策答复", placeholder: "写下你的决定…",
+                    submit: async (payload) => {
+                      if (payload.attachments?.length) throw new Error("决策答复使用文字；附件可切换为普通消息发送。");
+                      await store.getState().client.request("decision.answer", { workspaceId: sessionWorkspaceId, decisionId: currentDecision.decisionId, note: payload.content });
+                    }
+                  } : undefined}
                   composerExtras={<>
-                    {sessionWorkspaceId && <CurrentWorkBar client={store.getState().client} workspaceId={sessionWorkspaceId} sessionId={sessionId} request={currentWorkRequest} item={currentWorkItem} decision={currentDecision} />}
                     <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
                     {discussionIssue && sessionWorkspaceId && <Button size="sm" variant="ghost" outlined onClick={() => store.getState().showIssue({ workspaceId: sessionWorkspaceId, issueId: discussionIssue.issueId })}>Issue</Button>}
                   </>}

@@ -4,7 +4,7 @@ import { type AgentRun, type Scheduler, type WorkItem, type WorkbenchClient, typ
 import type { TaskTarget, WorkbenchState } from "../workbench-store.js";
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { statusLabel } from "./task-labels.js";
+import { currentWorkStatus, statusLabel } from "./task-labels.js";
 import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, Stepper, Toggle } from "./ui.js";
 
 import { roleLabel, workItemProgress } from "./workflow-display.js";
@@ -34,14 +34,14 @@ const WorkRequestRow = ({ request, requestItems, client, workspaceId, busy, onOp
   const blocked = request.status === "failed" || request.control === "manual";
   const title = request.scope?.trim() || "当前工作";
   const finished = requestItems.length > 0 && requestItems.every((item) => ["closed", "cancelled"].includes(item.status));
-  const state = finished ? (requestItems.some((item) => item.status === "cancelled") ? "部分完成" : "已完成") : paused ? "已暂停" : request.status === "failed" ? "工作受阻" : request.control === "manual" ? "人工接管" : request.status === "preparing" ? "准备中" : request.status === "pending" ? "等待准备" : "已交接";
+  const state = finished ? (requestItems.some((item) => item.status === "cancelled") ? "部分完成" : "已完成") : currentWorkStatus(undefined, request).label;
   const itemSummary = requestItems.length ? "工单 " + requestItems.length + " · " + requestItems.slice(0, 2).map((item) => item.title).join("、") : undefined;
   const action = async (method: "work.pause" | "work.resume" | "work.retry" | "work.cancel" | "work.confirm") => {
     await client.request(method, { workspaceId, requestId: request.requestId });
   };
   return <li className="border-t border-border first:border-t-0">
     <ListRow leading={<Badge>{"工作"}</Badge>} title={<span title={title}>{title}</span>}
-      meta={[state, itemSummary, request.waitReason, request.failure].filter(Boolean).join(" · ")}
+      meta={[itemSummary, request.failure ?? request.waitReason].filter(Boolean).join(" · ")}
       columns={{ status: <Badge status={paused || blocked ? "decision" : "preparing"}>{state}</Badge>,
         hoverAction: !finished && request.status !== "cancelled" && <IconButton icon={X} size={12} label={"取消工作：" + title} disabled={busy} onClick={() => void action("work.cancel")} />,
         action: request.workerSessionId && <SessionLink sessionId={request.workerSessionId} onOpenSession={onOpenSession} /> }}

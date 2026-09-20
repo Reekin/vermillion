@@ -102,7 +102,7 @@ describe("ComposerPanel", () => {
     expect(html).toContain(">标准<");
     expect((html.match(/disabled=""/g) ?? []).length).toBeGreaterThanOrEqual(3);
     expect(html).toContain(">默认<");
-    expect(html).toContain(">Steer<");
+    expect(html).toContain('aria-label="Steer"');
     expect(html).not.toContain(">Queue<");
     expect(html).toContain('class="awb-composer__resize-handle"');
     expect(html).toContain("--awb-composer-editor-height:76px");
@@ -330,7 +330,7 @@ describe("ComposerPanel", () => {
     expect(html).toContain("Run shell command");
     expect(html).toContain("echo hello");
     expect(html).toContain(">Approve<");
-    expect(html).toContain(">Stop<");
+    expect(html).toContain('aria-label="Stop"');
     expect(html).not.toContain(">Queue<");
     expect(html.indexOf("awb-composer-approvals")).toBeLessThan(
       html.indexOf("<textarea")

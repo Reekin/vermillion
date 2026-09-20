@@ -150,6 +150,36 @@ describe("composer content lifetime", () => {
     for (const send of [h.send, h.steer, prepareSend, submitBranch]) expect(send).not.toHaveBeenCalled();
   });
 
+  it("routes the primary send through the explicit reply handler and preserves a failed draft", async () => {
+    const submitMessage = vi.fn(async () => {});
+    const notice = vi.fn();
+    const h = setup({ submitMessage, onStatusNotice: notice });
+    let c = await h.flush();
+    c.onDraftChange("Use the first option");
+    c = h.render();
+    submitMessage.mockRejectedValueOnce(new Error("reply unavailable"));
+    await c.onPrimaryAction();
+    expect(h.render().draft).toBe("Use the first option");
+    expect(notice).toHaveBeenCalledWith(expect.objectContaining({ message: "reply unavailable", severity: "error" }));
+    await h.render().onPrimaryAction();
+    expect(h.render().draft).toBe("");
+    expect(submitMessage).toHaveBeenCalledTimes(2);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.steer).not.toHaveBeenCalled();
+  });
+
+  it("does not submit an explicit reply while the IME is composing", async () => {
+    const submitMessage = vi.fn(async () => {});
+    const h = setup({ submitMessage });
+    let c = await h.flush();
+    c.onDraftChange("选择第一项");
+    c = h.render();
+    const event = { key: "Enter", shiftKey: false, nativeEvent: { isComposing: true }, preventDefault: vi.fn() } as unknown as Parameters<typeof c.onInputKeyDown>[0];
+    await c.onInputKeyDown(event);
+    expect(submitMessage).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
   it("creates New Chat without sending a turn before calling the submit handler", async () => {
     const createSession = vi.fn(async () => "new-session");
     const handler = vi.fn(async () => {});

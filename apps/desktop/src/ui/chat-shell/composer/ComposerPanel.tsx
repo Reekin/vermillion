@@ -108,6 +108,9 @@ export const ComposerPanel = ({
   pendingInteractions = [],
   contextUsage,
   threadGoal,
+  beforeEditor,
+  submitLabel,
+  placeholder = "继续交谈，或补充工作要求…",
   extraExecutionControls,
   intent,
   supportsSteer,
@@ -159,6 +162,10 @@ export const ComposerPanel = ({
   pendingInteractions?: RuntimeInteraction[];
   contextUsage?: ContextUsage;
   threadGoal?: ThreadGoal;
+  /** Full-width content above the input and attachments. */
+  beforeEditor?: ReactNode;
+  submitLabel?: string;
+  placeholder?: string;
   /** Rendered before the Model select inside the turn-configuration group. */
   extraExecutionControls?: ReactNode;
   intent: ComposerIntent;
@@ -283,6 +290,7 @@ export const ComposerPanel = ({
       onSendNow={onSendQueuedMessageNow}
       onSteerNow={onSteerQueuedMessageNow}
     />
+    {beforeEditor ? <div className="awb-composer__before-editor">{beforeEditor}</div> : null}
     {selectedSkills.length > 0 ? (
       <div className="awb-composer-skills" aria-label="Selected skills">
         {selectedSkills.map((skill) => (
@@ -368,6 +376,8 @@ export const ComposerPanel = ({
     <div className="awb-composer-panel__editor">
       <textarea
         ref={textareaRef}
+        aria-label="消息"
+        placeholder={placeholder}
         value={draft}
         onChange={(event) =>
           onTextareaChange(
@@ -381,21 +391,28 @@ export const ComposerPanel = ({
         onKeyDown={(event) => void onInputKeyDown(event)}
         onPaste={onPaste}
       />
-      <Button
-        variant={primaryAction === "stop" ? "danger" : "accent"}
-        size="lg"
-        className="awb-composer__primary-action"
-        onClick={() =>
-          primaryAction === "stop" ? void onStop() : void onPrimaryAction()
-        }
-        disabled={primaryDisabled}
-      >
-        {primaryAction === "steer"
-          ? "Steer"
-          : primaryAction === "stop"
-            ? "Stop"
-            : "Send"}
-      </Button>
+      <div className="awb-composer-panel__editor-bottom">
+        <span className="awb-composer__input-hint">Enter 发送 · Shift + Enter 换行</span>
+        <Button
+          variant="primary"
+          size="icon"
+          className="awb-composer__primary-action"
+          aria-label={primaryAction === "stop" ? "Stop" : submitLabel ?? (primaryAction === "steer" ? "Steer" : "Send")}
+          title={primaryAction === "stop" ? "停止" : submitLabel ?? (primaryAction === "steer" ? "补充到当前轮次" : "发送")}
+          onClick={() =>
+            primaryAction === "stop" ? void onStop() : void onPrimaryAction()
+          }
+          disabled={primaryDisabled}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {primaryAction === "stop" ? (
+              <rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" />
+            ) : (
+              <path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            )}
+          </svg>
+        </Button>
+      </div>
       <ComposerSuggestions
         suggestions={suggestions}
         onHover={onSuggestionHover}

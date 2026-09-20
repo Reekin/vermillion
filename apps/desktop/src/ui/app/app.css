@@ -100,6 +100,23 @@
 }
 
 /* Dense boards reuse the same slots and controls across cards and standalone lists. */
+.vm-current-work { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 0; border-block: 1px solid var(--color-border); }
+.vm-current-work__summary { display: flex; flex: 1 1 220px; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.vm-current-work__title { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-label); font-weight: 500; color: var(--color-strong); }
+.vm-current-work__state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--text-caption); color: var(--color-muted-foreground); }
+.vm-current-work__state[data-state="running"]::before { content: ""; width: 7px; height: 7px; border: 2px solid var(--color-status-running); border-radius: 50%; }
+.vm-current-work__state[data-state="decision"] { padding: 2px 6px; border: 1px solid var(--color-control-border); border-radius: var(--radius-sm); color: var(--color-foreground); }
+.vm-current-work__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.vm-decision-context { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-block: 12px 0; }
+.vm-decision-context__question { font-size: var(--text-label); color: var(--color-strong); }
+.vm-decision-context__modes { display: flex; gap: 4px; }
+.vm-decision-context__modes button[aria-pressed="true"] { background: var(--color-surface-selected); color: var(--color-strong); }
+@container (max-width: 460px) {
+  .vm-current-work__summary { flex-basis: 100%; }
+  .vm-current-work__actions { flex: 1; margin-left: 26px; }
+  .vm-current-work__actions > :last-child:not(:first-child) { margin-left: auto; }
+}
+
 .vm-button-outlined { border: 1px solid var(--color-control-border); color: var(--color-foreground); }
 .vm-button-outlined:hover { border-color: var(--color-control-border-hover); }
 .vm-field-compact { height: 28px; padding-inline: 8px; font-size: var(--text-label); }

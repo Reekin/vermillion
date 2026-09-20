@@ -10,18 +10,24 @@ export const ComposerStatusBar = ({
 }: {
   status: ComposerStatusModel;
   notice?: ComposerStatusNotice;
-}): ReactElement => (
-  <div className="awb-composer-status">
-    <span className={`awb-composer-status__pill is-${status.kind}`}>
-      {status.label}
-    </span>
-    {notice?.message ? (
-      <span
-        className={`awb-composer-status__notice is-${notice.severity ?? "info"}`}
-        title={notice.message}
-      >
-        {notice.message}
-      </span>
-    ) : null}
-  </div>
-);
+}): ReactElement | null => {
+  const showStatus = status.kind !== "idle" && status.kind !== "no_session";
+  if (!showStatus && !notice?.message) return null;
+  return (
+    <div className="awb-composer-status">
+      {showStatus ? (
+        <span className={`awb-composer-status__pill is-${status.kind}`}>
+          {status.label}
+        </span>
+      ) : null}
+      {notice?.message ? (
+        <span
+          className={`awb-composer-status__notice is-${notice.severity ?? "info"}`}
+          title={notice.message}
+        >
+          {notice.message}
+        </span>
+      ) : null}
+    </div>
+  );
+};

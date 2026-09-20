@@ -351,6 +351,7 @@ export const resolveInterruptTurnId = (input: {
 
 type UseComposerControllerInput = {
   transport: DesktopTransport;
+  submitMessage?: ComposerSubmitHandler;
   activeSession?: ChatSession;
   activeSessionId?: string;
   /** Stable through the transition from an accepted branch operation to its session. */
@@ -1181,6 +1182,13 @@ export const useComposerController = (
     if (!canSubmit) {
       return;
     }
+    if (input.submitMessage) {
+      try { await onSubmitUsing(input.submitMessage); }
+      catch (error) {
+        input.onStatusNotice({ message: error instanceof Error ? error.message : String(error), severity: "error", persistent: true, source: "send" });
+      }
+      return;
+    }
     const goalCommand = parseGoalSlashCommand(draft);
     if (goalCommand?.kind === "empty") {
       input.onStatusNotice({
@@ -1376,6 +1384,7 @@ export const useComposerController = (
   const onInputKeyDown = async (
     event: ReactKeyboardEvent<HTMLTextAreaElement>
   ): Promise<void> => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (suggestions && suggestions.items.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();

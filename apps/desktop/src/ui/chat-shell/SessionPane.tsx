@@ -79,7 +79,7 @@ import { ChatTreePanel, type ChatTreePanelProps } from "./ChatTreePanel.js";
 import { GitBranch } from "lucide-react";
 import { useRendererDiagnostics } from "./use-renderer-diagnostics.js";
 import { ComposerContainer } from "./composer/ComposerContainer.js";
-import type { ComposerActions, ComposerExecutionSelection } from "./composer/composer-types.js";
+import type { ComposerActions, ComposerExecutionSelection, ComposerSubmitOverride } from "./composer/composer-types.js";
 import "./chat-shell.css";
 
 const CHAT_TREE_VISIBLE_KEY = "vermillion.chatTreeVisible";
@@ -123,6 +123,9 @@ export type SessionPaneProps = {
   initializeDraftExecution?: () => Promise<SessionExecutionProfileInput>;
   /** Rendered inside the composer turn-configuration group, before the model picker. */
   composerExtras?: ReactNode;
+  /** Application-owned work context, displayed above the message editor. */
+  composerHeader?: ReactNode;
+  composerSubmitOverride?: ComposerSubmitOverride;
   composerDraftKey?: string;
   onComposerChange?: (actions: ComposerActions | undefined) => void;
   /** Records preparation cancellation or a Worker pause before the shared session Stop command interrupts its turn. */
@@ -638,6 +641,8 @@ export const SessionPane = ({
   createSession,
   initializeDraftExecution,
   composerExtras,
+  composerHeader,
+  composerSubmitOverride,
   composerDraftKey,
   onComposerChange,
   onBeforeStop,
@@ -1242,6 +1247,8 @@ export const SessionPane = ({
           draftKey={executionDraftKey}
           initializeDraftExecution={initializeDraftExecution}
           extraExecutionControls={composerExtras}
+          beforeEditor={composerHeader}
+          submitOverride={composerSubmitOverride}
           transport={transport}
           activeSession={activeSession}
           activeSessionId={activeSessionId}

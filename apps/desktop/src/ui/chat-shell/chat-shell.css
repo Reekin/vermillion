@@ -164,22 +164,15 @@ button:disabled {
 
 .awb-composer textarea {
   width: 100%;
-  border: 1px solid var(--awb-rule-strong);
-  border-radius: var(--awb-radius-soft);
-  background: var(--awb-input);
-  color: var(--awb-ink);
-  padding: 10px 12px;
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    background-color 160ms ease;
+  border: 0;
+  background: transparent;
+  color: var(--awb-ink-strong);
+  padding: 0;
+  font-size: var(--awb-text-body);
 }
 
 .awb-composer textarea:focus {
   outline: none;
-  border-color: rgba(182, 185, 183, 0.34);
-  box-shadow: 0 0 0 1px rgba(140, 143, 141, 0.14);
-  background: var(--awb-input-soft);
 }
 
 .awb-button {
@@ -930,11 +923,18 @@ button:disabled {
   border-top: 1px solid var(--awb-rule);
   background: var(--awb-panel-alt);
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   transition:
     background-color 160ms ease,
     box-shadow 160ms ease,
     border-color 160ms ease;
+}
+
+.awb-composer__before-editor {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
 }
 
 .awb-composer__resize-handle {
@@ -1133,13 +1133,35 @@ button:disabled {
 .awb-composer-panel__editor {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--awb-control-border-hover);
+  border-radius: calc(var(--awb-control-radius) + 2px);
+  background: var(--awb-input-soft);
+  transition: border-color 160ms ease;
+}
+
+.awb-composer-panel__editor:focus-within {
+  border-color: var(--awb-control-focus);
 }
 
 .awb-composer-panel__editor textarea {
   min-width: 0;
+}
+
+.awb-composer-panel__editor-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.awb-composer__input-hint {
+  font-size: var(--awb-text-micro);
+  font-weight: 400;
+  color: var(--awb-ink-muted);
 }
 
 .awb-composer-queue {
@@ -1195,29 +1217,29 @@ button:disabled {
   letter-spacing: normal;
   text-transform: none;
   font-family: var(--awb-font-sans);
-  background: rgba(140, 143, 141, 0.16);
+  background: var(--awb-accent-soft);
   color: var(--awb-ink-strong);
 }
 
 .awb-composer-status__pill.is-awaiting_approval,
 .awb-composer-status__pill.is-notice {
-  background: rgba(191, 140, 81, 0.18);
-  color: var(--awb-warm);
+  background: var(--awb-accent-soft);
+  color: var(--awb-ink-strong);
 }
 
 .awb-composer-status__pill.is-running {
-  background: rgba(105, 162, 132, 0.18);
-  color: var(--awb-accent);
+  background: transparent;
+  color: var(--awb-status-running);
 }
 
 .awb-composer-status__pill.is-error {
-  background: rgba(184, 99, 99, 0.18);
-  color: var(--awb-danger);
+  background: var(--awb-accent-soft);
+  color: var(--awb-ink-strong);
 }
 
 .awb-composer-status__notice {
   min-width: 0;
-  max-width: min(42vw, 520px);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1230,11 +1252,11 @@ button:disabled {
 }
 
 .awb-composer-status__notice.is-error {
-  color: #c99191;
+  color: var(--awb-ink-strong);
 }
 
 .awb-composer-status__notice.is-warning {
-  color: #c2a16f;
+  color: var(--awb-ink);
 }
 
 .awb-composer-suggestions {
@@ -1297,11 +1319,9 @@ button:disabled {
 }
 
 .awb-composer__actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  display: grid;
+  min-width: 0;
+  gap: 8px;
 }
 
 .awb-composer__meta {
@@ -1312,33 +1332,40 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.awb-composer__meta:empty {
+  display: none;
+}
+
 .awb-composer__right-rail {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 10px;
   min-width: 0;
-  margin-left: auto;
+  flex-wrap: wrap;
 }
 
 .awb-composer-execution {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 12px;
   min-width: 0;
+  flex: 1;
 }
 
 .awb-configuration-control {
   display: inline-flex;
   flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 6px;
   height: var(--awb-control-height-md);
-  padding: 0 10px;
-  border: 1px solid var(--awb-control-border);
+  padding: 0 4px;
+  border: 1px solid transparent;
   border-radius: var(--awb-radius-soft);
-  background: var(--awb-input);
+  background: transparent;
   color: var(--awb-ink-strong);
   font: 500 var(--awb-text-label)/1 var(--awb-font-sans);
   white-space: nowrap;
@@ -1364,9 +1391,15 @@ label.awb-configuration-control > span {
   color: var(--awb-ink-strong);
 }
 
-.awb-configuration-control:focus-within,
 .awb-configuration-control:hover {
   border-color: var(--awb-control-border-hover);
+  background: var(--awb-panel-soft);
+}
+
+.awb-configuration-control:focus-within {
+  border-color: var(--awb-control-focus);
+  background: var(--awb-panel-soft);
+  outline: none;
 }
 
 .awb-configuration-control:disabled,
@@ -1526,8 +1559,25 @@ label.awb-configuration-control > span {
 
 .awb-composer__primary-action {
   box-sizing: border-box;
-  min-width: 68px;
-  align-self: center;
+  flex: 0 0 30px;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  margin-left: auto;
+  background: var(--awb-ink);
+  color: var(--awb-bg);
+}
+
+.awb-composer__primary-action:hover:not(:disabled) {
+  background: var(--awb-ink-strong);
+  color: var(--awb-bg);
+}
+
+.awb-composer__primary-action svg {
+  width: 20px;
+  height: 20px;
 }
 
 @keyframes awb-spin {

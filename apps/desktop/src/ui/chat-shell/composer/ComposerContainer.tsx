@@ -23,6 +23,7 @@ import { ComposerPanel } from "./ComposerPanel.js";
 import type {
   ComposerActions,
   ComposerSubmitHandler,
+  ComposerSubmitOverride,
   ComposerExecutionSelection,
   ComposerModelExecutionPreferences
 } from "./composer-types.js";
@@ -30,6 +31,8 @@ import type {
 export type ComposerContainerProps = {
   transport: DesktopTransport;
   extraExecutionControls?: ReactNode;
+  beforeEditor?: ReactNode;
+  submitOverride?: ComposerSubmitOverride;
   activeSession?: ChatSession;
   activeSessionId?: string;
   draftKey?: string;
@@ -77,6 +80,8 @@ export type ComposerContainerProps = {
 export const ComposerContainer = memo(({
   transport,
   extraExecutionControls,
+  beforeEditor,
+  submitOverride,
   activeSession,
   activeSessionId,
   draftKey,
@@ -121,6 +126,7 @@ export const ComposerContainer = memo(({
   useLayoutEffect(() => { recordUiOperation("react.composer.commit", renderStartedAt, undefined, "render"); });
   const composer = useComposerController({
     transport,
+    submitMessage: submitOverride?.submit,
     activeSession,
     activeSessionId,
     draftKey,
@@ -168,6 +174,9 @@ export const ComposerContainer = memo(({
   return (
     <ComposerPanel
       extraExecutionControls={extraExecutionControls}
+      beforeEditor={beforeEditor}
+      submitLabel={submitOverride?.label}
+      placeholder={submitOverride?.placeholder}
       isDropTarget={composer.isDropTarget}
       textareaRef={composer.composerTextareaRef}
       draft={composer.draft}
