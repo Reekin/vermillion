@@ -52,7 +52,7 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
         <span className="vm-current-work__state" data-state={state.kind}>{label}</span>
       </div>
       <div className="vm-current-work__actions">
-        {primary && <Button size="sm" disabled={busy} onClick={() => void invoke(primary.operation)}>{primary.label}</Button>}
+        {primary && <Button size="sm" variant="primary" disabled={busy} onClick={() => void invoke(primary.operation)}>{primary.label}</Button>}
         <Button size="sm" variant="ghost" outlined onClick={() => setDetail(true)}>查看</Button>
         {!finished && <OverflowMenu label="更多工作操作" items={[
           ...(state.kind !== "paused" && primary?.operation !== "pause" ? [{ label: preparation ? "暂停准备" : "暂停本工单", disabled: busy, onSelect: () => void invoke("pause") }] : []),

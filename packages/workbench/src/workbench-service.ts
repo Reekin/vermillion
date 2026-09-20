@@ -1082,7 +1082,8 @@ export class WorkbenchService {
 
   async retryWork(workspaceId: string, requestId: string): Promise<WorkRequest> {
     const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
-    if (!request || request.status !== "failed") throw new Error("只有失败的开工请求可以重试。");
+    if (!request || !(request.status === "failed" || (["pending", "preparing"].includes(request.status) && request.retryAt)))
+      throw new Error("只有失败或等待重试的开工请求可以重试。");
     if (request.pendingMessageId) throw new Error("消息受理状态不明，请先调用 work.confirm。");
     return this.putWorkRequest(workspaceId, { ...request, status: request.workerSessionId ? "preparing" : "pending",
       control: "auto", attempts: 0, retryAt: undefined, failure: undefined, waitReason: undefined, pendingMessageId: undefined });

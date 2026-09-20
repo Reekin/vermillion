@@ -73,13 +73,15 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const workSessionId = workTarget.sessionId ?? sessionId;
   const discussionIssue = store((s) => s.view?.issues.find((issue) => issue.discussionSessionId === sessionId));
   const currentWorkRequest = store((s) => s.view?.workRequests.find((request) => {
+    if (!workSessionId) return false;
     const hasOpenItems = s.view?.workItems.some((item) => item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
-    return request.workerSessionId === workSessionId &&
+    return (request.workerSessionId === workSessionId || (!request.workerSessionId && request.sourceSessionId === workSessionId && request.status === "pending")) &&
       (request.status !== "ready" || hasOpenItems);
   }));
-  const currentWorkItem = store((s) => s.view?.workItems.find((item) => item.run.sessionId === workSessionId && !["closed", "cancelled"].includes(item.status)));
+  const currentWorkItem = store((s) => workSessionId ? s.view?.workItems.find((item) => item.run.sessionId === workSessionId && !["closed", "cancelled"].includes(item.status))
+    ?? s.view?.workItems.filter((item) => item.run.sessionId === workSessionId).at(-1) : undefined);
   const decisions = store((s) => s.view?.decisions);
-  const currentDecisions = (decisions ?? []).filter((card) => !card.answer && !card.withdrawn && card.sessionId === workSessionId);
+  const currentDecisions = (decisions ?? []).filter((card) => workSessionId && !card.answer && !card.withdrawn && card.sessionId === workSessionId);
   const [decisionMode, setDecisionMode] = useState<{ sessionId?: string; decisionId?: string; ordinary: boolean }>({ ordinary: false });
   const currentDecision = currentDecisions.find((card) => card.decisionId === decisionMode.decisionId) ?? (currentDecisions.length === 1 ? currentDecisions[0] : undefined);
   const answeringDecision = Boolean(currentDecision && !(decisionMode.sessionId === workSessionId && decisionMode.ordinary));

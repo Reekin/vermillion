@@ -31,6 +31,20 @@ it("requires explicit preparation handoff before releasing prepared items", asyn
   } finally { await f.cleanup(); }
 });
 
+it("allows an explicit retry during preparation backoff without accepting unknown delivery", async () => {
+  const f = await setup();
+  try {
+    const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "turn" });
+    await f.service.failWorkRequest(f.workspaceId, request.requestId, "network timeout");
+    expect((await f.service.listWorkRequests(f.workspaceId))[0]?.retryAt).toBeDefined();
+    const resumed = await f.service.retryWork(f.workspaceId, request.requestId);
+    expect(resumed).toMatchObject({ status: "pending", control: "auto", attempts: 0 });
+    expect(resumed.retryAt).toBeUndefined();
+    await f.service.putWorkRequest(f.workspaceId, { ...resumed, retryAt: new Date().toISOString(), pendingMessageId: "unknown" });
+    await expect(f.service.retryWork(f.workspaceId, request.requestId)).rejects.toThrow("work.confirm");
+  } finally { await f.cleanup(); }
+});
+
 it("turns a queued retry into manual execution and clears the old retry deadline", async () => {
   const f = await setup();
   try {

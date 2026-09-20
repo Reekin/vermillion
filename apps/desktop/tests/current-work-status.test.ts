@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { WorkRequest } from "@vermillion/workbench/client";
+import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
 import { currentWorkStatus } from "../src/ui/app/components/task-labels.js";
 
 const request: WorkRequest = { requestId: "work", sourceSessionId: "source", status: "preparing", createdAt: "2026-09-21", updatedAt: "2026-09-21" };
 
 describe("current work status", () => {
+  it("does not mistake a recorded ended turn for an active worker", () => {
+    const item = { status: "decision", run: { lastFailure: "quota exceeded", activeTurnId: "ended", control: "manual" } } as WorkItem;
+    expect(currentWorkStatus(item).kind).toBe("interrupted");
+  });
   it.each(["quota exceeded", "connection reset", "429 Too Many Requests"])("uses interruption for %s rather than a cause-specific state", (failure) => {
     expect(currentWorkStatus(undefined, { ...request, status: "failed", failure, control: "manual" })).toEqual({ kind: "interrupted", label: "已中断" });
   });

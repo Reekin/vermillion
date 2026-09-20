@@ -14,7 +14,7 @@ export const currentWorkStatus = (item?: WorkItem, request?: WorkRequest, hasDec
   if (hasDecision) return { kind: "decision", label: "等待决策" };
   if (run?.pendingMessageId && run.waitReason) return { kind: "confirmation", label: "等待确认" };
   const failure = item?.run.lastFailure ?? request?.failure;
-  if (status === "failed" || run?.retryAt || (failure && !run?.activeTurnId && (status === "decision" || run?.control === "manual")))
+  if (status === "failed" || run?.retryAt || (failure && status === "decision"))
     return { kind: "interrupted", label: "已中断" };
   if (run?.control === "manual") return { kind: "manual", label: "人工接管" };
   if (status === "decision") return { kind: "decision", label: "等待决策" };

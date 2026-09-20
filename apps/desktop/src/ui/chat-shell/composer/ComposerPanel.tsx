@@ -216,7 +216,7 @@ export const ComposerPanel = ({
         (option) => option.optionId === selectedModel.defaultReasoningOptionId
       )?.displayName ?? selectedModel.defaultReasoningOptionId
     : undefined;
-  const primaryAction = canStop && !isTurnActive
+  const primaryAction = submitLabel && hasComposedInput ? "send" : canStop && !isTurnActive
     ? "stop"
     : isTurnActive
     ? hasComposedInput
