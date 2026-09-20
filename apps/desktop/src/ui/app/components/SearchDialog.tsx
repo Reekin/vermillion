@@ -68,12 +68,12 @@ const RESULT_SNIPPET_CHARS = 96;
 const RESULT_SNIPPET_PREFIX_CHARS = 20;
 
 const snippetLine = (line: SearchHit["context"][number]): SearchHit["context"][number] => {
-  if (line.text.length <= RESULT_SNIPPET_CHARS || line.matches.length === 0) return line;
+  if (line.matches.length === 0) return line;
   const focus = line.matches[0]!.start;
-  const start = Math.max(
-    0,
-    Math.min(focus - RESULT_SNIPPET_PREFIX_CHARS, line.text.length - RESULT_SNIPPET_CHARS)
-  );
+  const desiredStart = Math.max(0, focus - RESULT_SNIPPET_PREFIX_CHARS);
+  const start = line.text.length <= RESULT_SNIPPET_CHARS
+    ? desiredStart
+    : Math.min(desiredStart, line.text.length - RESULT_SNIPPET_CHARS);
   const end = start + RESULT_SNIPPET_CHARS;
   const prefix = start > 0 ? "…" : "";
   const suffix = end < line.text.length ? "…" : "";
