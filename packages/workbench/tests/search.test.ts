@@ -61,7 +61,7 @@ describe("workbench search", () => {
     }
   });
 
-  it("limits rollout search to entries supplied by Vermillion", async () => {
+  it("searches only entries supplied by Vermillion without truncating later matches", async () => {
     const fixture = await setup();
     try {
       const vermillionRollout = join(fixture.root, "vermillion.jsonl");
@@ -78,8 +78,90 @@ describe("workbench search", () => {
         expect(result.hits).toHaveLength(2);
         expect(result.hits[0]).toMatchObject({ sessionId: "vermillion-session", path: vermillionRollout });
         const limited = await service.search({ query: "registered-only", maxResults: 1 });
-        expect(limited.hits).toHaveLength(1);
-        expect(limited.stats.truncated).toBe(true);
+        expect(limited.hits).toHaveLength(2);
+        expect(limited.stats.truncated).toBe(false);
+      } finally {
+        await service.dispose();
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("sorts tree metadata and deduplicates inherited turn positions", async () => {
+    const fixture = await setup();
+    try {
+      const header = JSON.stringify({ type: "session_meta", payload: { originator: "vermillion" } });
+      const turnLine = (turnId: string, text: string, positionId = turnId) =>
+        JSON.stringify({ type: "response_item", payload: { turn_id: turnId, id: "position-" + positionId, text } });
+      const nodeLine = JSON.stringify({ type: "event_msg", payload: { node_id: "node-shared", summary: "tree-a node" } });
+      const rootPath = join(fixture.root, "root.jsonl");
+      const childPath = join(fixture.root, "child.jsonl");
+      const otherPath = join(fixture.root, "other.jsonl");
+      await writeFile(rootPath, [
+        header,
+        turnLine("turn-shared", "tree-a shared"),
+        turnLine("turn-root-only", "tree-a root"),
+        turnLine("turn-shared", "tree-a independent", "turn-shared-independent"),
+        nodeLine
+      ].join("\n"), "utf8");
+      await writeFile(childPath, [
+        header,
+        "unrelated child line",
+        turnLine("turn-shared", "tree-a shared"),
+        turnLine("turn-child-only", "tree-a child"),
+        nodeLine
+      ].join("\n"), "utf8");
+      await writeFile(otherPath, [
+        header,
+        turnLine("turn-other", "tree-b other")
+      ].join("\n"), "utf8");
+      const service = new WorkbenchService({
+        ...fixture.options,
+        sessionSearch: async () => [
+          {
+            sessionId: "tree-a-root",
+            providerSessionId: "provider-root",
+            workspaceId: fixture.workspaceId,
+            providerKind: "codex-thread",
+            treeId: "tree-a",
+            treeTitle: "Tree A",
+            treeActivityAt: "2026-01-02T00:00:00.000Z",
+            activityAt: "2026-01-01T00:00:00.000Z",
+            rolloutPath: rootPath
+          },
+          {
+            sessionId: "tree-a-child",
+            providerSessionId: "provider-child",
+            workspaceId: fixture.workspaceId,
+            providerKind: "codex-thread",
+            treeId: "tree-a",
+            treeTitle: "Tree A",
+            treeActivityAt: "2026-01-02T00:00:00.000Z",
+            activityAt: "2026-01-02T00:00:00.000Z",
+            rolloutPath: childPath
+          },
+          {
+            sessionId: "tree-b-root",
+            providerSessionId: "provider-other",
+            workspaceId: fixture.workspaceId,
+            providerKind: "codex-thread",
+            treeId: "tree-b",
+            treeTitle: "Tree B",
+            treeActivityAt: "2026-01-03T00:00:00.000Z",
+            activityAt: "2026-01-03T00:00:00.000Z",
+            rolloutPath: otherPath
+          }
+        ],
+        rolloutsDir: fixture.root
+      });
+      try {
+        const result = await service.search({ query: "tree", contextLines: 1 });
+        expect(result.hits.map((hit) => hit.title)).toEqual(["Tree B", "Tree A", "Tree A", "Tree A", "Tree A", "Tree A"]);
+        expect(result.hits.filter((hit) => hit.turnId === "turn-shared")).toHaveLength(2);
+        expect(result.hits.filter((hit) => hit.turnId === "node-shared")).toHaveLength(1);
+        expect(result.hits.filter((hit) => hit.treeId === "tree-a")).toHaveLength(5);
+        expect(result.hits[1]).toMatchObject({ sessionId: "tree-a-child", treeTitle: "Tree A" });
       } finally {
         await service.dispose();
       }

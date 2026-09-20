@@ -15,6 +15,14 @@ export type SearchSessionEntry = {
   engineId?: string;
   providerKind?: string;
   title?: string;
+  treeId?: string;
+  treeTitle?: string;
+  treeActivityAt?: string;
+  activityAt?: string;
+  createdAt?: string;
+  lastCompletedTurnAt?: string;
+  lastUserMessageAt?: string;
+  archivedAt?: string;
   rolloutPath?: string;
 };
 
@@ -42,7 +50,6 @@ type TextDocument = {
 type SearchAccumulator = {
   hits: SearchHit[];
   pending: SearchHit[];
-  maxResults: number;
   truncated: boolean;
   onHits?: (hits: SearchHit[]) => void;
 };
@@ -50,8 +57,8 @@ type SearchAccumulator = {
 const MAX_CONTEXT_LINE_CHARS = 4_000;
 /** Windows caps a command line around 32k characters, so rollout paths go to ripgrep in batches. */
 const MAX_BATCH_ARGV_CHARS = 24_000;
-/** Distinct matching lines kept per batch; well above any maxResults, with room for filtered files. */
-const MAX_BATCH_MATCH_LINES = 5_000;
+/** Keeps incremental search events small enough for the UI to stay responsive on dense matches. */
+const HIT_EVENT_BATCH_SIZE = 100;
 /** Bytes read around a hit to rebuild its context without loading a multi-megabyte rollout line. */
 const CONTEXT_WINDOW_BYTES = 32_768;
 /** A session_meta header carries the originator; this covers it without reading the whole file. */
@@ -64,6 +71,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const asNonEmptyString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+const displaySessionTitle = (title: string | undefined): string => {
+  const value = title?.trim();
+  if (!value || /^codex-thread:[0-9a-f-]+$/i.test(value) || /^rollout-.*\.jsonl$/i.test(value)) {
+    return "未命名会话";
+  }
+  return value;
+};
 
 /** `query` is already lower-cased by the caller; the haystack is lower-cased once per line. */
 const findMatches = (text: string, query: string): Array<{ start: number; end: number }> => {
@@ -112,10 +127,6 @@ const contextForLines = (
 };
 
 const addHit = (accumulator: SearchAccumulator, hit: SearchHit): boolean => {
-  if (accumulator.hits.length >= accumulator.maxResults) {
-    accumulator.truncated = true;
-    return false;
-  }
   accumulator.hits.push(hit);
   accumulator.pending.push(hit);
   return true;
@@ -154,22 +165,25 @@ const searchTextDocument = (
       ...(document.workItemId ? { workItemId: document.workItemId } : {})
     } satisfies SearchHit;
     if (!addHit(accumulator, hit)) return false;
+    if (accumulator.pending.length >= HIT_EVENT_BATCH_SIZE) flushHits(accumulator);
   }
   return true;
 };
 
-const turnIdPattern = /"turn_id":"([^"]+)"/;
+const turnIdPattern = /"(?:turn_id|node_id)":"([^"]+)"/;
+const positionIdPattern = /"(?:node_id|id)":"([^"]+)"/;
 
 const scanTurnId = (text: string): string | undefined => turnIdPattern.exec(text)?.[1];
+const scanPositionId = (text: string): string | undefined => positionIdPattern.exec(text)?.[1];
 
-const extractTurnId = (line: string): string | undefined => {
+const extractRolloutIdentity = (line: string): { turnId?: string; positionId?: string } => {
   let value: unknown;
   try {
     value = JSON.parse(line);
   } catch {
-    return undefined;
+    return {};
   }
-  if (!isRecord(value)) return undefined;
+  if (!isRecord(value)) return {};
   const payload = isRecord(value.payload) ? value.payload : undefined;
   const item = payload && isRecord(payload.item) ? payload.item : undefined;
   const metadata = isRecord(value.internal_chat_message_metadata_passthrough)
@@ -177,14 +191,26 @@ const extractTurnId = (line: string): string | undefined => {
     : isRecord(payload?.internal_chat_message_metadata_passthrough)
       ? payload.internal_chat_message_metadata_passthrough
       : undefined;
-  return (
+  const turnId =
     asNonEmptyString(value.turn_id) ??
     asNonEmptyString(payload?.turn_id) ??
     asNonEmptyString(payload?.turnId) ??
     asNonEmptyString(item?.turn_id) ??
     asNonEmptyString(item?.turnId) ??
-    asNonEmptyString(metadata?.turn_id)
-  );
+    asNonEmptyString(metadata?.turn_id) ??
+    asNonEmptyString(value.node_id) ??
+    asNonEmptyString(payload?.node_id) ??
+    asNonEmptyString(item?.node_id);
+  const positionId =
+    asNonEmptyString(payload?.node_id) ??
+    asNonEmptyString(item?.id) ??
+    asNonEmptyString(payload?.id) ??
+    asNonEmptyString(value.id) ??
+    asNonEmptyString(item?.node_id);
+  return {
+    ...(turnId ? { turnId } : {}),
+    ...(positionId ? { positionId } : {})
+  };
 };
 
 const isVermillionRollout = (header: string): boolean => {
@@ -479,6 +505,14 @@ const readTurnIdOnLine = async (path: string, start: number, end: number): Promi
   return scanTurnId(await readChunk(path, end - CONTEXT_WINDOW_BYTES, CONTEXT_WINDOW_BYTES));
 };
 
+const readPositionIdOnLine = async (path: string, start: number, end: number): Promise<string | undefined> => {
+  const length = Math.max(0, end - start);
+  const head = await readChunk(path, start, Math.min(length, CONTEXT_WINDOW_BYTES));
+  const fromHead = scanPositionId(head);
+  if (fromHead || length <= CONTEXT_WINDOW_BYTES * 2) return fromHead;
+  return scanPositionId(await readChunk(path, end - CONTEXT_WINDOW_BYTES, CONTEXT_WINDOW_BYTES));
+};
+
 /**
  * Column of a hit whose line reaches past the context window. The window alone cannot tell how far
  * the match sits from the line start, so the prefix is decoded; past the limit the byte distance is
@@ -577,11 +611,21 @@ const searchRollouts = async (input: {
     if (path && !entryByPath.has(path)) entryByPath.set(path, entry);
   }
   if (entryByPath.size === 0) return;
-  // Newest session first: rollout file names start with the session's timestamp.
-  const paths = [...entryByPath.keys()].sort((a, b) => basename(b).localeCompare(basename(a)));
+  const paths = [...entryByPath.keys()].sort((leftPath, rightPath) => {
+    const left = entryByPath.get(leftPath)!;
+    const right = entryByPath.get(rightPath)!;
+    return (
+      (right.treeActivityAt ?? right.activityAt ?? "").localeCompare(left.treeActivityAt ?? left.activityAt ?? "") ||
+      (left.treeId ?? left.sessionId).localeCompare(right.treeId ?? right.sessionId) ||
+      (right.activityAt ?? "").localeCompare(left.activityAt ?? "") ||
+      left.sessionId.localeCompare(right.sessionId) ||
+      basename(leftPath).localeCompare(basename(rightPath))
+    );
+  });
   const executable = await resolveRipgrepPath();
   const vermillionByPath = new Map<string, boolean>();
   const lineStartsByPath = new Map<string, Promise<number[]>>();
+  const sharedPositionKeys = new Set<string>();
 
   const cutLineBounds = async (path: string, line: number): Promise<{ start: number; end: number } | undefined> => {
     let starts = lineStartsByPath.get(path);
@@ -600,14 +644,12 @@ const searchRollouts = async (input: {
   for (const batch of batchPaths(paths)) {
     if (input.signal?.aborted || input.accumulator.truncated) return;
     const found = new Map<string, Map<number, number>>();
-    let collected = 0;
     const run = await runRipgrepBatch({
       executable,
       paths: batch,
       query: input.query,
       signal: input.signal,
       onMatch: (match) => {
-        if (collected >= MAX_BATCH_MATCH_LINES) return;
         let lines = found.get(match.path);
         if (!lines) {
           lines = new Map();
@@ -615,7 +657,6 @@ const searchRollouts = async (input: {
         }
         if (lines.has(match.line)) return;
         lines.set(match.line, match.byteOffset);
-        collected += 1;
       }
     });
     input.stats.sourcesScanned += run.filesSearched || batch.length;
@@ -639,23 +680,38 @@ const searchRollouts = async (input: {
         const built = buildHitContext(window, line, input.query, input.contextLines);
         let column = built.column;
         let turnId: string | undefined;
+        let positionId: string | undefined;
         if (built.hitComplete) {
-          turnId = extractTurnId(built.hitText);
+          const identity = extractRolloutIdentity(built.hitText);
+          turnId = identity.turnId;
+          positionId = identity.positionId;
         } else {
           // The window holds only part of this line, so its start is needed for both the turn and
           // the column; one ripgrep pass over the file provides every line start.
           const bounds = await cutLineBounds(path, line);
           if (bounds) {
             turnId = await readTurnIdOnLine(path, bounds.start, bounds.end);
+            positionId = await readPositionIdOnLine(path, bounds.start, bounds.end);
             column = await columnInLine(path, bounds.start, byteOffset);
           }
         }
+        const treeId = entry.treeId ?? entry.sessionId;
+        const treeTitle = displaySessionTitle(entry.treeTitle);
+        const sharedPositionKey = positionId
+          ? [treeId, turnId ?? "", positionId].join(":")
+          : undefined;
+        if (sharedPositionKey && sharedPositionKeys.has(sharedPositionKey)) continue;
+        if (sharedPositionKey) sharedPositionKeys.add(sharedPositionKey);
         const hit = {
           id: `session:${entry.workspaceId}:${entry.sessionId}:${line}`,
           kind: "session" as const,
           workspaceId: entry.workspaceId,
           workspaceLabel,
-          title: entry.title?.trim() || basename(path),
+          title: treeTitle,
+          treeId,
+          treeTitle,
+          ...(entry.treeActivityAt ? { treeActivityAt: entry.treeActivityAt } : {}),
+          ...(entry.activityAt ? { sessionActivityAt: entry.activityAt } : {}),
           path,
           line,
           column,
@@ -664,11 +720,74 @@ const searchRollouts = async (input: {
           ...(turnId ? { turnId } : {})
         } satisfies SearchHit;
         if (!addHit(input.accumulator, hit)) break;
+        if (input.accumulator.pending.length >= HIT_EVENT_BATCH_SIZE) flushHits(input.accumulator);
       }
       flushHits(input.accumulator);
       if (input.accumulator.truncated) return;
     }
   }
+};
+
+type SearchSessionRelation = {
+  parentSessionId: string;
+  childSessionId: string;
+  relationType: string;
+};
+
+const latestTimestamp = (values: readonly (string | undefined)[]): string | undefined =>
+  values.reduce<string | undefined>(
+    (latest, value) => value && (!latest || value > latest) ? value : latest,
+    undefined
+  );
+
+const decorateSessionSearchEntries = (
+  entries: SearchSessionEntry[],
+  relations: SearchSessionRelation[]
+): SearchSessionEntry[] => {
+  const parentBySessionId = new Map(
+    relations
+      .filter((relation) => relation.relationType === "fork")
+      .map((relation) => [relation.childSessionId, relation.parentSessionId])
+  );
+  const entryBySessionId = new Map(entries.map((entry) => [entry.sessionId, entry]));
+  const rootIdFor = (sessionId: string): string => {
+    const seen = new Set<string>();
+    let current = sessionId;
+    while (!seen.has(current)) {
+      seen.add(current);
+      const parent = parentBySessionId.get(current);
+      if (!parent || !entryBySessionId.has(parent)) break;
+      current = parent;
+    }
+    return current;
+  };
+  const membersByTree = new Map<string, SearchSessionEntry[]>();
+  for (const entry of entries) {
+    const treeId = rootIdFor(entry.sessionId);
+    const members = membersByTree.get(treeId) ?? [];
+    members.push(entry);
+    membersByTree.set(treeId, members);
+  }
+  const metadataByTree = new Map<string, { title: string; activityAt: string | undefined }>();
+  for (const [treeId, members] of membersByTree) {
+    const root = entryBySessionId.get(treeId);
+    metadataByTree.set(treeId, {
+      title: displaySessionTitle(root?.title),
+      activityAt: latestTimestamp(
+        members.filter((entry) => !entry.archivedAt).map((entry) => entry.activityAt)
+      )
+    });
+  }
+  return entries.map((entry) => {
+    const treeId = rootIdFor(entry.sessionId);
+    const tree = metadataByTree.get(treeId)!;
+    return {
+      ...entry,
+      treeId,
+      treeTitle: tree.title,
+      ...(tree.activityAt ? { treeActivityAt: tree.activityAt } : {})
+    };
+  });
 };
 
 const readFileSessionEntries = async (baseDir: string): Promise<SearchSessionEntry[]> => {
@@ -685,7 +804,7 @@ const readFileSessionEntries = async (baseDir: string): Promise<SearchSessionEnt
     return [];
   }
   if (!isRecord(value) || !Array.isArray(value.entries)) return [];
-  return value.entries.flatMap((rawEntry): SearchSessionEntry[] => {
+  const entries = value.entries.flatMap((rawEntry): SearchSessionEntry[] => {
     if (!isRecord(rawEntry)) return [];
     const sessionId = asNonEmptyString(rawEntry.sessionId);
     const workspaceId = asNonEmptyString(rawEntry.workspaceId);
@@ -704,11 +823,44 @@ const readFileSessionEntries = async (baseDir: string): Promise<SearchSessionEnt
         ? { providerKind: asNonEmptyString(rawEntry.providerKind) }
         : {}),
       ...(asNonEmptyString(rawEntry.title) ? { title: asNonEmptyString(rawEntry.title) } : {}),
+      ...(asNonEmptyString(rawEntry.createdAt) ? { createdAt: asNonEmptyString(rawEntry.createdAt) } : {}),
+      ...(asNonEmptyString(rawEntry.lastCompletedTurnAt)
+        ? { lastCompletedTurnAt: asNonEmptyString(rawEntry.lastCompletedTurnAt) }
+        : {}),
+      ...(asNonEmptyString(rawEntry.lastUserMessageAt)
+        ? { lastUserMessageAt: asNonEmptyString(rawEntry.lastUserMessageAt) }
+        : {}),
+      ...(asNonEmptyString(rawEntry.archivedAt) ? { archivedAt: asNonEmptyString(rawEntry.archivedAt) } : {}),
+      activityAt: latestTimestamp([
+        asNonEmptyString(rawEntry.lastCompletedTurnAt),
+        asNonEmptyString(rawEntry.lastUserMessageAt),
+        asNonEmptyString(rawEntry.createdAt)
+      ]),
       ...(asNonEmptyString(metadata?.rolloutPath)
         ? { rolloutPath: asNonEmptyString(metadata?.rolloutPath) }
         : {})
     }];
   });
+  const relations = Array.isArray(value.relations)
+    ? value.relations.flatMap((rawRelation): SearchSessionRelation[] => {
+      if (!isRecord(rawRelation)) return [];
+      const parentSessionId = asNonEmptyString(rawRelation.parentSessionId);
+      const childSessionId = asNonEmptyString(rawRelation.childSessionId);
+      const relationType = asNonEmptyString(rawRelation.relationType);
+      return parentSessionId && childSessionId && relationType
+        ? [{ parentSessionId, childSessionId, relationType }]
+        : [];
+    })
+    : [];
+  const decorated = decorateSessionSearchEntries(entries, relations);
+  return decorated.map((entry) => ({
+    ...entry,
+    activityAt: latestTimestamp([
+      entry.lastCompletedTurnAt,
+      entry.lastUserMessageAt,
+      entry.createdAt
+    ])
+  }));
 };
 
 export const createFileSessionSearchSource = (baseDir: string): SessionSearchSource =>
@@ -736,7 +888,6 @@ export const searchWorkbench = async (input: {
   const accumulator: SearchAccumulator = {
     hits: [],
     pending: [],
-    maxResults: input.query.maxResults ?? 200,
     truncated: false,
     ...(input.onHits ? { onHits: input.onHits } : {})
   };
