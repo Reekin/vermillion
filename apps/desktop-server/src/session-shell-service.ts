@@ -544,22 +544,93 @@ export class SessionShellService {
     engineId?: string;
     providerKind?: string;
     title?: string;
+    treeId?: string;
+    treeTitle?: string;
+    treeActivityAt?: string;
+    activityAt?: string;
+    createdAt?: string;
+    lastCompletedTurnAt?: string;
+    lastUserMessageAt?: string;
     rolloutPath?: string;
   }>> {
     const index = this.runtimeService.getSessionIndexStore?.();
     if (!index) return [];
     await index.ready();
-    return index.listEntries().map((entry) => ({
+    const entries = index.listEntries();
+    const displayTitle = (title: string | undefined): string => {
+      const value = title?.trim();
+      return !value || /^codex-thread:[0-9a-f-]+$/i.test(value) || /^rollout-.*\.jsonl$/i.test(value)
+        ? "未命名会话"
+        : value;
+    };
+    const activityAt = (entry: typeof entries[number]): string | undefined =>
+      [entry.lastCompletedTurnAt, entry.lastUserMessageAt, entry.createdAt]
+        .reduce<string | undefined>(
+          (latest, value) => value && (!latest || value > latest) ? value : latest,
+          undefined
+        );
+    const entryBySessionId = new Map(entries.map((entry) => [entry.sessionId, entry]));
+    const parentBySessionId = new Map(
+      index.listRelations()
+        .filter((relation) => relation.relationType === "fork")
+        .map((relation) => [relation.childSessionId, relation.parentSessionId])
+    );
+    const treeIdFor = (sessionId: string): string => {
+      const seen = new Set<string>();
+      let current = sessionId;
+      while (!seen.has(current)) {
+        seen.add(current);
+        const parent = parentBySessionId.get(current);
+        if (!parent || !entryBySessionId.has(parent)) break;
+        current = parent;
+      }
+      return current;
+    };
+    const treeIdBySessionId = new Map(
+      entries.map((entry) => [entry.sessionId, treeIdFor(entry.sessionId)])
+    );
+    const membersByTreeId = new Map<string, typeof entries>();
+    for (const entry of entries) {
+      const treeId = treeIdBySessionId.get(entry.sessionId)!;
+      const members = membersByTreeId.get(treeId) ?? [];
+      members.push(entry);
+      membersByTreeId.set(treeId, members);
+    }
+    const treeMeta = new Map<string, { title: string; activityAt: string | undefined }>();
+    for (const [treeId, members] of membersByTreeId) {
+      const root = entryBySessionId.get(treeId);
+      treeMeta.set(treeId, {
+        title: displayTitle(root?.title),
+        activityAt: members
+          .map(activityAt)
+          .reduce<string | undefined>(
+            (latest, value) => value && (!latest || value > latest) ? value : latest,
+            undefined
+          )
+      });
+    }
+    return entries.map((entry) => {
+      const treeId = treeIdBySessionId.get(entry.sessionId)!;
+      const tree = treeMeta.get(treeId)!;
+      return {
       sessionId: entry.sessionId,
       ...(entry.providerSessionId ? { providerSessionId: entry.providerSessionId } : {}),
       workspaceId: entry.workspaceId,
       ...(entry.engineId ? { engineId: entry.engineId } : {}),
       ...(entry.providerKind ? { providerKind: entry.providerKind } : {}),
       ...(entry.title ? { title: entry.title } : {}),
+      treeId,
+      treeTitle: tree.title,
+      ...(tree.activityAt ? { treeActivityAt: tree.activityAt } : {}),
+      ...(activityAt(entry) ? { activityAt: activityAt(entry) } : {}),
+      createdAt: entry.createdAt,
+      ...(entry.lastCompletedTurnAt ? { lastCompletedTurnAt: entry.lastCompletedTurnAt } : {}),
+      ...(entry.lastUserMessageAt ? { lastUserMessageAt: entry.lastUserMessageAt } : {}),
       ...(typeof entry.metadata?.rolloutPath === "string" && entry.metadata.rolloutPath.trim()
         ? { rolloutPath: entry.metadata.rolloutPath }
         : {})
-    }));
+      };
+    });
   }
 
   public async repairSessionBrowser(workspaceIds: string[]): Promise<{
