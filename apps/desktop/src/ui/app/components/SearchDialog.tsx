@@ -71,9 +71,7 @@ const snippetLine = (line: SearchHit["context"][number]): SearchHit["context"][n
   if (line.matches.length === 0) return line;
   const focus = line.matches[0]!.start;
   const desiredStart = Math.max(0, focus - RESULT_SNIPPET_PREFIX_CHARS);
-  const start = line.text.length <= RESULT_SNIPPET_CHARS
-    ? desiredStart
-    : Math.min(desiredStart, line.text.length - RESULT_SNIPPET_CHARS);
+  const start = desiredStart;
   const end = start + RESULT_SNIPPET_CHARS;
   const prefix = start > 0 ? "…" : "";
   const suffix = end < line.text.length ? "…" : "";
