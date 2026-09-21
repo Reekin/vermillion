@@ -44,7 +44,8 @@ async function fixture() {
   const service = new WrapperChatTreeService({
     sessionIndexStore: index, reconciliation: { ensureSessionLoaded: load } as never,
     runtimeService: { getSnapshot: () => snapshot, getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
-      getRevision: () => "initial", subscribe: () => () => {}, notifyChatTreeChanged: changed } as never,
+      getRevision: () => "initial", getSessionHistoryRevision: () => "history", hasSessionWindow: () => false,
+      subscribe: () => () => {}, notifyChatTreeChanged: changed } as never,
     capabilities: { forkSessionFromTurn: fork } as never
   });
   cleanups.push(async () => { service.dispose(); await rm(baseDir, { recursive: true, force: true }); });

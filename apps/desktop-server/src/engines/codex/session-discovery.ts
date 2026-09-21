@@ -31,6 +31,7 @@ import type { SessionSource } from "../../codex-app-server-generated/v2/SessionS
 import type { UserInput } from "../../codex-app-server-generated/v2/UserInput.js";
 import { engineItemKey, sessionItemId } from "../../session-item-id.js";
 import type { CodexAppServerRuntimePort } from "./runtime-port.js";
+import type { CodexHistorySource } from "./history-source.js";
 import type {
   SessionIndexEntry,
   SessionRelationIndex,
@@ -812,17 +813,20 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
   private readonly turnChangesStore: CodexTurnChangesStore | undefined;
   private readonly resolveHistoryCwd: ((workspaceId: string) => string | undefined) | undefined;
   private readonly resolveRoleInstructions: SessionRoleInstructionsResolver | undefined;
+  private readonly historySource: CodexHistorySource | undefined;
 
   public constructor(options: {
     codexRuntimePort: CodexAppServerRuntimePort;
     turnChangesStore?: CodexTurnChangesStore;
     resolveHistoryCwd?: (workspaceId: string) => string | undefined;
     resolveRoleInstructions?: SessionRoleInstructionsResolver;
+    historySource?: CodexHistorySource;
   }) {
     this.codexRuntimePort = options.codexRuntimePort;
     this.turnChangesStore = options.turnChangesStore;
     this.resolveHistoryCwd = options.resolveHistoryCwd;
     this.resolveRoleInstructions = options.resolveRoleInstructions;
+    this.historySource = options.historySource;
   }
 
   /** Loading a thread fixes the instructions Codex re-renders after compaction, so they must be current. */
@@ -970,6 +974,20 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
   }
 
   public async hydrateSession(
+    entry: SessionIndexEntry,
+    input: { signal?: AbortSignal; retainExecution?: boolean } = {}
+  ): Promise<HydratedSessionSnapshot | undefined> {
+    const read = () => this.readSession(entry, input);
+    return this.historySource
+      ? this.historySource.read(entry, read, input.signal)
+      : read();
+  }
+
+  public onHistoryCommitted(hydrated: HydratedSessionSnapshot): void {
+    this.historySource?.confirmRead(hydrated);
+  }
+
+  private async readSession(
     entry: SessionIndexEntry,
     input: {
       signal?: AbortSignal;

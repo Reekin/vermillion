@@ -47,6 +47,7 @@ export const connectDesktopTransportToStore = async (
     });
 
     if (replayResult.status === "gap") {
+      input.store.clearKnownSessionWindows();
       await hydrateSnapshot();
     } else {
       input.store.ingestEnvelopes(replayResult.envelopes);

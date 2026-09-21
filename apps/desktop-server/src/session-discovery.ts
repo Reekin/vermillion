@@ -95,6 +95,8 @@ export type HydratedSessionWindowSnapshot = HydratedSessionSnapshot & {
 
 export type SessionDiscoveryProvider = {
   readonly engineId: string;
+  /** Receives the original full-read object only after its projection and index commit succeed. */
+  onHistoryCommitted?: (hydrated: HydratedSessionSnapshot) => void;
   discoverWorkspaces: (
     workspaces: readonly WorkspaceRecord[]
   ) => Promise<ReadonlyMap<string, DiscoveredWorkspaceResult>>;
@@ -566,7 +568,9 @@ export class SessionReconciliationService {
     if (!hydrated || input.signal?.aborted) {
       return false;
     }
-    return Boolean(await this.commitHydratedSession(entry, hydrated));
+    const committed = await this.commitHydratedSession(entry, hydrated);
+    if (committed && !input.signal?.aborted) provider.onHistoryCommitted?.(hydrated);
+    return Boolean(committed);
   }
 
   private async commitHydratedSession<T extends HydratedSessionSnapshot>(

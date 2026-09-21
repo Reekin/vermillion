@@ -1621,6 +1621,22 @@ export class CodexAppServerRuntimePort
     await this.releaseThreadExecution(threadId);
   }
 
+  /** History replacement owns only this thread, never its running descendants. */
+  public async releaseThreadForHistoryRefresh(threadId: string): Promise<void> {
+    if (this.activeTurnByThreadId.has(threadId) || this.pendingTurnSessionIdByThreadId.has(threadId)) {
+      throw new Error(`Cannot refresh history for ${threadId}: a turn is active.`);
+    }
+    const thread = await this.readThread(threadId, false);
+    if (thread.status.type === "notLoaded") return;
+    if (thread.status.type === "active") {
+      throw new Error(`Cannot refresh history for ${threadId}: a turn is active.`);
+    }
+    await this.releaseThreadExecution(threadId);
+    if (!await this.waitForThreadClosed(threadId)) {
+      throw new Error(`Cannot refresh history for ${threadId}: execution has not been released.`);
+    }
+  }
+
   /** Unsubscribe the idle execution tree without waiting for unloading or archiving its history. */
   public async releaseSessionExecution(sessionId: string): Promise<void> {
     const owned = this.sessionExecutionThreadIds(sessionId);

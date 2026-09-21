@@ -153,7 +153,7 @@ const buildProjectedProviderOpenHarness = (
 
 const buildHistoryRefreshOpenHarness = (input: {
   activeTurnId?: string;
-  clearResult?: boolean;
+  current?: boolean;
 } = {}) => {
   const snapshot = buildSessionSnapshot();
   const providerSession = {
@@ -164,7 +164,8 @@ const buildHistoryRefreshOpenHarness = (input: {
     }
   };
   const releaseSessionExecution = vi.fn().mockResolvedValue(undefined);
-  const clearSessionHistory = vi.fn().mockResolvedValue(input.clearResult ?? true);
+  const clearSessionHistory = vi.fn().mockResolvedValue(true);
+  const isCurrent = vi.fn().mockResolvedValue(input.current ?? false);
   const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
   const ensureSessionExecutable = vi.fn().mockResolvedValue(true);
   const invalidate = vi.fn();
@@ -191,7 +192,8 @@ const buildHistoryRefreshOpenHarness = (input: {
       releaseSessionExecution,
       clearSessionHistory,
       getActiveTurnId: () => input.activeTurnId,
-      getSessionRuntime: () => ({ releaseSessionExecution, clearSessionHistory })
+      getSessionRuntime: () => ({ releaseSessionExecution, clearSessionHistory,
+        historySource: { isCurrent } })
     } as never,
     wrapperChatTree: { invalidate } as never,
     sessionCatalog: { markSessionRead } as never,
@@ -211,6 +213,7 @@ const buildHistoryRefreshOpenHarness = (input: {
     service,
     releaseSessionExecution,
     clearSessionHistory,
+    isCurrent,
     ensureSessionLoaded,
     ensureSessionExecutable,
     invalidate,
@@ -255,21 +258,13 @@ describe("SessionShellService", () => {
       }
     });
 
-    expect(harness.releaseSessionExecution).toHaveBeenCalledWith("session-1");
-    expect(harness.clearSessionHistory).toHaveBeenCalledWith("session-1");
+    expect(harness.isCurrent).toHaveBeenCalledWith("session-1", expect.any(AbortSignal));
     expect(harness.ensureSessionLoaded).toHaveBeenCalledWith("session-1", {
       force: true,
       requireFull: true,
-      signal: expect.any(AbortSignal),
-      retainExecution: true
+      signal: expect.any(AbortSignal)
     });
-    expect(harness.invalidate).toHaveBeenCalledWith("session-1");
-    expect(harness.releaseSessionExecution.mock.invocationCallOrder[0]).toBeLessThan(
-      harness.clearSessionHistory.mock.invocationCallOrder[0]
-    );
-    expect(harness.clearSessionHistory.mock.invocationCallOrder[0]).toBeLessThan(
-      harness.ensureSessionLoaded.mock.invocationCallOrder[0]
-    );
+    expect(harness.invalidate).not.toHaveBeenCalled();
   });
 
   it("keeps an active provider session attached when it is opened", async () => {
@@ -279,16 +274,46 @@ describe("SessionShellService", () => {
 
     expect(harness.releaseSessionExecution).not.toHaveBeenCalled();
     expect(harness.clearSessionHistory).not.toHaveBeenCalled();
-    expect(harness.ensureSessionLoaded).not.toHaveBeenCalled();
+    expect(harness.isCurrent).not.toHaveBeenCalled();
+    expect(harness.ensureSessionLoaded).toHaveBeenCalledWith("session-1", {
+      force: false, requireFull: true, signal: expect.any(AbortSignal)
+    });
   });
 
-  it("clears provider history after releasing execution", async () => {
+  it("retains provider history after releasing execution", async () => {
     const harness = buildHistoryRefreshOpenHarness();
 
     await harness.service.releaseSessionExecution("session-1");
 
     expect(harness.releaseSessionExecution).toHaveBeenCalledWith("session-1");
-    expect(harness.clearSessionHistory).toHaveBeenCalledWith("session-1");
+    expect(harness.clearSessionHistory).not.toHaveBeenCalled();
+  });
+
+  it("reuses current history without forcing hydration or invalidating the tree", async () => {
+    const harness = buildHistoryRefreshOpenHarness({ current: true });
+    await harness.service.openSession("session-1");
+    expect(harness.ensureSessionLoaded).toHaveBeenCalledTimes(1);
+    expect(harness.ensureSessionLoaded).toHaveBeenCalledWith("session-1", {
+      force: false, requireFull: true, signal: expect.any(AbortSignal)
+    });
+    expect(harness.invalidate).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a history failure and can retry", async () => {
+    const harness = buildHistoryRefreshOpenHarness();
+    harness.ensureSessionLoaded.mockRejectedValueOnce(new Error("read failed"));
+    await expect(harness.service.ensureHistoryCurrent("session-1")).rejects.toThrow("read failed");
+    await expect(harness.service.ensureHistoryCurrent("session-1")).resolves.toBe(true);
+  });
+
+  it("opens without constructing or returning a body when the path owns body delivery", async () => {
+    const harness = buildHistoryRefreshOpenHarness({ current: true });
+    const buildWindow = vi.spyOn(harness.service as never as {
+      buildSessionWindow: (...args: unknown[]) => unknown;
+    }, "buildSessionWindow");
+    await expect(harness.service.openSession("session-1", { includeWindow: false })).resolves.toEqual({});
+    expect(buildWindow).not.toHaveBeenCalled();
+    expect(harness.ensureSessionExecutable).toHaveBeenCalledWith("session-1");
   });
 
   it("serves engine registry and surface from injected engine-control services", () => {

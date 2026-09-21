@@ -309,9 +309,10 @@ export const createWorkbenchRpcHandler = (
               id: request.id,
               method: request.method,
               ok: true,
-              result: request.params.forceProviderHydration
+              result: request.params.forceProviderHydration || request.params.includeWindow !== undefined
                 ? await shellService.openSession(request.params.sessionId, {
-                    forceProviderHydration: true
+                    forceProviderHydration: request.params.forceProviderHydration,
+                    includeWindow: request.params.includeWindow
                   })
                 : await shellService.openSession(request.params.sessionId)
             });
@@ -434,7 +435,7 @@ export const createWorkbenchRpcHandler = (
               method: request.method,
               ok: true,
               result: {
-                chatTree: await shellService.getChatTree(request.params.sessionId, request.params.scope)
+                chatTree: await shellService.getChatTree(request.params.sessionId, request.params.scope, request.params.knownWindows)
               }
             });
           case "chatTree.submit":

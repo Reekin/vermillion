@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { DomainReplica } from "@vermillion/core";
 import type {
   AgentParticipant,
@@ -83,6 +85,21 @@ export class DomainService {
   private readonly createRelationId: IdFactory;
   private readonly createSessionId: IdFactory;
   private readonly domainReplica: DomainReplica;
+  private readonly historyRevisions = new Map<string, string>();
+
+  /** A baseline changes only when history is replaced outside the live event stream. */
+  public getHistoryRevision(sessionId: string): string {
+    let revision = this.historyRevisions.get(sessionId);
+    if (!revision) {
+      revision = randomUUID();
+      this.historyRevisions.set(sessionId, revision);
+    }
+    return revision;
+  }
+
+  public invalidateHistoryRevision(sessionId: string): void {
+    this.historyRevisions.set(sessionId, randomUUID());
+  }
 
   public constructor(options: DomainServiceOptions) {
     this.assertEngineRegistered = options.assertEngineRegistered;
@@ -104,6 +121,7 @@ export class DomainService {
       replaceSessionHistory?: boolean;
     } = {}
   ): ChatSession {
+    const previousBody = this.domainReplica.getSessionSnapshot(snapshot.session.sessionId);
     const existingConversation = this.domainReplica.getConversation(
       snapshot.conversation.conversationId
     );
@@ -160,6 +178,11 @@ export class DomainService {
       });
     }
 
+    const currentBody = this.domainReplica.getSessionSnapshot(snapshot.session.sessionId);
+    const bodyKeys = ["turns", "messageBlocks", "toolCalls", "terminalStreams", "approvalRequests", "runtimeInteractions", "threadGoals"] as const;
+    if (bodyKeys.some((key) => !isDeepStrictEqual(previousBody[key], currentBody[key]))) {
+      this.invalidateHistoryRevision(snapshot.session.sessionId);
+    }
     const session = this.requireSession(snapshot.session.sessionId);
     this.ensureParticipantForSession(session);
 
@@ -506,6 +529,7 @@ export class DomainService {
 
   private applyRuntimeEvent(event: RuntimeEvent, occurredAt?: string): void {
     this.domainReplica.apply(event, occurredAt);
+    if (event.type === "session.disposed") this.historyRevisions.delete(event.sessionId);
     if (event.type === "turn.completed") {
       this.markSessionUnreadCompleted?.({
         sessionId: event.sessionId,

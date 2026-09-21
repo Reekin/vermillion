@@ -44,6 +44,8 @@ const fixture = async (
       getSnapshot: () => snapshot,
       getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
       getRevision: () => "initial",
+      getSessionHistoryRevision: (id: string) => `history-${id}`,
+      hasSessionWindow: (id: string, known?: { revision: string }) => known?.revision === `history-${id}`,
       updateSessionMetadata,
       notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
@@ -170,6 +172,20 @@ describe("wrapper session trees", () => {
     const rootPath = await f.service.get("root", "path");
     expect(rootPath.windows?.map((window) => window.sessionId)).toEqual(["root"]);
     expect(rootPath.visibleTurnIds).toEqual(["a", "b"]);
+    f.service.dispose();
+  });
+
+  it("omits only acknowledged member bodies while preserving path structure", async () => {
+    const f = await fixture();
+    const first = await f.service.get("branch", "path");
+    const known = Object.fromEntries(first.windows!.map((window) => [window.sessionId, { revision: window.revision! }]));
+    const cached = await f.service.get("branch", "path", known);
+    expect(cached.windows).toEqual([]);
+    expect(cached.visibleTurnIds).toEqual(first.visibleTurnIds);
+    expect(cached.nodes).toEqual(first.nodes);
+    const changed = await f.service.get("branch", "path", { ...known, branch: { revision: "stale" } });
+    expect(changed.windows?.map((window) => window.sessionId)).toEqual(["branch"]);
+    expect((await f.service.get("branch", "path")).windows).toHaveLength(2);
     f.service.dispose();
   });
 

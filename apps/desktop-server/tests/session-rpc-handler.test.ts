@@ -961,6 +961,19 @@ describe("createWorkbenchRpcHandler", () => {
         sessionId: "session-1"
       }
     });
+    const knownWindows = { "session-1": { revision: "history-epoch", cursor: "42" } };
+    await handler.handleRequest({
+      id: "req-chat-tree-known", method: "chatTree.get",
+      params: { sessionId: "session-1", scope: "path", knownWindows }
+    });
+    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", "path", knownWindows);
+    await handler.handleRequest({
+      id: "req-open-without-window", method: "sessionBrowser.open",
+      params: { sessionId: "session-1", includeWindow: false }
+    });
+    expect((shellService as any).openSession).toHaveBeenCalledWith("session-1", {
+      forceProviderHydration: undefined, includeWindow: false
+    });
     const worktreeResponse = await handler.handleRequest({
       id: "req-worktree",
       method: "worktree.get",
@@ -1129,7 +1142,7 @@ describe("createWorkbenchRpcHandler", () => {
       limit: 8
     });
     expect((shellService as any).removeWorkspace).toHaveBeenCalledWith("workspace-1");
-    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", undefined);
+    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", undefined, undefined);
     expect((shellService as any).getWorktree).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getCheckpoint).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getDiagnostics).toHaveBeenCalledWith("session-1");

@@ -357,47 +357,27 @@ export class SessionShellService {
     return this.runtimeService.getSnapshot();
   }
 
-  /**
-   * 只清理该会话自身的可重建引擎缓存：祖先缓存是后代读取继承历史的依据，
-   * 连带清除会让后代历史在不报错的情况下缺少继承前缀。
-   */
-  private async tryClearSessionHistory(sessionId: string): Promise<boolean> {
-    if (!this.capabilities) return false;
-    try {
-      return await this.capabilities.clearSessionHistory(sessionId);
-    } catch (error) {
-      console.warn("[vermillion] Failed to clear session history", {
-        sessionId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      return false;
-    }
-  }
-
-  private async refreshSessionHistoryBeforeOpen(sessionId: string): Promise<boolean> {
-    if (!this.capabilities || this.getActiveTurnId(sessionId)) return false;
-    try {
-      await this.releaseSessionExecutionIfSupported(sessionId);
-      const refreshed = await this.tryClearSessionHistory(sessionId);
-      if (refreshed) {
-        this.wrapperChatTree?.invalidate(sessionId);
-      }
-      return refreshed;
-    } catch (error) {
-      console.warn("[vermillion] Failed to refresh session history", {
-        sessionId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      return false;
-    }
-  }
-
-  private async releaseSessionExecutionIfSupported(sessionId: string): Promise<void> {
+  /** Check one member without invalidating its ancestors or the published tree. */
+  public async ensureHistoryCurrent(sessionId: string, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
     const engineId = this.sessionIdentity.resolveContext(sessionId).engineId;
-    const release = this.capabilities?.getSessionRuntime(engineId)?.releaseSessionExecution;
-    if (release) {
-      await release(sessionId);
-    }
+    const source = this.capabilities?.getSessionRuntime(engineId)?.historySource;
+    if (!source || !this.sessionReconciliation) return false;
+    const load = async (force: boolean) => {
+      const loaded = await this.sessionReconciliation!.ensureSessionLoaded(sessionId, {
+        force, requireFull: true, signal
+      });
+      signal?.throwIfAborted();
+      if (!loaded) throw new Error(`Could not load current history for ${sessionId}.`);
+      this.partiallyHydratedSessionIds.delete(sessionId);
+    };
+    // Adopt any full read already committed by reconciliation (including initial tree load).
+    // Active is not a completeness claim: requireFull still fills missing history.
+    await load(false);
+    if (this.getActiveTurnId(sessionId) || await source.isCurrent(sessionId, signal)) return false;
+    signal?.throwIfAborted();
+    await load(true);
+    return true;
   }
 
   public async releaseSessionExecution(sessionId: string): Promise<void> {
@@ -406,7 +386,6 @@ export class SessionShellService {
     }
     if (!this.capabilities) throw new Error("Execution release is unavailable for this runtime.");
     await this.capabilities.releaseSessionExecution(sessionId);
-    await this.tryClearSessionHistory(sessionId);
   }
 
   public getActiveTurnId(sessionId: string): string | undefined {
@@ -463,17 +442,8 @@ export class SessionShellService {
   }
 
   public async dispose(): Promise<void> {
-    const loadedSessionIds = this.runtimeService
-      .listSessions({ includeArchived: true })
-      .map((session) => session.sessionId);
     this.wrapperChatTree?.dispose();
-    try {
-      await this.runtimeService.dispose();
-    } finally {
-      await Promise.allSettled(
-        loadedSessionIds.map((sessionId) => this.tryClearSessionHistory(sessionId))
-      );
-    }
+    await this.runtimeService.dispose();
   }
 
   public async listWorkspaces(): Promise<{
@@ -734,14 +704,39 @@ export class SessionShellService {
     return (await this.capabilities?.listSkills(input)) ?? [];
   }
 
+  public openSession(sessionId: string, input: {
+    forceProviderHydration?: boolean; includeWindow: false;
+  }): Promise<{ page?: SessionWindowSnapshot }>;
+  public openSession(sessionId: string, input?: {
+    forceProviderHydration?: boolean; includeWindow?: true;
+  }): Promise<{ page: SessionWindowSnapshot }>;
+  public openSession(sessionId: string, input: {
+    forceProviderHydration?: boolean; includeWindow?: boolean;
+  }): Promise<{ page?: SessionWindowSnapshot }>;
   public async openSession(
     sessionId: string,
     input: {
       forceProviderHydration?: boolean;
+      includeWindow?: boolean;
     } = {}
-  ): Promise<{ page: SessionWindowSnapshot }> {
+  ): Promise<{ page?: SessionWindowSnapshot }> {
     const signal = this.beginOpenSession();
-    const refreshedHistory = await this.refreshSessionHistoryBeforeOpen(sessionId);
+    const refreshedHistory = await this.ensureHistoryCurrent(sessionId, signal);
+    if (input.includeWindow === false) {
+      if (this.sessionReconciliation) {
+        const loaded = await this.sessionReconciliation.ensureSessionLoaded(sessionId, {
+          force: input.forceProviderHydration,
+          requireFull: true,
+          signal
+        });
+        throwIfOpenCancelled(signal);
+        if (!loaded) throw new Error(`Could not load current history for ${sessionId}.`);
+        this.partiallyHydratedSessionIds.delete(sessionId);
+      }
+      await this.activateOpenedSession(sessionId, { signal });
+      this.startSessionExecutionRecovery(sessionId);
+      return {};
+    }
     const loadedSession = this.runtimeService
       .listSessions({ includeArchived: true })
       .find((session) => session.sessionId === sessionId);
@@ -767,18 +762,6 @@ export class SessionShellService {
       !this.partiallyHydratedSessionIds.has(sessionId);
     throwIfOpenCancelled(signal);
     if (refreshedHistory && this.sessionReconciliation) {
-      const loadedByFullHydration =
-        (await this.sessionReconciliation.ensureSessionLoaded(sessionId, {
-          force: true,
-          requireFull: true,
-          signal,
-          retainExecution: true
-        })) ?? false;
-      throwIfOpenCancelled(signal);
-      if (!loadedByFullHydration) {
-        throw new Error("This session could not be fully loaded.");
-      }
-      this.partiallyHydratedSessionIds.delete(sessionId);
       await this.activateOpenedSession(sessionId, { signal });
       this.startSessionExecutionRecovery(sessionId);
       return {
@@ -971,8 +954,9 @@ export class SessionShellService {
     return this.sessionCatalog.renameSession(input);
   }
 
-  public async getChatTree(sessionId: string, scope?: ChatTreeScope): Promise<ChatTreeSnapshot> {
-    if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId, scope);
+  public async getChatTree(sessionId: string, scope?: ChatTreeScope,
+    knownWindows?: Record<string, { revision: string; cursor?: string }>): Promise<ChatTreeSnapshot> {
+    if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId, scope, knownWindows);
     return this.capabilities
       ? this.capabilities.getConversationGraph(sessionId)
       : this.requireChatTreeProvider().get(sessionId);

@@ -688,7 +688,8 @@ const zSessionBrowserOpenRequestSchema = z.object({
   method: z.literal("sessionBrowser.open"),
   params: z.object({
     sessionId: zSessionId,
-    forceProviderHydration: z.boolean().optional()
+    forceProviderHydration: z.boolean().optional(),
+    includeWindow: z.boolean().optional()
   })
 });
 
@@ -761,7 +762,9 @@ const zChatTreeGetRequestSchema = z.object({
   params: z.object({
     sessionId: zSessionId,
     /** tree：树结构；path：当前查看路径的位置与正文窗口。 */
-    scope: z.enum(["tree", "path"]).optional()
+    scope: z.enum(["tree", "path"]).optional(),
+    /** Complete member baselines actually held by the caller, with applied event watermarks. */
+    knownWindows: z.record(z.object({ revision: z.string().min(1), cursor: z.string().min(1).optional() })).optional()
   })
 });
 
@@ -1169,7 +1172,7 @@ const zSessionBrowserOpenResponseSchema = z.object({
   method: z.literal("sessionBrowser.open"),
   ok: z.literal(true),
   result: z.object({
-    page: zSessionWindowSchema
+    page: zSessionWindowSchema.optional()
   })
 });
 

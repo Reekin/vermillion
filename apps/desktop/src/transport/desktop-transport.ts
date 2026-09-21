@@ -290,8 +290,9 @@ export type DesktopTransport = {
       sessionId: string,
       options?: {
         forceProviderHydration?: boolean;
+        includeWindow?: boolean;
       }
-    ) => Promise<{ page: SessionWindowRpc }>;
+    ) => Promise<{ page?: SessionWindowRpc }>;
     activate: (sessionId: string, options?: { focusTree?: boolean }) => Promise<{ sessionId: string }>;
     loadOlder: (input: {
       sessionId: string;
@@ -332,7 +333,7 @@ export type DesktopTransport = {
     operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
     get: (
       sessionId: string,
-      options?: { scope?: "tree" | "path" }
+      options?: { scope?: "tree" | "path"; knownWindows?: Record<string, { revision: string; cursor?: string }> }
     ) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
       sessionId: string;
@@ -802,10 +803,11 @@ export const createDesktopTransport = (
           workspaceIds
         }),
       create: (input) => rpc.request("sessionBrowser.create", input),
-      open: (sessionId: string, options?: { forceProviderHydration?: boolean }) =>
+      open: (sessionId, options) =>
         rpc.request("sessionBrowser.open", {
           sessionId,
-          forceProviderHydration: options?.forceProviderHydration
+          forceProviderHydration: options?.forceProviderHydration,
+          ...(options?.includeWindow !== undefined ? { includeWindow: options.includeWindow } : {})
         }),
       activate: (sessionId: string, options?: { focusTree?: boolean }) =>
         rpc.request("sessionBrowser.activate", {
@@ -888,10 +890,11 @@ export const createDesktopTransport = (
       cancel: (input) => rpc.request("chatTree.cancel", input),
       remove: (input) => rpc.request("chatTree.remove", input),
       operations: (input) => rpc.request("chatTree.operations", input),
-      get: async (sessionId: string, options?: { scope?: "tree" | "path" }) => {
+      get: async (sessionId, options) => {
         const result = await rpc.request("chatTree.get", {
           sessionId,
-          ...(options?.scope ? { scope: options.scope } : {})
+          ...(options?.scope ? { scope: options.scope } : {}),
+          ...(options?.knownWindows ? { knownWindows: options.knownWindows } : {})
         });
         return result.chatTree;
       },

@@ -174,12 +174,13 @@ export const createSessionRuntimeService = (
     sessionIdentity,
     capabilityRegistry: capabilities
   });
-  const shellService = new SessionShellService({
+  const shellService: SessionShellService = new SessionShellService({
     runtimeService,
     wrapperChatTree: new WrapperChatTreeService({
       runtimeService,
       sessionIndexStore,
       reconciliation: sessionReconciliation,
+      ensureHistoryCurrent: (sessionId, signal) => shellService.ensureHistoryCurrent(sessionId, signal),
       capabilities,
       logDiagnostic: ({ message, sessionId, context }) => {
         writeDiagnostic({

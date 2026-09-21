@@ -114,6 +114,26 @@ const readSessionSnapshot: DomainSnapshot = {
 describe("Codex app-server runtime port", () => {
   const disposers: Array<() => Promise<void>> = [];
 
+  it("releases only the requested thread for history refresh and waits for unloading", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath });
+    vi.spyOn(port, "readThread")
+      .mockResolvedValueOnce({ status: { type: "idle" } } as never)
+      .mockResolvedValueOnce({ status: { type: "notLoaded" } } as never);
+    const release = vi.spyOn(port, "releaseThreadExecution").mockResolvedValue(undefined);
+    const releaseTree = vi.spyOn(port, "releaseSessionExecution").mockResolvedValue(undefined);
+    await port.releaseThreadForHistoryRefresh("thread-parent");
+    expect(release).toHaveBeenCalledExactlyOnceWith("thread-parent");
+    expect(releaseTree).not.toHaveBeenCalled();
+  });
+
+  it("does not release a thread the engine reports as active for history refresh", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath });
+    vi.spyOn(port, "readThread").mockResolvedValue({ status: { type: "active" } } as never);
+    const release = vi.spyOn(port, "releaseThreadExecution").mockResolvedValue(undefined);
+    await expect(port.releaseThreadForHistoryRefresh("thread-active")).rejects.toThrow("a turn is active");
+    expect(release).not.toHaveBeenCalled();
+  });
+
   afterEach(async () => {
     clearCodexTurnChangesStore();
     clearCodexHookActivityStore();

@@ -224,6 +224,8 @@ describe("SessionRuntimeService", () => {
     });
     const received = [] as ReturnType<typeof service.replay>;
     const unsubscribe = service.subscribe((envelope) => received.push(envelope));
+    const baseline = { revision: service.getSessionHistoryRevision("session-1"), cursor: service.getRevision() };
+    expect(service.hasSessionWindow("session-1", baseline)).toBe(true);
     let eventIndex = 0;
     const emit = (event: Parameters<NonNullable<typeof listener>>[0]["event"]) => listener?.({
       eventId: `adapter-event-${++eventIndex}`,
@@ -294,6 +296,14 @@ describe("SessionRuntimeService", () => {
       (chunk) => /[\uD800-\uDBFF]$/.test(chunk) || /^[\uDC00-\uDFFF]/.test(chunk)
     )).toBe(false);
 
+    expect(service.getSessionHistoryRevision("session-1")).toBe(baseline.revision);
+    expect(service.hasSessionWindow("session-1", baseline)).toBe(false);
+    const covered = { ...baseline, cursor: received.at(-1)!.cursor };
+    expect(service.hasSessionWindow("session-1", covered)).toBe(true);
+    expect(service.hasSessionWindow("session-1", { ...covered, revision: "another-process" })).toBe(false);
+    await service.updateSessionMetadata("session-1", { chatTreeRefresh: { status: "ready" } });
+    service.notifyChatTreeChanged("session-1", ["turn-stream"]);
+    expect(service.hasSessionWindow("session-1", covered)).toBe(true);
     unsubscribe();
     await service.dispose();
     services.delete(service);
