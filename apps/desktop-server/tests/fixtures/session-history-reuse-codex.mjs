@@ -61,6 +61,8 @@ const handle = ({ id, method, params = {} }) => {
       sandbox: { type: "readOnly", networkAccess: false }, reasoningEffort: "max", multiAgentMode: "explicitRequestOnly" });
     case "thread/turns/list": return send(id, { data: history(thread).turns, nextCursor: null, backwardsCursor: null });
     case "thread/goal/get": return send(id, { goal: null });
+    case "thread/inject_items": return send(id, {});
+    case "skills/list": return send(id, { data: [{ cwd, skills: [], errors: [] }] });
     case "turn/start": {
       const turnId = `history-live-${Date.now()}`;
       const item = { type: "agentMessage", id: `${turnId}-assistant`, text: "", phase: null, memoryCitation: null };

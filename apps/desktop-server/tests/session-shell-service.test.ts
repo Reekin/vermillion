@@ -222,6 +222,70 @@ const buildHistoryRefreshOpenHarness = (input: {
 };
 
 describe("SessionShellService", () => {
+  it("cancels an identified open during source validation before forced hydration", async () => {
+    const harness = buildHistoryRefreshOpenHarness();
+    let sourceSignal: AbortSignal | undefined;
+    let finish!: (value: boolean) => void;
+    harness.isCurrent.mockImplementationOnce((_sessionId, signal) => {
+      sourceSignal = signal;
+      return new Promise<boolean>((resolve) => { finish = resolve; });
+    });
+    const opening = harness.service.openSession("session-1", { readId: "open-read", includeWindow: false });
+    const rejected = expect(opening).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(sourceSignal).toBeDefined());
+    expect(harness.service.cancelRead("open-read")).toEqual({ cancelled: true });
+    expect(sourceSignal!.aborted).toBe(true);
+    finish(false);
+    await rejected;
+    expect(harness.ensureSessionLoaded).toHaveBeenCalledTimes(1);
+    expect(harness.service.cancelRead("open-read")).toEqual({ cancelled: false });
+  });
+
+  it("keeps identified open owners independent from other opens", async () => {
+    const harness = buildHistoryRefreshOpenHarness({ current: true });
+    const signals: AbortSignal[] = [];
+    const finishes: ((value: boolean) => void)[] = [];
+    harness.isCurrent.mockImplementation((_sessionId, signal) => {
+      signals.push(signal);
+      return new Promise<boolean>((resolve) => { finishes.push(resolve); });
+    });
+    const first = harness.service.openSession("session-1", { readId: "first", includeWindow: false });
+    const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    const next = harness.service.openSession("session-1", { readId: "next", includeWindow: false });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals[0]!.aborted).toBe(false);
+    harness.service.cancelRead("first");
+    expect(signals[1]!.aborted).toBe(false);
+    finishes[0]!(true);
+    finishes[1]!(true);
+    await rejected;
+    await expect(next).resolves.toEqual({});
+    expect(harness.service.cancelRead("next")).toEqual({ cancelled: false });
+  });
+
+  it("does not let an old read finally remove its replacement owner", async () => {
+    const finishes: (() => void)[] = [];
+    const signals: AbortSignal[] = [];
+    const get = vi.fn((_sessionId, _scope, _known, signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise((resolve) => { finishes.push(() => resolve({})); });
+    });
+    const service = new SessionShellService({ runtimeService: {} as never, wrapperChatTree: { get } as never });
+    const first = service.getChatTree("session-1", "path", undefined, "read");
+    const firstRejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    expect(service.cancelRead("read")).toEqual({ cancelled: true });
+    const replacement = service.getChatTree("session-1", "path", undefined, "read");
+    const replacementRejected = expect(replacement).rejects.toMatchObject({ name: "AbortError" });
+    finishes[0]!();
+    await firstRejected;
+    expect(service.cancelRead("read")).toEqual({ cancelled: true });
+    expect(signals[1]!.aborted).toBe(true);
+    finishes[1]!();
+    await replacementRejected;
+    expect(service.cancelRead("read")).toEqual({ cancelled: false });
+  });
+
   it("runs a rollout action against the session that owns the selected tree node", async () => {
     const getNodeTarget = vi.fn().mockResolvedValue({ sessionId: "branch-session", canHide: false });
     const runAction = vi.fn().mockResolvedValue({

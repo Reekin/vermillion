@@ -85,12 +85,15 @@ export type RendererStoreAction =
     }
   | {
       type: "store/hydrateSessionWindows";
+      readId?: string;
       windows: Array<{
         sessionId: string;
         snapshot: DomainSnapshot;
         cursor?: string;
         replaceSessionHistory?: boolean;
         revision?: string;
+        /** In-memory tail captured during this read, applied with the snapshot. */
+        replayEnvelopes?: EventEnvelope[];
       }>;
     }
   | { type: "store/disposeSession"; sessionId: string }

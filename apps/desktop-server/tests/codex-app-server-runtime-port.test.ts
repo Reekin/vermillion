@@ -114,16 +114,15 @@ const readSessionSnapshot: DomainSnapshot = {
 describe("Codex app-server runtime port", () => {
   const disposers: Array<() => Promise<void>> = [];
 
-  it("releases only the requested thread for history refresh and waits for unloading", async () => {
+  it("releases only the requested thread without requiring the engine to evict its idle cache", async () => {
     const port = createCodexAppServerRuntimePort({ commandPath: process.execPath });
-    vi.spyOn(port, "readThread")
-      .mockResolvedValueOnce({ status: { type: "idle" } } as never)
-      .mockResolvedValueOnce({ status: { type: "notLoaded" } } as never);
+    const read = vi.spyOn(port, "readThread").mockResolvedValue({ status: { type: "idle" } } as never);
     const release = vi.spyOn(port, "releaseThreadExecution").mockResolvedValue(undefined);
     const releaseTree = vi.spyOn(port, "releaseSessionExecution").mockResolvedValue(undefined);
     await port.releaseThreadForHistoryRefresh("thread-parent");
     expect(release).toHaveBeenCalledExactlyOnceWith("thread-parent");
     expect(releaseTree).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it("does not release a thread the engine reports as active for history refresh", async () => {

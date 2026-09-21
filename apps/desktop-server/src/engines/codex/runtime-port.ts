@@ -1632,9 +1632,8 @@ export class CodexAppServerRuntimePort
       throw new Error(`Cannot refresh history for ${threadId}: a turn is active.`);
     }
     await this.releaseThreadExecution(threadId);
-    if (!await this.waitForThreadClosed(threadId)) {
-      throw new Error(`Cannot refresh history for ${threadId}: execution has not been released.`);
-    }
+    // Unsubscribing releases our execution ownership. The engine's idle cache
+    // may remain loaded; history projection reads do not require its eviction.
   }
 
   /** Unsubscribe the idle execution tree without waiting for unloading or archiving its history. */

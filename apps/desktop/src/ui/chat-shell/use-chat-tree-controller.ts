@@ -15,7 +15,7 @@ import {
 const emptyOperations: ChatTreeSendOperation[] = [];
 /** Explicit navigation supplied by a work-item, search or session link. */
 export type ChatTreeNavigationEntry = { focusTree?: boolean; turnId?: string };
-type SessionRequest = { sessionId: string; promise: Promise<void> };
+type SessionRequest = { sessionId: string; promise: Promise<void>; signal?: AbortSignal };
 type ChatTreeEntry = {
   opened: { current: SessionRequest | undefined };
   activation: { current: SessionRequest | undefined };
@@ -93,14 +93,15 @@ export const useChatTreeController = (input: {
   sessionIdRef.current = sessionId;
   navigationEntryRef.current = navigationEntry;
 
-  const ensureSessionOpened = useCallback((): Promise<void> => {
+  const ensureSessionOpened = useCallback((signal: AbortSignal): Promise<void> => {
     if (!sessionId || !entry) return Promise.resolve();
     const current = entry.opened.current;
-    if (current?.sessionId === sessionId) return current.promise;
+    if (current?.sessionId === sessionId && !current.signal?.aborted) return current.promise;
 
     const opened: SessionRequest = {
       sessionId,
-      promise: transport.sessionBrowser.open(sessionId, { includeWindow: false }).then(() => undefined)
+      signal,
+      promise: transport.sessionBrowser.open(sessionId, { includeWindow: false, signal }).then(() => undefined)
     };
     entry.opened.current = opened;
     void opened.promise.catch(() => {
@@ -191,7 +192,8 @@ export const useChatTreeController = (input: {
     viewedEntry: ChatTreeEntry,
     path: ChatTreeSnapshotRpc,
     navigationForRequest: ChatTreeNavigationEntry | undefined,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    readId?: string
   ): Promise<boolean> => {
     if (!sessionId) return false;
     const entry = viewedEntry;
@@ -212,7 +214,8 @@ export const useChatTreeController = (input: {
               cursor: window.cursor,
               replaceSessionHistory: window.replaceSessionHistory,
               revision: !window.hasOlder && !window.hasNewer ? window.revision : undefined
-            }))
+            })),
+            readId
           );
           if (start + batchSize < freshWindowsToHydrate.length) {
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -236,27 +239,30 @@ export const useChatTreeController = (input: {
     requestedNavigation?: ChatTreeNavigationEntry
   ): Promise<void> => {
     if (!sessionId || !entry || entryRef.current !== entry) return;
-    return entry.refresh.request(async function refresh(signal, consumePending) {
+    return entry.refresh.request(async (signal, consumePending) => {
       const startedAt = performance.now();
+      const readId = globalThis.crypto.randomUUID();
+      let finishRead = () => {};
       const isCurrent = () => entryRef.current === entry && !signal.aborted;
       const navigationForRequest = requestedNavigation ?? navigationEntry;
       try {
-        await ensureSessionOpened();
+        await ensureSessionOpened(signal);
         if (!isCurrent()) return;
         await ensureNavigation(navigationForRequest);
         if (!isCurrent()) return;
         consumePending();
+        finishRead = store.beginSessionWindowRead(readId);
+        signal.addEventListener("abort", finishRead, { once: true });
         const [initialPath, result] = await Promise.all([
-          transport.chatTree.get(sessionId, { scope: "path", knownWindows: store.getKnownSessionWindows() }),
+          transport.chatTree.get(sessionId, { scope: "path", knownWindows: store.getKnownSessionWindows(), readId, signal }),
           transport.chatTree.operations({ sessionId })
         ]);
         if (!isCurrent()) return;
         entry.operations = result.operations;
-        if (!await applyViewPath(entry, initialPath, navigationForRequest, isCurrent)) return;
-        let appliedPath = initialPath;
+        if (!await applyViewPath(entry, initialPath, navigationForRequest, isCurrent, readId)) return;
         setFailedEntry(undefined);
         setTreeFailure(undefined);
-        let tree = await transport.chatTree.get(sessionId);
+        let tree = await transport.chatTree.get(sessionId, { signal });
         if (!isCurrent()) return;
         const selected = result.operations.find((op) => op.operationId === selectedSendRef.current);
         if (selected?.turnId && tree.nodes.some((node) => node.turnId === selected.turnId)) {
@@ -264,13 +270,12 @@ export const useChatTreeController = (input: {
           await transport.chatTree.jump({ sessionId, nodeId: selected.turnId });
           if (!isCurrent() || navigationRef.current !== navigation) return;
           const [jumpedTree, jumpedPath] = await Promise.all([
-            transport.chatTree.get(sessionId),
-            transport.chatTree.get(sessionId, { scope: "path", knownWindows: store.getKnownSessionWindows() })
+            transport.chatTree.get(sessionId, { signal }),
+            transport.chatTree.get(sessionId, { scope: "path", knownWindows: store.getKnownSessionWindows(), signal })
           ]);
           if (!isCurrent() || navigationRef.current !== navigation) return;
           tree = jumpedTree;
-          if (!await applyViewPath(entry, jumpedPath, navigationForRequest, isCurrent)) return;
-          appliedPath = jumpedPath;
+          if (!await applyViewPath(entry, jumpedPath, navigationForRequest, isCurrent, readId)) return;
         }
         entry.tree = { ...tree, windows: undefined };
         setCacheRevision((revision) => revision + 1);
@@ -279,18 +284,12 @@ export const useChatTreeController = (input: {
         }
         setFailedEntry(undefined);
         setTreeFailure(undefined);
-        const knownWindows = store.getKnownSessionWindows();
-        if (appliedPath.windows?.some((window) => window.replaceSessionHistory &&
-          !window.hasOlder && !window.hasNewer && window.revision &&
-          knownWindows[window.sessionId]?.revision !== window.revision)) {
-          // A same-member event overtook a cold baseline. Keep its body and
-          // acquire the missing baseline through the existing trailing flight.
-          entry.refresh.request(refresh);
-        }
       } catch (error) {
         if (!isCurrent()) return;
         throw error;
       } finally {
+        signal.removeEventListener("abort", finishRead);
+        finishRead();
         recordUiOperation("chat-tree.refresh", startedAt, { sessionId }, "async");
       }
     });

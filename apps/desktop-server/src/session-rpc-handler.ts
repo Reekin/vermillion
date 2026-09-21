@@ -309,10 +309,11 @@ export const createWorkbenchRpcHandler = (
               id: request.id,
               method: request.method,
               ok: true,
-              result: request.params.forceProviderHydration || request.params.includeWindow !== undefined
+              result: request.params.forceProviderHydration || request.params.includeWindow !== undefined || request.params.readId !== undefined
                 ? await shellService.openSession(request.params.sessionId, {
                     forceProviderHydration: request.params.forceProviderHydration,
-                    includeWindow: request.params.includeWindow
+                    includeWindow: request.params.includeWindow,
+                    readId: request.params.readId
                   })
                 : await shellService.openSession(request.params.sessionId)
             });
@@ -435,8 +436,14 @@ export const createWorkbenchRpcHandler = (
               method: request.method,
               ok: true,
               result: {
-                chatTree: await shellService.getChatTree(request.params.sessionId, request.params.scope, request.params.knownWindows)
+                chatTree: await shellService.getChatTree(request.params.sessionId, request.params.scope, request.params.knownWindows, request.params.readId)
               }
+            });
+          case "chatTree.cancelRead":
+            if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");
+            return parseSessionRpcResponse({
+              id: request.id, method: request.method, ok: true,
+              result: shellService.cancelRead(request.params.readId)
             });
           case "chatTree.submit":
           case "chatTree.nodeAction":

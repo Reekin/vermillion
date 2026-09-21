@@ -199,6 +199,7 @@ export class SessionShellService {
   private readonly errorLogService: ErrorLogService;
   private readonly diagnosticLogService: DiagnosticLogService;
   private openSessionAbortController: AbortController | undefined;
+  private readonly reads = new Map<string, AbortController>();
   private activationQueue: Promise<void> = Promise.resolve();
   private readonly partiallyHydratedSessionIds = new Set<string>();
   private readonly executionRecoveryBySessionId = new Map<string, Promise<void>>();
@@ -374,8 +375,10 @@ export class SessionShellService {
     // Adopt any full read already committed by reconciliation (including initial tree load).
     // Active is not a completeness claim: requireFull still fills missing history.
     await load(false);
-    if (this.getActiveTurnId(sessionId) || await source.isCurrent(sessionId, signal)) return false;
+    if (this.getActiveTurnId(sessionId)) return false;
+    const current = await source.isCurrent(sessionId, signal);
     signal?.throwIfAborted();
+    if (current) return false;
     await load(true);
     return true;
   }
@@ -442,6 +445,9 @@ export class SessionShellService {
   }
 
   public async dispose(): Promise<void> {
+    this.openSessionAbortController?.abort();
+    for (const controller of this.reads.values()) controller.abort();
+    this.reads.clear();
     this.wrapperChatTree?.dispose();
     await this.runtimeService.dispose();
   }
@@ -705,22 +711,32 @@ export class SessionShellService {
   }
 
   public openSession(sessionId: string, input: {
-    forceProviderHydration?: boolean; includeWindow: false;
+    forceProviderHydration?: boolean; includeWindow: false; readId?: string;
   }): Promise<{ page?: SessionWindowSnapshot }>;
   public openSession(sessionId: string, input?: {
-    forceProviderHydration?: boolean; includeWindow?: true;
+    forceProviderHydration?: boolean; includeWindow?: true; readId?: string;
   }): Promise<{ page: SessionWindowSnapshot }>;
   public openSession(sessionId: string, input: {
-    forceProviderHydration?: boolean; includeWindow?: boolean;
+    forceProviderHydration?: boolean; includeWindow?: boolean; readId?: string;
   }): Promise<{ page?: SessionWindowSnapshot }>;
   public async openSession(
     sessionId: string,
     input: {
       forceProviderHydration?: boolean;
       includeWindow?: boolean;
+      readId?: string;
     } = {}
   ): Promise<{ page?: SessionWindowSnapshot }> {
-    const signal = this.beginOpenSession();
+    return this.withRead(input.readId, (signal) => this.readOpenedSession(
+      sessionId, input, signal ?? this.beginOpenSession()
+    ));
+  }
+
+  private async readOpenedSession(
+    sessionId: string,
+    input: { forceProviderHydration?: boolean; includeWindow?: boolean },
+    signal: AbortSignal
+  ): Promise<{ page?: SessionWindowSnapshot }> {
     const refreshedHistory = await this.ensureHistoryCurrent(sessionId, signal);
     if (input.includeWindow === false) {
       if (this.sessionReconciliation) {
@@ -861,6 +877,28 @@ export class SessionShellService {
     return controller.signal;
   }
 
+  public cancelRead(readId: string): { cancelled: boolean } {
+    const controller = this.reads.get(readId);
+    if (!controller) return { cancelled: false };
+    this.reads.delete(readId);
+    controller.abort();
+    return { cancelled: true };
+  }
+
+  private async withRead<T>(readId: string | undefined, read: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+    if (!readId) return read();
+    if (this.reads.has(readId)) throw new Error(`Read already in progress: ${readId}`);
+    const controller = new AbortController();
+    this.reads.set(readId, controller);
+    try {
+      const result = await read(controller.signal);
+      controller.signal.throwIfAborted();
+      return result;
+    } finally {
+      if (this.reads.get(readId) === controller) this.reads.delete(readId);
+    }
+  }
+
   public async loadOlderSessionTurns(input: {
     sessionId: string;
     beforeTurnId?: string;
@@ -955,11 +993,13 @@ export class SessionShellService {
   }
 
   public async getChatTree(sessionId: string, scope?: ChatTreeScope,
-    knownWindows?: Record<string, { revision: string; cursor?: string }>): Promise<ChatTreeSnapshot> {
-    if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId, scope, knownWindows);
-    return this.capabilities
-      ? this.capabilities.getConversationGraph(sessionId)
-      : this.requireChatTreeProvider().get(sessionId);
+    knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string): Promise<ChatTreeSnapshot> {
+    return this.withRead(readId, async (signal) => {
+      if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId, scope, knownWindows, signal);
+      return this.capabilities
+        ? this.capabilities.getConversationGraph(sessionId)
+        : this.requireChatTreeProvider().get(sessionId);
+    });
   }
 
   public async jumpChatTree(input: {

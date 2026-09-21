@@ -10,7 +10,8 @@ const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
 
 const fixture = async (
-  logDiagnostic?: (input: { message: string; sessionId?: string }) => void
+  logDiagnostic?: (input: { message: string; sessionId?: string }) => void,
+  ensureHistoryCurrent?: (sessionId: string, signal?: AbortSignal) => Promise<boolean>
 ) => {
   const baseDir = await mkdtemp(join(tmpdir(), "wrapper-tree-"));
   dirs.push(baseDir);
@@ -51,6 +52,7 @@ const fixture = async (
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
     capabilities: { forkSessionFromTurn: fork } as never,
+    ensureHistoryCurrent,
     ...(logDiagnostic ? { logDiagnostic } : {})
   });
   return { service, index, snapshot, load, fork, baseDir, changed, updateSessionMetadata,
@@ -59,6 +61,26 @@ const fixture = async (
 };
 
 describe("wrapper session trees", () => {
+  it("stops a cancelled path at source validation before starting member reads", async () => {
+    const controller = new AbortController();
+    const signals: (AbortSignal | undefined)[] = [];
+    const finishes: (() => void)[] = [];
+    const f = await fixture(undefined, async (_sessionId, signal) => {
+      signals.push(signal);
+      await new Promise<void>((resolve) => { finishes.push(resolve); });
+      return true;
+    });
+    const reading = f.service.get("branch", "path", undefined, controller.signal);
+    const rejected = expect(reading).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    controller.abort();
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    finishes.forEach((finish) => finish());
+    await rejected;
+    expect(f.load).not.toHaveBeenCalled();
+    f.service.dispose();
+  });
+
   it("opens the requested discussion branch even when preparation is newer", async () => {
     const f = await fixture();
     const preparation = f.snapshot.sessions.find((session) => session.sessionId === "branch")!;

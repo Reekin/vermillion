@@ -964,16 +964,21 @@ describe("createWorkbenchRpcHandler", () => {
     const knownWindows = { "session-1": { revision: "history-epoch", cursor: "42" } };
     await handler.handleRequest({
       id: "req-chat-tree-known", method: "chatTree.get",
-      params: { sessionId: "session-1", scope: "path", knownWindows }
+      params: { sessionId: "session-1", scope: "path", knownWindows, readId: "path-read" }
     });
-    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", "path", knownWindows);
+    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", "path", knownWindows, "path-read");
     await handler.handleRequest({
       id: "req-open-without-window", method: "sessionBrowser.open",
-      params: { sessionId: "session-1", includeWindow: false }
+      params: { sessionId: "session-1", includeWindow: false, readId: "open-read" }
     });
     expect((shellService as any).openSession).toHaveBeenCalledWith("session-1", {
-      forceProviderHydration: undefined, includeWindow: false
+      forceProviderHydration: undefined, includeWindow: false, readId: "open-read"
     });
+    (shellService as any).cancelRead = vi.fn().mockReturnValue({ cancelled: true });
+    await expect(handler.handleRequest({
+      id: "req-cancel-read", method: "chatTree.cancelRead", params: { readId: "path-read" }
+    })).resolves.toMatchObject({ ok: true, result: { cancelled: true } });
+    expect((shellService as any).cancelRead).toHaveBeenCalledWith("path-read");
     const worktreeResponse = await handler.handleRequest({
       id: "req-worktree",
       method: "worktree.get",
@@ -1142,7 +1147,7 @@ describe("createWorkbenchRpcHandler", () => {
       limit: 8
     });
     expect((shellService as any).removeWorkspace).toHaveBeenCalledWith("workspace-1");
-    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", undefined, undefined);
+    expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", undefined, undefined, undefined);
     expect((shellService as any).getWorktree).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getCheckpoint).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getDiagnostics).toHaveBeenCalledWith("session-1");

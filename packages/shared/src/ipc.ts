@@ -51,6 +51,7 @@ export const sessionRpcMethods = [
   "chat.getCapabilities",
   "skills.list",
   "chatTree.get",
+  "chatTree.cancelRead",
   "chatTree.nodeAction",
   "chatTree.jump",
   "chatTree.markRead",
@@ -689,7 +690,8 @@ const zSessionBrowserOpenRequestSchema = z.object({
   params: z.object({
     sessionId: zSessionId,
     forceProviderHydration: z.boolean().optional(),
-    includeWindow: z.boolean().optional()
+    includeWindow: z.boolean().optional(),
+    readId: z.string().min(1).optional()
   })
 });
 
@@ -764,8 +766,15 @@ const zChatTreeGetRequestSchema = z.object({
     /** tree：树结构；path：当前查看路径的位置与正文窗口。 */
     scope: z.enum(["tree", "path"]).optional(),
     /** Complete member baselines actually held by the caller, with applied event watermarks. */
-    knownWindows: z.record(z.object({ revision: z.string().min(1), cursor: z.string().min(1).optional() })).optional()
+    knownWindows: z.record(z.object({ revision: z.string().min(1), cursor: z.string().min(1).optional() })).optional(),
+    readId: z.string().min(1).optional()
   })
+});
+
+const zChatTreeCancelReadRequestSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.cancelRead"),
+  params: z.object({ readId: z.string().min(1) })
 });
 
 const zChatTreeJumpRequestSchema = z.object({
@@ -987,6 +996,7 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zChatGetCapabilitiesRequestSchema,
   zSkillsListRequestSchema,
   zChatTreeGetRequestSchema,
+  zChatTreeCancelReadRequestSchema,
   zChatTreeNodeActionRequestSchema,
   zChatTreeJumpRequestSchema,
   zChatTreeMarkReadRequestSchema,
@@ -1247,6 +1257,13 @@ const zChatTreeGetResponseSchema = z.object({
   })
 });
 
+const zChatTreeCancelReadResponseSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.cancelRead"),
+  ok: z.literal(true),
+  result: z.object({ cancelled: z.boolean() })
+});
+
 const zChatTreeJumpResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("chatTree.jump"),
@@ -1491,6 +1508,7 @@ export const zSessionRpcResponseSchema = z.union([
   zChatGetCapabilitiesResponseSchema,
   zSkillsListResponseSchema,
   zChatTreeGetResponseSchema,
+  zChatTreeCancelReadResponseSchema,
   zChatTreeNodeActionResponseSchema,
   zChatTreeJumpResponseSchema,
   zChatTreeMarkReadResponseSchema,
