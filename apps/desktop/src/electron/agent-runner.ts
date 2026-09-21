@@ -67,7 +67,11 @@ export const createSessionSteerer = (shell: SessionShell) => async (target: stri
     ? { type: "steerTurn" as const, sessionId, turnId: activeTurnId, messageId: messageId ?? createId(), content, attachments: [] }
     : { type: "sendUserMessage" as const, sessionId, messageId: messageId ?? createId(), content, attachments: [] };
   const receipt = await shell.executeCommand({ commandId: createId(), command });
-  if (!receipt.accepted || !receipt.turnId) throw new Error("steer was not accepted for " + sessionId);
+  if (receipt.queued) return { sessionId, accepted: false, queued: receipt.queued };
+  if (!receipt.accepted || !receipt.turnId) return {
+    sessionId, accepted: false,
+    error: receipt.error ?? { code: "message_rejected", message: "引擎未接受本次消息" }
+  };
   return {
     sessionId,
     turnId: receipt.turnId,
@@ -235,7 +239,10 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
       command: { type: "sendUserMessage", sessionId, messageId, content,
         attachments: options?.attachments ?? [], execution: options?.execution }
     });
-    if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
+    if (!receipt.accepted) return {
+      accepted: false, error: receipt.error, queued: receipt.queued, messageId,
+      turnId: receipt.turnId
+    };
     return { turnId: receipt.turnId, messageId };
   },
   steer: async (sessionId, content, messageId) => {
@@ -246,7 +253,10 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
       ? { type: "steerTurn" as const, sessionId, turnId, messageId: id, content, attachments: [] }
       : { type: "sendUserMessage" as const, sessionId, messageId: id, content, attachments: [] };
     const receipt = await shell.executeCommand({ commandId: createId(), command });
-    if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
+    if (!receipt.accepted) return {
+      accepted: false, error: receipt.error, queued: receipt.queued, messageId: id,
+      turnId: receipt.turnId
+    };
     return { turnId: receipt.turnId, messageId: id,
       delivery: receipt.delivery === "steered" ? "steered" as const : "started" as const };
   },

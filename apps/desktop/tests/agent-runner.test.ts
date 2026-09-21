@@ -2,6 +2,33 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it.each(["send", "steer"] as const)("preserves a known rejection from scheduled %s", async (method) => {
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: () => undefined,
+      getSnapshot: () => ({ turns: [] }),
+      executeCommand: vi.fn().mockResolvedValue({ accepted: false, error: { code: "rejected", message: "引擎明确拒绝" } })
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
+    await expect(runner[method]("worker", "continue"))
+      .resolves.toMatchObject({ accepted: false, error: { code: "rejected", message: "引擎明确拒绝" } });
+  });
+
+  it("returns a pending receipt when a provider-addressed Worker is blocked", async () => {
+    const shell = {
+      resolveSessionIdentifier: () => "codex-thread:worker",
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: () => undefined,
+      getSnapshot: () => ({ turns: [] }),
+      executeCommand: vi.fn().mockResolvedValue({
+        accepted: false, queued: { messageId: "queued-message", reason: "等待前置工单", workItemId: "blocked" }
+      })
+    };
+    await expect(createSessionSteerer(shell as unknown as Parameters<typeof createSessionSteerer>[0])("worker", "继续"))
+      .resolves.toEqual({ sessionId: "codex-thread:worker", accepted: false,
+        queued: { messageId: "queued-message", reason: "等待前置工单", workItemId: "blocked" } });
+  });
+
   it("returns canonical delivery for generic session steering", async () => {
     const shell = {
       resolveSessionIdentifier: vi.fn((sessionId: string) => sessionId),

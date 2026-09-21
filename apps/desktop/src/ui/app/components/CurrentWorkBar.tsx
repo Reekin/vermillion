@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ClipboardList } from "lucide-react";
-import type { WorkRequest, WorkItem, WorkbenchClient } from "@vermillion/workbench/client";
+import type { WorkRequest, WorkItem, WorkbenchClient, WorkbenchRpcResult } from "@vermillion/workbench/client";
 import { Button, DetailSection, InlineNotice, OverflowMenu } from "./ui.js";
 import { Modal } from "./Modal.js";
 import { currentWorkStatus } from "./task-labels.js";
@@ -13,12 +13,15 @@ type Props = {
   item?: WorkItem;
   hasDecision?: boolean;
   onOpenWorkItem?: () => void;
+  onContinueFrom?: (target: { requestId: string } | { workItemId: string }) => Promise<void>;
+  onOpenRelatedWorkItem?: (workItemId: string) => void;
 };
 
-export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item, hasDecision, onOpenWorkItem }: Props) => {
+export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item: associatedItem, hasDecision, onOpenWorkItem, onContinueFrom, onOpenRelatedWorkItem }: Props) => {
   const [detail, setDetail] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const item = request && !["ready", "cancelled"].includes(request.status) ? undefined : associatedItem;
   if (!request && !item) return null;
   const title = item?.title || request?.scope?.trim() || sourceTitle || "开工准备";
   const state = currentWorkStatus(item, request, hasDecision);
@@ -44,6 +47,13 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
     : finished || state.kind === "decision" ? undefined
     : { label: preparation ? "暂停准备" : "暂停本工单", operation: "pause" as const };
   const retryAt = item?.run.retryAt ?? request?.retryAt;
+  const continueFrom = async () => {
+    setBusy(true);
+    setError(undefined);
+    try { await onContinueFrom?.(item ? { workItemId: item.workItemId } : { requestId: request!.requestId }); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  };
   return <>
     <section className="vm-current-work" aria-label="当前工作">
       <div className="vm-current-work__summary">
@@ -52,6 +62,7 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
         <span className="vm-current-work__state" data-state={state.kind}>{label}</span>
       </div>
       <div className="vm-current-work__actions">
+        {!finished && onContinueFrom && <Button size="sm" variant="ghost" outlined disabled={busy} onClick={() => void continueFrom()}>从此处继续执行</Button>}
         {primary && <Button size="sm" variant="primary" disabled={busy} onClick={() => void invoke(primary.operation)}>{primary.label}</Button>}
         <Button size="sm" variant="ghost" outlined onClick={() => setDetail(true)}>查看</Button>
         {!finished && <OverflowMenu label="更多工作操作" items={[
@@ -60,6 +71,10 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
         ]} />}
       </div>
     </section>
+    {(item?.run.sessionId ?? request?.workerSessionId) && <PendingWorkMessages
+      key={item?.run.sessionId ?? request?.workerSessionId}
+      client={client} workspaceId={workspaceId} sessionId={(item?.run.sessionId ?? request?.workerSessionId)!}
+      onOpenWorkItem={onOpenRelatedWorkItem} />}
     {error && <InlineNotice tone="error">{error}</InlineNotice>}
     {detail && <Modal title={title} width={480} onClose={() => setDetail(false)}>
       <div className="space-y-3 px-4 pb-4">
@@ -71,5 +86,58 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
         {onOpenWorkItem && item && <Button size="sm" variant="ghost" outlined onClick={() => { setDetail(false); onOpenWorkItem(); }}>打开工单</Button>}
       </div>
     </Modal>}
+  </>;
+};
+
+export const PendingWorkMessages = ({ client, workspaceId, sessionId, onOpenWorkItem }: {
+  client: WorkbenchClient; workspaceId: string; sessionId: string;
+  onOpenWorkItem?: (workItemId: string) => void;
+}) => {
+  const [messages, setMessages] = useState<WorkbenchRpcResult<"session.messages.pending">>([]);
+  const [error, setError] = useState<string>();
+  const [withdrawing, setWithdrawing] = useState<string>();
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    let active = true;
+    let generation = 0;
+    setMessages([]);
+    const refresh = async () => {
+      const current = ++generation;
+      try {
+        const result = await client.request("session.messages.pending", { sessionId });
+        if (active && current === generation) { setMessages(result); setError(undefined); }
+      } catch (cause) {
+        if (active && current === generation) setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    };
+    const unsubscribe = client.subscribe((event) => {
+      if (event.type === "session.messages.changed" && event.workspaceId === workspaceId && event.sessionId === sessionId) void refresh();
+    });
+    void refresh();
+    return () => { active = false; unsubscribe(); };
+  }, [client, sessionId, workspaceId, revision]);
+  const withdraw = async (messageId: string) => {
+    setWithdrawing(messageId);
+    try {
+      const result = await client.request("session.messages.cancel", { sessionId, messageId });
+      if (!result.cancelled) throw new Error("消息已开始发送，无法撤回。");
+      setRevision((value) => value + 1);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setWithdrawing(undefined); }
+  };
+  return <>
+    {messages.map((message) => <section key={message.messageId} aria-label="等待发送" className="space-y-2 border-t border-border px-3 py-2">
+      <p className="text-label text-foreground">等待发送</p>
+      <p className="max-h-32 overflow-auto whitespace-pre-wrap break-words text-body text-foreground">{message.content}</p>
+      {message.attachments?.length ? <ul aria-label="待发送附件" className="space-y-1 text-caption text-muted-foreground">
+        {message.attachments.map((attachment) => <li key={attachment.attachmentId}>{attachment.name ?? "附件"}</li>)}
+      </ul> : null}
+      <p className="text-caption text-muted-foreground">{message.reason ?? "等待执行条件满足"}</p>
+      <div className="flex flex-wrap gap-2">
+        {message.blockerWorkItemIds?.map((workItemId, index) => onOpenWorkItem && <Button key={workItemId} size="sm" variant="ghost" outlined onClick={() => onOpenWorkItem(workItemId)}>查看阻塞工单{message.blockerWorkItemIds!.length > 1 ? ` ${index + 1}` : ""}</Button>)}
+        <Button size="sm" variant="ghost" outlined disabled={withdrawing === message.messageId} onClick={() => void withdraw(message.messageId)}>撤回</Button>
+      </div>
+    </section>)}
+    {error && <InlineNotice tone="error">{error}</InlineNotice>}
   </>;
 };

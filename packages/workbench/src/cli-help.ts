@@ -2,6 +2,8 @@ import { z } from "zod";
 import { workbenchRpc, type WorkbenchRpcMethod } from "./rpc.js";
 
 const states: Partial<Record<WorkbenchRpcMethod, string>> = {
+  "session.messages.pending": "读取当前分支持久化待发送消息及阻塞原因。",
+  "session.messages.cancel": "撤回尚未送达引擎的排队消息；已经受理的消息不能撤回。",
   "docs.discardPreview": "只读预览：paths 可选 .vermillion/docs 内的文件或目录，返回当前变更文件。",
   "docs.discard": "丢弃已确认文件的暂存和未暂存改动，恢复到 HEAD；新增文件删除。paths 必须传 discardPreview 返回的具体文件路径，不展开目录。返回实际处理的变更。",
   "docs.rebase": "在一棵会话树里提交文档时与主分支冲突后使用；把该树的草稿同步到主分支，冲突文件留在草稿里带冲突标记，用 docs.write 解决后再 docs.commit。files 为空表示已同步。",
@@ -14,6 +16,7 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "work.diagnose": "现存工作；只读汇总准备、关联工单、等待原因和合法操作。",
   "work.pause": "未结束的准备工作；暂停自动准备与重试，保留会话和已登记工单。",
   "work.resume": "已暂停的准备工作；恢复自动推进。",
+  "work.continueFrom": "当前准备分支；先停止原执行并确认退出，再从所选节点迁移准备归属，首次发送携带有效进度摘要。",
   "decision.answer": "尚未答复的决策；只有获得用户实际答复后才能提交 key 或 note。",
   "runtime.info": "随时查询；连接桌面时返回该运行端的构建哈希，否则返回 CLI 本地运行端并标明 schedulerOnline=false。",
   "workItem.start": "无阻塞的 queued 工单，或同一会话的 running 工单；遵守并发与资源限制。",

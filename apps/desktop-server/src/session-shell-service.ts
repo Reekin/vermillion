@@ -6,6 +6,7 @@ import type {
   ChatSession,
   ComposerSlashSuggestionRpc,
   CommandEnvelope,
+  RuntimeCommandReceiptRpc,
   DomainSnapshot,
   DiagnosticsWriteInputRpc,
   DiagnosticsWriteResultRpc,
@@ -148,6 +149,11 @@ const resolveComposerSlashSuggestions = (
 
   return items;
 };
+
+export type SessionCommandDispatch = (
+  input: CommandEnvelope,
+  send: (input: CommandEnvelope) => Promise<RuntimeCommandReceiptRpc>
+) => Promise<RuntimeCommandReceiptRpc>;
 
 export type SessionShellServiceOptions = {
   runtimeService: SessionRuntimeService;
@@ -295,7 +301,19 @@ export class SessionShellService {
     return this.getSettings();
   }
 
-  public async executeCommand(input: CommandEnvelope) {
+  private commandDispatch?: SessionCommandDispatch;
+
+  /** The host supplies execution admission; ordinary session commands use the same runtime. */
+  public setCommandDispatch(dispatch: SessionCommandDispatch): void {
+    this.commandDispatch = dispatch;
+  }
+
+  public async executeCommand(input: CommandEnvelope): Promise<RuntimeCommandReceiptRpc> {
+    const send = (command: CommandEnvelope) => this.executeAdmittedCommand(command);
+    return this.commandDispatch ? this.commandDispatch(input, send) : send(input);
+  }
+
+  private async executeAdmittedCommand(input: CommandEnvelope): Promise<RuntimeCommandReceiptRpc> {
     if ("sessionId" in input.command && typeof input.command.sessionId === "string") {
       await this.ensureSessionReadyForCommand(input.command);
     }

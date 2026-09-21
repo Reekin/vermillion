@@ -22,7 +22,7 @@ import {
   zIssueStatus,
   zIssueType,
   zPatrolRun,
-  zWorkRequest,
+  zWorkRequest as zStoredWorkRequest,
   zWorkDiagnosis,
   zWorkMessage,
   zReviewDisposition,
@@ -44,6 +44,7 @@ export type { SearchHit, SearchQuery, SearchResult } from "./search-contract.js"
 const zWs = z.object({ workspaceId: z.string().min(1) });
 const zWi = zWs.extend({ workItemId: z.string().min(1) });
 const zEmpty = z.object({});
+const zWorkRequest = zStoredWorkRequest.omit({ deliveries: true, continuationSummary: true });
 
 /** A document call inside a session edits that conversation tree's draft; without a session it edits the main branch. */
 const zDocsScope = zWs.extend({ sessionId: z.string().min(1).optional() });
@@ -79,9 +80,20 @@ export const workbenchRpc = {
     params: z.object({ sessionId: z.string().min(1), content: z.string().trim().min(1) }),
     result: z.object({
       sessionId: z.string().min(1),
-      turnId: z.string().min(1),
-      delivery: z.enum(["steered", "started"])
+      turnId: z.string().min(1).optional(),
+      accepted: z.boolean(),
+      error: z.object({ code: z.string(), message: z.string() }).optional(),
+      queued: z.object({ messageId: z.string(), reason: z.string(), workItemId: z.string().optional() }).optional(),
+      delivery: z.enum(["steered", "started", "queued"])
     })
+  },
+  "session.messages.pending": {
+    params: z.object({ sessionId: z.string().min(1) }),
+    result: z.array(zWorkMessage.extend({ sessionId: z.string(), messageId: z.string(), reason: z.string().optional(), workItemId: z.string().optional(), requestId: z.string().optional(), blockerWorkItemIds: z.array(z.string()).optional(), createdAt: z.string() }))
+  },
+  "session.messages.cancel": {
+    params: z.object({ sessionId: z.string().min(1), messageId: z.string().min(1) }),
+    result: z.object({ cancelled: z.boolean() })
   },
   "workspace.list": { params: zEmpty, result: z.array(zWorkspace) },
   "workspace.add": { params: z.object({ rootPath: z.string().min(1), label: z.string().optional() }), result: zWorkspace },
@@ -166,6 +178,7 @@ export const workbenchRpc = {
   "work.confirm": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
   "work.pause": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
   "work.resume": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
+  "work.continueFrom": { params: zWs.extend({ requestId: z.string().min(1), sessionId: z.string().min(1), turnId: z.string().min(1) }), result: zWorkRequest },
   "work.cancel": { params: z.union([
     zWs.extend({ requestId: z.string().min(1) }),
     zWs.extend({ sessionId: z.string().min(1) })

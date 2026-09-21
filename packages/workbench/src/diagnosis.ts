@@ -58,7 +58,7 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
   const availableActions = [{ method: "workItem.diagnose", condition: "随时查询当前状态。" }];
   if (item.run.pendingMessageId) availableActions.push({ method: "workItem.confirm", condition: "核对引擎实际消息/轮次后再继续。" });
   if (decisions.length) availableActions.push({ method: "decision.answer", condition: "获得用户实际答复后选择重试、取消或给出具体说明。" });
-  if (item.run.pauseReason === "user") availableActions.push({ method: "workItem.resume", condition: "确认继续执行时，从原会话恢复。" });
+  if (item.run.control === "paused") availableActions.push({ method: "workItem.resume", condition: "确认继续执行时，从原会话恢复。" });
   if (item.run.control === "manual") availableActions.push({ method: "workItem.retry", condition: "明确恢复自动推进并从当前成果继续。" });
   if (!["closed", "cancelled"].includes(item.status)) availableActions.push({ method: "workItem.update", condition: "调整合同或 dependsOn；并在 note 说明修改。" }, { method: "workItem.cancel", condition: "取消当前工作。" });
   const integration = related.find((action): action is Extract<WorkflowAction, { kind: "integration" }> => action.kind === "integration" && action.stage === "merge" && actionIsOpen(action));

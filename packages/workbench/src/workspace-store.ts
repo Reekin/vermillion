@@ -149,6 +149,10 @@ export class WorkspaceStore {
     return transactCollection(join(this.stateDir, "issues", id), this.issues, id, update);
   }
 
+  async transactWorkRequest<T>(id: string, update: (record: WorkRequest | undefined) => { record: WorkRequest; result: T }): Promise<T> {
+    return transactCollection(join(this.stateDir, "work-requests", id), this.workRequests, id, update);
+  }
+
   async transactDomainConfig<T>(id: string, update: (record: DomainConfig | undefined) => { record: DomainConfig; result: T }): Promise<T> {
     return transactCollection(join(this.stateDir, "domains", id), this.domainConfigs, id, update);
   }

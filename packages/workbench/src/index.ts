@@ -1,4 +1,5 @@
 export * from "./contracts.js";
+export * from "./execution-control.js";
 export * from "./rpc.js";
 export * from "./rpc-handler.js";
 export * from "./docs.js";

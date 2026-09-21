@@ -25,6 +25,7 @@ it("keeps requests and every prepared item durable without dispatch until the pr
   const restarted = new WorkbenchService(options);
   try {
     expect(await restarted.listWorkRequests(workspaceId)).toMatchObject([{ sourceTurnId: "design-turn", scope: "ABC" }]);
+    await restarted.completePreparation(workspaceId, { requestId: request.requestId, sessionId: "prep", workItemIds: [first.workItemId, next.workItemId] });
     await restarted.finishPreparation(workspaceId, "prep", "prep-end");
     expect(await restarted.getWorkItem(workspaceId, first.workItemId)).toMatchObject({ status: "queued", sourceSessionId: "design", treeId: "tree", run: { sessionId: "prep" } });
     expect(await restarted.getWorkItem(workspaceId, next.workItemId)).toMatchObject({ status: "queued", run: { forkSessionId: "prep", forkTurnId: "prep-end" } });
@@ -77,6 +78,7 @@ it("delivers worker decisions that also carry a preparation request id", async (
   const request = await service.startWork(workspaceId, { sessionId: "design", turnId: "source-turn" });
   await service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: "worker" });
   const item = await service.createWorkItem(workspaceId, { ...contract, requestId: request.requestId, sessionId: "worker" });
+  await service.completePreparation(workspaceId, { requestId: request.requestId, sessionId: "worker", workItemIds: [item.workItemId] });
   await service.finishPreparation(workspaceId, "worker", "prep-end");
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   const action = (await service.listActions(workspaceId))[0]!;

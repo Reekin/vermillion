@@ -175,6 +175,7 @@ export const zRun = z.object({
   activeTurnId: z.string().optional(),
   waitReason: z.string().optional(),
   pendingMessageId: z.string().optional(),
+  deliveryUncertain: z.boolean().optional(),
   migratedFromSessionId: z.string().optional(),
 });
 
@@ -243,7 +244,21 @@ export const zWorkMessage = z.object({
 });
 export type WorkMessage = z.infer<typeof zWorkMessage>;
 
+export const zSessionDelivery = zWorkMessage.extend({
+  sessionId: z.string(), messageId: z.string(), origin: z.enum(["scheduler", "user"]),
+  state: z.enum(["queued", "sending", "accepted", "cancelled"]),
+  reason: z.string().optional(), workItemId: z.string().optional(), requestId: z.string().optional(),
+  blockerWorkItemIds: z.array(z.string()).optional(),
+  noticeCount: z.number().int().nonnegative().optional(),
+  turnId: z.string().optional(), createdAt: z.string()
+});
+export type SessionDelivery = z.infer<typeof zSessionDelivery>;
+
 export const zWorkRequest = z.object({
+  continuationSummary: z.string().optional(),
+  deliveries: z.array(zSessionDelivery).optional(),
+  deliveryUncertain: z.boolean().optional(),
+  idleTurns: z.number().int().nonnegative().optional(),
   requestId: z.string(), sourceSessionId: z.string(), sourceTurnId: z.string().optional(),
   message: zWorkMessage.optional(),
   scope: z.string().optional(), treeId: z.string().optional(), workerSessionId: z.string().optional(),
@@ -262,6 +277,7 @@ export const zWorkRequest = z.object({
   pendingMessageId: z.string().optional(),
   workItemIds: z.array(z.string()).optional(),
   migratedToSessionId: z.string().optional(),
+  migratedFromSessionId: z.string().optional(),
   createdAt: z.string(), updatedAt: z.string()
 });
 export type WorkRequest = z.infer<typeof zWorkRequest>;
@@ -352,7 +368,7 @@ export const zScheduler = z.object({
 export type Scheduler = z.infer<typeof zScheduler>;
 
 export const zWorkDiagnosis = z.object({
-  request: zWorkRequest,
+  request: zWorkRequest.omit({ deliveries: true, continuationSummary: true }),
   workItems: z.array(zWorkItem),
   scheduler: zScheduler,
   waiting: z.array(z.string()),
@@ -411,7 +427,9 @@ export const renderExecutionNotices = (notices: ExecutionNotice[]): string =>
 
 /** The sole owner of a worker's runtime state and pending delivery. */
 export const zExecution = zProcess.extend({
-  ...zRun.omit({ resumeMessage: true, lastFailure: true, attempts: true, retryAt: true }).shape,
+  continuationSummary: z.string().optional(),
+  deliveries: z.array(zSessionDelivery).optional(),
+  ...zRun.omit({ resumeMessage: true, lastFailure: true, attempts: true, retryAt: true, pauseReason: true }).shape,
   kind: z.literal("execute"),
   stage: z.enum(["open", "deliver", "execute"]),
   /** Git checkpoint being handled by this Worker execution. */
@@ -459,7 +477,7 @@ export type Integration = z.infer<typeof zIntegration>;
 export const zWorkflowAction = z.discriminatedUnion("kind", [zExecution, zIntegration]);
 export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
-export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.pauseReason === "user";
+export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.control === "paused";
 /** The pending state of whichever process this action runs. */
 export const actionNote = (action: WorkflowAction): string =>
   action.kind === "integration" ? action.message : renderExecutionNotices(action.notices);
@@ -492,7 +510,7 @@ export type WorkItemRecord = z.infer<typeof zWorkItemRecord>;
 
 export const projectWorkItem = ({ item, execution }: WorkItemRecord): WorkItem => ({
   ...item,
-  run: zRun.parse({ ...execution, lastFailure: execution.failure, resumeMessage: renderExecutionNotices(execution.notices) || undefined })
+  run: zRun.parse({ ...execution, pauseReason: execution.control === "paused" ? "user" : undefined, lastFailure: execution.failure, resumeMessage: renderExecutionNotices(execution.notices) || undefined })
 });
 
 export const zSessionNavigation = z.object({
@@ -509,6 +527,7 @@ export type SessionNavigation = z.infer<typeof zSessionNavigation>;
 
 /** Change notifications emitted by the workbench service after every write, and by the docs watcher. */
 export const zWorkbenchEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("session.messages.changed"), workspaceId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal("workspaces.changed") }),
   z.object({ type: z.literal("sessionNavigation.changed"), sessionId: z.string(), workspaceId: z.string() }),
   z.object({ type: z.literal("docs.changed"), workspaceId: z.string() }),
