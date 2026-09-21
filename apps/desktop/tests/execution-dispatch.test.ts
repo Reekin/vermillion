@@ -23,7 +23,7 @@ function setup(blocked = false, activeTurnId?: string) {
   }));
   const shell = {
     setCommandDispatch: (handler: SessionCommandDispatch) => { dispatch = handler; },
-    getActiveTurnId: () => activeTurnId,
+    getActiveTurnId: vi.fn().mockReturnValue(activeTurnId),
     ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
     executeCommand: (input: CommandEnvelope) => dispatch(input, raw)
   };
@@ -39,6 +39,14 @@ function setup(blocked = false, activeTurnId?: string) {
 }
 
 describe("desktop execution dispatch", () => {
+  it("requests new admission if the active turn ends while history is loading", async () => {
+    const f = setup(false, "old-turn");
+    f.admit.mockImplementation(async (input, send) => send({ ...input, allowStart: false }));
+    f.shell.ensureSessionLoadedForRead.mockImplementation(async () => { f.shell.getActiveTurnId.mockReturnValue(undefined); return true; });
+    expect(await f.shell.executeCommand(message)).toMatchObject({ accepted: false, error: { code: "execution_readmission_required" } });
+    expect(f.raw).not.toHaveBeenCalled();
+  });
+
   it("returns queued without invoking the engine and retains the submitted payload", async () => {
     const f = setup(true);
     expect(await f.shell.executeCommand(message)).toMatchObject({

@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { parseSessionRpcRequest, safeParseSessionRpcResponse } from "./ipc.js";
+import { parseCommandEnvelope } from "./commands.js";
 
 describe("IPC schemas", () => {
+  it("preserves a steer-only admission grant through command validation", () => {
+    const input = parseCommandEnvelope({ commandId: "append", command: {
+      type: "steerTurn", sessionId: "worker", turnId: "old", messageId: "input", content: "continue", allowStart: false
+    } });
+    expect(input.command).toMatchObject({ type: "steerTurn", allowStart: false });
+  });
+
   it("preserves pending delivery without reporting engine acceptance", () => {
     const response = safeParseSessionRpcResponse({
       id: "request-send", method: "runtime.command", ok: true,

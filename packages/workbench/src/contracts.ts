@@ -546,9 +546,9 @@ export const zWorkbenchEvent = z.discriminatedUnion("type", [
   /** A running work item gained pending notices; the orchestrator hands them to its worker right away. */
   z.object({ type: z.literal("workItem.updated"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string() }),
   /** A work item was cancelled. sessionId when a worker held it (interrupted); dependants are queued items that listed it in dependsOn. */
-  z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string().optional(), dependants: z.array(z.string()) }),
+  z.object({ type: z.literal("workItem.cancelled"), workspaceId: z.string(), workItemId: z.string(), sessionId: z.string().optional(), turnId: z.string().optional(), dependants: z.array(z.string()) }),
   /** A preparation request was cancelled; sessionId identifies its preparation branch when one exists. */
-  z.object({ type: z.literal("workRequest.cancelled"), workspaceId: z.string(), requestId: z.string(), sessionId: z.string().optional() }),
+  z.object({ type: z.literal("workRequest.cancelled"), workspaceId: z.string(), requestId: z.string(), sessionId: z.string().optional(), turnId: z.string().optional() }),
   z.object({ type: z.literal("runs.changed"), workspaceId: z.string() }),
   z.object({ type: z.literal("actions.changed"), workspaceId: z.string() }),
   /** Streaming search results for the query started by `search.start`. */

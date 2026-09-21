@@ -121,9 +121,9 @@ it("interrupts a cancelled worker before sending work to the next shared-resourc
   expect(f.active.has("worker-a")).toBe(true);
 
   const order: string[] = [];
-  vi.mocked(f.runner.interrupt).mockImplementation(async (id) => {
+  vi.mocked(f.runner.interrupt).mockImplementation(async (id, turnId) => {
     order.push("interrupt:" + id);
-    f.active.delete(id);
+    f.complete(id, turnId, "interrupted");
   });
   vi.mocked(f.runner.send).mockImplementation(async (id) => {
     order.push("send:" + id);
@@ -163,8 +163,8 @@ it("interrupts cancelled preparation and does not retry it after the turn settle
 
   const preparationSession = (await f.service.listWorkRequests(f.workspaceId))[0]!.workerSessionId!;
   await f.service.cancelWorkRequest(f.workspaceId, { requestId: request.requestId });
-  await vi.waitFor(() => expect(f.runner.interrupt).toHaveBeenCalledWith(preparationSession));
-  f.complete(preparationSession, "preparation-turn", "interrupted");
+  await vi.waitFor(() => expect(f.runner.interrupt).toHaveBeenCalledWith(preparationSession, "turn-1"));
+  f.complete(preparationSession, "turn-1", "interrupted");
   await new Promise((resolve) => setTimeout(resolve, 100));
 
   const cancelled = (await f.service.listWorkRequests(f.workspaceId))[0]!;
@@ -381,7 +381,7 @@ it("admits takeover through the scheduler and retains user pause across restart"
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
   await f.service.cancelWorkItem(f.workspaceId, item.workItemId);
   f.complete("worker", "turn-2", "interrupted");
-  await vi.waitFor(() => expect(f.runner.interrupt).toHaveBeenCalledWith("worker"));
+  await vi.waitFor(() => expect(f.runner.interrupt).toHaveBeenCalledWith("worker", "turn-2"));
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("cancelled");
 });
 
@@ -576,6 +576,7 @@ it("queues a user continuation until the preceding completion settles", async ()
     expect(queued).toMatchObject({ accepted: false, queued: { reason: "等待上一轮结算完成" } });
   } finally { release(); }
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.control).toBe("manual"));
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
   expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ status: "running", stage: "execute", idleTurns: 0, attempts: 0 });
   expect((await f.service.listRuns(f.workspaceId))[0]).toMatchObject({ turns: 1 });
   expect(f.runner.interrupt).not.toHaveBeenCalled();

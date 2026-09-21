@@ -2,6 +2,37 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it("interrupts the acknowledged cancelled turn without targeting a later discussion", async () => {
+    const shell = {
+      getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "later-discussion", status: "streaming" }] }),
+      executeCommand: vi.fn().mockResolvedValue({ accepted: true })
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
+    await runner.interrupt("worker", "cancelled-delivery-turn");
+    expect(shell.executeCommand).toHaveBeenCalledWith(expect.objectContaining({
+      command: { type: "interruptTurn", sessionId: "worker", turnId: "cancelled-delivery-turn" }
+    }));
+  });
+
+  it("confirms the canonical session-scoped client message after refreshing engine history", async () => {
+    const blocks: Array<{ sessionId: string; messageId: string; turnId: string; role: string }> = [];
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn(async () => {
+        blocks.push({ sessionId: "worker", messageId: "worker:client-message", turnId: "accepted-turn", role: "user" });
+        return true;
+      }),
+      getSnapshot: () => ({ messageBlocks: blocks }),
+      getActiveTurnId: () => "accepted-turn"
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
+    await expect(runner.confirmMessage!("worker", "client-message")).resolves.toEqual({ accepted: true, turnId: "accepted-turn", active: true });
+    expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledWith("worker", { force: true });
+    await expect(runner.confirmMessage!("worker", "client-message")).resolves.toMatchObject({ accepted: true });
+    expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledTimes(1);
+    shell.ensureSessionLoadedForRead.mockResolvedValue(false);
+    await expect(runner.confirmMessage!("different-worker", "client-message")).resolves.toEqual({ accepted: false });
+  });
+
   it.each(["completed", "failed", "interrupted"] as const)("inspects a cold historical %s turn for restart settlement", async (finishReason) => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
@@ -11,19 +42,32 @@ describe("AgentRunner recovery", () => {
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await expect(runner.inspectTurn!("worker", "past-turn")).resolves.toEqual({ status: "completed", finishReason });
     await expect(runner.inspectTurn!("worker", "missing-turn")).resolves.toEqual({ status: "unknown" });
-    expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledWith("worker");
+    expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledWith("worker", { force: true });
   });
 
   it("uses runtime activity rather than stale history to inspect the current turn", async () => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
-      getActiveTurnId: () => "active-turn",
+      getActiveTurnId: vi.fn().mockReturnValue("active-turn"),
       getSnapshot: () => ({ turns: [] })
     };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
     await expect(runner.inspectTurn!("worker", "active-turn")).resolves.toEqual({ status: "active" });
+    expect(shell.ensureSessionLoadedForRead).not.toHaveBeenCalled();
+    shell.getActiveTurnId.mockReturnValue(undefined);
     shell.ensureSessionLoadedForRead.mockResolvedValue(false);
     await expect(runner.inspectTurn!("worker", "active-turn")).resolves.toEqual({ status: "unknown" });
+  });
+
+  it("refreshes an inactive cached turn before deciding whether it has ended", async () => {
+    let ended = false;
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn(async (_sessionId, input) => { ended = input?.force === true; return true; }),
+      getActiveTurnId: () => undefined,
+      getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "last-turn", status: ended ? "completed" : "streaming", finishReason: ended ? "completed" : undefined }] })
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
+    await expect(runner.inspectTurn!("worker", "last-turn")).resolves.toEqual({ status: "completed", finishReason: "completed" });
   });
 
   it.each(["send", "steer"] as const)("preserves a known rejection from scheduled %s", async (method) => {

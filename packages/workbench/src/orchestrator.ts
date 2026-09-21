@@ -14,7 +14,7 @@ export type AgentRunner = {
   send: (sessionId: string, content: string, options?: Omit<WorkMessage, "content"> & { messageId?: string }) => Promise<void | (Partial<SessionDispatchReceipt> & { messageId?: string })>;
   /** Delivers into the running turn when there is one, otherwise starts the next message. */
   steer: (sessionId: string, content: string, messageId?: string) => Promise<Partial<SessionDispatchReceipt> & { messageId?: string }>;
-  interrupt: (sessionId: string) => Promise<void>;
+  interrupt: (sessionId: string, turnId?: string) => Promise<void>;
   /** Loads an existing session so it can receive messages again. Resolves false when the session cannot be opened. */
   resume: (sessionId: string, options?: { cwd?: string; modelConfig?: RoleExecutionOverrides; metadata?: Record<string, unknown>; title?: string }) => Promise<boolean>;
   /** Requests unsubscribe of an idle worker; preserves its history and permits native idle unloading. */
@@ -82,6 +82,7 @@ export class Orchestrator {
     this.disposers.push(this.service.setWorkerActiveChecker((sessionId) => this.runner.isActive?.(sessionId) ?? false));
     this.disposers.push(this.service.setWorkerSettlingChecker((sessionId) => !!this.settling.get(sessionId)));
     if (this.runner.inspectTurn) this.disposers.push(this.service.setTurnInspector(this.runner.inspectTurn));
+    this.disposers.push(this.service.setTurnInterrupter((sessionId, turnId) => this.runner.interrupt(sessionId, turnId)));
     this.disposers.push(this.service.setWorkerEnvironmentReleaser((sessionId) => this.runner.release(sessionId)));
     if (this.runner.resolveSourceTurn) this.disposers.push(this.service.setSourceTurnResolver(this.runner.resolveSourceTurn));
     this.disposers.push(this.service.registerScheduler());
@@ -114,16 +115,15 @@ export class Orchestrator {
         const sessionId = event.sessionId;
         void this.enqueue(event.workspaceId, async () => {
           if (sessionId) {
-            const wasPreparing = this.preparing.get(sessionId) === event.workspaceId;
             this.preparing.delete(sessionId);
-            if (wasPreparing || this.runner.isActive?.(sessionId)) await this.runner.interrupt(sessionId);
+            if (event.turnId) await this.runner.interrupt(sessionId, event.turnId);
           }
           await this.service.releaseIdleWorkers(event.workspaceId);
           await this.reconcile(event.workspaceId);
         });
       } else if (event.type === "workItem.cancelled" && event.sessionId) {
         const sessionId = event.sessionId;
-        void this.enqueue(event.workspaceId, async () => { await this.runner.interrupt(sessionId); await this.service.releaseIdleWorkers(event.workspaceId); await this.reconcile(event.workspaceId); });
+        void this.enqueue(event.workspaceId, async () => { if (event.turnId) await this.runner.interrupt(sessionId, event.turnId); await this.service.releaseIdleWorkers(event.workspaceId); await this.reconcile(event.workspaceId); });
       }
     }));
     if (this.runner.onTurnStarted) this.disposers.push(this.runner.onTurnStarted((event) => this.attributeTurn(event)));
@@ -264,11 +264,11 @@ export class Orchestrator {
     const scheduler = await this.service.getScheduler(workspaceId);
     this.clearRetryTimer(workspaceId);
     for (const request of await this.service.listWorkRequests(workspaceId)) {
-      if (request.control === "paused" && request.workerSessionId && this.runner.isActive?.(request.workerSessionId))
+      if (request.status !== "cancelled" && request.control === "paused" && request.workerSessionId && this.runner.isActive?.(request.workerSessionId))
         await this.runner.interrupt(request.workerSessionId);
     }
     for (const item of await this.service.listWorkItems(workspaceId)) {
-      if (item.run.control === "paused" && item.run.sessionId && this.runner.isActive?.(item.run.sessionId))
+      if (!["closed", "cancelled"].includes(item.status) && item.run.control === "paused" && item.run.sessionId && this.runner.isActive?.(item.run.sessionId))
         await this.runner.interrupt(item.run.sessionId);
     }
     if (!scheduler.enabled) { await this.scheduleRetry(workspaceId); return; }
@@ -452,10 +452,6 @@ export class Orchestrator {
           scheduledTurnId = receipt.turnId;
         }
       } catch (error) {
-        await this.service.updateAction(workspaceId, action, (current) => ({ ...current, status: "decision", control: "manual",
-          deliveryUncertain: true,
-          waitReason: "消息受理状态不明，请核对引擎轮次后再继续", failure: error instanceof Error ? error.message : String(error),
-          pendingMessageId: messageId }), (item) => ({ ...item, status: "decision" }));
         return;
       }
       // Sending may synchronously cause a decision/completion write: preserve its latest state.

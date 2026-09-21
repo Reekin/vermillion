@@ -23,10 +23,14 @@ export function connectExecutionDispatch(
         return { accepted: false, error: { code: "session_unavailable", message: "无法加载目标会话" } };
       }
       const activeTurnId = shell.getActiveTurnId(message.sessionId);
+      if (!activeTurnId && message.allowStart === false) return {
+        accepted: false,
+        error: { code: "execution_readmission_required", message: "当前轮次已变化，需要重新检查执行条件" }
+      };
       const envelope: CommandEnvelope = {
         commandId: input.commandId,
         command: activeTurnId
-          ? { ...command, ...message, type: "steerTurn", turnId: activeTurnId, attachments: message.attachments ?? [] }
+          ? { ...command, ...message, type: "steerTurn", turnId: activeTurnId, allowStart: message.allowStart !== false, attachments: message.attachments ?? [] }
           : { ...command, ...message, type: "sendUserMessage", attachments: message.attachments ?? [] }
       };
       const result = await send(envelope);

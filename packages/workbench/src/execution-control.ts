@@ -1,6 +1,7 @@
 import type { WorkMessage } from "./contracts.js";
 
-export type SessionDispatchMessage = WorkMessage & { sessionId: string; messageId: string; origin?: "scheduler" | "user"; decisionId?: string };
+export type SessionDispatchMessage = WorkMessage & { sessionId: string; messageId: string; origin?: "scheduler" | "user"; decisionId?: string; allowStart?: boolean };
+export type SessionDispatchGrant = { messageId: string; allowStart: boolean };
 export type SessionDispatchReceipt = { accepted: boolean; queued?: { messageId: string; reason: string; workItemId?: string }; error?: { code: string; message: string }; turnId?: string; delivery?: "started" | "steered" };
 export type MessageDeliveryPort = (message: SessionDispatchMessage) => Promise<SessionDispatchReceipt>;
 export type TurnInspection = { status: "active" | "completed" | "unknown"; finishReason?: "completed" | "failed" | "interrupted"; failure?: string };

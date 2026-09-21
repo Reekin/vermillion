@@ -178,14 +178,25 @@ it.each(["paused", "manual"] as const)("reconciles completed facts while preserv
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.activeTurnId).toBeUndefined();
 });
 
-it.each([false, true])("attributes a steer fallback that starts a new turn using the actual receipt (formal answer: %s)", async (formal) => {
+it.each([false, true])("readmits an expired supplement before a new turn (formal answer: %s)", async (formal) => {
   const f = await fixture();
   await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
   await f.service.dispatchSessionMessage({ sessionId: "worker", messageId: "auto", content: "work", origin: "scheduler" }, async () => ({ accepted: true, turnId: "old" }));
-  f.service.setWorkerActiveChecker(() => true);
+  let active = true;
+  f.service.setWorkerActiveChecker(() => active);
   await f.service.dispatchSessionMessage({ sessionId: "worker", messageId: "fallback", content: "continue", ...(formal ? { decisionId: "formal-answer" } : {}) },
-    async () => ({ accepted: true, turnId: "new", delivery: "started" }));
+    async (message) => {
+      expect(message.allowStart).toBe(false);
+      active = false;
+      await f.service.settleExecutionTurn(f.workspaceId, "worker", "old", "completed");
+      return { accepted: false, error: { code: "execution_readmission_required", message: "Original turn ended" } };
+    });
+  f.service.setMessageDeliveryPort(async (message) => {
+    expect(message.allowStart).toBe(true);
+    return { accepted: true, turnId: "new", delivery: "started" };
+  });
+  await f.service.flushSessionMessages(f.workspaceId);
   const current = await f.service.getWorkItem(f.workspaceId, item.workItemId);
   expect(current.run).toMatchObject({ activeTurnId: "new", control: formal ? "auto" : "manual" });
   expect(current.run.pendingMessageId).toBeUndefined();

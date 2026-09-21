@@ -15,6 +15,7 @@ export * from "./read-session-host-tool.js";
 export * from "./read-session-transcript.js";
 export * from "./workspace-registry.js";
 export * from "./session-index.js";
+export { sessionItemId } from "./session-item-id.js";
 export * from "./session-catalog.js";
 export * from "./session-discovery.js";
 export * from "./session-actions.js";

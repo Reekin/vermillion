@@ -784,7 +784,7 @@ const boot = async (): Promise<void> => {
       return sessionSteerer(sessionId, content, messageId);
     },
     executionTransfer: {
-      interrupt: (sessionId) => agentRunner.interrupt(sessionId),
+      interrupt: (sessionId, turnId) => agentRunner.interrupt(sessionId, turnId),
       fork: (input) => agentRunner.fork({ ...input, modelConfig: undefined })
     },
     deliveryConfirmer: (sessionId, messageId) => agentRunner.confirmMessage!(sessionId, messageId),

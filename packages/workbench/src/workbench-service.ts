@@ -1,7 +1,7 @@
 import type { FSWatcher } from "node:fs";
 import { workerOpeningMessage } from "./execution-message.js";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { beginExecution, confirmExecution, acceptExecutionMessage, transitionControl, retryMinutes, type TurnInspector, type SessionDispatchMessage, type SessionDispatchReceipt, type MessageDeliveryPort } from "./execution-control.js";
+import { beginExecution, confirmExecution, acceptExecutionMessage, transitionControl, retryMinutes, type TurnInspector, type SessionDispatchGrant, type SessionDispatchMessage, type SessionDispatchReceipt, type MessageDeliveryPort } from "./execution-control.js";
 import { basename, resolve } from "node:path";
 import type {
   AgentRun,
@@ -98,7 +98,7 @@ export type SessionSteerer = (input: {
 }) => Promise<SessionSteerResult>;
 
 export type ExecutionTransferPort = {
-  interrupt: (sessionId: string) => Promise<void>;
+  interrupt: (sessionId: string, turnId?: string) => Promise<void>;
   fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
 };
 
@@ -184,7 +184,7 @@ export class WorkbenchService {
   private readonly integrations = new Map<string, Promise<unknown>>();
   private messageDeliveryPort?: MessageDeliveryPort;
   private executionPreparer?: (sessionId: string, target: { workspaceId: string; workItemId?: string; requestId?: string }) => Promise<void>;
-  private readonly deliveryContext = new AsyncLocalStorage<string>();
+  private readonly deliveryContext = new AsyncLocalStorage<SessionDispatchGrant & { valid: boolean }>();
   private readonly inFlightMessages = new Set<string>();
   private readonly patrolScans = new Map<string, Promise<unknown>>();
   private readonly decisionDeliveries = new Map<string, Promise<void>>();
@@ -195,6 +195,7 @@ export class WorkbenchService {
   private workerActive?: (sessionId: string) => boolean;
   private workerSettling?: (sessionId: string) => boolean;
   private turnInspector?: TurnInspector;
+  private turnInterrupter?: (sessionId: string, turnId: string) => Promise<void>;
   private readonly turnInspections = new Map<string, { turnId: string; status: "active" | "completed" | "unknown" }>();
   private releaseWorkerEnvironment?: (sessionId: string) => Promise<void>;
 
@@ -218,17 +219,46 @@ export class WorkbenchService {
     return () => { if (this.turnInspector === inspector) this.turnInspector = undefined; };
   }
 
+  setTurnInterrupter(interrupt: (sessionId: string, turnId: string) => Promise<void>): () => void {
+    this.turnInterrupter = interrupt;
+    return () => { if (this.turnInterrupter === interrupt) this.turnInterrupter = undefined; };
+  }
+
+  private async stopCancelledDelivery(workspaceId: string, message: SessionDelivery, turnId?: string): Promise<void> {
+    let cancelled = false;
+    if (message.workItemId) {
+      if ((await this.getWorkItem(workspaceId, message.workItemId)).status !== "cancelled") return;
+      await this.transactRecord(workspaceId, message.workItemId, (record) => {
+        if (!record) throw new Error("Unknown work item: " + message.workItemId);
+        if (record.item.status !== "cancelled" || record.execution.sessionId !== message.sessionId) return { record, result: undefined };
+        if (record.execution.pendingMessageId !== message.messageId && (!turnId || record.execution.activeTurnId !== turnId)) return { record, result: undefined };
+        cancelled = true;
+        return { record: { ...record, execution: { ...record.execution,
+          pendingMessageId: record.execution.pendingMessageId === message.messageId ? undefined : record.execution.pendingMessageId,
+          ...(turnId ? { activeTurnId: turnId } : {}), deliveryUncertain: undefined, updatedAt: this.now() } }, result: undefined };
+      });
+    } else if (message.requestId) await this.updateWorkRequest(workspaceId, message.requestId, (request) => {
+      if (request.status !== "cancelled" || request.workerSessionId !== message.sessionId) return request;
+      if (request.pendingMessageId !== message.messageId && (!turnId || request.activeTurnId !== turnId)) return request;
+      cancelled = true;
+      return { ...request, pendingMessageId: request.pendingMessageId === message.messageId ? undefined : request.pendingMessageId,
+        ...(turnId ? { activeTurnId: turnId } : {}), deliveryUncertain: undefined };
+    });
+    if (cancelled && turnId) await (this.turnInterrupter ?? this.executionTransfer?.interrupt)?.(message.sessionId, turnId);
+  }
+
   async reconcileExecutionTurns(workspaceId: string): Promise<void> {
     const inspect = this.turnInspector;
     if (!inspect) return;
     const targets = [
-      ...(await this.listWorkRequests(workspaceId)).filter((entry) => entry.status !== "ready" && entry.status !== "cancelled")
-        .map((entry) => ({ sessionId: entry.workerSessionId, turnId: entry.activeTurnId })),
-      ...(await this.listWorkItems(workspaceId)).map((entry) => ({ sessionId: entry.run.sessionId, turnId: entry.run.activeTurnId }))
+      ...(await this.listWorkRequests(workspaceId)).filter((entry) => entry.status !== "ready")
+        .map((entry) => ({ sessionId: entry.workerSessionId, turnId: entry.activeTurnId, cancelled: entry.status === "cancelled" })),
+      ...(await this.listWorkItems(workspaceId)).map((entry) => ({ sessionId: entry.run.sessionId, turnId: entry.run.activeTurnId, cancelled: entry.status === "cancelled" }))
     ];
     for (const target of targets) {
       if (!target.sessionId || !target.turnId || this.workerSettling?.(target.sessionId)) continue;
       const result = await inspect(target.sessionId, target.turnId);
+      if (target.cancelled && result.status === "active") await (this.turnInterrupter ?? this.executionTransfer?.interrupt)?.(target.sessionId, target.turnId);
       const previous = this.turnInspections.get(target.sessionId);
       this.turnInspections.set(target.sessionId, { turnId: target.turnId, status: result.status });
       if (previous?.turnId !== target.turnId || previous.status !== result.status) {
@@ -240,12 +270,12 @@ export class WorkbenchService {
   }
 
   async settleExecutionTurn(workspaceId: string, sessionId: string, turnId: string, finishReason: string, failure?: string, completion?: string) {
-    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === sessionId && entry.activeTurnId === turnId && entry.status === "preparing");
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === sessionId && entry.activeTurnId === turnId && ["preparing", "cancelled"].includes(entry.status));
     if (request) return this.integrate(workspaceId, async () => {
       const current = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === request.requestId)!;
       if (current.workerSessionId !== sessionId || current.activeTurnId !== turnId) return undefined;
-      if (finishReason === "completed" && current.handoff) await this.finishPreparationRecord(workspaceId, sessionId, turnId);
-      else if (current.control !== "paused") {
+      if (current.status !== "cancelled" && finishReason === "completed" && current.handoff) await this.finishPreparationRecord(workspaceId, sessionId, turnId);
+      else if (current.status !== "cancelled" && current.control !== "paused") {
         if (finishReason === "completed") await this.preparationWithoutHandoff(workspaceId, current.requestId);
         else await this.failWorkRequest(workspaceId, current.requestId, failure ?? "准备轮" + finishReason);
       }
@@ -327,8 +357,8 @@ export class WorkbenchService {
   async listOccupiedWorkItems(workspaceId: string): Promise<WorkItem[]> {
     const actions = await this.listActions(workspaceId);
     return (await this.listWorkItems(workspaceId)).filter((item) => {
+      if (["closed", "cancelled"].includes(item.status)) return !!item.run.pendingMessageId || !!item.run.activeTurnId;
       if (item.run.sessionId && this.workerActive?.(item.run.sessionId)) return true;
-      if (["closed", "cancelled"].includes(item.status)) return false;
       const execution = actions.find((action): action is Execution => action.kind === "execute" && action.workItemId === item.workItemId)!;
       return !!execution.activeTurnId || !!execution.pendingMessageId || execution.status === "running" && execution.control !== "paused";
     });
@@ -356,9 +386,10 @@ export class WorkbenchService {
   }
 
   async dispatchSessionMessage(input: SessionDispatchMessage, deliver = this.messageDeliveryPort): Promise<SessionDispatchReceipt> {
-    if (this.deliveryContext.getStore() === input.messageId) {
+    const grant = this.deliveryContext.getStore();
+    if (grant?.valid && grant.messageId === input.messageId) {
       if (!deliver) throw new Error("Session delivery requires a running desktop instance.");
-      return deliver(input);
+      return deliver({ ...input, allowStart: grant.allowStart });
     }
     const ownsFlight = !this.inFlightMessages.has(input.messageId);
     if (ownsFlight) this.inFlightMessages.add(input.messageId);
@@ -368,7 +399,6 @@ export class WorkbenchService {
 
   private async dispatchSessionMessageRecord(input: SessionDispatchMessage, deliver = this.messageDeliveryPort): Promise<SessionDispatchReceipt> {
     if (!deliver) throw new Error("Session delivery requires a running desktop instance.");
-    if (this.deliveryContext.getStore() === input.messageId) return deliver(input);
     const binding = await this.executionBinding(input.sessionId);
     if (!binding) {
       for (const { workspaceId } of await this.listWorkspaces()) {
@@ -376,7 +406,7 @@ export class WorkbenchService {
             (await this.listWorkRequests(workspaceId)).some((request) => request.migratedFromSessionId === input.sessionId))
           return { accepted: false, error: { code: "execution_moved", message: "执行已迁移，请进入当前执行分支" } };
       }
-      return deliver(input);
+      return deliver({ ...input, allowStart: true });
     }
     const { workspaceId } = binding;
     // Serialize admission and persist reservation before calling the engine. Do not hold the lock across engine callbacks.
@@ -405,7 +435,7 @@ export class WorkbenchService {
       else if (this.workerSettling?.(input.sessionId)) reason = "等待上一轮结算完成";
       else if (control.pendingMessageId && control.pendingMessageId !== input.messageId) reason = "等待前一条消息受理确认";
       else if (!active && control.activeTurnId) reason = "等待上一轮结算完成";
-      else if (!input.decisionId && origin === "scheduler" && (!scheduler.enabled || control.control === "manual")) reason = "自动推进未启用";
+      else if (origin === "scheduler" && (!scheduler.enabled || control.control === "manual" && !input.decisionId)) reason = "自动推进未启用";
       else if (!input.decisionId && origin === "scheduler" && control.retryAt && control.retryAt > this.now()) reason = "等待重试时间";
       else if (!active) {
         if (item) {
@@ -465,8 +495,11 @@ export class WorkbenchService {
     }
     if (!receipt!) {
       try {
-        receipt = await this.deliveryContext.run(input.messageId, () => deliver({ ...message,
-          content: admission.summary ? admission.summary + "\n\n" + message.content : message.content }));
+        const grant = { messageId: input.messageId, allowStart: !admission.active, valid: true };
+        try {
+          receipt = await this.deliveryContext.run(grant, () => deliver({ ...message, allowStart: grant.allowStart,
+            content: admission.summary ? admission.summary + "\n\n" + message.content : message.content }));
+        } finally { grant.valid = false; }
       } catch (error) {
         const known = await (await this.sessionDeliveries(workspaceId)).get(input.messageId);
         if (known?.state === "accepted") receipt = { accepted: true, turnId: known.turnId };
@@ -476,11 +509,9 @@ export class WorkbenchService {
             const current = await this.executionBinding(input.sessionId);
             const reason = "消息受理状态不明，请核对引擎轮次后再继续";
             if (current?.request) await this.updateWorkRequest(workspaceId, current.request.requestId, (latest) => latest.pendingMessageId !== input.messageId ? latest :
-              ({ ...(message.mode === "supplement" ? latest : transitionControl(latest, { type: "hold", reason })), waitReason: reason, deliveryUncertain: true, failure: error instanceof Error ? error.message : String(error) }));
+              ({ ...latest, waitReason: reason, deliveryUncertain: true, failure: error instanceof Error ? error.message : String(error) }));
             if (current?.item) await this.mutateRecord(workspaceId, current.item.workItemId, (record) => record.execution.pendingMessageId !== input.messageId ? record : ({ ...record,
-              item: { ...record.item, status: message.mode === "supplement" ? record.item.status : "decision" },
-              execution: { ...(message.mode === "supplement" ? record.execution : transitionControl(record.execution, { type: "hold", reason })),
-                status: message.mode === "supplement" ? record.execution.status : "decision", waitReason: reason, deliveryUncertain: true, failure: error instanceof Error ? error.message : String(error) } }));
+              execution: { ...record.execution, waitReason: reason, deliveryUncertain: true, failure: error instanceof Error ? error.message : String(error) } }));
           });
           throw error;
         }
@@ -488,6 +519,9 @@ export class WorkbenchService {
     }
     const deliveriesStore = await this.sessionDeliveries(workspaceId);
     if (!receipt.accepted) {
+      if (receipt.error?.code === "execution_readmission_required") {
+        receipt = { accepted: false, queued: { messageId: input.messageId, reason: "原轮已结束，等待重新检查执行条件", workItemId: message.workItemId } };
+      }
       if (receipt.error) {
         await this.integrate(workspaceId, async () => {
           await deliveriesStore.put({ ...message, state: "rejected", reason: receipt.error!.message });
@@ -501,7 +535,6 @@ export class WorkbenchService {
         });
         return receipt;
       }
-      await deliveriesStore.put({ ...message, state: "queued", reason: receipt.queued?.reason ?? "等待引擎受理" });
       await this.integrate(workspaceId, async () => {
         const current = await this.executionBinding(input.sessionId);
         if (current?.request) await this.updateWorkRequest(workspaceId, current.request.requestId, (latest) => latest.pendingMessageId !== input.messageId ? latest : ({ ...latest, pendingMessageId: undefined }));
@@ -509,6 +542,7 @@ export class WorkbenchService {
           item: { ...record.item, status: message.mode === "supplement" || record.execution.control === "paused" ? record.item.status : "queued" },
           execution: { ...record.execution, pendingMessageId: undefined,
             ...(message.mode === "supplement" ? {} : { status: record.execution.control === "paused" ? "decision" as const : "pending" as const, stage: "deliver" as const }) } }));
+        await deliveriesStore.put({ ...message, state: "queued", reason: receipt.queued?.reason ?? "等待引擎受理" });
       });
       return { ...receipt, queued: receipt.queued ?? { messageId: input.messageId, reason: "等待引擎受理", workItemId: message.workItemId } };
     }
@@ -524,6 +558,7 @@ export class WorkbenchService {
           notices: message.origin === "scheduler" ? record.execution.notices.slice(message.noticeCount ?? 0) : record.execution.notices,
           continuationSummary: record.execution.attemptId === input.messageId ? undefined : record.execution.continuationSummary, updatedAt: this.now() } }));
     });
+    await this.stopCancelledDelivery(workspaceId, message, receipt.turnId);
     return receipt;
   }
 
@@ -1561,21 +1596,20 @@ export class WorkbenchService {
       return request;
     const deliveryStore = await this.sessionDeliveries(workspaceId);
     const delivery = await deliveryStore.get(messageId);
+    if (!delivery || delivery.sessionId !== request.workerSessionId || delivery.requestId !== requestId || !["sending", "unknown", "accepted"].includes(delivery.state)) return request;
     if (delivery) await deliveryStore.put({ ...delivery, state: "accepted", turnId });
     const latest = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId)!;
-    const recovered = latest.deliveryUncertain && latest.control !== "paused" && delivery?.mode !== "supplement"
-      ? active ? { status: "preparing" as const, control: delivery?.origin === "user" ? "manual" as const : "auto" as const, failure: undefined, waitReason: undefined }
-        : { status: "preparing" as const, control: "manual" as const, failure: undefined, waitReason: "消息已确认但原轮已结束，等待手动继续" }
-      : {};
     return this.updateWorkRequest(workspaceId, requestId, (current) => current.pendingMessageId !== messageId || current.workerSessionId !== request.workerSessionId ? current : ({ ...current,
-      ...(current.control === "paused" || current.status === "cancelled" ? {} : recovered), deliveryUncertain: undefined, pendingMessageId: undefined, ...(turnId && active ? { activeTurnId: turnId } : {}) }));
+      deliveryUncertain: undefined, pendingMessageId: undefined, failure: undefined,
+      waitReason: current.control === "paused" ? current.waitReason : undefined,
+      ...(turnId ? { activeTurnId: turnId } : {}) }));
   }
 
   async markPreparationDeliveryUnknown(workspaceId: string, requestId: string, messageId: string, failure: string): Promise<WorkRequest> {
     const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId);
     if (!request) throw new Error("Unknown work request: " + requestId);
     return this.updateWorkRequest(workspaceId, requestId, (current) => current.status === "cancelled" || current.pendingMessageId !== messageId ? current : ({ ...current,
-      ...transitionControl(current, { type: "hold", reason: "消息受理状态不明，请核对准备分支后再继续" }),
+      waitReason: "消息受理状态不明，请核对准备分支后再继续",
       failure, deliveryUncertain: true, pendingMessageId: messageId }));
   }
 
@@ -1589,13 +1623,16 @@ export class WorkbenchService {
     const expectedAttemptId = request.attemptId;
     const messageId = request.pendingMessageId;
     const result = await this.deliveryConfirmer(expectedSessionId, messageId);
-    return result.accepted ? this.confirmPreparationDelivery(workspaceId, requestId, messageId, result.turnId, result.active !== false, expectedSessionId, expectedAttemptId) : request;
+    if (!result.accepted) return request;
+    await this.confirmPreparationDelivery(workspaceId, requestId, messageId, result.turnId, result.active !== false, expectedSessionId, expectedAttemptId);
+    await this.reconcileExecutionTurns(workspaceId);
+    return (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === requestId)!;
   }
 
   async confirmWorkItemDelivery(workspaceId: string, workItemId: string): Promise<WorkItem> {
     await this.reconcileExecutionTurns(workspaceId);
     const item = await this.getWorkItem(workspaceId, workItemId);
-    const action = (await this.listActions(workspaceId)).find((entry): entry is Execution => entry.kind === "execute" && entry.workItemId === workItemId && actionIsOpen(entry));
+    const action = (await this.listActions(workspaceId)).find((entry): entry is Execution => entry.kind === "execute" && entry.workItemId === workItemId);
     if (!action?.pendingMessageId || !action.sessionId) return item;
     if (!this.deliveryConfirmer) return item;
     const result = await this.deliveryConfirmer(action.sessionId, action.pendingMessageId);
@@ -1610,22 +1647,23 @@ export class WorkbenchService {
       if (!record) throw new Error("Unknown work item: " + workItemId);
       const current = record.execution;
       if (current.pendingMessageId !== action.pendingMessageId || current.sessionId !== expectedSessionId || current.attemptId !== expectedAttemptId ||
-          !current.deliveryUncertain) return { record, result: false };
+          !delivery || delivery.sessionId !== expectedSessionId || delivery.workItemId !== workItemId || !["sending", "unknown", "accepted"].includes(delivery.state)) return { record, result: false };
       const now = this.now();
       if (delivery?.mode === "supplement") return { record: { ...record, execution: {
         ...acceptExecutionMessage(current, delivery, active ? result.turnId : undefined), pendingMessageId: undefined,
         deliveryUncertain: undefined, failure: undefined, waitReason: current.control === "paused" ? current.waitReason : undefined, updatedAt: now
       } }, result: true };
       return { record: { ...record,
-        item: { ...record.item, status: current.control !== "paused" && active && ["queued", "decision"].includes(record.item.status) ? "running" : record.item.status, updatedAt: now },
-        execution: { ...current, pendingMessageId: undefined, deliveryUncertain: undefined, scheduledTurnId: result.turnId,
-          activeTurnId: active ? result.turnId : undefined,
-          status: active && current.control !== "paused" ? "running" : "decision", stage: active ? "execute" : "deliver",
-          control: current.control === "paused" ? current.control : active && delivery?.origin !== "user" ? "auto" : "manual", deliveredAt: now,
-          waitReason: active ? undefined : "消息已确认但原轮已结束，等待手动继续", failure: undefined, updatedAt: now }
+        execution: { ...acceptExecutionMessage(current, delivery, result.turnId), pendingMessageId: undefined, deliveryUncertain: undefined,
+          scheduledTurnId: delivery.origin === "scheduler" ? result.turnId : current.scheduledTurnId,
+          activeTurnId: result.turnId ?? current.activeTurnId,
+          deliveredAt: now,
+          waitReason: current.control === "paused" ? current.waitReason : undefined, failure: undefined, updatedAt: now }
       }, result: true };
     });
     if (!confirmed) return this.getWorkItem(workspaceId, workItemId);
+    if (delivery) await this.stopCancelledDelivery(workspaceId, delivery, result.turnId);
+    await this.reconcileExecutionTurns(workspaceId);
     return this.getWorkItem(workspaceId, workItemId);
   }
 
@@ -1643,9 +1681,9 @@ export class WorkbenchService {
       }
       const saved = await this.updateWorkRequest(workspaceId, request.requestId, (current) => ({
         ...current, status: "cancelled", control: "paused", failure: undefined, retryAt: undefined,
-        waitReason: "用户已取消当前工作", pendingMessageId: undefined
+        waitReason: "用户已取消当前工作"
       }));
-      this.emit({ type: "workRequest.cancelled", workspaceId, requestId: request.requestId, sessionId: request.workerSessionId });
+      this.emit({ type: "workRequest.cancelled", workspaceId, requestId: request.requestId, sessionId: request.workerSessionId, turnId: request.activeTurnId });
       return { cancelled: true, request: saved };
     });
   }
@@ -2320,7 +2358,7 @@ export class WorkbenchService {
       return { ...detached, item: { ...record.item, status: "cancelled", updatedAt: this.now() },
         execution: { ...detached.execution, status: "cancelled", updatedAt: this.now() },
         integrations: record.integrations.map((action) => actionIsOpen(action) ? { ...action, status: "cancelled", updatedAt: this.now() } : action) };
-    }, notify ? [{ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, dependants }] : []);
+    }, notify ? [{ type: "workItem.cancelled", workspaceId, workItemId, sessionId: item.run.sessionId, turnId: item.run.activeTurnId, dependants }] : []);
     return cancelled;
   }
 
@@ -2519,7 +2557,7 @@ export class WorkbenchService {
     await this.integrate(workspaceId, async () => {
       const items = await this.listWorkItems(workspaceId);
       const candidates = await this.listWorktreeCleanup(workspaceId);
-      const owners = new Set(items.filter((item) => !["closed", "cancelled"].includes(item.status)).map((item) => item.run.sessionId));
+      const owners = new Set(items.filter((item) => !["closed", "cancelled"].includes(item.status) || item.run.pendingMessageId || item.run.activeTurnId).map((item) => item.run.sessionId));
       for (const sessionId of owners) if (sessionId) this.releasedWorkers.delete(sessionId);
       for (const item of items) {
         const sessionId = item.run.sessionId;
@@ -2546,7 +2584,7 @@ export class WorkbenchService {
       const retained: Array<{ workItemId?: string; worktreePath: string; reason: string }> = [];
       for (const candidate of await this.listWorktreeCleanup(workspaceId)) {
         const items = await this.listWorkItems(workspaceId);
-        const reused = items.some((item) => !["closed", "cancelled"].includes(item.status) &&
+        const reused = items.some((item) => (!["closed", "cancelled"].includes(item.status) || item.run.pendingMessageId || item.run.activeTurnId) &&
           ((candidate.sessionId && item.run.sessionId === candidate.sessionId) || item.run.branch === candidate.branch ||
             (item.run.worktreePath && this.sameWorktreePath(item.run.worktreePath, candidate.worktreePath))));
         let reason = reused ? "owned" :
