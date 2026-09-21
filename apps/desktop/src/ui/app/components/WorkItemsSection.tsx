@@ -43,7 +43,7 @@ const WorkRequestRow = ({ entry, sourceTitle, open, onToggle, busy, onOpenSessio
       title={<span title={title}>{title}</span>} onClick={items.length ? onToggle : undefined} expanded={items.length ? open : undefined}
       titleClassName={finished ? "text-muted-foreground" : "text-strong"}
       meta={!finished && !items.length ? request.failure ?? request.waitReason : undefined}
-      columns={{ controls: true, info: <span title={new Date(entry.updatedAt).toLocaleString("zh-CN")}>{items.length} 工单 · {relativeTime(entry.updatedAt)}</span>,
+      columns={{ controls: true, info: <span title={new Date(entry.updatedAt).toLocaleString("zh-CN")}><span className="block">{items.length} 工单</span>{relativeTime(entry.updatedAt)}</span>,
         status: <Badge status={state.status} muted={finished}>{state.label}</Badge>,
         hoverAction: !finished && <IconButton icon={X} size={12} label={"取消工作：" + title} disabled={busy} onClick={() => action("work.cancel")} />,
         action: request.workerSessionId && <SessionLink sessionId={request.workerSessionId} onOpenSession={onOpenSession} />,
@@ -67,7 +67,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, onOpenSessio
   const open = isOpenWorkItem(item);
   const state = currentWorkStatus(item);
   const label = workItemBoardLabel(item, progress.shortLabel);
-  const meta = open ? waitingFor.length ? "等待 " + waitingFor.join("、") : progress.reason ?? item.run.waitReason : undefined;
+  const meta = open && state.kind !== "paused" ? waitingFor.length ? "等待 " + waitingFor.join("、") : progress.reason ?? item.run.waitReason : undefined;
   const paused = item.run.pauseReason === "user" || item.run.control === "paused";
   const manual = item.run.control === "manual" && !paused;
   const retryable = item.status === "decision" && !paused && Boolean(item.run.waitReason?.includes("故障") || item.run.waitReason?.includes("工作受阻") || item.run.waitReason?.includes("次数"));

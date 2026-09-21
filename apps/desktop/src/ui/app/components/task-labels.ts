@@ -20,7 +20,7 @@ export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { la
   if (open.length) {
     if (open.some((item) => item.run.activeTurnId)) return { label: "执行中", status: "running" };
     if (open.every((item) => item.run.control === "paused" || item.run.pauseReason === "user")) return { label: "已暂停", status: "decision" };
-    if (open.some((item) => item.status === "decision")) return { label: "等待用户", status: "decision" };
+    if (open.some((item) => item.status === "decision" && item.run.control !== "paused" && item.run.pauseReason !== "user")) return { label: "等待用户", status: "decision" };
     if (open.some((item) => item.run.lastFailure || item.run.retryAt)) return { label: "已中断", status: "decision" };
     if (open.some((item) => item.run.control === "manual")) return { label: "人工接管", status: "decision" };
     return { label: "等待推进", status: "queued" };

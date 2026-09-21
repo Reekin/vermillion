@@ -67,6 +67,7 @@ describe("work board projection", () => {
     expect(workRequestStatus(r, [cancelled])).toEqual({ label: "已取消", status: "cancelled" });
     expect(workRequestStatus(r, [done, cancelled])).toEqual({ label: "部分完成", status: "closed" });
     expect(workRequestStatus(r, [{ ...done, status: "queued", run: { attempts: 0, control: "paused" } }]).label).toBe("已暂停");
+    expect(workRequestStatus(r, [{ ...done, status: "decision", run: { attempts: 0, control: "paused", pauseReason: "user" } }, item("queued", "queued", 4)]).label).toBe("等待推进");
     expect(workRequestStatus(request("prep", "preparing", 2), []).status).not.toBe("running");
   });
 
