@@ -68,16 +68,16 @@ it("routes generic steer through the session port and returns its delivery mode"
   services.push(service);
   const client = createWorkbenchClient({ request: createWorkbenchRpcHandler(service), onEvent: () => () => {} });
 
-  await expect(client.request("steer", { sessionId: "active", content: "Continue the current turn." })).resolves.toEqual({
+  await expect(client.request("steer", { sessionId: "active", content: "Continue the current turn." })).resolves.toMatchObject({
     sessionId: "active",
     turnId: "active-turn",
     delivery: "steered"
   });
-  await expect(client.request("steer", { sessionId: "idle", content: "Start a new turn." })).resolves.toEqual({
+  await expect(client.request("steer", { sessionId: "idle", content: "Start a new turn." })).resolves.toMatchObject({
     sessionId: "idle",
     turnId: "started-turn",
     delivery: "started"
   });
-  expect(sessionSteerer).toHaveBeenNthCalledWith(1, { sessionId: "active", content: "Continue the current turn." });
-  expect(sessionSteerer).toHaveBeenNthCalledWith(2, { sessionId: "idle", content: "Start a new turn." });
+  expect(sessionSteerer).toHaveBeenNthCalledWith(1, expect.objectContaining({ sessionId: "active", content: "Continue the current turn.", messageId: expect.any(String) }));
+  expect(sessionSteerer).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: "idle", content: "Start a new turn.", messageId: expect.any(String) }));
 });

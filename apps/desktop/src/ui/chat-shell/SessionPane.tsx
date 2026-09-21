@@ -130,7 +130,7 @@ export type SessionPaneProps = {
   onComposerChange?: (actions: ComposerActions | undefined) => void;
   /** Records preparation cancellation or a Worker pause before the shared session Stop command interrupts its turn. */
   onBeforeStop?: (sessionId: string) => Promise<"cancelled" | void>;
-  onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
+  onViewChange?: (view: { sessionId?: string; turnId?: string; canContinueFrom?: boolean }) => void;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
 };
@@ -790,7 +790,9 @@ export const SessionPane = ({
     store, visibleTurnIds, activeChatTree ? undefined : viewSessionId
   );
   const domain = store.getDomainReadModel();
-  const viewTurnId = activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId)?.turnId;
+  const viewNode = activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId);
+  const viewTurnId = viewNode?.turnId;
+  const canContinueFrom = Boolean(viewTurnId && viewNode?.status && viewNode.status !== "pending");
   const [windowVisible, setWindowVisible] = useState(() => typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus());
   useEffect(() => {
     const update = () => setWindowVisible(document.visibilityState === "visible" && document.hasFocus());
@@ -817,8 +819,8 @@ export const SessionPane = ({
     });
   }, [readNodeId, unreadVisibleKey, isVisible, windowVisible, sessionId, transport, setStatusNotice]);
   useEffect(() => {
-    onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId });
-  }, [onViewChange, viewSessionId, viewTurnId]);
+    onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId, canContinueFrom });
+  }, [onViewChange, viewSessionId, viewTurnId, canContinueFrom]);
 
   const { session: displayedSession, goal: activeThreadGoal } = useRendererSessionSelection(
     store, viewSessionId, () => ({
@@ -1173,7 +1175,7 @@ export const SessionPane = ({
       <div className="awb-session-pane">
         <header className="awb-main__header">
           <div>
-            <h2>
+            <h2 title={displayedSession?.title}>
               {sessionId ? truncateSessionHeading(displayedSession?.title) : "新会话"}
             </h2>
           </div>

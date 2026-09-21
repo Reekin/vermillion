@@ -21,6 +21,8 @@ import { SettingsPage } from "./components/SettingsPage.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
+import { continueWorkFrom } from "./continue-work-from.js";
+import { currentWorkContext, decisionsForWork } from "./current-work-context.js";
 import { Button, Field, InlineNotice, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
@@ -69,19 +71,16 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
-  const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
+  const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string; canContinueFrom?: boolean }>({});
   const workSessionId = workTarget.sessionId ?? sessionId;
   const discussionIssue = store((s) => s.view?.issues.find((issue) => issue.discussionSessionId === sessionId));
-  const currentWorkRequest = store((s) => s.view?.workRequests.find((request) => {
-    if (!workSessionId) return false;
-    const hasOpenItems = s.view?.workItems.some((item) => item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
-    return (request.workerSessionId === workSessionId || (!request.workerSessionId && request.sourceSessionId === workSessionId && request.status === "pending")) &&
-      (request.status !== "ready" || hasOpenItems);
-  }));
-  const currentWorkItem = store((s) => workSessionId ? s.view?.workItems.find((item) => item.run.sessionId === workSessionId && !["closed", "cancelled"].includes(item.status))
-    ?? s.view?.workItems.filter((item) => item.run.sessionId === workSessionId).at(-1) : undefined);
+  const workItems = store((s) => s.view?.workItems);
+  const workRequests = store((s) => s.view?.workRequests);
+  const workContext = useMemo(() => currentWorkContext(workItems ?? [], workRequests ?? [], workSessionId), [workItems, workRequests, workSessionId]);
+  const { item: currentWorkItem, request: currentWorkRequest, transferredSessionId } = workContext;
   const decisions = store((s) => s.view?.decisions);
-  const currentDecisions = (decisions ?? []).filter((card) => workSessionId && !card.answer && !card.withdrawn && card.sessionId === workSessionId);
+  const actions = store((s) => s.view?.actions);
+  const currentDecisions = useMemo(() => decisionsForWork(decisions ?? [], actions ?? [], workContext, workSessionId), [decisions, actions, workContext, workSessionId]);
   const [decisionMode, setDecisionMode] = useState<{ sessionId?: string; decisionId?: string; ordinary: boolean }>({ ordinary: false });
   const currentDecision = currentDecisions.find((card) => card.decisionId === decisionMode.decisionId) ?? (currentDecisions.length === 1 ? currentDecisions[0] : undefined);
   const answeringDecision = Boolean(currentDecision && !(decisionMode.sessionId === workSessionId && decisionMode.ordinary));
@@ -91,6 +90,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [sessionEntry, setSessionEntry] = useState<{ focusTree?: boolean; turnId?: string }>();
   const [navigationError, setNavigationError] = useState<string>();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [docsExplorerOpen, setDocsExplorerOpen] = useState(false);
   const [searchWorkItemTarget, setSearchWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
     setWorkTarget({});
@@ -284,8 +284,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} />
-            <div className={section === "sessions" ? "flex min-h-0 flex-1" : "hidden"}>
+            <div className="flex min-w-0 shrink-0 items-center">
+              <div className="min-w-0 flex-1"><Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} /></div>
+              {section === "sessions" && <Button className="vm-docs-toggle" size="sm" variant="ghost" aria-expanded={docsExplorerOpen} onClick={() => setDocsExplorerOpen((open) => !open)}>文档栏</Button>}
+            </div>
+            <div className={section === "sessions" ? "vm-conversation-layout" : "hidden"}>
               <main className="relative min-w-0 flex-1">
                 <SessionPane
                   isVisible={panel === "workbench" && section === "sessions" && !overlay}
@@ -296,7 +299,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   reloadSignal={reloadSignal}
                   createSession={createSession}
                   initializeDraftExecution={initializeDraftExecution}
-                  onBeforeStop={sessionWorkspaceId ? async (workerSessionId) => {
+                  onBeforeStop={sessionWorkspaceId && (currentWorkItem || currentWorkRequest) ? async (workerSessionId) => {
                     const preparation = store.getState().view?.workRequests.find((request) => request.workerSessionId === workerSessionId && ["pending", "preparing"].includes(request.status));
                     if (preparation) {
                       await store.getState().client.request("work.pause", { workspaceId: sessionWorkspaceId, requestId: preparation.requestId });
@@ -315,10 +318,19 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   renderImageContextMenu={({ onCopy, ...props }) => <ContextMenu {...props} zIndex={1001}
                     items={[{ key: "copy-image", label: "复制图片", onSelect: onCopy }]} />}
                   renderFileLinkContextMenu={renderFileLinkContextMenu}
-                  composerHeader={currentWorkRequest || currentWorkItem || currentDecisions.length > 0 ? <>
+                  composerHeader={currentWorkRequest || currentWorkItem || transferredSessionId || currentDecisions.length > 0 ? <>
+                    {!currentWorkItem && !currentWorkRequest && transferredSessionId && sessionWorkspaceId && <section className="vm-current-work" aria-label="已转移的工作">
+                      <span className="text-caption text-muted-foreground">已转移到其他分支</span>
+                      <Button size="sm" variant="ghost" outlined onClick={() => void openSessionTarget(sessionWorkspaceId, transferredSessionId)}>前往当前执行</Button>
+                    </section>}
                     {sessionWorkspaceId && <CurrentWorkBar key={currentWorkItem?.workItemId ?? currentWorkRequest?.requestId ?? workSessionId} client={store.getState().client} workspaceId={sessionWorkspaceId}
                       sourceTitle={sidebar.findSession(currentWorkRequest?.sourceSessionId ?? workSessionId ?? "")?.title ?? openSession?.title}
                       request={currentWorkRequest} item={currentWorkItem} hasDecision={currentDecisions.length > 0}
+                      onOpenRelatedWorkItem={(workItemId) => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: workItemId })}
+                      onContinueFrom={(currentWorkItem || currentWorkRequest) && workTarget.canContinueFrom && workTarget.turnId && workSessionId && (!composerActions?.hasContent || composerActions.canSubmit)
+                        ? (target) => continueWorkFrom({ client: store.getState().client, transport, composer: composerActions,
+                          workspaceId: sessionWorkspaceId, target, sessionId: workSessionId,
+                          turnId: workTarget.turnId!, open: openSessionTarget }) : undefined}
                       onOpenWorkItem={currentWorkItem ? () => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: currentWorkItem.workItemId }) : undefined} />}
                     {currentDecisions.length > 0 && <section className="vm-decision-context" aria-label="决策回复">
                       {currentDecisions.length > 1 ? <Field kind="select" aria-label="选择待回复决策" compact value={currentDecision?.decisionId ?? ""}
@@ -345,7 +357,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   </>}
                 />
               </main>
-              <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="文档">
+              <aside className="vm-conversation-docs border-l border-border-strong bg-app-shell" data-open={docsExplorerOpen} aria-label="文档">
+                <div className="vm-docs-close"><Button size="sm" variant="ghost" onClick={() => setDocsExplorerOpen(false)}>收起文档栏</Button></div>
                 <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
                   <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
                     const workspaceId = sessionId ? sessionWorkspaceId : draftWorkspaceId;

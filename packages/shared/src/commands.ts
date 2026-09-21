@@ -116,6 +116,8 @@ const zSteerTurnCommand = z.object({
   messageId: zMessageId,
   content: z.string(),
   attachments: z.array(zAttachmentSchema).default([]),
+  /** False when admission permits only joining an existing turn. */
+  allowStart: z.boolean().optional(),
   cwd: z.string().min(1).optional(),
   developerInstructions: z.string().min(1).optional(),
   deliveredDeveloperInstructions: z.string().optional()

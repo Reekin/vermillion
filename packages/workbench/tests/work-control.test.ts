@@ -22,10 +22,10 @@ it("requires explicit preparation handoff before releasing prepared items", asyn
     const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "turn" });
     await f.service.putWorkRequest(f.workspaceId, { ...request, status: "preparing", workerSessionId: "prep", treeId: "tree" });
     const item = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "prep" });
-    await f.service.finishPreparation(f.workspaceId, "prep", "prep-turn", false);
+    await f.service.finishPreparation(f.workspaceId, "prep", "prep-turn");
     expect(await f.service.getWorkItem(f.workspaceId, item.workItemId)).toMatchObject({ status: "preparing" });
     await f.service.completePreparation(f.workspaceId, { requestId: request.requestId, sessionId: "prep", workItemIds: [item.workItemId] });
-    await f.service.finishPreparation(f.workspaceId, "prep", "prep-turn", false);
+    await f.service.finishPreparation(f.workspaceId, "prep", "prep-turn");
     expect(await f.service.getWorkItem(f.workspaceId, item.workItemId)).toMatchObject({ status: "queued" });
     expect(await f.service.listWorkRequests(f.workspaceId)).toEqual([expect.objectContaining({ status: "ready", handoff: expect.any(Object) })]);
   } finally { await f.cleanup(); }
@@ -53,7 +53,7 @@ it("turns a queued retry into manual execution and clears the old retry deadline
     const action = (await f.service.listActions(f.workspaceId))[0]!;
     await f.service.failAction(f.workspaceId, action.actionId, "temporary runtime failure");
     expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.retryAt).toEqual(expect.any(String));
-    await f.service.adoptManualTurn("worker", "user-turn");
+    await f.service.dispatchSessionMessage({ sessionId: "worker", messageId: "manual", content: "continue" }, async () => ({ accepted: true, turnId: "user-turn" }));
     const current = await f.service.getWorkItem(f.workspaceId, item.workItemId);
     expect(current).toMatchObject({ status: "running", run: { control: "manual", activeTurnId: "user-turn" } });
     expect(current.run.retryAt).toBeUndefined();
@@ -97,7 +97,8 @@ it("delivers a business decision directly through a manually owned session", asy
   try {
     const item = await service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
     await service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
-    await service.adoptManualTurn("worker", "manual-turn");
+    await service.dispatchSessionMessage({ sessionId: "worker", messageId: "manual", content: "continue" }, async () => ({ accepted: true, turnId: "manual-turn" }));
+    await service.settleManualTurn("worker", "manual-turn");
     const action = (await service.listActions(f.workspaceId))[0]!;
     const card = await service.createDecision(f.workspaceId, { workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker", kind: "worker",
       question: "Continue?", context: "A business choice is required.", options: [{ key: "go", label: "Continue" }] });

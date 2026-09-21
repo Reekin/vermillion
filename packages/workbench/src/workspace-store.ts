@@ -149,6 +149,10 @@ export class WorkspaceStore {
     return transactCollection(join(this.stateDir, "issues", id), this.issues, id, update);
   }
 
+  async transactWorkRequest<T>(id: string, update: (record: WorkRequest | undefined) => { record: WorkRequest; result: T }): Promise<T> {
+    return transactCollection(join(this.stateDir, "work-requests", id), this.workRequests, id, update);
+  }
+
   async transactDomainConfig<T>(id: string, update: (record: DomainConfig | undefined) => { record: DomainConfig; result: T }): Promise<T> {
     return transactCollection(join(this.stateDir, "domains", id), this.domainConfigs, id, update);
   }
@@ -160,7 +164,7 @@ export class WorkspaceStore {
   constructor(rootPath: string) {
     this.rootPath = rootPath;
     this.stateDir = join(rootPath, STATE_DIR);
-    this.workRequests = createCollection(join(this.stateDir, "work-requests"), zWorkRequest, "requestId");
+    this.workRequests = createCollection(join(this.stateDir, "work-requests"), zWorkRequest.omit({ turnStatus: true }), "requestId");
     this.records = createCollection(join(this.stateDir, "workitems"), zWorkItemRecord, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
     this.issues = createCollection(join(this.stateDir, "issues"), zIssue, "issueId");

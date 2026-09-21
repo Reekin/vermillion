@@ -1077,6 +1077,10 @@ export const useComposerController = (
           content,
           attachments
         });
+        if (receipt.queued) {
+          input.onStatusNotice({ message: `等待发送：${receipt.queued.reason}`, source: "send" });
+          return true;
+        }
         if (!receipt.accepted) {
           throw new Error("The current runtime does not accept steer requests.");
         }
@@ -1087,6 +1091,10 @@ export const useComposerController = (
           attachments,
           execution: payload.execution
         });
+        if (receipt.queued) {
+          input.onStatusNotice({ message: `等待发送：${receipt.queued.reason}`, source: "send" });
+          return true;
+        }
         if (!receipt.accepted) {
           throw new Error("The current runtime rejected the send request.");
         }

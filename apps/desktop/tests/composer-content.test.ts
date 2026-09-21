@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatSession } from "@vermillion/shared";
+import type { ChatSession, RuntimeCommandReceiptRpc } from "@vermillion/shared";
 import { useComposerController } from "../src/ui/chat-shell/use-composer-controller.js";
 
 // The desktop suite runs in Node. This hook runner retains state and runs effects
@@ -59,8 +59,8 @@ const session = (sessionId: string, status: ChatSession["status"] = "idle"): Cha
 });
 
 const setup = (overrides: Partial<Input> = {}) => {
-  const send = vi.fn(async () => ({ accepted: true }));
-  const steer = vi.fn(async () => ({ accepted: true }));
+  const send = vi.fn(async (): Promise<RuntimeCommandReceiptRpc> => ({ accepted: true }));
+  const steer = vi.fn(async (): Promise<RuntimeCommandReceiptRpc> => ({ accepted: true }));
   let input: Input = {
     transport: {
       chat: { send, steer, getCapabilities: async () => ({ supportsSteer: false, supportsAttachments: true, slashSuggestions: [] }) },
@@ -256,6 +256,22 @@ describe("composer content lifetime", () => {
     c = h.render({ contentDraftKey: "tree-b", draftKey: "b:node-1", activeSessionId: "b",
       activeSession: session("b") });
     expect(c.draft).toBe("tree b");
+  });
+
+  it("clears a server-retained message without reporting engine acceptance", async () => {
+    const notice = vi.fn();
+    const h = setup({ onStatusNotice: notice });
+    let c = await h.flush();
+    c.onDraftChange("wait for the dependency");
+    c.onComposerDrop({ preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] } } as Parameters<typeof c.onComposerDrop>[0]);
+    c = await h.flush();
+    h.send.mockResolvedValueOnce({ accepted: false, queued: { messageId: "pending-1", reason: "等待前置工单", workItemId: "predecessor" } });
+    await c.onPrimaryAction();
+    expect(h.render().draft).toBe("");
+    expect(h.render().attachments).toEqual([]);
+    expect(h.send).toHaveBeenCalledOnce();
+    expect(h.send).toHaveBeenCalledWith(expect.objectContaining({ attachments: [attachment.attachment] }));
+    expect(notice).toHaveBeenLastCalledWith({ message: "等待发送：等待前置工单", source: "send" });
   });
 
   it("clears only the submitted tree after an asynchronous send", async () => {

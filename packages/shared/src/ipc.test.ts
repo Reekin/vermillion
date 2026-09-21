@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { parseSessionRpcRequest, safeParseSessionRpcResponse } from "./ipc.js";
+import { parseCommandEnvelope } from "./commands.js";
 
 describe("IPC schemas", () => {
+  it("preserves a steer-only admission grant through command validation", () => {
+    const input = parseCommandEnvelope({ commandId: "append", command: {
+      type: "steerTurn", sessionId: "worker", turnId: "old", messageId: "input", content: "continue", allowStart: false
+    } });
+    expect(input.command).toMatchObject({ type: "steerTurn", allowStart: false });
+  });
+
+  it("preserves pending delivery without reporting engine acceptance", () => {
+    const response = safeParseSessionRpcResponse({
+      id: "request-send", method: "runtime.command", ok: true,
+      result: {
+        commandId: "command-send", commandType: "sendUserMessage", sessionId: "worker", accepted: false,
+        queued: { messageId: "message-pending", reason: "等待前置工单", workItemId: "work-item" }
+      }
+    });
+    expect(response.success).toBe(true);
+    if (response.success) expect(response.data).toMatchObject({
+      result: { accepted: false, queued: { messageId: "message-pending", reason: "等待前置工单" } }
+    });
+  });
+
   it("parses session browser snapshots without transcript metadata", () => {
     const request = parseSessionRpcRequest({
       id: "req-roots",

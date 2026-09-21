@@ -491,6 +491,31 @@ describe("SessionShellService", () => {
     });
   });
 
+  it("applies execution admission before loading or sending a bound session", async () => {
+    const executeCommand = vi.fn();
+    const ensureSessionLoaded = vi.fn();
+    const service = new SessionShellService({
+      runtimeService: { executeCommand } as never,
+      sessionCatalog: {} as never,
+      sessionActions: {} as never,
+      chatTreeProvider: {} as never,
+      sessionReconciliation: { ensureSessionLoaded } as never
+    });
+    service.setCommandDispatch(async (input) => ({
+      commandId: input.commandId,
+      commandType: input.command.type,
+      accepted: false,
+      queued: { messageId: "message-1", reason: "等待前置工单", workItemId: "blocked-item" }
+    }));
+    const receipt = await service.executeCommand({
+      commandId: "blocked-command",
+      command: { type: "sendUserMessage", sessionId: "worker", messageId: "message-1", content: "继续", attachments: [] }
+    });
+    expect(receipt).toMatchObject({ accepted: false, queued: { reason: "等待前置工单" } });
+    expect(ensureSessionLoaded).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
   it("allows plain send from a partially hydrated session when full hydration is unavailable", async () => {
     const executeCommand = vi.fn().mockResolvedValue({
       commandId: "cmd-send",
@@ -523,6 +548,9 @@ describe("SessionShellService", () => {
       }
     ).partiallyHydratedSessionIds.add("session-1");
 
+    const admission = vi.fn(async (input, send) => send(input));
+    service.setCommandDispatch(admission);
+
     await expect(
       service.executeCommand({
         commandId: "cmd-send",
@@ -543,6 +571,7 @@ describe("SessionShellService", () => {
       force: true
     });
     expect(executeCommand).toHaveBeenCalledTimes(1);
+    expect(admission).toHaveBeenCalledTimes(1);
   });
 
   it("blocks stateful non-send commands when a partial session cannot be fully hydrated", async () => {

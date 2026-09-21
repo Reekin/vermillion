@@ -1400,6 +1400,11 @@ const zRuntimeCommandResponseSchema = z.object({
     commandId: zRequestId,
     commandType: zSessionCommandType,
     accepted: z.boolean().default(true),
+    queued: z.object({
+      messageId: z.string(),
+      reason: z.string(),
+      workItemId: z.string().optional()
+    }).optional(),
     error: z.object({
       code: z.string(),
       message: z.string(),

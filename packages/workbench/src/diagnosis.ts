@@ -36,29 +36,32 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
   const actions = related.filter(actionIsOpen);
   const decisions = cards.filter((c) => !c.answer && !c.withdrawn && (c.workItemId === workItemId || actions.some((a) => a.actionId === c.actionId)));
   const dependencies = item.dependsOn.map((id) => ({ workItemId: id, status: items.find((i) => i.workItemId === id)?.status ?? "missing" }));
-  const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => (a.kind === "integration" && !a.agent) || ["retry", "decision"].includes(a.status) || (a.kind === "execute" && a.control === "manual"))
+  const blockers: z.infer<typeof zDiagnosis>["blockers"] = actions.filter((a) => (a.kind === "integration" && !a.agent) || ["retry", "decision"].includes(a.status) || (a.kind === "execute" && (a.control === "manual" || a.control === "paused")))
     .map((a) => ({ reason: isUserPaused(a) ? "用户已暂停 Worker" : a.kind === "execute" && a.control === "manual" ? a.waitReason ?? "人工接管当前执行" : a.failure ?? actionNote(a), role: a.kind === "execute" ? "worker" : "workbench", sessionId: a.kind === "execute" ? a.sessionId : undefined, actionId: a.actionId, next: nextFor(a) }));
   for (const dependency of dependencies.filter((d) => d.status !== "closed"))
     blockers.push({ reason: `前置 ${dependency.workItemId}: ${dependency.status}`, role: dependency.status === "cancelled" ? "worker" : "workbench", next: dependency.status === "cancelled" ? "用户调整依赖或取消。" : "等待前置关闭。" });
   for (const card of decisions) blockers.push({ reason: card.question, role: "user", sessionId: card.sessionId, actionId: card.actionId, next: "用户答复 decision.answer。" });
-  const running = items.filter((i) => i.workItemId !== workItemId && i.status === "running");
+  const occupancy = await service.getExecutionOccupancy(workspaceId);
+  const running = occupancy.workItems.filter((i) => i.workItemId !== workItemId);
   const resources = running.flatMap((i) => effectiveNeeds(i).filter((n) => effectiveNeeds(item).includes(n)).map((name) => ({ name, workItemId: i.workItemId, sessionId: i.run.sessionId })));
   const waiting = blockers.map((b) => b.reason);
+  if (item.run.turnStatus === "unknown") waiting.push("执行轮次状态等待确认");
   if (item.status === "preparing") waiting.push("等待开工准备轮完成工单与执行目录登记。");
   const unfinished = !["closed", "cancelled"].includes(item.status) || actions.length > 0;
   if (unfinished) {
     if (!online) waiting.push("桌面调度器不在线，等待启动；保存的记录尚未派发。");
     else if (!scheduler.enabled) waiting.push("调度开关关闭，等待启用。");
     if (item.status === "queued") {
-      if (running.length >= scheduler.maxWorkers) waiting.push(`等待 Worker 并发空位（${running.length}/${scheduler.maxWorkers}）。`);
+      const occupied = occupancy.sessionIds.filter((sessionId) => sessionId !== item.run.sessionId).length;
+      if (occupied >= scheduler.maxWorkers) waiting.push(`等待 Worker 并发空位（${occupied}/${scheduler.maxWorkers}）。`);
       if (resources.length) waiting.push("等待共享资源释放：" + resources.map((r) => r.name).join("、"));
       if (!waiting.length) waiting.push("等待调度器接手排队动作。");
     }
   }
   const availableActions = [{ method: "workItem.diagnose", condition: "随时查询当前状态。" }];
-  if (item.run.pendingMessageId) availableActions.push({ method: "workItem.confirm", condition: "核对引擎实际消息/轮次后再继续。" });
+  if (item.run.pendingMessageId || item.run.activeTurnId) availableActions.push({ method: "workItem.confirm", condition: "核对引擎实际消息/轮次后再继续。" });
   if (decisions.length) availableActions.push({ method: "decision.answer", condition: "获得用户实际答复后选择重试、取消或给出具体说明。" });
-  if (item.run.pauseReason === "user") availableActions.push({ method: "workItem.resume", condition: "确认继续执行时，从原会话恢复。" });
+  if (item.run.control === "paused") availableActions.push({ method: "workItem.resume", condition: "确认继续执行时，从原会话恢复。" });
   if (item.run.control === "manual") availableActions.push({ method: "workItem.retry", condition: "明确恢复自动推进并从当前成果继续。" });
   if (!["closed", "cancelled"].includes(item.status)) availableActions.push({ method: "workItem.update", condition: "调整合同或 dependsOn；并在 note 说明修改。" }, { method: "workItem.cancel", condition: "取消当前工作。" });
   const integration = related.find((action): action is Extract<WorkflowAction, { kind: "integration" }> => action.kind === "integration" && action.stage === "merge" && actionIsOpen(action));
@@ -67,7 +70,7 @@ export async function diagnose(service: WorkbenchService, workspaceId: string, w
   }
   for (const ref of invalidRefs) waiting.push(`引用定位失效：${ref.path}${ref.section ? "#" + ref.section : ""}（${ref.reason}）`);
   return { workItemId, phase: item.status, sessionId: item.run.sessionId, actions, blockers, dependencies, decisions, invalidRefs,
-    scheduler: { ...scheduler, online, running: items.filter((entry) => entry.status === "running").length }, resources, waiting, availableActions,
+    scheduler: { ...scheduler, online, running: occupancy.sessionIds.length }, resources, waiting, availableActions,
     lastFailure: related.filter((a) => a.failure).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0],
     nextRetryAt: actions.flatMap((a) => a.retryAt ? [a.retryAt] : []).sort()[0] };
 }

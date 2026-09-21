@@ -1280,15 +1280,21 @@ export class CodexAppServerRuntimePort
             }
           };
         }
-      case "turn/steer":
+      case "turn/steer": {
+        const result = await this.handleTurnSteer(payload, options);
+        if (!result) return {
+          id: payload.id, ok: false,
+          error: { code: "execution_readmission_required", message: "当前轮次已变化，需要重新检查执行条件" }
+        };
         return {
           id: payload.id,
           ok: true,
           result: {
             accepted: true,
-            ...await this.handleTurnSteer(payload, options)
+            ...result
           }
         };
+      }
       case "turn/interrupt":
         await this.handleTurnInterrupt(payload, options);
         return {
@@ -2049,7 +2055,7 @@ export class CodexAppServerRuntimePort
   private async handleTurnSteer(
     payload: CodexRuntimeRequest,
     options: RuntimeOperationOptions
-  ): Promise<{ sessionId: string; turnId: string; delivery: "steered" | "start_or_steer" }> {
+  ): Promise<{ sessionId: string; turnId: string; delivery: "steered" | "start_or_steer" } | undefined> {
     const sessionId = String(payload.params.sessionId ?? "");
     const expectedTurnId = String(payload.params.turnId ?? "");
     const content = String(payload.params.content ?? "");
@@ -2076,6 +2082,7 @@ export class CodexAppServerRuntimePort
     // Only a provider precondition rejection proves this input was not delivered.
     // Retry a changed turn once; repeated handoffs must not create an unbounded loop.
     for (let attempt = 0; ; attempt++) {
+      const observedActive = this.activeTurnByThreadId.get(threadId);
       try {
         const steerParams: Record<string, unknown> = {
           threadId,
@@ -2095,6 +2102,11 @@ export class CodexAppServerRuntimePort
           continue;
         }
         if (error.message !== "no active turn to steer") throw error;
+        const currentActive = this.activeTurnByThreadId.get(threadId);
+        if (currentActive?.turnId === observedActive?.turnId && currentActive?.sessionId === observedActive?.sessionId) {
+          this.activeTurnByThreadId.delete(threadId);
+        }
+        if (payload.params.allowStart === false) return undefined;
         // Native turn/start is StartOrSteer: a concurrent new turn receives the
         // input atomically. Its response does not distinguish start from steer.
         const started = await this.handleTurnStart(payload, options, false, false);

@@ -144,7 +144,7 @@
 .vm-checkbox > input:checked::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 7px; border-right: 1.5px solid var(--color-surface); border-bottom: 1.5px solid var(--color-surface); transform: rotate(45deg); }
 .vm-checkbox > input:indeterminate::after { content: ""; position: absolute; inset: 3px; background: var(--color-surface); }
 .vm-checkbox:has(> input:disabled) { opacity: 0.5; }
-.vm-tabs { display: flex; align-items: center; gap: 2px; padding-inline: 10px; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
+.vm-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; padding-inline: 10px; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
 .vm-tabs > button { font-weight: 500; margin-bottom: -1px; padding: 10px 8px; border-bottom: 1px solid transparent; font-size: var(--text-label); color: var(--color-muted-foreground); white-space: nowrap; }
 .vm-tabs > button:hover { color: var(--color-foreground); }
 .vm-tabs > button[aria-current="page"] { border-bottom-color: var(--color-accent-strong); color: var(--color-strong); }
@@ -273,3 +273,13 @@
 
 /* The session list holds its own anchor while rows reorder; the browser's anchor is dropped when nodes move. */
 .vm-session-list { overflow-anchor: none; }
+
+.vm-conversation-layout { position: relative; display: flex; flex: 1; min-height: 0; }
+.vm-conversation-docs { display: flex; flex-direction: column; width: 336px; flex-shrink: 0; min-height: 0; }
+.vm-docs-toggle, .vm-docs-close { display: none; }
+@media (max-width: 1100px) {
+  .vm-docs-toggle { display: inline-flex; margin-inline: 8px; }
+  .vm-docs-close { display: flex; justify-content: flex-end; padding: 4px 8px; }
+  .vm-conversation-docs { position: absolute; inset: 0 0 0 auto; z-index: 20; width: min(336px, 100%); @apply floating-shadow; }
+  .vm-conversation-docs[data-open="false"] { display: none; }
+}

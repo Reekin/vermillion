@@ -1,4 +1,4 @@
-import type { createSessionRuntimeService } from "@vermillion/desktop-server";
+import { sessionItemId, type createSessionRuntimeService } from "@vermillion/desktop-server";
 import type { AgentRunner, RoleExecutionOverrides, SessionSteerResult, SourceAsker } from "@vermillion/workbench";
 import { mergeSessionExecutionProfile, resolveEngineExecutionPreference, writeSessionExecutionProfile } from "@vermillion/shared";
 
@@ -67,7 +67,11 @@ export const createSessionSteerer = (shell: SessionShell) => async (target: stri
     ? { type: "steerTurn" as const, sessionId, turnId: activeTurnId, messageId: messageId ?? createId(), content, attachments: [] }
     : { type: "sendUserMessage" as const, sessionId, messageId: messageId ?? createId(), content, attachments: [] };
   const receipt = await shell.executeCommand({ commandId: createId(), command });
-  if (!receipt.accepted || !receipt.turnId) throw new Error("steer was not accepted for " + sessionId);
+  if (receipt.queued) return { sessionId, accepted: false, queued: receipt.queued };
+  if (!receipt.accepted || !receipt.turnId) return {
+    sessionId, accepted: false,
+    error: receipt.error ?? { code: "message_rejected", message: "引擎未接受本次消息" }
+  };
   return {
     sessionId,
     turnId: receipt.turnId,
@@ -235,7 +239,10 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
       command: { type: "sendUserMessage", sessionId, messageId, content,
         attachments: options?.attachments ?? [], execution: options?.execution }
     });
-    if (!receipt.accepted) throw new Error("sendUserMessage rejected for " + sessionId);
+    if (!receipt.accepted) return {
+      accepted: false, error: receipt.error, queued: receipt.queued, messageId,
+      turnId: receipt.turnId
+    };
     return { turnId: receipt.turnId, messageId };
   },
   steer: async (sessionId, content, messageId) => {
@@ -246,17 +253,20 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
       ? { type: "steerTurn" as const, sessionId, turnId, messageId: id, content, attachments: [] }
       : { type: "sendUserMessage" as const, sessionId, messageId: id, content, attachments: [] };
     const receipt = await shell.executeCommand({ commandId: createId(), command });
-    if (!receipt.accepted) throw new Error("steer rejected for " + sessionId);
+    if (!receipt.accepted) return {
+      accepted: false, error: receipt.error, queued: receipt.queued, messageId: id,
+      turnId: receipt.turnId
+    };
     return { turnId: receipt.turnId, messageId: id,
       delivery: receipt.delivery === "steered" ? "steered" as const : "started" as const };
   },
-  interrupt: async (sessionId) => {
-    const turn = shell
+  interrupt: async (sessionId, expectedTurnId) => {
+    const turnId = expectedTurnId ?? shell
       .getSnapshot()
       .turns.filter((t) => t.sessionId === sessionId && t.status !== "completed")
-      .at(-1);
-    if (!turn) return;
-    await shell.executeCommand({ commandId: createId(), command: { type: "interruptTurn", sessionId, turnId: turn.turnId } });
+      .at(-1)?.turnId;
+    if (!turnId) return;
+    await shell.executeCommand({ commandId: createId(), command: { type: "interruptTurn", sessionId, turnId } });
   },
   resume: async (sessionId, options) => {
     // Background recovery must not participate in the UI's cancellable session-opening sequence.
@@ -277,9 +287,23 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
   },
   isActive: (sessionId) => !!shell.getActiveTurnId(sessionId),
   getActiveTurnId: (sessionId) => shell.getActiveTurnId(sessionId),
+  inspectTurn: async (sessionId, turnId) => {
+    if (shell.getActiveTurnId(sessionId) === turnId) return { status: "active" };
+    if (!await shell.ensureSessionLoadedForRead(sessionId, { force: true })) return { status: "unknown" };
+    if (shell.getActiveTurnId(sessionId) === turnId) return { status: "active" };
+    const turn = shell.getSnapshot().turns.find((entry) => entry.sessionId === sessionId && entry.turnId === turnId);
+    if (turn?.status !== "completed" || !turn.finishReason) return { status: "unknown" };
+    return { status: "completed", finishReason: turn.finishReason };
+  },
   confirmMessage: async (sessionId, messageId) => {
-    if (!await shell.ensureSessionLoadedForRead(sessionId)) return { accepted: false };
-    const block = shell.getSnapshot().messageBlocks.find((entry) => entry.sessionId === sessionId && entry.messageId === messageId);
+    const canonicalId = sessionItemId(sessionId, messageId);
+    const findAcceptedMessage = () => shell.getSnapshot().messageBlocks.find((entry) =>
+      entry.sessionId === sessionId && entry.role === "user" && entry.messageId === canonicalId);
+    let block = findAcceptedMessage();
+    if (!block) {
+      if (!await shell.ensureSessionLoadedForRead(sessionId, { force: true })) return { accepted: false };
+      block = findAcceptedMessage();
+    }
     return block ? { accepted: true, turnId: block.turnId, active: shell.getActiveTurnId(sessionId) === block.turnId } : { accepted: false };
   },
   onTurnStarted: (listener) => shell.subscribe(({ event }) => {
