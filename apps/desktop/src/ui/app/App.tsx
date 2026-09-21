@@ -95,6 +95,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [sessionEntry, setSessionEntry] = useState<{ focusTree?: boolean; turnId?: string }>();
   const [navigationError, setNavigationError] = useState<string>();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [docsExplorerOpen, setDocsExplorerOpen] = useState(false);
   const [searchWorkItemTarget, setSearchWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
     setWorkTarget({});
@@ -288,8 +289,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} />
-            <div className={section === "sessions" ? "flex min-h-0 flex-1" : "hidden"}>
+            <div className="flex min-w-0 shrink-0 items-center">
+              <div className="min-w-0 flex-1"><Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} /></div>
+              {section === "sessions" && <Button className="vm-docs-toggle" size="sm" variant="ghost" aria-expanded={docsExplorerOpen} onClick={() => setDocsExplorerOpen((open) => !open)}>文档栏</Button>}
+            </div>
+            <div className={section === "sessions" ? "vm-conversation-layout" : "hidden"}>
               <main className="relative min-w-0 flex-1">
                 <SessionPane
                   isVisible={panel === "workbench" && section === "sessions" && !overlay}
@@ -358,7 +362,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   </>}
                 />
               </main>
-              <aside className="w-[336px] shrink-0 border-l border-border-strong bg-app-shell" aria-label="文档">
+              <aside className="vm-conversation-docs border-l border-border-strong bg-app-shell" data-open={docsExplorerOpen} aria-label="文档">
+                <div className="vm-docs-close"><Button size="sm" variant="ghost" onClick={() => setDocsExplorerOpen(false)}>收起文档栏</Button></div>
                 <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
                   <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
                     const workspaceId = sessionId ? sessionWorkspaceId : draftWorkspaceId;

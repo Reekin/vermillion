@@ -152,6 +152,7 @@ export const zRejection = z.object({ reason: z.string().min(1), at: z.string() }
 
 /** Read-only API projection of Execution; never stored on the work-item contract. */
 export const zRun = z.object({
+  turnStatus: z.enum(["active", "unknown"]).optional(),
   forkSessionId: z.string().optional(),
   forkTurnId: z.string().optional(),
   baseCommit: z.string().optional(),
@@ -245,8 +246,11 @@ export const zWorkMessage = z.object({
 export type WorkMessage = z.infer<typeof zWorkMessage>;
 
 export const zSessionDelivery = zWorkMessage.extend({
+  decisionId: z.string().optional(),
+  mode: z.enum(["start", "supplement"]).optional(),
+  targetTurnId: z.string().optional(),
   sessionId: z.string(), messageId: z.string(), origin: z.enum(["scheduler", "user"]),
-  state: z.enum(["queued", "sending", "accepted", "cancelled"]),
+  state: z.enum(["queued", "sending", "unknown", "rejected", "accepted", "cancelled"]),
   reason: z.string().optional(), workItemId: z.string().optional(), requestId: z.string().optional(),
   blockerWorkItemIds: z.array(z.string()).optional(),
   noticeCount: z.number().int().nonnegative().optional(),
@@ -255,6 +259,7 @@ export const zSessionDelivery = zWorkMessage.extend({
 export type SessionDelivery = z.infer<typeof zSessionDelivery>;
 
 export const zWorkRequest = z.object({
+  turnStatus: z.enum(["active", "unknown"]).optional(),
   continuationSummary: z.string().optional(),
   deliveries: z.array(zSessionDelivery).optional(),
   deliveryUncertain: z.boolean().optional(),
@@ -429,7 +434,7 @@ export const renderExecutionNotices = (notices: ExecutionNotice[]): string =>
 export const zExecution = zProcess.extend({
   continuationSummary: z.string().optional(),
   deliveries: z.array(zSessionDelivery).optional(),
-  ...zRun.omit({ resumeMessage: true, lastFailure: true, attempts: true, retryAt: true, pauseReason: true }).shape,
+  ...zRun.omit({ resumeMessage: true, lastFailure: true, attempts: true, retryAt: true, pauseReason: true, turnStatus: true }).shape,
   kind: z.literal("execute"),
   stage: z.enum(["open", "deliver", "execute"]),
   /** Git checkpoint being handled by this Worker execution. */

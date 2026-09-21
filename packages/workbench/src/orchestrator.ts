@@ -1,10 +1,11 @@
-import { effectiveNeeds, actionIsOpen, renderExecutionNotices, type AgentRun, type Execution, type PatrolRun, type WorkItem, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
+import { effectiveNeeds, actionIsOpen, renderExecutionNotices, type AgentRun, type Execution, type PatrolRun, type WorkMessage, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
-import type { SessionDispatchReceipt } from "./execution-control.js";
+import type { SessionDispatchReceipt, TurnInspector } from "./execution-control.js";
 
 /** What the orchestrator needs from the session engine. Implemented in Electron main over SessionShellService. */
 export type AgentRunner = {
+  inspectTurn?: TurnInspector;
   /** Resolves the session's latest turn; undefined means a verified empty session. */
   resolveSourceTurn?: (sessionId: string) => Promise<string | undefined>;
   fork: (input: { workspaceId: string; sourceSessionId: string; sourceTurnId: string; modelConfig?: RoleExecutionOverrides; title: string; metadata: Record<string, unknown> }) => Promise<{ sessionId: string; treeId?: string }>;
@@ -80,6 +81,7 @@ export class Orchestrator {
     this.disposed = false;
     this.disposers.push(this.service.setWorkerActiveChecker((sessionId) => this.runner.isActive?.(sessionId) ?? false));
     this.disposers.push(this.service.setWorkerSettlingChecker((sessionId) => !!this.settling.get(sessionId)));
+    if (this.runner.inspectTurn) this.disposers.push(this.service.setTurnInspector(this.runner.inspectTurn));
     this.disposers.push(this.service.setWorkerEnvironmentReleaser((sessionId) => this.runner.release(sessionId)));
     if (this.runner.resolveSourceTurn) this.disposers.push(this.service.setSourceTurnResolver(this.runner.resolveSourceTurn));
     this.disposers.push(this.service.registerScheduler());
@@ -181,7 +183,6 @@ export class Orchestrator {
     const bound = turn?.bound;
     const workspaces = await this.service.listWorkspaces();
     try {
-      await this.service.settleManualTurn(event.sessionId, event.turnId);
       const patrol = this.patrolsBySession.get(event.sessionId);
       if (patrol) {
         const run = await this.service.getPatrolRun(patrol.workspaceId, patrol.patrolRunId);
@@ -190,26 +191,16 @@ export class Orchestrator {
         this.patrolsBySession.delete(event.sessionId);
         await this.runner.release(event.sessionId);
       }
-      await Promise.all(workspaces.map(({ workspaceId }) => this.enqueue(workspaceId, async () => {
+      await Promise.all(workspaces.map(async ({ workspaceId }) => {
         await this.service.workerTurnCompleted(workspaceId, event.sessionId);
         if (bound?.workspaceId === workspaceId && turn && !turn.settled) {
-          await this.onTurn(bound, turn, event.finishReason, event.failure);
           turn.settled = true;
+          await this.onTurn(bound, turn, event.finishReason, event.failure);
           this.unsettledTurns.get(event.sessionId)?.delete(turn);
         }
-        if (this.preparing.get(event.sessionId) === workspaceId &&
-            (!turn?.turnId || turn.turnId === event.turnId) && this.turnsBySession.get(event.sessionId) === turn) {
-          this.preparing.delete(event.sessionId);
-          const request = (await this.service.listWorkRequests(workspaceId)).find((entry) => entry.workerSessionId === event.sessionId && entry.status === "preparing");
-          if (request && request.control === "paused")
-            await this.service.holdPreparation(workspaceId, request.requestId, request.waitReason ?? "用户已暂停当前准备");
-          else if (request && event.finishReason !== "completed")
-            await this.service.failWorkRequest(workspaceId, request.requestId, event.failure ?? "准备轮未完成，请核对当前准备进度并继续。");
-          else if (request && !request.handoff)
-            await this.service.preparationWithoutHandoff(workspaceId, request.requestId);
-          else await this.service.finishPreparation(workspaceId, event.sessionId, event.turnId);
-        }
-      })));
+        if (bound?.workspaceId !== workspaceId) await this.service.settleExecutionTurn(workspaceId, event.sessionId, event.turnId, event.finishReason, event.failure);
+        this.preparing.delete(event.sessionId);
+      }));
     } finally {
       if (turn && !bound) {
         turn.settled = true;
@@ -264,6 +255,7 @@ export class Orchestrator {
 
   private async reconcile(workspaceId: string): Promise<void> {
     if (this.disposed) return;
+    await this.service.reconcileExecutionTurns(workspaceId);
     await this.service.flushSessionMessages(workspaceId, async (message) => ({ accepted: true,
       ...await (this.runner.isActive?.(message.sessionId)
         ? this.runner.steer(message.sessionId, message.content, message.messageId)
@@ -302,9 +294,9 @@ export class Orchestrator {
       const item = items.find((i) => i.workItemId === action.workItemId);
       if (!item || !["queued", "running"].includes(item.status) || await this.service.isWorkItemBlocked(workspaceId, item.workItemId)) continue;
       if (action.control === "manual" || action.control === "paused") continue;
-      const running = items.filter((i) => i.status === "running" && i.workItemId !== item.workItemId);
-      const activePreparations = requests.filter((request) => request.status === "preparing" && request.control !== "paused" && request.workerSessionId && this.runner.isActive?.(request.workerSessionId)).length;
-      if (running.length + activePreparations >= scheduler.maxWorkers || running.some((i) => effectiveNeeds(i).some((need) => effectiveNeeds(item).includes(need)))) continue;
+      const occupancy = await this.service.getExecutionOccupancy(workspaceId);
+      const running = occupancy.workItems.filter((i) => i.workItemId !== item.workItemId);
+      if (occupancy.sessionIds.filter((sessionId) => sessionId !== action.sessionId).length >= scheduler.maxWorkers || running.some((i) => effectiveNeeds(i).some((need) => effectiveNeeds(item).includes(need)))) continue;
       await this.dispatch(workspaceId, action);
     }
     await this.scheduleRetry(workspaceId);
@@ -374,8 +366,10 @@ export class Orchestrator {
   }
 
   private async dispatch(workspaceId: string, initial: Execution): Promise<void> {
-    let action = initial;
+    let action = (await this.service.listActions(workspaceId)).find((entry): entry is Execution => entry.kind === "execute" && entry.actionId === initial.actionId) ?? initial;
     if (action.control && action.control !== "auto") return;
+    if (action.retryAt && action.retryAt > this.now()) return;
+    if (action.deliveries?.some((message) => ["queued", "sending", "unknown"].includes(message.state))) return;
     try {
       const root = await this.service.workspaceRoot(workspaceId);
       let item = await this.service.getWorkItem(workspaceId, action.workItemId);
@@ -429,14 +423,12 @@ export class Orchestrator {
       if (action.stage === "execute" && !wasQueued && (wasActive || userOwnsSession)) return;
       if (wasQueued && action.stage === "execute") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver", status: "pending" }));
       if (action.stage === "execute") {
-        // No in-memory watcher is not evidence that the previous engine turn should be replayed.
-        await this.service.updateAction(workspaceId, action, (current) => ({ ...current, status: "decision", control: "manual",
-          waitReason: "原执行轮状态等待确认", activeTurnId: undefined }), (current) => ({ ...current, status: "decision" }));
+        // Unknown engine history retains its identity for an explicit or subsequent reconciliation.
         return;
       }
       if (action.stage === "open") action = await this.service.updateAction(workspaceId, action, (action) => ({ ...action, stage: "deliver" }));
       if (action.pendingMessageId) return;
-      const message = await this.actionMessage(workspaceId, action, cwd);
+      const message = await this.actionMessage(workspaceId, action);
       let scheduledTurnId: string | undefined;
       const messageId = action.pendingMessageId ?? createId("message");
       action = await this.service.updateAction(workspaceId, action, (current) => ({ ...current,
@@ -445,7 +437,7 @@ export class Orchestrator {
       try {
         if (wasActive) {
           const receipt = await this.service.dispatchSessionMessage({ sessionId, content: message, messageId, origin: "scheduler" },
-            async () => ({ accepted: true, ...await this.runner.steer(sessionId, message, messageId) }));
+            async (delivery) => ({ accepted: true, ...await this.runner.steer(sessionId, delivery.content, messageId) }));
           if (!receipt.accepted) return;
           scheduledTurnId = receipt.turnId;
           // Steering joins a turn that is already running, so no turn-start event names our message;
@@ -455,7 +447,7 @@ export class Orchestrator {
           }
         } else {
           const receipt = await this.service.dispatchSessionMessage({ sessionId, content: message, messageId, origin: "scheduler" },
-            async () => ({ accepted: true, ...await this.runner.send(sessionId, message, { messageId }) }));
+            async (delivery) => ({ accepted: true, ...await this.runner.send(sessionId, delivery.content, { messageId }) }));
           if (!receipt.accepted) return;
           scheduledTurnId = receipt.turnId;
         }
@@ -495,41 +487,13 @@ export class Orchestrator {
 
   private async onTurn(bound: WorkerBinding, turn: WorkerTurn, finishReason: string, failure?: string): Promise<void> {
     const ownsExecution = () => this.turnsBySession.get(bound.run.sessionId) === turn && this.runsBySession.get(bound.run.sessionId) === bound;
-    const result = bound.run.workItemId ? await this.service.settleWorkerTurn(bound.workspaceId, bound.run.workItemId, {
-      ownsExecution, turnId: turn.turnId, scheduled: turn.origin === "scheduler", finishReason, failure,
-      completion: await this.completion(bound.workspaceId, bound.actionId)
-    }) : undefined;
+    const result = turn.turnId ? await this.service.settleExecutionTurn(bound.workspaceId, bound.run.sessionId, turn.turnId,
+      finishReason, failure, await this.completion(bound.workspaceId, bound.actionId)) : undefined;
     // Every turn settles its own run once, even when a newer turn already owns the execution.
-    bound.run = { ...bound.run, turns: bound.run.turns + 1 };
+    bound.run = result ? (await this.service.listRuns(bound.workspaceId)).find((run) => run.runId === bound.run.runId) ?? bound.run
+      : { ...bound.run, turns: bound.run.turns + 1 };
     if (result && ownsExecution()) await this.release(bound, result.status, result.note);
     else await this.service.putRun(bound.workspaceId, bound.run);
-  }
-
-  private async workerMessage(workspaceId: string, item: WorkItem, cwd: string): Promise<string> {
-    const root = await this.service.workspaceRoot(workspaceId);
-    const isolated = !!item.run.worktreePath;
-    const branch = item.run.branch;
-    const related = "sourceSessionId: " + (item.sourceSessionId ?? "") + "\nsourceTurnId: " + (item.sourceTurnId ?? "");
-    return [
-      "你负责工单「" + item.title + "」。",
-      "workspaceId: " + workspaceId,
-      "workItemId: " + item.workItemId,
-      "contractRevision: " + item.contractRevision,
-      related,
-      "会话 cwd: " + cwd,
-      "工作目录: " + (item.run.worktreePath ?? root) + (isolated ? "（独立 worktree，分支 " + branch + "）" : "（workspace 根目录，不开分支）"),
-      ...(isolated ? [
-        "会话 cwd 保持 workspace 根目录。操作本工单文件时显式指定工具 workdir、git -C 或 worktree 内的绝对路径。",
-        "workspace 根目录（只读主分支）: " + root,
-        "提交前先在自己的分支提交 allowedPaths 内的成果，再用 git -C " + JSON.stringify(root) + " rev-parse HEAD 读取主分支当前 SHA，在本 worktree 执行 git rebase <该 SHA>。不要修改或合并主分支。",
-        "rebase 冲突在自己的分支解决并继续；基于 rebase 后的结果做 review 和验收。workItem.submit 前再次读取主分支 HEAD，若已前进则重复 rebase 并更新受影响的验证和提交材料。"
-      ] : []),
-      "",
-      "先用 CLI 读取完整工单：vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "'",
-      ...(item.run.migratedFromSessionId ? ["本工单已从历史节点迁移到当前分支；调用 workItem.submit 时必须传当前 sessionId: " + item.run.sessionId] : []),
-      "",
-      "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create，发现依赖另一张未合入的工单时通过 workItem.update 修改 dependsOn，需要用户取舍时直接创建决策卡；调用后结束会话。"
-    ].join("\n");
   }
 
   private async completion(workspaceId: string, actionId: string): Promise<string> {
@@ -540,13 +504,10 @@ export class Orchestrator {
     return "完成后重新读取 workItem.get，将当前 contractRevision 传给 workItem.submit，并提交证据、review 和逐条验收；需要用户取舍时调用 decision.create。";
   }
 
-  private async actionMessage(workspaceId: string, action: Execution, cwd: string): Promise<string> {
+  private async actionMessage(workspaceId: string, action: Execution): Promise<string> {
     const update = [action.failure ? "继续" : "", renderExecutionNotices(action.notices)].filter(Boolean).join("\n");
     if (action.integrationActionId) return [update, await this.completion(workspaceId, action.actionId)].filter(Boolean).join("\n");
-    if (action.deliveredAt) return update;
-    const item = await this.service.getWorkItem(workspaceId, action.workItemId);
-    return [await this.workerMessage(workspaceId, item, cwd), "sessionId: " + action.sessionId,
-      "actionId: " + action.actionId, update].filter(Boolean).join("\n");
+    return update;
   }
 
   private async prepareRequests(workspaceId: string): Promise<void> {
@@ -557,10 +518,8 @@ export class Orchestrator {
       if (request.pendingMessageId) continue;
       const existingActivePreparation = Boolean(request.workerSessionId && this.runner.isActive?.(request.workerSessionId));
       if (!existingActivePreparation) {
-        const activePreparations = (await this.service.listWorkRequests(workspaceId)).filter((entry) =>
-          entry.status === "preparing" && entry.control !== "paused" && entry.workerSessionId && this.runner.isActive?.(entry.workerSessionId)).length;
-        const activeWorkers = (await this.service.listWorkItems(workspaceId)).filter((item) => item.status === "running").length;
-        if (activePreparations + activeWorkers >= scheduler.maxWorkers) continue;
+        const occupancy = await this.service.getExecutionOccupancy(workspaceId);
+        if (occupancy.sessionIds.filter((sessionId) => sessionId !== request.workerSessionId).length >= scheduler.maxWorkers) continue;
       }
       if (!request.workerSessionId && this.runner.isActive?.(request.sourceSessionId)) continue;
       try {
@@ -582,8 +541,6 @@ export class Orchestrator {
         if (this.preparing.has(sessionId)) continue;
         if (this.runner.isActive?.(sessionId)) { this.preparing.set(sessionId, workspaceId); continue; }
         if (request.activeTurnId) {
-          if (request.handoff) await this.service.finishPreparation(workspaceId, sessionId, request.activeTurnId);
-          else await this.service.preparationWithoutHandoff(workspaceId, request.requestId);
           continue;
         }
         if (!request.failure && (await this.service.listWorkItems(workspaceId)).some((item) => item.run.sessionId === sessionId)) {
@@ -607,7 +564,7 @@ export class Orchestrator {
           "建单与目录登记完成后，必须调用 vermillion work.prepare.complete --help，并用当前 requestId、sessionId、全部 workItemIds 及相关文档 refs 登记完整交接；仅回复文字不算准备完成。",
           request.failure ? "上次准备未完成：" + request.failure : ""].filter(Boolean).join("\n\n");
         const receipt = await this.service.dispatchSessionMessage({ ...request.message, sessionId, content, messageId, origin: "scheduler" },
-          async () => ({ accepted: true, ...await this.runner.send(sessionId, content,
+          async (delivery) => ({ accepted: true, ...await this.runner.send(sessionId, delivery.content,
             request.message ? { attachments: request.message.attachments, execution: request.message.execution, messageId } : { messageId }) }));
         if (!receipt.accepted) { this.preparing.delete(sessionId); continue; }
         await this.service.confirmPreparationDelivery(workspaceId, request.requestId, messageId, receipt?.turnId, true, request.workerSessionId, request.attemptId);

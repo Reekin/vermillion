@@ -1175,7 +1175,7 @@ export const SessionPane = ({
       <div className="awb-session-pane">
         <header className="awb-main__header">
           <div>
-            <h2>
+            <h2 title={displayedSession?.title}>
               {sessionId ? truncateSessionHeading(displayedSession?.title) : "新会话"}
             </h2>
           </div>

@@ -40,7 +40,7 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally { setBusy(false); }
   };
-  const primary = state.kind === "confirmation" ? { label: "确认状态", operation: "confirm" as const }
+  const primary = state.kind === "confirmation" || (item?.run.turnStatus ?? request?.turnStatus) === "unknown" ? { label: "确认状态", operation: "confirm" as const }
     : state.kind === "paused" ? { label: preparation ? "恢复准备" : "恢复本工单", operation: "resume" as const }
     : state.kind === "interrupted" ? { label: "继续", operation: "retry" as const }
     : state.kind === "manual" ? { label: "恢复自动推进", operation: item ? "retry" as const : "resume" as const }
@@ -74,7 +74,7 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
     {(item?.run.sessionId ?? request?.workerSessionId) && <PendingWorkMessages
       key={item?.run.sessionId ?? request?.workerSessionId}
       client={client} workspaceId={workspaceId} sessionId={(item?.run.sessionId ?? request?.workerSessionId)!}
-      onOpenWorkItem={onOpenRelatedWorkItem} />}
+      onOpenWorkItem={onOpenRelatedWorkItem} onConfirm={primary?.operation === "confirm" ? undefined : () => invoke("confirm")} confirming={busy} />}
     {error && <InlineNotice tone="error">{error}</InlineNotice>}
     {detail && <Modal title={title} width={480} onClose={() => setDetail(false)}>
       <div className="space-y-3 px-4 pb-4">
@@ -89,9 +89,11 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
   </>;
 };
 
-export const PendingWorkMessages = ({ client, workspaceId, sessionId, onOpenWorkItem }: {
+export const PendingWorkMessages = ({ client, workspaceId, sessionId, onOpenWorkItem, onConfirm, confirming }: {
   client: WorkbenchClient; workspaceId: string; sessionId: string;
   onOpenWorkItem?: (workItemId: string) => void;
+  onConfirm?: () => Promise<void>;
+  confirming?: boolean;
 }) => {
   const [messages, setMessages] = useState<WorkbenchRpcResult<"session.messages.pending">>([]);
   const [error, setError] = useState<string>();
@@ -126,8 +128,8 @@ export const PendingWorkMessages = ({ client, workspaceId, sessionId, onOpenWork
     finally { setWithdrawing(undefined); }
   };
   return <>
-    {messages.map((message) => <section key={message.messageId} aria-label="等待发送" className="space-y-2 border-t border-border px-3 py-2">
-      <p className="text-label text-foreground">等待发送</p>
+    {messages.map((message) => <section key={message.messageId} aria-label={message.state === "queued" ? "等待发送" : "等待确认"} className="space-y-2 border-t border-border px-3 py-2">
+      <p className="text-label text-foreground">{message.state === "queued" ? "等待发送" : "等待确认"}</p>
       <p className="max-h-32 overflow-auto whitespace-pre-wrap break-words text-body text-foreground">{message.content}</p>
       {message.attachments?.length ? <ul aria-label="待发送附件" className="space-y-1 text-caption text-muted-foreground">
         {message.attachments.map((attachment) => <li key={attachment.attachmentId}>{attachment.name ?? "附件"}</li>)}
@@ -135,7 +137,9 @@ export const PendingWorkMessages = ({ client, workspaceId, sessionId, onOpenWork
       <p className="text-caption text-muted-foreground">{message.reason ?? "等待执行条件满足"}</p>
       <div className="flex flex-wrap gap-2">
         {message.blockerWorkItemIds?.map((workItemId, index) => onOpenWorkItem && <Button key={workItemId} size="sm" variant="ghost" outlined onClick={() => onOpenWorkItem(workItemId)}>查看阻塞工单{message.blockerWorkItemIds!.length > 1 ? ` ${index + 1}` : ""}</Button>)}
-        <Button size="sm" variant="ghost" outlined disabled={withdrawing === message.messageId} onClick={() => void withdraw(message.messageId)}>撤回</Button>
+        {message.state === "queued"
+          ? <Button size="sm" variant="ghost" outlined disabled={withdrawing === message.messageId} onClick={() => void withdraw(message.messageId)}>撤回</Button>
+          : onConfirm && <Button size="sm" variant="ghost" outlined disabled={confirming} onClick={() => void onConfirm()}>确认状态</Button>}
       </div>
     </section>)}
     {error && <InlineNotice tone="error">{error}</InlineNotice>}

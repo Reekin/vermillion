@@ -146,7 +146,7 @@ it("does not retry a manually stopped worker until the work item is explicitly r
   f.complete("original", "turn-1", "interrupted");
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.pauseReason).toBe("user"));
   const stopped = await f.service.getWorkItem(f.workspaceId, item.workItemId);
-  expect(stopped).toMatchObject({ status: "decision", run: { attempts: 0, pauseReason: "user" } });
+  expect(stopped).toMatchObject({ status: "running", run: { attempts: 0, control: "paused", pauseReason: "user" } });
   expect(stopped.run.retryAt).toBeUndefined();
   expect(f.runner.send).toHaveBeenCalledOnce();
 
@@ -174,8 +174,8 @@ it("interrupts cancelled preparation and does not retry it after the turn settle
   expect(f.runner.send).toHaveBeenCalledOnce();
 });
 
-async function fixture() {
-  const f = await setup(); fixtures.push(f);
+async function fixture(now?: () => string) {
+  const f = await setup(now); fixtures.push(f);
   const active = new Set<string>();
   const listeners = new Set<Parameters<AgentRunner["onTurnCompleted"]>[0]>();
   const started = new Set<Parameters<NonNullable<AgentRunner["onTurnStarted"]>>[0]>();
@@ -260,7 +260,7 @@ it("delivers a merge takeover once to the original worker and suppresses automat
   expect(f.runner.send).toHaveBeenCalledTimes(1);
 });
 
-it("holds an unconfirmed delegated merge after restart without replaying execution", async () => {
+it("inspects and settles an ended delegated merge after restart before issuing one handoff reminder", async () => {
   const f = await fixture();
   const item = await f.service.createWorkItem(f.workspaceId, { title: "Merge recovery", objective: "recover", risk: "R1",
     scope: { inScope: [], outOfScope: [], allowedPaths: [] }, acceptance: [{ text: "merged" }], sessionId: "worker" });
@@ -276,18 +276,20 @@ it("holds an unconfirmed delegated merge after restart without replaying executi
 
   await f.orchestrator.dispose();
   f.active.clear();
+  f.runner.inspectTurn = vi.fn(async (_session, turnId) => turnId === "turn-1" ? ({ status: "completed", finishReason: "completed" }) : ({ status: "active" }));
   const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
   orchestrators.push(restarted);
   restarted.start();
-  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.waitReason).toBe("原执行轮状态等待确认"));
-  expect(f.runner.send).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(f.runner.inspectTurn).toHaveBeenCalledWith("worker", "turn-1");
+  expect(vi.mocked(f.runner.send).mock.calls[1]?.[1]).toContain("workItem.integration.complete");
 });
 
 
 it("sends only continue with no notices when retrying the original worker", async () => {
-  const f = await fixture();
-  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
   let now = Date.now();
+  const f = await fixture(() => new Date(now).toISOString());
+  await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
   const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner, now: () => new Date(now).toISOString() });
   orchestrators.push(orchestrator);
   orchestrator.start();
@@ -304,7 +306,8 @@ it("sends only continue with no notices when retrying the original worker", asyn
 });
 
 it.each([false, true])("retries a failed takeover turn through execution (user turn: %s)", async (userTurn) => {
-  const f = await fixture();
+  let now = Date.now();
+  const f = await fixture(() => new Date(now).toISOString());
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
   await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
   const integration = await f.service.createAction(f.workspaceId, {
@@ -312,7 +315,6 @@ it.each([false, true])("retries a failed takeover turn through execution (user t
     integration: { operation: "merge", contractRevision: 0, diffStat: "" }
   }, (current) => ({ ...current, status: "merging" }));
   await f.service.takeoverIntegration(f.workspaceId, item.workItemId, "keep evidence");
-  let now = Date.now();
   const orchestrator = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner, now: () => new Date(now).toISOString() });
   orchestrators.push(orchestrator);
   if (userTurn) await f.service.dispatchSessionMessage({ sessionId: "worker", messageId: "manual-takeover", content: "continue" }, async () => {
@@ -365,7 +367,7 @@ it("admits takeover through the scheduler and retains user pause across restart"
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(f.runner.send).not.toHaveBeenCalled();
   await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
-  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute" }));
+  await vi.waitFor(async () => expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ stage: "execute", deliveredAt: expect.any(String) }));
   await f.service.pauseWorkItem(f.workspaceId, "worker");
   f.complete("worker", "turn-1", "interrupted");
   await f.orchestrator.dispose();
@@ -885,7 +887,7 @@ it("resumes a worker decision that also carries its preparation request id", asy
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
 });
 
-it("steers only the latest committed document diff and resumes without the opening message", async () => {
+it("steers only the latest document diff and reconciles a completed turn before resuming", async () => {
   const f = await fixture();
   const path = ".vermillion/docs/Task/PRD.md";
   await f.service.writeDoc(f.workspaceId, path, "Baseline\n");
@@ -909,11 +911,13 @@ it("steers only the latest committed document diff and resumes without the openi
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).contractRevision).toBe(2);
   await f.orchestrator.dispose();
   f.active.clear();
+  f.runner.inspectTurn = vi.fn(async (_session, turnId) => turnId === "turn-1" ? ({ status: "completed", finishReason: "completed" }) : ({ status: "active" }));
   const restarted = new Orchestrator({ service: f.service, roles: f.roles, runner: f.runner });
   orchestrators.push(restarted);
   restarted.start();
-  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.waitReason).toBe("原执行轮状态等待确认"));
-  expect(f.runner.send).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledTimes(2));
+  expect(f.runner.inspectTurn).toHaveBeenCalledWith("original", "turn-1");
+  expect(vi.mocked(f.runner.send).mock.calls.at(-1)?.[1]).toContain("尚未落实处置");
 });
 
 it("hands every pending notice over at once and consumes them with that delivery", async () => {

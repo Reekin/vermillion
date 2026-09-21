@@ -22,7 +22,7 @@ vi.mock("react", async (original) => ({
   }
 }));
 type Pending = WorkbenchRpcResult<"session.messages.pending">;
-const message = (content: string): Pending => [{ sessionId: "worker", messageId: "message", content, reason: "等待前置工单", workItemId: "item", blockerWorkItemIds: ["dependency"],
+const message = (content: string): Pending => [{ state: "queued", sessionId: "worker", messageId: "message", content, reason: "等待前置工单", workItemId: "item", blockerWorkItemIds: ["dependency"],
   attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png", name: "参考图.png" }], createdAt: "2026-01-01" }];
 const elements = (node: ReactNode): Array<{ props: Record<string, any> }> => Children.toArray(node).flatMap((child) => {
   if (!isValidElement<{ children?: ReactNode }>(child)) return [];
@@ -33,19 +33,31 @@ const setup = () => {
   const request = vi.fn<WorkbenchClient["request"]>();
   const client = { request, subscribe: (listener: (event: WorkbenchEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; } } as WorkbenchClient;
   const onOpenWorkItem = vi.fn();
+  const onConfirm = vi.fn(async () => {});
   const render = (sessionId = "worker") => {
     hooks.cursor = 0;
-    const tree = PendingWorkMessages({ client, workspaceId: "workspace", sessionId, onOpenWorkItem });
+    const tree = PendingWorkMessages({ client, workspaceId: "workspace", sessionId, onOpenWorkItem, onConfirm });
     hooks.effects.splice(0).forEach((effect) => effect());
     return elements(tree);
   };
   const flush = async (sessionId = "worker") => { await Promise.resolve(); await Promise.resolve(); return render(sessionId); };
   const emit = (sessionId: string) => listeners.forEach((listener) => listener({ type: "session.messages.changed", workspaceId: "workspace", sessionId }));
-  return { request, render, flush, emit, onOpenWorkItem, listeners };
+  return { request, render, flush, emit, onOpenWorkItem, onConfirm, listeners };
 };
 beforeEach(() => { hooks.cleanups.forEach((cleanup) => cleanup?.()); hooks.slots = []; hooks.effects = []; hooks.cleanups = []; hooks.cursor = 0; });
 
 describe("server pending messages", () => {
+  it("offers confirmation instead of withdrawal when delivery may already be accepted", async () => {
+    const h = setup();
+    h.request.mockResolvedValueOnce(message("uncertain message").map((entry) => ({ ...entry, state: "unknown", reason: "消息受理状态等待确认" })));
+    h.render();
+    const rows = await h.flush();
+    expect(rows.some((row) => row.props["aria-label"] === "等待确认")).toBe(true);
+    expect(rows.some((row) => row.props.children === "撤回")).toBe(false);
+    rows.find((row) => row.props.children === "确认状态")!.props.onClick();
+    expect(h.onConfirm).toHaveBeenCalledExactlyOnceWith();
+  });
+
   it("uses the newest server result when matching events race", async () => {
     const h = setup();
     let resolveOld!: (messages: Pending) => void;

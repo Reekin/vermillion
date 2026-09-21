@@ -10,7 +10,7 @@ export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { la
   if (isPreparingWork(request)) {
     const state = currentWorkStatus(undefined, request);
     return { label: request.status === "ready" ? "准备收尾" : state.label,
-      status: request.activeTurnId ? "running" : state.kind === "queued" ? "queued" : "decision" };
+      status: request.activeTurnId && request.turnStatus !== "unknown" ? "running" : state.kind === "queued" ? "queued" : "decision" };
   }
   const open = items.filter((item) => item.status !== "closed" && item.status !== "cancelled");
   if (items.length && !open.length) {
@@ -18,8 +18,9 @@ export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { la
     return { label: closed === items.length ? "已完成" : closed ? "部分完成" : "已取消", status: closed ? "closed" : "cancelled" };
   }
   if (open.length) {
-    if (open.some((item) => item.run.activeTurnId)) return { label: "执行中", status: "running" };
+    if (open.some((item) => item.run.activeTurnId && item.run.turnStatus !== "unknown")) return { label: "执行中", status: "running" };
     if (open.every((item) => item.run.control === "paused" || item.run.pauseReason === "user")) return { label: "已暂停", status: "decision" };
+    if (open.some((item) => item.run.turnStatus === "unknown")) return { label: "等待确认", status: "decision" };
     if (open.some((item) => item.status === "decision" && item.run.control !== "paused" && item.run.pauseReason !== "user")) return { label: "等待用户", status: "decision" };
     if (open.some((item) => item.run.lastFailure || item.run.retryAt)) return { label: "已中断", status: "decision" };
     if (open.some((item) => item.run.control === "manual")) return { label: "人工接管", status: "decision" };
@@ -27,7 +28,7 @@ export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { la
   }
   const state = currentWorkStatus(undefined, request);
   return { label: state.label, status: state.kind === "finished" ? (request.status === "cancelled" ? "cancelled" : "closed")
-    : request.activeTurnId ? "running" : state.kind === "queued" ? "queued" : "decision" };
+    : request.activeTurnId && request.turnStatus !== "unknown" ? "running" : state.kind === "queued" ? "queued" : "decision" };
 };
 
 export const workItemBoardLabel = (item: WorkItem, progressLabel: string) => {
@@ -46,7 +47,7 @@ export const currentWorkStatus = (item?: WorkItem, request?: WorkRequest, hasDec
     return { kind: "finished", label: status === "cancelled" ? "已取消" : status === "ready" ? "已交接" : "已完成" };
   if (run?.control === "paused" || item?.run.pauseReason === "user") return { kind: "paused", label: "已暂停" };
   if (hasDecision) return { kind: "decision", label: "等待决策" };
-  if (run?.pendingMessageId && run.waitReason) return { kind: "confirmation", label: "等待确认" };
+  if (run?.turnStatus === "unknown" || (run?.pendingMessageId && run.waitReason)) return { kind: "confirmation", label: "等待确认" };
   const failure = item?.run.lastFailure ?? request?.failure;
   if (status === "failed" || run?.retryAt || (failure && status === "decision"))
     return { kind: "interrupted", label: "已中断" };

@@ -98,6 +98,7 @@ it("delivers a business decision directly through a manually owned session", asy
     const item = await service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
     await service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
     await service.dispatchSessionMessage({ sessionId: "worker", messageId: "manual", content: "continue" }, async () => ({ accepted: true, turnId: "manual-turn" }));
+    await service.settleManualTurn("worker", "manual-turn");
     const action = (await service.listActions(f.workspaceId))[0]!;
     const card = await service.createDecision(f.workspaceId, { workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker", kind: "worker",
       question: "Continue?", context: "A business choice is required.", options: [{ key: "go", label: "Continue" }] });

@@ -2,6 +2,30 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it.each(["completed", "failed", "interrupted"] as const)("inspects a cold historical %s turn for restart settlement", async (finishReason) => {
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: () => undefined,
+      getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "past-turn", status: "completed", finishReason }] })
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
+    await expect(runner.inspectTurn!("worker", "past-turn")).resolves.toEqual({ status: "completed", finishReason });
+    await expect(runner.inspectTurn!("worker", "missing-turn")).resolves.toEqual({ status: "unknown" });
+    expect(shell.ensureSessionLoadedForRead).toHaveBeenCalledWith("worker");
+  });
+
+  it("uses runtime activity rather than stale history to inspect the current turn", async () => {
+    const shell = {
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: () => "active-turn",
+      getSnapshot: () => ({ turns: [] })
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
+    await expect(runner.inspectTurn!("worker", "active-turn")).resolves.toEqual({ status: "active" });
+    shell.ensureSessionLoadedForRead.mockResolvedValue(false);
+    await expect(runner.inspectTurn!("worker", "active-turn")).resolves.toEqual({ status: "unknown" });
+  });
+
   it.each(["send", "steer"] as const)("preserves a known rejection from scheduled %s", async (method) => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),

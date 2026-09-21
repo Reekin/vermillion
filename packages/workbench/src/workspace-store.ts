@@ -164,7 +164,7 @@ export class WorkspaceStore {
   constructor(rootPath: string) {
     this.rootPath = rootPath;
     this.stateDir = join(rootPath, STATE_DIR);
-    this.workRequests = createCollection(join(this.stateDir, "work-requests"), zWorkRequest, "requestId");
+    this.workRequests = createCollection(join(this.stateDir, "work-requests"), zWorkRequest.omit({ turnStatus: true }), "requestId");
     this.records = createCollection(join(this.stateDir, "workitems"), zWorkItemRecord, "workItemId");
     this.decisions = createCollection(join(this.stateDir, "decisions"), zDecisionCard, "decisionId");
     this.issues = createCollection(join(this.stateDir, "issues"), zIssue, "issueId");

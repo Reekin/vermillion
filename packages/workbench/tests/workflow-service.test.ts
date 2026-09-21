@@ -137,7 +137,7 @@ it("persists a user pause separately from failure decisions and resumes the same
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
 
   const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
-  expect(paused).toMatchObject({ paused: true, workItem: { status: "decision", run: { sessionId: "worker", pauseReason: "user", attempts: 0 } } });
+  expect(paused).toMatchObject({ paused: true, workItem: { status: "running", run: { sessionId: "worker", control: "paused", pauseReason: "user", attempts: 0 } } });
   expect(await service.listDecisions(workspaceId)).toEqual([]);
   expect(await service.diagnoseWorkItem(workspaceId, item.workItemId)).toMatchObject({
     waiting: expect.arrayContaining(["用户已暂停 Worker"]),
@@ -146,9 +146,9 @@ it("persists a user pause separately from failure decisions and resumes the same
 
   const restarted = new WorkbenchService(options);
   try {
-    expect(await restarted.getWorkItem(workspaceId, item.workItemId)).toMatchObject({ status: "decision", run: { pauseReason: "user" } });
+    expect(await restarted.getWorkItem(workspaceId, item.workItemId)).toMatchObject({ status: "running", run: { control: "paused", pauseReason: "user" } });
     const resumed = await restarted.resumeWorkItem(workspaceId, item.workItemId);
-    expect(resumed).toMatchObject({ status: "queued", run: { sessionId: "worker" } });
+    expect(resumed).toMatchObject({ status: "running", run: { sessionId: "worker", control: "auto" } });
     expect(resumed.run.pauseReason).toBeUndefined();
     expect((await restarted.listActions(workspaceId))[0]).toMatchObject({ status: "pending", stage: "deliver" });
   } finally { await restarted.dispose(); }
@@ -449,11 +449,11 @@ it("pauses and resumes a delegated merge without returning it to automatic execu
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
 
   const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
-  expect(paused).toMatchObject({ paused: true, workItem: { status: "decision", run: { pauseReason: "user" } } });
+  expect(paused).toMatchObject({ paused: true, workItem: { status: "running", run: { control: "paused", pauseReason: "user" } } });
   await expect(client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" })).rejects.toThrow("先恢复工单");
 
   const resumed = await client.request("workItem.resume", { workspaceId, workItemId: item.workItemId });
-  expect(resumed).toMatchObject({ status: "queued" });
+  expect(resumed).toMatchObject({ status: "running", run: { control: "auto" } });
   expect(resumed.run.pauseReason).toBeUndefined();
   expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "pending", agent: { sessionId: "worker" } });
 });

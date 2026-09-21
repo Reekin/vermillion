@@ -1,8 +1,10 @@
 import type { WorkMessage } from "./contracts.js";
 
-export type SessionDispatchMessage = WorkMessage & { sessionId: string; messageId: string; origin?: "scheduler" | "user" };
+export type SessionDispatchMessage = WorkMessage & { sessionId: string; messageId: string; origin?: "scheduler" | "user"; decisionId?: string };
 export type SessionDispatchReceipt = { accepted: boolean; queued?: { messageId: string; reason: string; workItemId?: string }; error?: { code: string; message: string }; turnId?: string; delivery?: "started" | "steered" };
 export type MessageDeliveryPort = (message: SessionDispatchMessage) => Promise<SessionDispatchReceipt>;
+export type TurnInspection = { status: "active" | "completed" | "unknown"; finishReason?: "completed" | "failed" | "interrupted"; failure?: string };
+export type TurnInspector = (sessionId: string, turnId: string) => Promise<TurnInspection>;
 export type ControlState = { control?: "auto" | "manual" | "paused"; retryAt?: string; failure?: string; activeTurnId?: string; pendingMessageId?: string; attemptId?: string; waitReason?: string; attempts?: number; idleTurns?: number };
 
 export type ControlEvent =
@@ -39,7 +41,7 @@ export function transitionControl<T extends ControlState>(state: T, event: Contr
 
 /** Shared transitions change control only for explicit control operations. */
 export function beginExecution<T extends ControlState>(state: T, messageId: string, origin: "scheduler" | "user", active: boolean): T {
-  if (active) return state;
+  if (active) return { ...state, pendingMessageId: messageId };
   return { ...state, control: origin === "scheduler" ? state.control ?? "auto" : "manual",
     retryAt: undefined, failure: undefined, waitReason: undefined, pendingMessageId: messageId,
     attemptId: messageId, activeTurnId: undefined,
@@ -49,4 +51,12 @@ export function beginExecution<T extends ControlState>(state: T, messageId: stri
 export function confirmExecution<T extends ControlState>(state: T, messageId: string, turnId?: string): T {
   if (state.pendingMessageId !== messageId) return state;
   return { ...state, pendingMessageId: undefined, activeTurnId: turnId ?? state.activeTurnId };
+}
+
+export function acceptExecutionMessage<T extends ControlState>(state: T, message: { messageId: string; origin: "user" | "scheduler"; mode?: "start" | "supplement"; targetTurnId?: string; decisionId?: string }, turnId?: string, started = false): T {
+  if (state.pendingMessageId !== message.messageId) return state;
+  const newUserTurn = message.mode === "supplement" && message.origin === "user" && !message.decisionId &&
+    (started || !!turnId && !!message.targetTurnId && turnId !== message.targetTurnId);
+  const current = newUserTurn && state.control !== "paused" ? beginExecution(state, message.messageId, "user", false) : state;
+  return confirmExecution(current, message.messageId, turnId);
 }

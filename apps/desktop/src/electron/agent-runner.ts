@@ -287,6 +287,13 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
   },
   isActive: (sessionId) => !!shell.getActiveTurnId(sessionId),
   getActiveTurnId: (sessionId) => shell.getActiveTurnId(sessionId),
+  inspectTurn: async (sessionId, turnId) => {
+    if (!await shell.ensureSessionLoadedForRead(sessionId)) return { status: "unknown" };
+    if (shell.getActiveTurnId(sessionId) === turnId) return { status: "active" };
+    const turn = shell.getSnapshot().turns.find((entry) => entry.sessionId === sessionId && entry.turnId === turnId);
+    if (turn?.status !== "completed" || !turn.finishReason) return { status: "unknown" };
+    return { status: "completed", finishReason: turn.finishReason };
+  },
   confirmMessage: async (sessionId, messageId) => {
     if (!await shell.ensureSessionLoadedForRead(sessionId)) return { accepted: false };
     const block = shell.getSnapshot().messageBlocks.find((entry) => entry.sessionId === sessionId && entry.messageId === messageId);
