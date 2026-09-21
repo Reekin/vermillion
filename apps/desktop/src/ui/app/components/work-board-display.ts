@@ -1,6 +1,7 @@
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
 
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
+export const isPreparingWork = (request: WorkRequest) => request.status !== "cancelled" && (request.status !== "ready" || Boolean(request.activeTurnId));
 export const workExpansionKey = (requestId: string) => "work/" + requestId;
 
 type BoardOrder = { id: string; open: boolean; updatedAt: string };
@@ -27,7 +28,7 @@ export const workBoardGroups = (requests: WorkRequest[], items: WorkItem[]): Boa
     return {
       kind: "work", id: request.requestId, request, items: children,
       treeId: request.treeId ?? children.find((item) => item.treeId)?.treeId ?? "standalone",
-      open: children.length ? children.some(isOpenWorkItem) : request.status !== "cancelled" && request.status !== "ready",
+      open: isPreparingWork(request) || children.some(isOpenWorkItem),
       updatedAt: latest([request.updatedAt, ...children.map((item) => item.updatedAt)])
     };
   });
@@ -42,9 +43,9 @@ export const workBoardGroups = (requests: WorkRequest[], items: WorkItem[]): Boa
 };
 
 export const workBoardCounts = (requests: WorkRequest[], items: WorkItem[]) => {
-  const preparation = requests.filter((request) => request.status !== "ready" && !items.some((item) => item.requestId === request.requestId));
+  const preparation = requests.filter((request) => isPreparingWork(request) || (request.status === "cancelled" && !items.some((item) => item.requestId === request.requestId)));
   const states = [
-    ...items.map((item) => !isOpenWorkItem(item) ? "ended" : item.run.activeTurnId ? "active" : "waiting"),
+    ...items.filter((item) => item.status !== "preparing").map((item) => !isOpenWorkItem(item) ? "ended" : item.run.activeTurnId ? "active" : "waiting"),
     ...preparation.map((request) => request.status === "cancelled" ? "ended" : request.activeTurnId ? "active" : "waiting")
   ];
   return { active: states.filter((s) => s === "active").length, waiting: states.filter((s) => s === "waiting").length, ended: states.filter((s) => s === "ended").length };

@@ -1,4 +1,5 @@
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
+import { isPreparingWork } from "./work-board-display.js";
 
 export const statusLabel: Record<WorkItem["status"], string> = { preparing: "准备中", queued: "排队中", running: "进行中", merging: "等待合入", decision: "等待用户", closed: "已关闭", cancelled: "已取消" };
 
@@ -6,6 +7,11 @@ export type CurrentWorkState = "running" | "queued" | "manual" | "paused" | "int
 
 /** Work summaries aggregate child outcomes without repeating their individual labels. */
 export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { label: string; status: WorkItem["status"] } => {
+  if (isPreparingWork(request)) {
+    const state = currentWorkStatus(undefined, request);
+    return { label: request.status === "ready" ? "准备收尾" : state.label,
+      status: request.activeTurnId ? "running" : state.kind === "queued" ? "queued" : "decision" };
+  }
   const open = items.filter((item) => item.status !== "closed" && item.status !== "cancelled");
   if (items.length && !open.length) {
     const closed = items.filter((item) => item.status === "closed").length;
@@ -22,6 +28,14 @@ export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { la
   const state = currentWorkStatus(undefined, request);
   return { label: state.label, status: state.kind === "finished" ? (request.status === "cancelled" ? "cancelled" : "closed")
     : request.activeTurnId ? "running" : state.kind === "queued" ? "queued" : "decision" };
+};
+
+export const workItemBoardLabel = (item: WorkItem, progressLabel: string) => {
+  if (item.status === "closed" || item.status === "cancelled") return statusLabel[item.status];
+  const state = currentWorkStatus(item);
+  if (["paused", "manual", "confirmation"].includes(state.kind)) return state.label;
+  if (state.kind === "interrupted" && item.status !== "queued" && item.status !== "merging") return state.label;
+  return progressLabel;
 };
 
 /** Fault causes stay in details; the work bar presents one lifecycle state. */

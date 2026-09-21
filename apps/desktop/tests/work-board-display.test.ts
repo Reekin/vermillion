@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
 import { workBoardGroups, workBoardCounts } from "../src/ui/app/components/work-board-display.js";
-import { workRequestStatus } from "../src/ui/app/components/task-labels.js";
+import { workItemBoardLabel, workRequestStatus } from "../src/ui/app/components/task-labels.js";
 
 const at = (day: number) => `2026-09-${String(day).padStart(2, "0")}T00:00:00.000Z`;
 const item = (id: string, status: WorkItem["status"], day: number, treeId?: string, requestId?: string): WorkItem => ({
@@ -14,6 +14,23 @@ const request = (id: string, status: WorkRequest["status"], day: number, treeId?
 });
 
 describe("work board projection", () => {
+  it("keeps preparation active through partial creation, child cancellation and handoff turn exit", () => {
+    const r = { ...request("prep", "preparing", 2, "tree"), activeTurnId: "turn" };
+    const child = item("child", "preparing", 3, "tree", "prep");
+    expect(workRequestStatus(r, [child])).toEqual({ label: "准备中", status: "running" });
+    expect(workBoardCounts([r], [child])).toEqual({ active: 1, waiting: 0, ended: 0 });
+    expect(workBoardGroups([r], [{ ...child, status: "cancelled" }])[0]!.open).toBe(true);
+    expect(workRequestStatus(r, [{ ...child, status: "cancelled" }]).label).toBe("准备中");
+    expect(workRequestStatus({ ...r, status: "ready" }, [child]).label).toBe("准备收尾");
+    expect(workBoardGroups([{ ...r, status: "ready", activeTurnId: undefined }], [{ ...child, status: "closed" }])[0]!.open).toBe(false);
+  });
+
+  it("retains specific retry stages while distinguishing interrupted work", () => {
+    const retry = { ...item("retry", "queued", 2), run: { attempts: 1, retryAt: at(4) } };
+    expect(workItemBoardLabel(retry, "等待重试")).toBe("等待重试");
+    expect(workItemBoardLabel({ ...retry, status: "merging" }, "等待重试")).toBe("等待重试");
+    expect(workItemBoardLabel({ ...retry, status: "decision" }, "等待用户")).toBe("已中断");
+  });
   it("keeps each tree together and orders each level by open state then latest change", () => {
     const requests = [request("older", "ready", 2, "a"), request("newer", "ready", 5, "a"), request("prep", "preparing", 8, "b")];
     const items = [item("closed-new", "closed", 20, "a", "older"), item("active-old", "running", 3, "a", "older"),

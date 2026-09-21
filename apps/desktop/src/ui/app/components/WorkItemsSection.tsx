@@ -4,7 +4,7 @@ import { type AgentRun, type Scheduler, type WorkItem, type WorkbenchClient, typ
 import type { TaskTarget, WorkbenchState } from "../workbench-store.js";
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { currentWorkStatus, statusLabel, workRequestStatus } from "./task-labels.js";
+import { currentWorkStatus, workItemBoardLabel, workRequestStatus } from "./task-labels.js";
 import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, Stepper, Toggle } from "./ui.js";
 
 import { roleLabel, workItemProgress } from "./workflow-display.js";
@@ -35,7 +35,7 @@ const WorkRequestRow = ({ entry, sourceTitle, open, onToggle, busy, onOpenSessio
 }) => {
   const { request, items } = entry;
   const state = workRequestStatus(request, items);
-  const paused = request.control === "paused" || state.label === "已暂停";
+  const paused = request.control === "paused";
   const title = request.scope?.trim() || sourceTitle;
   const finished = !entry.open;
   return <li className="border-t border-border first:border-t-0">
@@ -50,7 +50,7 @@ const WorkRequestRow = ({ entry, sourceTitle, open, onToggle, busy, onOpenSessio
         control: finished ? null : request.waitReason?.includes("受理状态不明") ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.confirm")}>确认状态</Button>
           : paused ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.resume")}>恢复</Button>
           : request.status === "failed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.retry")}>重试</Button>
-          : request.control === "manual" || state.label === "人工接管" ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.resume")}>恢复自动推进</Button>
+          : request.control === "manual" ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.resume")}>恢复自动推进</Button>
           : <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.pause")}>暂停</Button> }}
     />
     {open && children}
@@ -66,7 +66,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, onOpenSessio
   const info = [run && run.turns + " turn", relativeTime(item.updatedAt)].filter(Boolean).join(" · ");
   const open = isOpenWorkItem(item);
   const state = currentWorkStatus(item);
-  const label = !open ? statusLabel[item.status] : ["paused", "manual", "interrupted", "confirmation"].includes(state.kind) ? state.label : progress.shortLabel;
+  const label = workItemBoardLabel(item, progress.shortLabel);
   const meta = open ? waitingFor.length ? "等待 " + waitingFor.join("、") : progress.reason ?? item.run.waitReason : undefined;
   const paused = item.run.pauseReason === "user" || item.run.control === "paused";
   const manual = item.run.control === "manual" && !paused;
