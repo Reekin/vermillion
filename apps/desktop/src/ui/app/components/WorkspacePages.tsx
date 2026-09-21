@@ -71,13 +71,14 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
   const [sourceTitles, setSourceTitles] = useState<Record<string, string>>({});
   const [linkedWorkItemTarget, setLinkedWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const [linkedIssueDomain, setLinkedIssueDomain] = useState<string>();
-  const sourceIdsKey = JSON.stringify(view?.workItems.map(({ treeId, sourceSessionId }) => [treeId, sourceSessionId]) ?? []);
+  const sources = [...(view?.workRequests ?? []), ...(view?.workItems ?? [])];
+  const sourceIdsKey = JSON.stringify(sources.map(({ treeId, sourceSessionId }) => [treeId, sourceSessionId]));
   useEffect(() => {
     let active = true;
     setSourceTitles({});
     setError(undefined);
     if (!activeWorkspaceId) return;
-    void loadSourceTreeTitles(transport.sessionBrowser.list, activeWorkspaceId, view?.workItems ?? [])
+    void loadSourceTreeTitles(transport.sessionBrowser.list, activeWorkspaceId, sources)
       .then((titles) => { if (active) setSourceTitles(titles); })
       .catch((caught: Error) => { if (active) setError(caught.message); });
     return () => { active = false; };

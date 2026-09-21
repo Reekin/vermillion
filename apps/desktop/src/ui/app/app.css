@@ -159,6 +159,11 @@
 .vm-list-cancel > button { width: 22px; height: 22px; }
 .vm-list-columns:hover .vm-list-cancel, .vm-list-columns:focus-within .vm-list-cancel { opacity: 1; }
 .vm-list-action > button { width: 48px; min-height: 24px; padding: 0 6px; }
+.vm-list-leading { display: flex; align-items: center; }
+.vm-list-control { display: flex; justify-content: flex-end; }
+.vm-list-columns-controls { grid-template-columns: 30px minmax(0, 1fr) 148px 110px 96px 22px 48px; padding-block: 5px; }
+.vm-list-columns-controls .vm-list-info { text-align: right; font-size: var(--text-micro); }
+.vm-list-columns-controls .vm-list-main > div { overflow-wrap: anywhere; }
 .vm-card-compact { background: var(--color-surface-raised); overflow: hidden; }
 .vm-card-compact > header { border-bottom: 0; padding: 9px 12px 6px; }
 /* Controlled cards keep their overview and readable detail in one surface. */
@@ -175,6 +180,11 @@
 .vm-disclosure-time { margin-left: auto; }
 .vm-disclosure-summary { flex-basis: 100%; min-width: 0; padding-left: 22px; font-size: var(--text-caption); color: var(--color-muted-foreground); }
 .vm-disclosure-body { border-top: 1px solid var(--color-border); padding: 4px 18px 16px 40px; }
+.vm-disclosure-plain { border: 0; border-radius: 0; background: transparent; }
+.vm-disclosure-plain > .vm-disclosure-header { padding: 12px; border-bottom: 1px solid var(--color-border-strong); }
+.vm-disclosure-plain > .vm-disclosure-body { border-top: 0; padding: 0; }
+.vm-disclosure-plain .vm-disclosure-title { flex: 1; }
+.vm-disclosure-plain .vm-disclosure-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @container (max-width: 640px) {
   .vm-disclosure-header { padding: 14px; }
   .vm-disclosure-title { flex-basis: 100%; }
@@ -190,6 +200,22 @@
 @media (max-width: 640px) {
   .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) 76px 22px 48px; gap: 4px; padding-inline: 8px; }
   .vm-tabs { overflow-x: auto; }
+}
+@container (max-width: 960px) {
+  .vm-list-columns-controls { grid-template-columns: 30px minmax(0, 1fr) 110px 96px 22px 48px; row-gap: 0; }
+  .vm-list-columns-controls > :not(.vm-list-info) { grid-row: 1; }
+  .vm-list-columns-controls .vm-list-info { grid-column: 2 / -1; grid-row: 2; text-align: left; max-width: none; padding-bottom: 4px; }
+}
+@container (max-width: 640px) {
+  .vm-list-columns-controls { grid-template-columns: 30px minmax(0, 1fr) 96px 22px 48px; column-gap: 6px; }
+  .vm-list-columns-controls .vm-list-leading, .vm-list-columns-controls .vm-list-main { grid-row: 1; }
+  .vm-list-columns-controls .vm-list-main { grid-column: 2 / -1; }
+  .vm-list-columns-controls .vm-list-status { grid-column: 2; grid-row: 2; justify-content: flex-start; }
+  .vm-list-columns-controls .vm-list-control { grid-column: 3; grid-row: 2; }
+  .vm-list-columns-controls .vm-list-cancel { grid-column: 4; grid-row: 2; }
+  .vm-list-columns-controls .vm-list-action { grid-column: 5; grid-row: 2; }
+  .vm-list-columns-controls .vm-list-info { grid-column: 2 / -1; grid-row: 3; }
+  .vm-disclosure-plain .vm-disclosure-title { flex-basis: 100%; }
 }
 
 /* Host for the embedded session shell; .awb-shell fills this box. */
