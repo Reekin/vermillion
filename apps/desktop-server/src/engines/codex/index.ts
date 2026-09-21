@@ -106,15 +106,16 @@ export const createCodexEngineIntegration = (
       });
     }
   });
-  const clearSessionHistory = async (sessionId: string): Promise<boolean> => {
+  const clearSessionHistory = async (sessionId: string, signal?: AbortSignal): Promise<boolean> => {
     await host.sessionIndexStore.ready();
+    signal?.throwIfAborted();
     const entry = host.sessionIndexStore.getEntry(sessionId);
     const threadId =
       runtimePort.getThreadIdForSession(sessionId) ?? entry?.providerSessionId;
     if (!threadId) {
       return false;
     }
-    const result = await historyProjection.clearThread(threadId);
+    const result = await historyProjection.clearThread(threadId, signal);
     return result.status !== "failed" && result.status !== "unavailable";
   };
   const historySource = new CodexHistorySource({
@@ -133,7 +134,7 @@ export const createCodexEngineIntegration = (
       if (!threadId) throw new Error(`No Codex thread for ${sessionId}.`);
       await runtimePort.releaseThreadForHistoryRefresh(threadId, signal);
       signal?.throwIfAborted();
-      if (!await clearSessionHistory(sessionId)) {
+      if (!await clearSessionHistory(sessionId, signal)) {
         throw new Error(`Could not rebuild Codex history for ${sessionId}.`);
       }
     }
