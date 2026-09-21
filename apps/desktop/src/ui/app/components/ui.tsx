@@ -290,24 +290,26 @@ type ListRowProps = {
   className?: string;
   titleClassName?: string;
   /** Dense one-line list with fixed status, hover-action and action slots. */
-  columns?: { info?: ReactNode; status: ReactNode; action?: ReactNode; hoverAction?: ReactNode };
+  columns?: { info?: ReactNode; status: ReactNode; action?: ReactNode; hoverAction?: ReactNode; control?: ReactNode; controls?: boolean };
+  expanded?: boolean;
 };
 
 /**
  * Standard row for sidebars and lists: leading | title / meta | trailing. Clickable when `onClick` is given;
  * the selection bar on the left is the same everywhere.
  */
-export const ListRow = ({ leading, leadingAction, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName, columns }: ListRowProps) => {
+export const ListRow = ({ leading, leadingAction, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName, columns, expanded }: ListRowProps) => {
   if (columns) return (
-    <div className={cn("vm-list-columns", className)}>
-      {leading}
-      <div className="min-w-0 py-1">
-        {onClick ? <button type="button" onClick={onClick} className={cn("block w-full truncate text-left text-label font-medium text-foreground hover:underline", titleClassName)}>{title}</button>
+    <div className={cn("vm-list-columns", columns.controls && "vm-list-columns-controls", className)} style={{ paddingLeft: 12 + depth * 14 }}>
+      <span className="vm-list-leading">{leading}</span>
+      <div className="vm-list-main min-w-0 py-1">
+        {onClick ? <button type="button" aria-expanded={expanded} onClick={onClick} className={cn("block w-full truncate text-left text-label font-medium text-foreground hover:underline", titleClassName)}>{title}</button>
           : <span className={cn("block truncate text-label font-medium text-foreground", titleClassName)}>{title}</span>}
         {meta && <div className="text-caption text-muted-foreground">{meta}</div>}
       </div>
       <span className="vm-list-info">{columns.info}</span>
       <span className="vm-list-status">{columns.status}</span>
+      {columns.controls && <span className="vm-list-control">{columns.control}</span>}
       <span className="vm-list-cancel">{columns.hoverAction}</span>
       <span className="vm-list-action">{columns.action}</span>
     </div>
@@ -362,13 +364,13 @@ export const Card = ({ header, children, footer, className, compact, rows }: { h
 );
 
 /** Controlled card with an overview, adjacent metadata and inline detail. */
-export const DisclosureCard = ({ title, open, onToggle, status, progress, time, actions, summary, children }: {
+export const DisclosureCard = ({ title, open, onToggle, status, progress, time, actions, summary, children, plain = false }: {
   title: string; open: boolean; onToggle: () => void; status?: ReactNode; progress?: ReactNode;
-  time?: ReactNode; actions?: ReactNode; summary?: ReactNode; children: ReactNode;
+  time?: ReactNode; actions?: ReactNode; summary?: ReactNode; children: ReactNode; plain?: boolean;
 }) => (
-  <article className="vm-disclosure-card">
+  <article className={cn("vm-disclosure-card", plain && "vm-disclosure-plain")}>
     <header className="vm-disclosure-header">
-      <Button variant="ghost" className="vm-disclosure-title" aria-expanded={open} onClick={onToggle}>
+      <Button variant="ghost" className="vm-disclosure-title" title={title} aria-expanded={open} onClick={onToggle}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span>{title}</span>
       </Button>
       <span className="vm-disclosure-status">{status}</span>
