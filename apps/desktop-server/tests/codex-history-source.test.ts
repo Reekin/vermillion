@@ -92,6 +92,18 @@ describe("Codex rollout history source", () => {
     expect(await source.isCurrent(entry)).toBe(true);
   });
 
+  it("passes cancellation into rebuilding and never continues into history after cancellation", async () => {
+    const { source, entry, rebuild, read } = await setup();
+    const controller = new AbortController();
+    rebuild.mockImplementationOnce(async (_id, signal) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+    });
+    await expect(source.read(entry, read, controller.signal)).rejects.toThrow();
+    expect(read).not.toHaveBeenCalled();
+    expect(await source.isCurrent(entry)).toBe(false);
+  });
+
   it("fills active history without releasing execution and never confirms a cancelled read", async () => {
     const { source, entry, rebuild, read, state } = await setup();
     state.active = true;

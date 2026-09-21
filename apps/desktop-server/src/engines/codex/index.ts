@@ -126,11 +126,13 @@ export const createCodexEngineIntegration = (
       return (await runtimePort.readThread(entry.providerSessionId, false, { signal })).path ?? undefined;
     },
     isActive: (sessionId) => Boolean(runtimePort.getActiveTurnId(sessionId)),
-    rebuild: async (sessionId) => {
+    rebuild: async (sessionId, signal) => {
+      signal?.throwIfAborted();
       const entry = host.sessionIndexStore.getEntry(sessionId);
       const threadId = runtimePort.getThreadIdForSession(sessionId) ?? entry?.providerSessionId;
       if (!threadId) throw new Error(`No Codex thread for ${sessionId}.`);
-      await runtimePort.releaseThreadForHistoryRefresh(threadId);
+      await runtimePort.releaseThreadForHistoryRefresh(threadId, signal);
+      signal?.throwIfAborted();
       if (!await clearSessionHistory(sessionId)) {
         throw new Error(`Could not rebuild Codex history for ${sessionId}.`);
       }

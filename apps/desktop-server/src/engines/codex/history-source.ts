@@ -14,7 +14,7 @@ export class CodexHistorySource {
   public constructor(private readonly options: {
     resolvePath: (entry: SessionIndexEntry, signal?: AbortSignal) => Promise<string | undefined>;
     isActive: (sessionId: string) => boolean;
-    rebuild: (sessionId: string) => Promise<void>;
+    rebuild: (sessionId: string, signal?: AbortSignal) => Promise<void>;
   }) {}
 
   public async isCurrent(entry: SessionIndexEntry, signal?: AbortSignal): Promise<boolean> {
@@ -38,7 +38,7 @@ export class CodexHistorySource {
     signal?.throwIfAborted();
     if (!this.options.isActive(sessionId) &&
         (!before || before !== this.committed.get(sessionId))) {
-      await this.options.rebuild(sessionId);
+      await this.options.rebuild(sessionId, signal);
     }
     signal?.throwIfAborted();
     const result = await read();
