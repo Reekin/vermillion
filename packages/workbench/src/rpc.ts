@@ -89,7 +89,7 @@ export const workbenchRpc = {
   },
   "session.messages.pending": {
     params: z.object({ sessionId: z.string().min(1) }),
-    result: z.array(zWorkMessage.extend({ state: z.enum(["queued", "unknown"]), sessionId: z.string(), messageId: z.string(), reason: z.string().optional(), workItemId: z.string().optional(), requestId: z.string().optional(), blockerWorkItemIds: z.array(z.string()).optional(), createdAt: z.string() }))
+    result: z.array(zWorkMessage.extend({ state: z.enum(["queued", "unknown"]), canWithdraw: z.boolean(), sessionId: z.string(), messageId: z.string(), reason: z.string().optional(), workItemId: z.string().optional(), requestId: z.string().optional(), blockerWorkItemIds: z.array(z.string()).optional(), createdAt: z.string() }))
   },
   "session.messages.cancel": {
     params: z.object({ sessionId: z.string().min(1), messageId: z.string().min(1) }),

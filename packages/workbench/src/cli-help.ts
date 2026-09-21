@@ -3,7 +3,7 @@ import { workbenchRpc, type WorkbenchRpcMethod } from "./rpc.js";
 
 const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "session.messages.pending": "读取当前分支持久化待发送消息及阻塞原因。",
-  "session.messages.cancel": "撤回尚未送达引擎的排队消息；已经受理的消息不能撤回。",
+  "session.messages.cancel": "撤回尚未送达的普通人工消息；正式决策答复和自动消息通过工作控制管理，已经受理的消息不能撤回。",
   "docs.discardPreview": "只读预览：paths 可选 .vermillion/docs 内的文件或目录，返回当前变更文件。",
   "docs.discard": "丢弃已确认文件的暂存和未暂存改动，恢复到 HEAD；新增文件删除。paths 必须传 discardPreview 返回的具体文件路径，不展开目录。返回实际处理的变更。",
   "docs.rebase": "在一棵会话树里提交文档时与主分支冲突后使用；把该树的草稿同步到主分支，冲突文件留在草稿里带冲突标记，用 docs.write 解决后再 docs.commit。files 为空表示已同步。",

@@ -1,7 +1,7 @@
 import type { FSWatcher } from "node:fs";
 import { workerOpeningMessage } from "./execution-message.js";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { beginExecution, confirmExecution, acceptExecutionMessage, transitionControl, retryMinutes, type TurnInspector, type SessionDispatchGrant, type SessionDispatchMessage, type SessionDispatchReceipt, type MessageDeliveryPort } from "./execution-control.js";
+import { beginExecution, confirmExecution, acceptExecutionMessage, transitionControl, retryMinutes, canWithdrawMessage, type TurnInspector, type SessionDispatchGrant, type SessionDispatchMessage, type SessionDispatchReceipt, type MessageDeliveryPort } from "./execution-control.js";
 import { basename, resolve } from "node:path";
 import type {
   AgentRun,
@@ -568,7 +568,7 @@ export class WorkbenchService {
       const deliveriesStore = await this.sessionDeliveries(workspaceId);
       messages.push(...(await deliveriesStore.list()).filter((entry) => entry.sessionId === sessionId &&
         (entry.state === "queued" || entry.state === "rejected" || entry.state === "unknown" || entry.state === "sending" && !this.inFlightMessages.has(entry.messageId)))
-        .map((entry) => ({ ...entry, state: entry.state === "queued" || entry.state === "rejected" ? "queued" as const : "unknown" as const,
+        .map((entry) => ({ ...entry, canWithdraw: canWithdrawMessage(entry), state: entry.state === "queued" || entry.state === "rejected" ? "queued" as const : "unknown" as const,
           reason: entry.state === "queued" || entry.state === "rejected" ? entry.reason : "消息受理状态等待确认" })));
     }
     return messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -579,7 +579,7 @@ export class WorkbenchService {
       const result = await this.integrate(workspaceId, async () => {
         const deliveriesStore = await this.sessionDeliveries(workspaceId);
         const message = await deliveriesStore.get(messageId);
-        if (message?.sessionId !== sessionId || !["queued", "rejected"].includes(message.state)) return false;
+        if (message?.sessionId !== sessionId || !canWithdrawMessage(message)) return false;
         await deliveriesStore.put({ ...message, state: "cancelled" });
         return true;
       });

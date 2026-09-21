@@ -22,7 +22,7 @@ vi.mock("react", async (original) => ({
   }
 }));
 type Pending = WorkbenchRpcResult<"session.messages.pending">;
-const message = (content: string): Pending => [{ state: "queued", sessionId: "worker", messageId: "message", content, reason: "等待前置工单", workItemId: "item", blockerWorkItemIds: ["dependency"],
+const message = (content: string): Pending => [{ state: "queued", canWithdraw: true, sessionId: "worker", messageId: "message", content, reason: "等待前置工单", workItemId: "item", blockerWorkItemIds: ["dependency"],
   attachments: [{ attachmentId: "image", mimeType: "image/png", uri: "file:///image.png", name: "参考图.png" }], createdAt: "2026-01-01" }];
 const elements = (node: ReactNode): Array<{ props: Record<string, any> }> => Children.toArray(node).flatMap((child) => {
   if (!isValidElement<{ children?: ReactNode }>(child)) return [];
@@ -47,9 +47,18 @@ const setup = () => {
 beforeEach(() => { hooks.cleanups.forEach((cleanup) => cleanup?.()); hooks.slots = []; hooks.effects = []; hooks.cleanups = []; hooks.cursor = 0; });
 
 describe("server pending messages", () => {
+  it("does not offer ordinary withdrawal for a registered decision reply", async () => {
+    const h = setup();
+    h.request.mockResolvedValueOnce(message("registered answer").map((entry) => ({ ...entry, canWithdraw: false })));
+    h.render();
+    const rows = await h.flush();
+    expect(rows.some((row) => row.props.children === "registered answer")).toBe(true);
+    expect(rows.some((row) => row.props.children === "撤回")).toBe(false);
+  });
+
   it("offers confirmation instead of withdrawal when delivery may already be accepted", async () => {
     const h = setup();
-    h.request.mockResolvedValueOnce(message("uncertain message").map((entry) => ({ ...entry, state: "unknown", reason: "消息受理状态等待确认" })));
+    h.request.mockResolvedValueOnce(message("uncertain message").map((entry) => ({ ...entry, state: "unknown", canWithdraw: false, reason: "消息受理状态等待确认" })));
     h.render();
     const rows = await h.flush();
     expect(rows.some((row) => row.props["aria-label"] === "等待确认")).toBe(true);

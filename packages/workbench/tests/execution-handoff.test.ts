@@ -7,6 +7,30 @@ const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
 const fixture = async () => { const f = await setup(); fixtures.push(f); return f; };
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.cleanup(); });
 
+it("keeps a registered decision deliverable when the ordinary-message withdrawal API is used", async () => {
+  const f = await fixture();
+  const deliver = vi.fn(async () => ({ accepted: true, turnId: "answer-turn", delivery: "started" as const }));
+  f.service.setMessageDeliveryPort(deliver);
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
+  const action = (await f.service.listActions(f.workspaceId)).find((entry) => entry.workItemId === item.workItemId)!;
+  const decision = await f.service.createDecision(f.workspaceId, {
+    workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker", kind: "worker",
+    question: "Continue?", context: "Registered business choice", options: [{ key: "go", label: "Continue" }]
+  });
+  await f.service.setScheduler(f.workspaceId, { enabled: false, maxWorkers: 2 });
+  await f.service.answerDecision(f.workspaceId, decision.decisionId, { key: "go" });
+  const [pending] = await f.service.listPendingSessionMessages("worker");
+  expect(pending).toMatchObject({ state: "queued", canWithdraw: false });
+  expect(await f.service.cancelPendingSessionMessage("worker", pending!.messageId)).toEqual({ cancelled: false });
+  expect(deliver).not.toHaveBeenCalled();
+  expect((await f.service.listDecisions(f.workspaceId))[0]).toMatchObject({ deliveryPending: true, answer: { key: "go" } });
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
+  await f.service.flushSessionMessages(f.workspaceId);
+  expect(deliver).toHaveBeenCalledOnce();
+  expect((await f.service.listDecisions(f.workspaceId))[0]?.deliveryPending).toBe(false);
+});
+
 it("moves preregistered preparation ownership and opens Workers only after handoff", async () => {
   const f = await fixture();
   const service = new WorkbenchService({ ...f.options, executionTransfer: { interrupt: async () => {}, fork: async () => ({ sessionId: "new-prep" }) } });

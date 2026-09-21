@@ -137,9 +137,8 @@ export const PendingWorkMessages = ({ client, workspaceId, sessionId, onOpenWork
       <p className="text-caption text-muted-foreground">{message.reason ?? "等待执行条件满足"}</p>
       <div className="flex flex-wrap gap-2">
         {message.blockerWorkItemIds?.map((workItemId, index) => onOpenWorkItem && <Button key={workItemId} size="sm" variant="ghost" outlined onClick={() => onOpenWorkItem(workItemId)}>查看阻塞工单{message.blockerWorkItemIds!.length > 1 ? ` ${index + 1}` : ""}</Button>)}
-        {message.state === "queued"
-          ? <Button size="sm" variant="ghost" outlined disabled={withdrawing === message.messageId} onClick={() => void withdraw(message.messageId)}>撤回</Button>
-          : onConfirm && <Button size="sm" variant="ghost" outlined disabled={confirming} onClick={() => void onConfirm()}>确认状态</Button>}
+        {message.canWithdraw && <Button size="sm" variant="ghost" outlined disabled={withdrawing === message.messageId} onClick={() => void withdraw(message.messageId)}>撤回</Button>}
+        {message.state === "unknown" && onConfirm && <Button size="sm" variant="ghost" outlined disabled={confirming} onClick={() => void onConfirm()}>确认状态</Button>}
       </div>
     </section>)}
     {error && <InlineNotice tone="error">{error}</InlineNotice>}

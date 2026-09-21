@@ -22,6 +22,7 @@ import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
 import { continueWorkFrom } from "./continue-work-from.js";
+import { currentWorkContext, decisionsForWork } from "./current-work-context.js";
 import { Button, Field, InlineNotice, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
@@ -73,19 +74,13 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string; canContinueFrom?: boolean }>({});
   const workSessionId = workTarget.sessionId ?? sessionId;
   const discussionIssue = store((s) => s.view?.issues.find((issue) => issue.discussionSessionId === sessionId));
-  const currentWorkRequest = store((s) => s.view?.workRequests.find((request) => {
-    if (!workSessionId) return false;
-    const hasOpenItems = s.view?.workItems.some((item) => item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
-    return request.workerSessionId === workSessionId &&
-      (request.status !== "ready" || hasOpenItems);
-  }));
-  const currentWorkItem = store((s) => workSessionId ? s.view?.workItems.find((item) => item.run.sessionId === workSessionId && !["closed", "cancelled"].includes(item.status))
-    ?? s.view?.workItems.filter((item) => item.run.sessionId === workSessionId).at(-1) : undefined);
-  const transferredWorkItem = store((s) => workSessionId ? s.view?.workItems.find((item) => item.run.migratedFromSessionId === workSessionId) : undefined);
-  const transferredWorkRequest = store((s) => workSessionId ? s.view?.workRequests.find((request) => request.migratedFromSessionId === workSessionId) : undefined);
-  const transferredSessionId = transferredWorkItem?.run.sessionId ?? transferredWorkRequest?.workerSessionId;
+  const workItems = store((s) => s.view?.workItems);
+  const workRequests = store((s) => s.view?.workRequests);
+  const workContext = useMemo(() => currentWorkContext(workItems ?? [], workRequests ?? [], workSessionId), [workItems, workRequests, workSessionId]);
+  const { item: currentWorkItem, request: currentWorkRequest, transferredSessionId } = workContext;
   const decisions = store((s) => s.view?.decisions);
-  const currentDecisions = (decisions ?? []).filter((card) => workSessionId && !card.answer && !card.withdrawn && card.sessionId === workSessionId);
+  const actions = store((s) => s.view?.actions);
+  const currentDecisions = useMemo(() => decisionsForWork(decisions ?? [], actions ?? [], workContext, workSessionId), [decisions, actions, workContext, workSessionId]);
   const [decisionMode, setDecisionMode] = useState<{ sessionId?: string; decisionId?: string; ordinary: boolean }>({ ordinary: false });
   const currentDecision = currentDecisions.find((card) => card.decisionId === decisionMode.decisionId) ?? (currentDecisions.length === 1 ? currentDecisions[0] : undefined);
   const answeringDecision = Boolean(currentDecision && !(decisionMode.sessionId === workSessionId && decisionMode.ordinary));

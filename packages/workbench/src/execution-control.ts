@@ -1,4 +1,7 @@
-import type { WorkMessage } from "./contracts.js";
+import type { SessionDelivery, WorkMessage } from "./contracts.js";
+
+export const canWithdrawMessage = (message: Pick<SessionDelivery, "state" | "origin" | "decisionId">): boolean =>
+  (message.state === "queued" || message.state === "rejected") && message.origin === "user" && !message.decisionId;
 
 export type SessionDispatchMessage = WorkMessage & { sessionId: string; messageId: string; origin?: "scheduler" | "user"; decisionId?: string; allowStart?: boolean };
 export type SessionDispatchGrant = { messageId: string; allowStart: boolean };
