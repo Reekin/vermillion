@@ -124,10 +124,8 @@ const rolloutPathForEntry = (
 const summarizeThread = (thread: Thread): string | undefined =>
   trimToUndefined(thread.preview) ?? trimToUndefined(thread.name);
 
-const titleForThread = (thread: Thread): string =>
-  trimToUndefined(thread.name) ??
-  trimToUndefined(thread.preview)?.split("\n").map((line) => line.trim()).find(Boolean) ??
-  discoveredCodexSessionId(thread.id);
+const titleForThread = (thread: Thread): string | undefined =>
+  trimToUndefined(thread.name);
 
 const mapThreadStatus = (thread: Thread): SessionStatus => {
   switch (thread.status.type) {

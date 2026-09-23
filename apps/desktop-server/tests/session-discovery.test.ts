@@ -134,10 +134,13 @@ describe("cold history hydration", () => {
     options: {
       metadata?: Record<string, unknown>;
       resumeProfile?: Record<string, unknown>;
+      preview?: string;
+      name?: string;
     } = {}
   ) => {
     const root = await createTempDir();
-    const thread = createThread({ id: "thread-history", cwd: join(root, "removed-worktree") });
+    const thread = createThread({ id: "thread-history", cwd: join(root, "removed-worktree"),
+      preview: options.preview, name: options.name });
     thread.turns = [{
       id: "turn-history", status: "completed", error: null, itemsView: "full",
       startedAt: null, completedAt: null, durationMs: null,
@@ -178,6 +181,14 @@ describe("cold history hydration", () => {
     return { root, port, rpc, hydrate, finishResume, resolveHistoryCwd };
   };
 
+  it.each(["full", "page"] as const)("keeps unnamed %s history untitled and preserves engine names", async (mode) => {
+    for (const options of [{ preview: "" }, { preview: "First message preview" }, { name: "Engine title" }]) {
+      const { hydrate, finishResume } = await setupHistory(mode, false, options);
+      finishResume();
+      expect((await hydrate())?.session.title).toBe(options.name);
+    }
+  });
+
   it.each(["full", "page"] as const)("loads cold %s history at the workspace root before reading and unsubscribes without starting a turn", async (mode) => {
     const { root, port, rpc, hydrate, finishResume, resolveHistoryCwd } = await setupHistory(mode);
     const pending = hydrate();
@@ -190,6 +201,7 @@ describe("cold history hydration", () => {
     const result = await pending;
     expect(result?.messageBlocks).toContainEqual(expect.objectContaining({ role: "assistant", text: "Saved worker answer" }));
     expect(result?.turns[0]?.turnId).toBe("turn-history");
+    expect(result?.session.title).toBeUndefined();
     expect(rpc.mock.calls.map(([method]) => method)).toEqual([
       "thread/read", "thread/resume", ...(mode === "page" ? ["thread/turns/list"] : []), "thread/goal/get", "thread/unsubscribe"
     ]);

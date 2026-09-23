@@ -46,7 +46,7 @@ export type DiscoveredSessionRecord = {
   engineId: string;
   providerKind: string;
   providerSessionId: string;
-  title: string;
+  title?: string;
   summaryText?: string;
   createdAt: string;
   updatedAt: string;

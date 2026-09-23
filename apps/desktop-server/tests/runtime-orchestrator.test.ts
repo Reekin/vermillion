@@ -990,7 +990,7 @@ describe("RuntimeOrchestrator", () => {
     expect(generateTitle).toHaveBeenCalledTimes(1);
   });
 
-  it("waits for pending title generation before disposing adapters", async () => {
+  it.each([false, true])("drains pending title generation and preserves manual rename: %s", async (rename) => {
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const titleGate = createDeferred<string>();
     const generateTitle = vi.fn(() => titleGate.promise);
@@ -1082,12 +1082,15 @@ describe("RuntimeOrchestrator", () => {
 
     expect(dispose).not.toHaveBeenCalled();
 
+    if (rename) {
+      await orchestrator.setSessionTitle(session.sessionId, "My chosen title");
+    }
     titleGate.resolve("Runtime lifecycle plan");
     await disposePromise;
 
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(domainService.getSession(session.sessionId)?.title).toBe(
-      "Runtime lifecycle plan"
+      rename ? "My chosen title" : "Runtime lifecycle plan"
     );
     expect(syncSession).toHaveBeenCalledWith("session-title-drain");
   });
