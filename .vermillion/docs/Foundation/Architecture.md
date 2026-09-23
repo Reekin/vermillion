@@ -21,7 +21,9 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 ## 持久化与事务
 
-全局 `~/.vermillion/` 保存 workspace 注册表、会话索引和全局角色文件。引擎的 `workspace-registry.json` 是唯一 workspace 注册表。
+全局 `~/.vermillion/` 保存 workspace 注册表、会话索引和全局角色文件。`workspace-registry.json` 是唯一 workspace 注册表，同时保存引擎设置：`defaultNewSessionEngineId`、`engineProgramPathsByEngineId`、`titleGenerationModelId`。默认角色随源码保存在 `packages/workbench/roles/`，打包后位于 `resources/app/roles/`，启动时由 `RoleService.ensureGlobal` 补齐全局目录中缺失的文件。
+
+统一的 Markdown 编辑界面不决定存储位置：编辑目标携带文件归属，由对应服务读写（文档走 `DocsService`，Maintainer 巡检指令走其配置存储）。
 
 每个 workspace 的 `.vermillion/` 保存 `docs/`、`roles/`、`work-requests/`、`workitems/`、`decisions/`、`runs/` 和 `scheduler.json`。文档在 `.vermillion/docs/` 内，以 Git commit 作为工单引用依据；工作台运行记录通过领域服务写入。
 
@@ -35,10 +37,25 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 引擎产品行为见[会话引擎](Engines/PRD.md)。每个引擎是一个装配单元 `EngineIntegration`（`apps/desktop-server/src/engines/<engineId>/`），包含引擎定义、能力面声明、`AgentAdapter` 与 runtime port、`AgentWorkbenchCapabilities`、程序解析规则和可选的 turn 扩展；`prod-service` 只持有装配单元列表，不直接引用任何引擎实现。会话级操作（释放执行、清理历史、活动 turn、技能列表、fork、凭据）都属于 `AgentWorkbenchCapabilities`，由 `CapabilityRegistry` 按会话 `engineId` 分发；shell 层不接收面向单一引擎的函数。入口（新建会话、AgentRunner、asksource）从设置读取新会话引擎，不写死引擎 ID。
 
-pi 的 runtime port 每会话启动一个 `pi --mode rpc` 进程，使用只按 `
-` 切分的 JSONL 客户端；宿主工具与角色指令注入由随包附带的 pi extension 提供。
+pi 的 runtime port 每会话启动一个 `pi --mode rpc` 进程，使用只按 `\n` 切分的 JSONL 客户端；宿主工具与角色指令注入由随包附带的 pi extension 提供。
+
+执行配置使用引擎无关的 `modelId`、`reasoningOptionId`、`serviceTierId`，由各适配层换算：Codex 直接传模型名与 effort；pi 通过 `get_available_models` 匹配唯一的 `provider/id`，推理档位映射为 thinking level。`serviceTierId` 只在引擎声明支持时传递。
+
+pi extension 在启动 pi 时以 `-e` 加载。pi 会话文件位于 `~/.pi/agent/sessions/<cwd 编码>/`，Vermillion 用 `--session-id` 指定会话 ID，并在会话索引中记录 `providerKind: "pi-session"`。工作台会话 ID 与引擎会话标识的对应关系也记录在会话索引中。
+
+## 角色指令送达
+
+角色行为见[角色与执行](../Workbench/Roles/PRD.md)。会话 metadata 只保存角色标识 `role`（`design-partner`、`work-preparation`、`worker`、`supervisor`、`maintainer`），不保存正文；fork 只继承 `role`。每次发送前按 `role` 和 workspace 现场解析正文，作为会话启动与恢复时的角色指令：Codex 由 runtime 通过 `config/read` 读取用户的 `developer_instructions`，再追加角色正文作为 developer 指令；pi 由 extension 在轮次开始前注入。
+
+解析结果与上次已送达的正文不同时，在本轮开始前以 developer 级消息追加到历史末尾，声明取代此前的角色指令，然后记为已送达。已送达正文保存在会话 metadata 的 `developerInstructions`，只由运行时在送达后回写；恢复会话时不重复追加相同正文。
 
 ## 会话与执行环境
+
+### 会话树
+
+会话树由 wrapper 维护，产品行为见[工作台 · 会话树](../Workbench/Think/PRD.md#会话树)。每个分支对应引擎中一个独立的线性会话，引擎只需提供从某个 turn fork 的能力。wrapper 记录树 id、成员会话 id、父会话 id 和 fork 点 turn id。fork 出的会话保留原 turn id，因此 turn id 就是树节点标识：同一会话内相邻 turn 相连，fork 会话的第一个自有 turn 挂在 fork 点 turn 下面。
+
+从非末端节点提问时，创建分支并发送是一个独立的异步操作，统一管理创建、发送、取消与收尾。前端收到受理结果即结束提交状态，之后通过事件更新进度和新分支。取消与发送受理交错时，按是否已产生正式 turn 收尾：没有正式 turn 的空分支归档，已有消息的分支不归档。成功的操作在正式节点接管后退出占位投影。
 
 ### 节点执行配置
 
@@ -53,6 +70,8 @@ Vermillion 将逐轮生效配置作为节点执行记录持久化，并通过已
 会话 cwd 保持 workspace 根目录。使用 worktree 时，Worker 在具体工具调用中显式指定 workdir、`git -C` 或文件绝对路径；工单流转与目录回收见[工单](../Workbench/Missions/PRD.md)。
 
 会话历史与执行环境的生命周期分开。读取历史先检查引擎是否已加载会话；未加载时在 workspace 根恢复，读完退订临时加载的执行环境，不发送模型消息。已有活动执行保持运行。历史阅读不依赖工单 worktree 是否存在；已加载会话树内的节点跳转只保存查看位置，树模型见[思考](../Workbench/Think/PRD.md#会话树)。
+
+重新进入 Codex 会话时以当前 rollout 为准，旧的数据库投影和已加载内容不决定展示结果。历史刷新只重建需要更新的可重建投影，保留 rollout、会话元数据和分支关系，不清空 Codex 状态数据库。
 
 刷新会话历史只清理该会话自身的可重建引擎缓存。祖先会话的缓存是后代读取继承历史的依据，连带清除会让后代历史在不报错的情况下缺少继承前缀。会话树内不存在引擎已归档但仍有活跃后代的成员：末端分支的移除由 Vermillion 自己的隐藏标记表达，不改变引擎归档状态，见[思考](../Workbench/Think/PRD.md#会话树)。历史读取因此只按会话自身的引擎线性历史进行，不从后代反推祖先内容。
 

@@ -4,7 +4,7 @@ Vermillion 通过引擎运行会话。当前支持 Codex（`codex`，Codex app-s
 
 ## 会话标识
 
-会话在工作台内由工作台会话 ID 标识，引擎另有自己的会话标识（Codex 的 thread id、pi 的 session id），两者的对应关系记录在会话索引中。引擎工具创建的子代理只向调用方返回引擎会话标识。
+会话在工作台内由工作台会话 ID 标识，引擎另有自己的会话标识（Codex 的 thread id、pi 的 session id）。引擎工具创建的子代理只向调用方返回引擎会话标识。
 
 面向 agent 的会话入口两种标识都接受：先按工作台会话 ID 定位，未命中时按引擎会话标识解析到对应会话。返回结果中的会话标识统一为工作台会话 ID。两种都定位不到时报错说明两种标识均已尝试。
 
@@ -16,11 +16,11 @@ Vermillion 通过引擎运行会话。当前支持 Codex（`codex`，Codex app-s
 - **引擎程序路径**：每个引擎一行，显示当前生效的完整程序路径和一个「选择」按钮，选中文件后立即保存。未设置自定义路径时按各引擎默认命令名在 PATH 中解析；已设置时多出「恢复默认」，回到默认命令解析。解析不到可执行文件时行内提示该引擎无法启动。
 - **标题模型**：下拉选择新会话引擎模型目录中的模型，留空时使用内置默认模型 `gpt-5.6-luna`。
 
-三项保存在全局注册表（`~/.vermillion/workspace-registry.json` 的 `defaultNewSessionEngineId`、`engineProgramPathsByEngineId`、`titleGenerationModelId`），修改立即生效，不重启应用。会话列表与输入器按会话的 `engineId` 展示对应引擎的能力面。
+三项都是全局设置，修改立即生效，不需要重启应用。会话列表和输入器按会话所用的引擎展示对应能力。
 
 ## 执行配置
 
-模型与推理档位是引擎无关的标识：`modelId` 为模型名（如 `gpt-5.6-luna`），`reasoningOptionId` 为推理档位（如 `max`）。执行偏好、角色 frontmatter、工单与 subagent 配置都使用这套标识，不按引擎分别配置。各引擎适配层把它映射到自身协议：Codex 直接传模型名与 effort；pi 通过 `get_available_models` 匹配唯一 `provider/id` 并映射为 thinking level。`serviceTierId` 只在引擎声明支持时展示与传递，pi 不支持。引擎模型目录中没有该模型或不支持该档位时明确报错，不静默回退。
+模型和推理档位用一套与引擎无关的写法：模型写模型名（如 `gpt-5.6-luna`），推理档位写档位名（如 `max`）。执行偏好、角色 frontmatter、工单和 subagent 配置都用这套写法，不按引擎分别配置，由各引擎自己换算成对应设置。速度只在引擎支持时显示和生效，pi 不支持。引擎里没有这个模型或不支持这个档位时明确报错，不悄悄换成别的。
 
 标题生成沿用全局生成器，凭据来源优先当前会话引擎提供的 OpenAI 兼容凭据，该引擎无法提供时使用其他已配置引擎的凭据；模型取设置页的「标题模型」，未设置时用内置默认模型 `gpt-5.6-luna`。
 
@@ -42,11 +42,11 @@ Vermillion 通过引擎运行会话。当前支持 Codex（`codex`，Codex app-s
 | diagnostics | 支持 | 进程与认证状态 |
 | 会话发现 | 列出 Codex 目录下全部线程 | 只列出 Vermillion 创建的会话 |
 
-不支持的能力按现有 `unsupported` 兜底展示，不为 pi 造替代实现。
+不支持的能力在界面上显示为不可用，不为 pi 造替代实现。
 
 ## pi 运行要求
 
 - `pi` 通过 npm 包 `@earendil-works/pi-coding-agent` 安装，`~/.pi/agent/settings.json` 的 `packages` 需包含 `npm:pi-subagents`（子代理）与 `npm:pi-mcp-adapter`（MCP）。
 - 模型来自 `~/.pi/agent/models.json` 的 provider 配置；`settings.json` 的 `defaultProvider` / `defaultModel` / `defaultThinkingLevel` 决定引擎默认。
-- Vermillion 随包附带一个 pi extension，启动 pi 时以 `-e` 加载，提供 `vermillion.read_session` 等宿主工具，并在每轮开始前注入当前角色指令（对应 Codex 的 developer 指令送达规则）。
-- pi 会话文件位于 `~/.pi/agent/sessions/<cwd 编码>/`，Vermillion 通过 `--session-id` 指定会话 ID 并在索引中记录 `providerKind: "pi-session"`。
+- `vermillion.read_session` 等工作台工具和角色指令由 Vermillion 随包附带的 pi 扩展提供，用户不需要另外安装。
+- pi 会话文件保存在 pi 自己的会话目录 `~/.pi/agent/sessions/` 下。
