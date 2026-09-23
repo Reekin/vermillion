@@ -1,17 +1,18 @@
 # 角色与执行
 
-四个身份，各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 工作台 → 角色 编辑。
+设计伙伴、Worker、监工、Maintainer 和 Liaison 各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 工作台 → 角色 编辑。
 
 默认角色随源码保存在 `packages/workbench/roles/`，打包后位于 `resources/app/roles/`。启动时 `RoleService.ensureGlobal` 只补齐 `~/.vermillion/roles/` 中缺失的文件，不覆盖已有全局版本。读取角色时优先采用 workspace 文件：`override` 用项目正文替换全局正文，`append` 将项目正文追加到全局正文；没有项目文件时使用全局版本。
 
-会话 metadata 只保存角色标识 `role`（`design-partner`、`work-preparation`、`worker`、`maintainer`），不保存角色正文；fork 只继承 `role`。设计伙伴会话使用 `design-partner` 角色，其指令正文附带当前 workspaceId 与工作台 CLI 说明。
+会话 metadata 只保存角色标识 `role`（`design-partner`、`work-preparation`、`worker`、`supervisor`、`maintainer`），不保存角色正文；fork 只继承 `role`。设计伙伴会话使用 `design-partner` 角色，其指令正文附带当前 workspaceId 与工作台 CLI 说明。
 
-每次向会话发送消息时，工作台按 `role` 和当前 workspace 现场解析该会话此刻应有的指令（设计伙伴与开工准备用设计伙伴正文，Worker 用含 Reviewer、Verifier 交接说明的完整 Worker 指令，Maintainer 按领域附加专属指令），角色文件的修改在下一条消息生效，不需要重建会话。解析结果作为会话启动与恢复的角色指令：Codex 由 runtime 通过 `config/read` 读取用户的 `developer_instructions` 再追加角色正文作为 developer 指令，不修改用户 `config.toml`；pi 由 Vermillion 附带的 extension 在轮次开始前注入；与上次已送达正文不同时，在本轮开始前以 developer 级消息追加到历史末尾并声明取代此前角色指令，然后记录为已送达。已送达正文保存在会话 metadata 的 `developerInstructions`，只由运行时在送达后回写。
+每次向会话发送消息时，工作台按 `role` 和当前 workspace 现场解析该会话此刻应有的指令（设计伙伴与开工准备用设计伙伴正文，Worker 用含 Reviewer、Verifier 交接说明的完整 Worker 指令，监工用 supervisor 正文，Maintainer 按领域附加专属指令），角色文件的修改在下一条消息生效，不需要重建会话。解析结果作为会话启动与恢复的角色指令：Codex 由 runtime 通过 `config/read` 读取用户的 `developer_instructions` 再追加角色正文作为 developer 指令，不修改用户 `config.toml`；pi 由 Vermillion 附带的 extension 在轮次开始前注入；与上次已送达正文不同时，在本轮开始前以 developer 级消息追加到历史末尾并声明取代此前角色指令，然后记录为已送达。已送达正文保存在会话 metadata 的 `developerInstructions`，只由运行时在送达后回写。
 
 角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在新建会话草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent（Codex 用 `spawn_agent`，pi 用 `subagent` 工具），创建时使用各自角色解析后的模型配置，未指定的字段沿用引擎的 subagent 默认值；正文与配置均遵循全局和项目的覆盖、追加规则。引擎不支持的显式配置应明确反馈，不能静默忽略。
 
 - **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/design-partner.md)。
 - **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/worker.md)。
+- **监工**：工作进展检查与异常处置，指令见 [supervisor.md](../../../../packages/workbench/roles/supervisor.md)。
 - **Maintainer（领域 Owner）**：领域巡检、Issue 分诊与授权范围内自动开单，指令见 [maintainer.md](../../../../packages/workbench/roles/maintainer.md)。
 - **Liaison**：IM 反馈收集，指令见 [liaison.md](../../../../packages/workbench/roles/liaison.md)。
 
@@ -20,6 +21,12 @@ Maintainer 和 IM 接入属于扩展能力，不是基本执行循环的前提�
 开工准备使用独立的 [work-preparation.md](../../../../packages/workbench/roles/work-preparation.md)，沿用角色文件的全局、项目覆盖与追加规则，可通过角色编辑器及 role CLI 编辑。正文作为准备轮消息发送，附上本次范围及工单关联信息；准备分支继承原角色，不注入 Worker 指令。开工流程见[工作台 · 开工](../Think/PRD.md)。
 
 调度器排到工单时，将分支的角色标识改为 `worker` 并应用其模型配置，随后发送执行合同；Worker 指令按上述送达规则在合同轮开始前追加。保留继承的历史前缀，后续恢复与压缩后仍使用 Worker 角色。`worker.md` 只描述执行已建立工单的职责。
+
+## 监工
+
+监工是程序创建并唤醒的普通 Agent 会话，角色标识为 `supervisor`，关联所属工作及准备来源。程序从已结束的准备 turn fork，按本 workspace 解析 supervisor 角色正文和模型配置后发送首次检查消息；不继承第一张工单的执行身份，不绑定为 Worker。
+
+后续检查复用同一会话，角色正文按普通角色解析规则送达。创建、检查周期、暂停和结束条件统一见[工作与工单 · 监工](../Missions/PRD.md#监工)。判断、纠偏、恢复与交接动作由 supervisor.md 规定，程序不把该 prompt 加载成其他执行者的身份。
 
 ## 编辑器
 
@@ -43,15 +50,19 @@ Maintainer 和 IM 接入属于扩展能力，不是基本执行循环的前提�
 
 ### 读取会话消息
 
-`vermillion.read_session` 按[会话标识](../../Foundation/Engines/PRD.md#会话标识)返回全部可见 user 和 agent 消息，包括 agent 的 commentary、最终回复以及进行中消息已生成的正文。每条消息保留消息 ID、所属 turn、发送者、阶段和时间戳；同时返回轮次状态，便于调用者结合最近消息判断进展。工具调用及其输出不作为 user/agent 消息混入。
+`vermillion.read_session` 按[会话标识](../../Foundation/Engines/PRD.md#会话标识)返回全部可见 user 和 agent 消息，包括 agent 的 commentary、最终回复以及进行中消息已生成的正文。每条消息保留消息 ID、所属 turn、发送者、阶段和时间戳；同时返回轮次状态及下述当前活动摘要，便于调用者结合最近消息判断进展。工具调用及其输出不作为 user/agent 消息混入。
 
 `limit` 按消息条数选取最近 N 条，再按时间正序返回；例如 10 或 20 条可用于查看最近进展。同一消息的流式片段合并为一条，不重复计数。未传 limit 时返回全部消息，现有 maxChars 字符预算仍可限制正文，截断须明确标记，字符预算优先保留最新消息。读取覆盖目标会话上下文中的用户与 agent 消息，共享历史不重复返回，不混入其他分支独有消息。
+
+消息列表之外单独返回目标会话的当前活动摘要：当前轮次与状态、仍在运行的工具或命令、最近完成的一项活动，以及待审批或待用户输入的事项。活动携带标识、名称、已有简短描述及开始/结束时间，工具状态沿用引擎事实；并行运行的活动分别列出，不能用最近一条已完成工具遮盖仍在运行的工具。默认不返回完整工具参数和输出。
+
+活动摘要只描述目标会话的实际活动，不把共享祖先或其他分支的历史工具当成当前执行。没有活动工具不代表会话停止；断连或仅有历史状态时明确标为未确认并保留已知记录的时间，不能用查询时间冒充进展时间，也不从无消息或时长推断卡死。摘要不受消息 limit 截断影响，消息字符预算语义保持。工具读取与对应 CLI 读取提供一致结果。
 
 读取不发起模型轮次、不改变当前查看位置或中断目标执行。没有新消息不能单独认定会话卡死，目标可能正在运行工具或等待模型。
 
 ### 向会话发送消息
 
-CLI `vermillion steer` 接收目标[会话标识](../../Foundation/Engines/PRD.md#会话标识)与 `content`，可向任意可访问的会话投递消息，不限于 Worker 或当前 workspace。目标有活动 turn 时追加到该轮，空闲时在原会话启动新轮；不创建 fork，不强制中断已有执行，不改变目标角色、模型偏好与工单归属。目标绑定准备或工单时，人工新轮、追加消息和暂停按[执行控制](../Missions/PRD.md#执行控制)处理；发送普通消息不等于恢复自动推进，也不代替[业务决策答复](../Inbox/PRD.md#决策卡)。
+CLI `vermillion steer` 接收目标[会话标识](../../Foundation/Engines/PRD.md#会话标识)与 `content`，可向任意可访问的会话投递消息，不限于 Worker 或当前 workspace。目标有活动 turn 时追加到该轮，空闲时在原会话启动新轮；不创建 fork，不强制中断已有执行，不改变目标角色、模型偏好与工单归属。准备或 Worker 会话复用相同聊天行为，普通消息不修改工单阶段、不建立人工接管或工单消息队列，也不代替[业务决策答复](../Inbox/PRD.md#决策卡)。任务控制使用独立的[业务入口](../Missions/PRD.md#执行控制)。
 
 命令以引擎实际接收为成功依据，返回目标会话、接收消息的 turn 和本次是追加还是新轮；不可访问、无法发送或引擎拒绝时返回明确错误。执行期间与投递同时发生的正常轮次结束，按当前实际状态将未接收的消息送入原会话新轮，不重复投递已接收消息。
 

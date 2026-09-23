@@ -46,7 +46,7 @@ Agent 会话行标注角色，subagent 缩进挂在派出它的会话下，沿�
 
 ## 角色
 
-设计伙伴、Worker、Maintainer、Liaison 的职责与配置见[角色](../Workbench/Roles/PRD.md)。
+设计伙伴、Worker、监工、Maintainer、Liaison 的职责与配置见[角色](../Workbench/Roles/PRD.md)。
 
 ## 基本闭环
 

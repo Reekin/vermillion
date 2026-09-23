@@ -27,7 +27,7 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 文档草稿是每棵会话树一个只签出 `.vermillion/docs` 的 sparse worktree，分支与目录以 treeId 命名，由 `DocsService` 在首次写入时创建。`docs.*` RPC 按调用方 sessionId 解析 treeId 并路由到对应草稿；treeId 由会话索引提供，工作台服务通过它已有的运行时接入点获取。草稿合入主干走与 Worker 成果合入相同的 `integrate` 串行边界和冲突处理，回收复用 `cleanup` 候选机制。
 
-每张工单持久化为一份 `WorkItemRecord`，包含合同与业务进度 `item`、当前执行过程 `execution`、合入检查点 `integrations` 和回收候选 `cleanup`。执行过程保存当前会话、消息投递、失败和重试状态，是恢复执行的唯一依据。工单查询中的 `run` 由 execution 投影，不单独持久化；`runs/` 中的历史记录只用于追溯。
+每张工单持久化为一份 `WorkItemRecord`，包含合同与业务进度 `item`、当前执行过程 `execution`、合入检查点 `integrations` 和回收候选 `cleanup`。执行记录保存固定 Worker 会话、业务派发与交接事实；普通聊天收发和轮次活动由会话系统提供，不在工单中维护第二份消息队列或人工接管状态。工单查询中的 `run` 由 execution 投影，不单独持久化；`runs/` 中的历史记录只用于追溯。
 
 `WorkspaceStore` 只负责记录查询和按工单串行的读改写事务；`WorkbenchService` 在事务内完成状态转换。持久化成功后统一发布工单和动作事件。取消事件先于通用更新事件送达，使本次取消触发的中断先于后续调度入队。查询投影不提供写入入口。
 
@@ -64,7 +64,7 @@ Vermillion 将逐轮生效配置作为节点执行记录持久化，并通过已
 
 `WrapperChatTreeService` 以每次加载为独立实例：一次加载持有自己的 signal、成员读取任务和构建结果，完成后整体成为已发布投影。已发布投影是不可变值，查看位置变更产生新投影而不是就地改写；查询、跳转和发送准备只读取当前已发布投影，读取路径不重新构建树或等待成员加载。
 
-`Orchestrator` 由工作台事件和 turn 完成通知驱动。合同更新送达原执行会话；提交依据是否有效由当前合同决定，与消息送达所在轮次无关。业务上的等待、重试和提交规则见[执行循环规范](../Workbench/Missions/Standards.md)。
+工作台程序负责按条件派发、登记业务动作和驱动监工检查；会话事件提供运行事实，不自动推断续做策略。监工会话及检查时间归所属工作持有，判断与处置沿角色和业务 CLI 边界执行。合同更新交付原 Worker，提交依据是否有效由当前合同决定；规则见[执行循环规范](../Workbench/Missions/Standards.md)。
 
 ## 搜索
 
