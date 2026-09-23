@@ -65,7 +65,7 @@ describe("chat tree entry navigation", () => {
       "open:worker", "activate:worker", "jump:historical", "get:path:worker", "get:tree:worker"
     ]);
     expect(test.activate).toHaveBeenCalledWith("worker", { focusTree: true });
-    expect(test.open).toHaveBeenCalledWith("worker", { includeWindow: false, signal: expect.any(AbortSignal) });
+    expect(test.open).toHaveBeenCalledWith("worker", { includeWindow: false, signal: expect.any(AbortSignal), readId: expect.stringContaining("::open::") });
     await test.controller.refreshChatTree();
     expect(test.open).toHaveBeenCalledTimes(1);
     expect(test.activate).toHaveBeenCalledTimes(1);

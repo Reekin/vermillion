@@ -1,5 +1,6 @@
 import { isHistoricalChatTreePosition } from "./chat-tree-send-target.js";
 import { recordUiOperation } from "../../diagnostics/ui-performance.js";
+import { sessionLoadTrace, sessionLoadMark } from "../../diagnostics/session-load-trace.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
@@ -101,7 +102,8 @@ export const useChatTreeController = (input: {
     const opened: SessionRequest = {
       sessionId,
       signal,
-      promise: transport.sessionBrowser.open(sessionId, { includeWindow: false, signal }).then(() => undefined)
+      promise: transport.sessionBrowser.open(sessionId, { includeWindow: false, signal,
+        readId: `${sessionLoadTrace(sessionId)?.id ?? globalThis.crypto.randomUUID()}::open::${globalThis.crypto.randomUUID()}` }).then(() => undefined)
     };
     entry.opened.current = opened;
     void opened.promise.catch(() => {
@@ -241,14 +243,19 @@ export const useChatTreeController = (input: {
     if (!sessionId || !entry || entryRef.current !== entry) return;
     return entry.refresh.request(async (signal, consumePending) => {
       const startedAt = performance.now();
-      const readId = globalThis.crypto.randomUUID();
+      const trace = sessionLoadTrace(sessionId);
+      const readId = `${trace?.id ?? globalThis.crypto.randomUUID()}::path::${globalThis.crypto.randomUUID()}`;
+      sessionLoadMark(trace, "refresh.begin", { readId });
+      let outcome = "ok";
       let finishRead = () => {};
       const isCurrent = () => entryRef.current === entry && !signal.aborted;
       const navigationForRequest = requestedNavigation ?? navigationEntry;
       try {
         await ensureSessionOpened(signal);
+        sessionLoadMark(trace, "open.ready", { readId });
         if (!isCurrent()) return;
         await ensureNavigation(navigationForRequest);
+        sessionLoadMark(trace, "navigation.ready", { readId });
         if (!isCurrent()) return;
         consumePending();
         finishRead = store.beginSessionWindowRead(readId);
@@ -258,11 +265,15 @@ export const useChatTreeController = (input: {
           transport.chatTree.operations({ sessionId })
         ]);
         if (!isCurrent()) return;
+        sessionLoadMark(trace, "path.received", { readId, windows: initialPath.windows?.length ?? 0, nodes: initialPath.nodes.length });
         entry.operations = result.operations;
         if (!await applyViewPath(entry, initialPath, navigationForRequest, isCurrent, readId)) return;
+        sessionLoadMark(trace, "path.applied", { readId });
         setFailedEntry(undefined);
         setTreeFailure(undefined);
-        let tree = await transport.chatTree.get(sessionId, { signal });
+        let tree = await transport.chatTree.get(sessionId, { signal,
+          readId: `${trace?.id ?? globalThis.crypto.randomUUID()}::tree::${globalThis.crypto.randomUUID()}` });
+        sessionLoadMark(trace, "tree.received", { readId, nodes: tree.nodes.length });
         if (!isCurrent()) return;
         const selected = result.operations.find((op) => op.operationId === selectedSendRef.current);
         if (selected?.turnId && tree.nodes.some((node) => node.turnId === selected.turnId)) {
@@ -285,9 +296,12 @@ export const useChatTreeController = (input: {
         setFailedEntry(undefined);
         setTreeFailure(undefined);
       } catch (error) {
+        outcome = "error";
         if (!isCurrent()) return;
         throw error;
       } finally {
+        sessionLoadMark(trace, "refresh.end", { readId, outcome: signal.aborted ? "cancelled" : outcome,
+          durationMs: performance.now() - startedAt });
         signal.removeEventListener("abort", finishRead);
         finishRead();
         recordUiOperation("chat-tree.refresh", startedAt, { sessionId }, "async");

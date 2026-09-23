@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { beginSessionStage } from "../session-load-trace.js";
 import type { Readable, Writable } from "node:stream";
 import { Worker } from "node:worker_threads";
 import {
@@ -102,6 +103,8 @@ type ActiveReadDiagnostics = {
 
 type QueuedLine = {
   line: string;
+  receivedAt: number;
+  parseStartedAt?: number;
   diagnostics?: ActiveReadDiagnostics;
 };
 
@@ -135,6 +138,8 @@ export class JsonRpcLineClient {
   >();
   private readonly protocolErrorListeners = new Set<Listener<Error>>();
   private readonly pendingById = new Map<string, PendingRequest>();
+  // Retain only a bounded diagnostic handle to recognize responses after local cancellation.
+  private readonly tracedResponses = new Map<string, ReturnType<typeof beginSessionStage>>();
   private readonly pendingWrites = new Set<PendingWrite>();
   private readonly bufferedParts: string[] = [];
   private bufferedBytes = 0;
@@ -347,19 +352,28 @@ export class JsonRpcLineClient {
       ...(params === undefined ? {} : { params })
     };
 
+    const span = beginSessionStage("engine.rpc", { method, engineRequestId: requestId,
+      threadId: (params as { threadId?: string } | undefined)?.threadId,
+      pendingRequests: this.pendingById.size });
+    if (span.owner) {
+      this.tracedResponses.set(requestId, span);
+      if (this.tracedResponses.size > 128) this.tracedResponses.delete(this.tracedResponses.keys().next().value!);
+    }
     return new Promise((resolve, reject) => {
       const pending: PendingRequest = {
         id,
         method,
-        resolve,
-        reject,
+        resolve: (value) => { span.emit("end", { outcome: "ok" }); resolve(value); },
+        reject: (error) => { span.emit("end", { outcome: "error", errorCode: (error as { code?: string }).code }); reject(error); },
         timeout: undefined,
         abortListener: undefined,
         signal: options.signal
       };
       this.pendingById.set(requestId, pending);
       this.installPendingGuards(requestId, pending, options);
-      void this.writePayload(payload, options).catch((error: Error) => {
+      void this.writePayload(payload, options).then(() => {
+        span.emit("sent");
+      }).catch((error: Error) => {
         this.rejectPending(requestId, this.createWriteError(error, method, id));
       });
     });
@@ -468,7 +482,7 @@ export class JsonRpcLineClient {
       start = newlineIndex + 1;
       if (!line.trim()) continue;
       if (diagnostics) diagnostics.pendingLines += 1;
-      this.parser.queue.push({ line, diagnostics });
+      this.parser.queue.push({ line, diagnostics, receivedAt: performance.now() });
     }
     if (start < text.length) {
       const remainder = text.slice(start);
@@ -483,6 +497,7 @@ export class JsonRpcLineClient {
     while (this.parser === parser) {
       const queued = parser.queue.shift();
       if (!queued) return;
+      queued.parseStartedAt = performance.now();
       if (Buffer.byteLength(queued.line) >= LARGE_JSON_PARSE_THRESHOLD) {
         parser.pending = queued;
         try {
@@ -493,13 +508,14 @@ export class JsonRpcLineClient {
         return;
       }
       const startedAt = performance.now();
-      this.handleLine(queued.line, queued.diagnostics);
+      this.handleLine(queued);
       if (queued.diagnostics) queued.diagnostics.syncDurationMs += performance.now() - startedAt;
       this.finishQueuedLine(queued.diagnostics);
     }
   }
 
-  private handleLine(line: string, diagnostics?: ActiveReadDiagnostics): void {
+  private handleLine(queued: QueuedLine): void {
+    const { line, diagnostics } = queued;
     let payload: JsonRpcLinePayload;
     try {
       payload = JSON.parse(line) as JsonRpcLinePayload;
@@ -507,7 +523,21 @@ export class JsonRpcLineClient {
       this.handleParseError(error, line, diagnostics);
       return;
     }
+    this.traceParsedResponse(payload, queued);
     this.dispatchParsedPayload(payload, diagnostics);
+  }
+
+  private traceParsedResponse(payload: JsonRpcLinePayload, queued: QueuedLine): void {
+    if (payload.method || payload.id === undefined) return;
+    const id = localRequestId(payload.id);
+    const span = this.tracedResponses.get(id);
+    if (!span) return;
+    span.emit("response", { late: !this.pendingById.has(id),
+      receivedAtEpochMs: performance.timeOrigin + queued.receivedAt,
+      responseBytes: Buffer.byteLength(queued.line),
+      parseQueueMs: (queued.parseStartedAt ?? queued.receivedAt) - queued.receivedAt,
+      parseMs: performance.now() - (queued.parseStartedAt ?? queued.receivedAt) });
+    this.tracedResponses.delete(id);
   }
 
   private dispatchParsedPayload(
@@ -579,6 +609,7 @@ export class JsonRpcLineClient {
       if (result.error !== undefined) {
         this.handleParseError(new Error(result.error), queued.line, queued.diagnostics);
       } else {
+        this.traceParsedResponse(result.payload!, queued);
         this.dispatchParsedPayload(result.payload!, queued.diagnostics);
       }
     } finally {

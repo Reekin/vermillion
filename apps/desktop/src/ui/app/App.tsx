@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { beginSessionLoad, sessionLoadMark } from "../../diagnostics/session-load-trace.js";
 import { mergeSessionExecutionProfile, resolveEngineExecutionPreference } from "@vermillion/shared";
 import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
@@ -92,6 +93,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const [docsExplorerOpen, setDocsExplorerOpen] = useState(false);
   const [searchWorkItemTarget, setSearchWorkItemTarget] = useState<{ workspaceId: string; workItemId: string; nonce: number }>();
   const openSessionTarget = useCallback(async (workspaceId: string, targetSessionId: string, turnId?: string) => {
+    beginSessionLoad(targetSessionId, transport.diagnostics.write, "target-link");
     setWorkTarget({});
     setSessionEntry({ focusTree: true, turnId });
     setNavigationTarget({ sessionId: targetSessionId, workspaceId });
@@ -99,7 +101,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     if (workspaceFilterId && workspaceFilterId !== workspaceId) setWorkspaceFilterId(workspaceId);
     store.getState().browseWorkspace(workspaceId);
     store.setState({ workspaceSection: "sessions", panel: "workbench", overlay: undefined });
-  }, [store, workspaceFilterId]);
+  }, [store, workspaceFilterId, transport]);
   const openSearchWorkItem = useCallback((hit: SearchHit) => {
     if (!hit.workItemId) return;
     setSearchOpen(false);
@@ -153,13 +155,17 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     onResumed: () => setReloadSignal((n) => n + 1)
   });
   const openSidebarSession = useCallback((id: string) => {
+    const trace = beginSessionLoad(id, transport.diagnostics.write, "sidebar");
+    if (id === sessionId) {
+      sessionLoadMark(trace, "navigation.already-selected");
+    }
     setWorkTarget({});
     setSessionEntry(undefined);
     const selected = sidebar.findSession(id);
     if (selected) setNavigationTarget({ sessionId: id, workspaceId: selected.workspaceId });
     setSessionId(id);
     store.getState().setWorkspaceSection("sessions");
-  }, [sidebar.findSession, store]);
+  }, [sidebar.findSession, store, transport, sessionId]);
   const openSidebarMenu = useCallback((event: ReactMouseEvent, id: string, title: string) => void sessionActions.openMenu(event, id, title), [sessionActions.openMenu]);
 
   // Docs panel follows the open session's workspace and tree; anywhere else it shows the main branch.

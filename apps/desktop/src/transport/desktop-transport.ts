@@ -1,4 +1,5 @@
 import { recordUiOperation } from "../diagnostics/ui-performance.js";
+import { sessionLoadMark, sessionLoadTrace } from "../diagnostics/session-load-trace.js";
 import type {
   Attachment,
   BackgroundRunSnapshotRpc,
@@ -577,17 +578,29 @@ export const createDesktopTransport = (
   );
 
   const historyRequest = async <T,>(
-    signal: AbortSignal | undefined, readId: string | undefined, request: (readId?: string) => Promise<T>
+    sessionId: string, method: string, signal: AbortSignal | undefined, readId: string | undefined, request: (readId?: string) => Promise<T>
   ): Promise<T> => {
     signal?.throwIfAborted();
-    const id = readId ?? (signal ? createId() : undefined);
+    const trace = sessionLoadTrace(sessionId);
+    const id = readId ?? (trace ? `${trace.id}::${createId()}` : signal ? createId() : undefined);
+    const startedAt = performance.now();
+    const fields = { method, readId: id ?? "" };
+    sessionLoadMark(trace, "rpc.begin", fields);
     const cancel = () => {
+      sessionLoadMark(trace, "rpc.cancel-requested", fields);
       if (id) void rpc.request("chatTree.cancelRead", { readId: id }).catch((error) => {
         console.warn("[vermillion] History read cancellation failed", error);
       });
     };
     signal?.addEventListener("abort", cancel, { once: true });
-    try { return await request(id); }
+    try {
+      const result = await request(id);
+      sessionLoadMark(trace, "rpc.end", { ...fields, outcome: "ok", durationMs: performance.now() - startedAt });
+      return result;
+    } catch (error) {
+      sessionLoadMark(trace, "rpc.end", { ...fields, outcome: signal?.aborted ? "cancelled" : "error", durationMs: performance.now() - startedAt });
+      throw error;
+    }
     finally { signal?.removeEventListener("abort", cancel); }
   };
 
@@ -820,7 +833,7 @@ export const createDesktopTransport = (
           workspaceIds
         }),
       create: (input) => rpc.request("sessionBrowser.create", input),
-      open: (sessionId, options) => historyRequest(options?.signal, options?.readId, (readId) =>
+      open: (sessionId, options) => historyRequest(sessionId, "sessionBrowser.open", options?.signal, options?.readId, (readId) =>
         rpc.request("sessionBrowser.open", {
           sessionId,
           forceProviderHydration: options?.forceProviderHydration,
@@ -909,7 +922,7 @@ export const createDesktopTransport = (
       remove: (input) => rpc.request("chatTree.remove", input),
       operations: (input) => rpc.request("chatTree.operations", input),
       get: async (sessionId, options) => {
-        const result = await historyRequest(options?.signal, options?.readId, (readId) => rpc.request("chatTree.get", {
+        const result = await historyRequest(sessionId, `chatTree.get.${options?.scope ?? "tree"}`, options?.signal, options?.readId, (readId) => rpc.request("chatTree.get", {
           sessionId,
           ...(options?.scope ? { scope: options.scope } : {}),
           ...(options?.knownWindows ? { knownWindows: options.knownWindows } : {}),

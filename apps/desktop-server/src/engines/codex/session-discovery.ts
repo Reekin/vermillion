@@ -1,3 +1,4 @@
+import { sessionStage } from "../../session-load-trace.js";
 import type {
   ChatSession,
   MessageBlock,
@@ -1030,13 +1031,13 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         metadata: this.hydratedMetadata(entry, thread)
       });
 
-      const hydratedTurns = await hydrateCodexTurnEntities({
+      const hydratedTurns = await sessionStage("history.convert", { memberSessionId: entry.sessionId, turns: thread.turns.length }, () => hydrateCodexTurnEntities({
         entry,
         thread,
         rolloutPath: rolloutPathForEntry(entry, thread),
         turnChangesStore: this.turnChangesStore,
         signal: input.signal
-      });
+      }));
       if (!hydratedTurns) {
         return undefined;
       }

@@ -1,3 +1,4 @@
+import { sessionStage } from "./session-load-trace.js";
 import type {
   ChatSession,
   Conversation,
@@ -426,7 +427,7 @@ export class SessionReconciliationService {
         return true;
       }
       existingHydration.addConsumer(input.signal);
-      const loadedByExisting = await existingHydration.promise;
+      const loadedByExisting = await sessionStage("history.shared-wait", { memberSessionId: sessionId }, () => existingHydration.promise);
       return input.signal?.aborted ? false : loadedByExisting;
     }
 
@@ -442,7 +443,7 @@ export class SessionReconciliationService {
     const existingHydration = this.reusableHydration(sessionId);
     if (existingHydration) {
       existingHydration.addConsumer(input.signal);
-      const loadedByExisting = await existingHydration.promise;
+      const loadedByExisting = await sessionStage("history.shared-wait", { memberSessionId: sessionId }, () => existingHydration.promise);
       return input.signal?.aborted ? false : loadedByExisting;
     }
     const hydration: SharedHydrationTask<boolean> = shareHydration(
@@ -568,7 +569,8 @@ export class SessionReconciliationService {
     if (!hydrated || input.signal?.aborted) {
       return false;
     }
-    const committed = await this.commitHydratedSession(entry, hydrated);
+    const committed = await sessionStage("history.commit", { memberSessionId: entry.sessionId },
+      () => this.commitHydratedSession(entry, hydrated));
     if (committed && !input.signal?.aborted) provider.onHistoryCommitted?.(hydrated);
     return Boolean(committed);
   }

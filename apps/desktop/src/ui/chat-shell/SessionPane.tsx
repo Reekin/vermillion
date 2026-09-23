@@ -1,3 +1,4 @@
+import { sessionContentCommitted } from "../../diagnostics/session-load-trace.js";
 import type {
   SessionExecutionProfileInput,
   TurnExecutionOptions
@@ -771,6 +772,9 @@ export const SessionPane = ({
     onStatusNotice: setStatusNotice
   });
   const visibleTurnIds = activeChatTree?.visibleTurnIds ?? emptyTurnIds;
+  useLayoutEffect(() => {
+    if (activeChatTree && !isOpeningSelectedSession) sessionContentCommitted(sessionId, visibleTurnIds.length);
+  });
   const streamScopeRef = useRef({ tree: activeChatTree, turnIds: new Set(visibleTurnIds), viewSessionId });
   streamScopeRef.current = { tree: activeChatTree, turnIds: new Set(visibleTurnIds), viewSessionId };
   const isBackgroundStream = useCallback(({ event }: EventEnvelope): boolean => {

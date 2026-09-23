@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { beginSessionStage } from "./session-load-trace.js";
 import type { Turn, ChatTreeSendInput, ChatTreeSendOperation, CommandEnvelope } from "@vermillion/shared";
 import type { ChatTreeSnapshot, ChatTreeNodeSnapshot } from "./chat-tree-provider.js";
 import type { SessionIndexStore } from "./session-index.js";
@@ -221,6 +222,20 @@ export class WrapperChatTreeService {
   }
 
   private buildProjection(
+    sessionId: string, loaded: ReadonlySet<string>, withWindows = false, knownWindows?: KnownSessionWindows
+  ): TreeProjection {
+    const span = beginSessionStage("tree.project", { memberSessionId: sessionId, members: loaded.size, withWindows });
+    try {
+      const result = this.buildProjectionValue(sessionId, loaded, withWindows, knownWindows);
+      span.emit("end", { outcome: "ok", nodes: result.tree.nodes.length, windows: result.tree.windows?.length ?? 0 });
+      return result;
+    } catch (error) {
+      span.emit("end", { outcome: "error" });
+      throw error;
+    }
+  }
+
+  private buildProjectionValue(
     sessionId: string,
     loaded: ReadonlySet<string>,
     withWindows = false,

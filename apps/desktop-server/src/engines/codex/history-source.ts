@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { sessionStage } from "../../session-load-trace.js";
 import type { SessionIndexEntry } from "../../session-index.js";
 
 /** Rollout metadata is an in-process freshness token, never a content revision. */
@@ -38,10 +39,11 @@ export class CodexHistorySource {
     signal?.throwIfAborted();
     if (!this.options.isActive(sessionId) &&
         (!before || before !== this.committed.get(sessionId))) {
-      await this.options.rebuild(sessionId, signal);
+      await sessionStage("history.rebuild-source", { memberSessionId: sessionId, hasBaseline: this.committed.has(sessionId) },
+        () => this.options.rebuild(sessionId, signal));
     }
     signal?.throwIfAborted();
-    const result = await read();
+    const result = await sessionStage("history.provider-read", { memberSessionId: sessionId }, read);
     signal?.throwIfAborted();
     if (result && before && path && before === await readRolloutSource(path)) {
       this.readSources.set(result, { sessionId, signature: before });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { traceSessionRead, sessionStage } from "./session-load-trace.js";
 import { readSession, type ReadSessionArgs } from "./read-session-host-tool.js";
 import type { ReadSessionTranscriptResult } from "./read-session-transcript.js";
 import type { HostToolRegistry } from "./host-tools.js";
@@ -363,9 +364,9 @@ export class SessionShellService {
     const source = this.capabilities?.getSessionRuntime(engineId)?.historySource;
     if (!source || !this.sessionReconciliation) return false;
     const load = async (force: boolean) => {
-      const loaded = await this.sessionReconciliation!.ensureSessionLoaded(sessionId, {
+      const loaded = await sessionStage("history.ensure-full", { memberSessionId: sessionId, force }, () => this.sessionReconciliation!.ensureSessionLoaded(sessionId, {
         force, requireFull: true, signal
-      });
+      }));
       signal?.throwIfAborted();
       if (!loaded) throw new Error(`Could not load current history for ${sessionId}.`);
       this.partiallyHydratedSessionIds.delete(sessionId);
@@ -374,7 +375,7 @@ export class SessionShellService {
     // Active is not a completeness claim: requireFull still fills missing history.
     await load(false);
     if (this.getActiveTurnId(sessionId)) return false;
-    const current = await source.isCurrent(sessionId, signal);
+    const current = await sessionStage("history.source-check", { memberSessionId: sessionId }, () => source.isCurrent(sessionId, signal));
     signal?.throwIfAborted();
     if (current) return false;
     await load(true);
@@ -725,7 +726,7 @@ export class SessionShellService {
       readId?: string;
     } = {}
   ): Promise<{ page?: SessionWindowSnapshot }> {
-    return this.withRead(input.readId, (signal) => this.readOpenedSession(
+    return this.withRead(input.readId, sessionId, (signal) => this.readOpenedSession(
       sessionId, input, signal ?? this.beginOpenSession()
     ));
   }
@@ -883,13 +884,15 @@ export class SessionShellService {
     return { cancelled: true };
   }
 
-  private async withRead<T>(readId: string | undefined, read: (signal?: AbortSignal) => Promise<T>): Promise<T> {
-    if (!readId) return read();
+  private async withRead<T>(readId: string | undefined, sessionId: string, read: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+    const traced = (signal?: AbortSignal) => traceSessionRead(readId ?? randomUUID(), sessionId,
+      (entry) => { void this.diagnosticLogService.write(entry).catch(() => undefined); }, () => read(signal));
+    if (!readId) return traced();
     if (this.reads.has(readId)) throw new Error(`Read already in progress: ${readId}`);
     const controller = new AbortController();
     this.reads.set(readId, controller);
     try {
-      const result = await read(controller.signal);
+      const result = await traced(controller.signal);
       controller.signal.throwIfAborted();
       return result;
     } finally {
@@ -992,7 +995,7 @@ export class SessionShellService {
 
   public async getChatTree(sessionId: string, scope?: ChatTreeScope,
     knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string): Promise<ChatTreeSnapshot> {
-    return this.withRead(readId, async (signal) => {
+    return this.withRead(readId, sessionId, async (signal) => {
       if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId, scope, knownWindows, signal);
       return this.capabilities
         ? this.capabilities.getConversationGraph(sessionId)
@@ -1320,7 +1323,8 @@ export class SessionShellService {
     const recovery = (async () => {
       await this.updateExecutionRecoveryStatus(sessionId, { status: "pending" });
       try {
-        await this.ensureOpenedSessionExecutable(sessionId);
+        await sessionStage("execution.recovery", { memberSessionId: sessionId, background: true },
+          () => this.ensureOpenedSessionExecutable(sessionId));
         await this.updateExecutionRecoveryStatus(sessionId, { status: "ready" });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
