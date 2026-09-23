@@ -279,8 +279,18 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
         ...mergeSessionExecutionProfile(resolveEngineExecutionPreference(settings.executionPreferencesByEngineId[engineId]), modelConfig)
       });
     }
-    const result = await shell.runSessionAction({ sessionId, action: "resume", preserveExecution: true, ...resumeOptions });
-    if (result.action !== "resume" || !result.resumed) return false;
+    const snapshot = shell.getSnapshot();
+    const session = snapshot.sessions.find(entry => entry.sessionId === sessionId);
+    const localDraft = session && !session.metadata?.providerSessionId && !session.lastTurnId &&
+      !snapshot.turns.some(turn => turn.sessionId === sessionId);
+    if (localDraft) {
+      // A local draft receives its provider thread on the first send.
+      await shell.updateSessionMetadata(sessionId, { ...resumeOptions.metadata,
+        ...(resumeOptions.cwd ? { cwd: resumeOptions.cwd } : {}) });
+    } else {
+      const result = await shell.runSessionAction({ sessionId, action: "resume", preserveExecution: true, ...resumeOptions });
+      if (result.action !== "resume" || !result.resumed) return false;
+    }
     if (title) await shell.setSessionTitle(sessionId, title);
     return true;
   },
