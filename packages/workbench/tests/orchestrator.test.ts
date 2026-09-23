@@ -252,6 +252,12 @@ it("forks one configured supervisor from completed preparation and waits five mi
   await reconcile(f.orchestrator, f.workspaceId);
   expect(count()).toBe(2);
   expect(vi.mocked(f.runner.fork).mock.calls.filter(([input]) => input.metadata.role === "supervisor")).toHaveLength(1);
+  f.complete(supervisor);
+  await vi.waitFor(async () => expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBeDefined());
+  await f.service.cancelWorkItem(f.workspaceId, item.workItemId);
+  await reconcile(f.orchestrator, f.workspaceId);
+  expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBeUndefined();
+  expect(count()).toBe(2);
 });
 
 it("does not backfill supervisors for independent or historical work", async () => {

@@ -330,10 +330,15 @@ export class Orchestrator {
     const timer = this.supervisorTimers.get(key);
     if (timer) clearTimeout(timer);
     this.supervisorTimers.delete(key);
-    if (!request.supervisor || request.status !== "ready") return;
+    if (!request.supervisor) return;
     const unfinished = (await this.service.listWorkItems(workspaceId)).some((item) =>
       item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
-    if (!unfinished || request.paused || !enabled) return;
+    if (request.status !== "ready" || !unfinished || request.paused || !enabled) {
+      if (request.supervisor.nextCheckAt) await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
+        ...current, supervisor: { ...current.supervisor, nextCheckAt: undefined }
+      }));
+      return;
+    }
     const schedule = (at: string) => {
       const timeout = setTimeout(() => {
         this.supervisorTimers.delete(key);
