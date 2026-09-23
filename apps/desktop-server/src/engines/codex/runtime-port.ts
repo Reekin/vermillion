@@ -82,16 +82,20 @@ import {
   codexRawCustomToolCallId,
   codexRawResponseToolCallId,
   isCodexContextCompactionThreadItem,
+  isCodexDynamicToolCallThreadItem,
   isCodexImageGenerationThreadItem,
   isCodexImageViewThreadItem,
+  isCodexMcpToolCallThreadItem,
   isCodexReasoningThreadItem,
   isCodexWebSearchThreadItem,
   mapCodexResponseItemStatus,
   summarizeCodexFunctionOutputBody,
+  summarizeCodexDynamicToolCall,
   summarizeCodexImageGenerationInput,
   summarizeCodexImageGenerationOutput,
   summarizeCodexImageViewInput,
   summarizeCodexImageViewOutput,
+  summarizeCodexMcpToolCall,
   summarizeCodexRawReasoningItem,
   summarizeCodexReasoningThreadItem,
   summarizeCodexWebSearchAction
@@ -593,16 +597,6 @@ const isCollabAgentToolCallThreadItem = (
 ): item is Extract<ThreadItem, { type: "collabAgentToolCall" }> =>
   isRecord(item) && item.type === "collabAgentToolCall" && typeof item.id === "string";
 
-const isDynamicToolCallThreadItem = (
-  item: ThreadItem | Record<string, unknown>
-): item is Extract<ThreadItem, { type: "dynamicToolCall" }> =>
-  isRecord(item) && item.type === "dynamicToolCall" && typeof item.id === "string";
-
-const isMcpToolCallThreadItem = (
-  item: ThreadItem | Record<string, unknown>
-): item is Extract<ThreadItem, { type: "mcpToolCall" }> =>
-  isRecord(item) && item.type === "mcpToolCall" && typeof item.id === "string";
-
 const mapCollabToolLabel = (
   tool: Extract<ThreadItem, { type: "collabAgentToolCall" }>["tool"]
 ): string => {
@@ -668,103 +662,6 @@ const summarizeCollabOutput = (
       : `${threadId}: ${state.status}`;
   });
   return lines.length > 0 ? lines.join("\n") : undefined;
-};
-
-const dynamicToolLabel = (
-  item: Pick<Extract<ThreadItem, { type: "dynamicToolCall" }>, "tool"> & {
-    namespace?: string | null;
-  }
-): string => (item.namespace ? `${item.namespace}.${item.tool}` : item.tool);
-
-const summarizeDynamicToolInput = (
-  item: Extract<ThreadItem, { type: "dynamicToolCall" }> & {
-    namespace?: string | null;
-  }
-): string | undefined => {
-  const label = dynamicToolLabel(item);
-  if (item.arguments === undefined || item.arguments === null) {
-    return label;
-  }
-  try {
-    return `${label} ${JSON.stringify(item.arguments)}`;
-  } catch {
-    return label;
-  }
-};
-
-const summarizeDynamicToolOutput = (
-  item: Extract<ThreadItem, { type: "dynamicToolCall" }>
-): string | undefined => {
-  if (!Array.isArray(item.contentItems) || item.contentItems.length === 0) {
-    return undefined;
-  }
-  return item.contentItems
-    .map((contentItem) => {
-      if (contentItem.type === "inputText") {
-        return contentItem.text;
-      }
-      if (contentItem.type === "inputImage") {
-        return contentItem.imageUrl;
-      }
-      return undefined;
-    })
-    .filter((value): value is string => Boolean(value && value.trim().length > 0))
-    .join("\n");
-};
-
-const mcpToolLabel = (item: Extract<ThreadItem, { type: "mcpToolCall" }>): string => {
-  const raw = item as Record<string, unknown>;
-  const server = optionalString(raw.server) ?? "server";
-  const tool = optionalString(raw.tool) ?? "tool";
-  return `mcp.${server}.${tool}`;
-};
-
-const summarizeMcpToolInput = (
-  item: Extract<ThreadItem, { type: "mcpToolCall" }>
-): string | undefined => {
-  const raw = item as Record<string, unknown>;
-  const args = raw.arguments;
-  const argumentSummary = stringifySummary(args);
-  return argumentSummary ? `${mcpToolLabel(item)} ${argumentSummary}` : mcpToolLabel(item);
-};
-
-const summarizeMcpContent = (value: unknown): string | undefined => {
-  if (!Array.isArray(value)) {
-    return stringifySummary(value);
-  }
-  const parts = value
-    .map((entry) => {
-      if (!isRecord(entry)) {
-        return stringifySummary(entry);
-      }
-      if (typeof entry.text === "string") {
-        return entry.text;
-      }
-      if (typeof entry.url === "string") {
-        return entry.url;
-      }
-      return stringifySummary(entry);
-    })
-    .filter((entry): entry is string => Boolean(entry && entry.trim().length > 0));
-  return parts.length > 0 ? parts.join("\n") : undefined;
-};
-
-const summarizeMcpToolOutput = (
-  item: Extract<ThreadItem, { type: "mcpToolCall" }>
-): string | undefined => {
-  const raw = item as Record<string, unknown>;
-  if (isRecord(raw.error) && typeof raw.error.message === "string") {
-    return raw.error.message;
-  }
-  const result = isRecord(raw.result) ? raw.result : undefined;
-  if (!result) {
-    return undefined;
-  }
-  return (
-    summarizeMcpContent(result.content) ??
-    stringifySummary(result.structuredContent) ??
-    stringifySummary(result)
-  );
 };
 
 const readNonNegativeInteger = (
@@ -3647,26 +3544,26 @@ export class CodexAppServerRuntimePort
       return;
     }
 
-    if (isMcpToolCallThreadItem(item)) {
+    if (isCodexMcpToolCallThreadItem(item)) {
+      const summary = summarizeCodexMcpToolCall(item);
       if (method === "item/started") {
         this.emitEvent("tool.started", {
           sessionId,
           turnId,
           toolCallId: item.id,
-          toolName: mcpToolLabel(item),
-          inputSummary: summarizeMcpToolInput(item),
+          toolName: summary.toolName,
+          inputSummary: summary.inputSummary,
           engineId: this.engineId
         });
         return;
       }
 
-      const raw = item as Record<string, unknown>;
       this.emitEvent("tool.completed", {
         sessionId,
         turnId,
         toolCallId: item.id,
-        status: raw.status === "failed" ? "failed" : "completed",
-        outputSummary: summarizeMcpToolOutput(item),
+        status: summary.status,
+        outputSummary: summary.outputSummary,
         engineId: this.engineId
       });
       return;
@@ -3685,17 +3582,15 @@ export class CodexAppServerRuntimePort
       return;
     }
 
-    if (isDynamicToolCallThreadItem(item)) {
-      const dynamicItem = item as Extract<ThreadItem, { type: "dynamicToolCall" }> & {
-        namespace?: string | null;
-      };
+    if (isCodexDynamicToolCallThreadItem(item)) {
+      const summary = summarizeCodexDynamicToolCall(item);
       if (method === "item/started") {
         this.emitEvent("tool.started", {
           sessionId,
           turnId,
-          toolCallId: dynamicItem.id,
-          toolName: dynamicToolLabel(dynamicItem),
-          inputSummary: summarizeDynamicToolInput(dynamicItem),
+          toolCallId: item.id,
+          toolName: summary.toolName,
+          inputSummary: summary.inputSummary,
           engineId: this.engineId
         });
         return;
@@ -3704,12 +3599,9 @@ export class CodexAppServerRuntimePort
       this.emitEvent("tool.completed", {
         sessionId,
         turnId,
-        toolCallId: dynamicItem.id,
-        status:
-          dynamicItem.status === "failed" || dynamicItem.success === false
-            ? "failed"
-            : "completed",
-        outputSummary: summarizeDynamicToolOutput(dynamicItem),
+        toolCallId: item.id,
+        status: summary.status,
+        outputSummary: summary.outputSummary,
         engineId: this.engineId
       });
       return;

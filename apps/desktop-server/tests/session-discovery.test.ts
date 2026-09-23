@@ -3153,6 +3153,76 @@ describe("Session discovery and reconciliation", () => {
     });
   });
 
+  it("restores dynamic and MCP calls beside shell activity in full and paged history", async () => {
+    const items = [
+      {
+        type: "commandExecution", id: "shell-1", command: "node vermillion.mjs work.diagnose",
+        status: "completed", aggregatedOutput: "diagnosed", exitCode: 0
+      },
+      {
+        type: "dynamicToolCall", id: "dynamic-1", namespace: "vermillion",
+        tool: "read_session", arguments: { sessionId: "worker", limit: 7 },
+        status: "completed", success: true,
+        contentItems: [{ type: "inputText", text: "Worker is active" }]
+      },
+      {
+        type: "dynamicToolCall", id: "dynamic-2", namespace: "vermillion",
+        tool: "read_session", arguments: { sessionId: "other" },
+        status: "completed", success: false,
+        contentItems: [{ type: "inputText", text: "Unknown session" }]
+      },
+      {
+        type: "mcpToolCall", id: "mcp-1", server: "lookup", tool: "search",
+        arguments: { q: "abc" }, status: "completed", error: null,
+        result: { content: [{ type: "text", text: "Found record" }], structuredContent: null }
+      },
+      {
+        type: "mcpToolCall", id: "mcp-2", server: "lookup", tool: "search",
+        arguments: { q: "xyz" }, status: "failed", error: { message: "Lookup failed" },
+        result: null
+      }
+    ];
+    const turn = { id: "turn-tools", status: "completed", error: null, items };
+    const thread = { ...createThread({ id: "thread-tools" }), turns: [turn] };
+    const provider = new CodexSessionDiscoveryProvider({ codexRuntimePort: {
+      isThreadExecutionReleased: () => false,
+      readThread: vi.fn(async (_id: string, includeTurns: boolean) =>
+        includeTurns ? thread : { ...thread, turns: [] }),
+      listThreadTurns: vi.fn().mockResolvedValue({ data: [turn], nextCursor: null, backwardsCursor: null }),
+      attachThreadToSession: vi.fn()
+    } as never });
+    const entry = {
+      sessionId: "codex-thread:thread-tools", workspaceId: "workspace-1",
+      conversationId: "conversation-1", engineId: "codex",
+      providerKind: "codex-thread", providerSessionId: "thread-tools",
+      createdAt: "2026-04-19T00:00:00.000Z",
+      updatedAt: "2026-04-19T00:01:00.000Z",
+      unreadState: "read", source: "reconciled"
+    } as const;
+    const full = await provider.hydrateSession(entry);
+    const page = await provider.hydrateSessionWindow?.(entry, { limit: 1 });
+    const ids = items.map((item) => `${entry.sessionId}:${item.id}`);
+    for (const history of [full, page]) {
+      expect(history?.turns[0]?.toolCallIds).toEqual(ids);
+      expect(history?.toolCalls.map((call) => call.toolCallId)).toEqual(ids);
+      expect(history?.terminalStreams).toHaveLength(1);
+      expect(history?.toolCalls[1]).toMatchObject({
+        toolName: "vermillion.read_session", inputSummary: expect.stringContaining('"sessionId":"worker"'),
+        outputSummary: "Worker is active", status: "completed"
+      });
+      expect(history?.toolCalls[2]).toMatchObject({
+        toolName: "vermillion.read_session", outputSummary: "Unknown session", status: "failed"
+      });
+      expect(history?.toolCalls[3]).toMatchObject({
+        toolName: "mcp.lookup.search", inputSummary: expect.stringContaining('"q":"abc"'),
+        outputSummary: "Found record", status: "completed"
+      });
+      expect(history?.toolCalls[4]).toMatchObject({
+        toolName: "mcp.lookup.search", outputSummary: "Lookup failed", status: "failed"
+      });
+    }
+  });
+
   it("recovers the explicit final answer or falls back to the last agent message", async () => {
     const provider = new CodexSessionDiscoveryProvider({
       codexRuntimePort: {

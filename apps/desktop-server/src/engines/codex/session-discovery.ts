@@ -62,15 +62,19 @@ import {
 } from "./extensions/turn-changes-store.js";
 import {
   isCodexContextCompactionThreadItem,
+  isCodexDynamicToolCallThreadItem,
   isCodexImageGenerationThreadItem,
   isCodexImageViewThreadItem,
+  isCodexMcpToolCallThreadItem,
   isCodexReasoningThreadItem,
   isCodexWebSearchThreadItem,
   mapCodexResponseItemStatus,
+  summarizeCodexDynamicToolCall,
   summarizeCodexImageGenerationInput,
   summarizeCodexImageGenerationOutput,
   summarizeCodexImageViewInput,
   summarizeCodexImageViewOutput,
+  summarizeCodexMcpToolCall,
   summarizeCodexReasoningThreadItem,
   summarizeCodexWebSearchAction
 } from "./extensions/process-activity.js";
@@ -711,6 +715,25 @@ const hydrateCodexTurnEntities = async (input: {
             completedAt: item.status === "inProgress" ? undefined : itemStartedAt
           })
         );
+        continue;
+      }
+
+      if (isCodexDynamicToolCallThreadItem(item) || isCodexMcpToolCallThreadItem(item)) {
+        const summary = item.type === "dynamicToolCall"
+          ? summarizeCodexDynamicToolCall(item)
+          : summarizeCodexMcpToolCall(item);
+        toolCallIds.push(itemEntityId);
+        toolCalls.push(parseToolCall({
+          toolCallId: itemEntityId,
+          sessionId: entry.sessionId,
+          turnId: turn.id,
+          ...summary,
+          outputSummary: summary.outputSummary
+            ? appendLimitedStreamText(undefined, summary.outputSummary)
+            : undefined,
+          startedAt: itemStartedAt,
+          completedAt: summary.status === "running" ? undefined : itemStartedAt
+        }));
         continue;
       }
 

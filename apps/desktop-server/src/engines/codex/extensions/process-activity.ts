@@ -31,6 +31,81 @@ export const isCodexImageGenerationThreadItem = (
 ): item is Extract<ThreadItem, { type: "imageGeneration" }> =>
   isRecord(item) && item.type === "imageGeneration" && typeof item.id === "string";
 
+export const isCodexDynamicToolCallThreadItem = (
+  item: ThreadItem | Record<string, unknown>
+): item is Extract<ThreadItem, { type: "dynamicToolCall" }> =>
+  isRecord(item) && item.type === "dynamicToolCall" && typeof item.id === "string";
+
+export const isCodexMcpToolCallThreadItem = (
+  item: ThreadItem | Record<string, unknown>
+): item is Extract<ThreadItem, { type: "mcpToolCall" }> =>
+  isRecord(item) && item.type === "mcpToolCall" && typeof item.id === "string";
+
+const stringifySummary = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    return value.trim() ? value : undefined;
+  }
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+};
+
+const toolCallStatus = (status: string, failed: boolean) =>
+  failed || status === "failed"
+    ? "failed" as const
+    : status === "inProgress" ? "running" as const : "completed" as const;
+
+export const summarizeCodexDynamicToolCall = (
+  item: Extract<ThreadItem, { type: "dynamicToolCall" }>
+) => {
+  const toolName = item.namespace ? `${item.namespace}.${item.tool}` : item.tool;
+  const args = stringifySummary(item.arguments);
+  const outputSummary = item.contentItems
+    ?.map((contentItem) => {
+      if (contentItem.type === "inputText") return contentItem.text;
+      if (contentItem.type === "inputImage") return contentItem.imageUrl;
+      return undefined;
+    })
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join("\n") || undefined;
+  return {
+    toolName,
+    inputSummary: args ? `${toolName} ${args}` : toolName,
+    outputSummary,
+    status: toolCallStatus(item.status, item.success === false)
+  };
+};
+
+export const summarizeCodexMcpToolCall = (
+  item: Extract<ThreadItem, { type: "mcpToolCall" }>
+) => {
+  const toolName = `mcp.${item.server}.${item.tool}`;
+  const args = stringifySummary(item.arguments);
+  const content = item.result?.content
+    .map((entry) => {
+      if (isRecord(entry)) {
+        if (typeof entry.text === "string") return entry.text;
+        if (typeof entry.url === "string") return entry.url;
+      }
+      return stringifySummary(entry);
+    })
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join("\n");
+  return {
+    toolName,
+    inputSummary: args ? `${toolName} ${args}` : toolName,
+    outputSummary: item.error?.message ?? (
+      content || stringifySummary(item.result?.structuredContent) || stringifySummary(item.result)
+    ),
+    status: toolCallStatus(item.status, Boolean(item.error))
+  };
+};
+
 export const summarizeCodexReasoningThreadItem = (
   item: Extract<ThreadItem, { type: "reasoning" }>
 ): string | undefined => {
