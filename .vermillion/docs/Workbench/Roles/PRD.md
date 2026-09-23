@@ -2,13 +2,11 @@
 
 设计伙伴、Worker、监工、Maintainer 和 Liaison 各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 工作台 → 角色 编辑。
 
-默认角色随源码保存在 `packages/workbench/roles/`，打包后位于 `resources/app/roles/`。启动时 `RoleService.ensureGlobal` 只补齐 `~/.vermillion/roles/` 中缺失的文件，不覆盖已有全局版本。读取角色时优先采用 workspace 文件：`override` 用项目正文替换全局正文，`append` 将项目正文追加到全局正文；没有项目文件时使用全局版本。
+默认角色随应用提供。应用启动时只补齐 `~/.vermillion/roles/` 中缺失的角色文件，不覆盖用户改过的全局版本。读取角色时，有项目文件就按它的方式处理：`override` 用项目正文替换全局正文，`append` 把项目正文接在全局正文后面；没有项目文件就用全局版本。
 
-会话 metadata 只保存角色标识 `role`（`design-partner`、`work-preparation`、`worker`、`supervisor`、`maintainer`），不保存角色正文；fork 只继承 `role`。设计伙伴会话使用 `design-partner` 角色，其指令正文附带当前 workspaceId 与工作台 CLI 说明。
+每个会话记住自己的角色，fork 出的会话继承同一角色。设计伙伴的指令正文附带当前 workspaceId 和工作台 CLI 说明。
 
-每次向会话发送消息时，工作台按 `role` 和当前 workspace 现场解析该会话此刻应有的指令（设计伙伴与开工准备用设计伙伴正文，Worker 用含 Reviewer、Verifier 交接说明的完整 Worker 指令，监工用 supervisor 正文，Maintainer 按领域附加专属指令），角色文件的修改在下一条消息生效，不需要重建会话。解析结果作为会话启动与恢复的角色指令：Codex 由 runtime 通过 `config/read` 读取用户的 `developer_instructions` 再追加角色正文作为 developer 指令，不修改用户 `config.toml`；pi 由 Vermillion 附带的 extension 在轮次开始前注入；与上次已送达正文不同时，在本轮开始前以 developer 级消息追加到历史末尾并声明取代此前角色指令，然后记录为已送达。已送达正文保存在会话 metadata 的 `developerInstructions`，只由运行时在送达后回写。
-
-角色文件头部可以用 frontmatter 指定这个身份新会话的默认模型配置（模型、推理档位、速度）；没写的沿用输入器里上次选的配置。设计伙伴的默认配置在新建会话草稿态显示于输入器，用户可手动调整，发送时以输入器当前选择为准。Reviewer 和 Verifier 是 Worker 拉起的 subagent（Codex 用 `spawn_agent`，pi 用 `subagent` 工具），创建时使用各自角色解析后的模型配置，未指定的字段沿用引擎的 subagent 默认值；正文与配置均遵循全局和项目的覆盖、追加规则。引擎不支持的显式配置应明确反馈，不能静默忽略。
+每次向会话发消息时，工作台都按会话的角色和所属 workspace 取当下的角色正文：设计伙伴和开工准备用设计伙伴正文，Worker 用包含 Reviewer、Verifier 交接说明的完整 Worker 指令，监工用 supervisor 正文，Maintainer 再附加领域专属指令。改了角色文件，下一条消息就生效，不需要重建会话。角色正文作为 developer 指令送给模型；用户在 Codex 配置里写的 `developer_instructions` 仍然生效，Vermillion 不修改用户的 `config.toml`。送达方式见[架构](../../Foundation/Architecture.md#角色指令送达)。
 
 - **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/design-partner.md)。
 - **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/worker.md)。
@@ -20,13 +18,19 @@ Maintainer 和 IM 接入属于扩展能力，不是基本执行循环的前提�
 
 开工准备使用独立的 [work-preparation.md](../../../../packages/workbench/roles/work-preparation.md)，沿用角色文件的全局、项目覆盖与追加规则，可通过角色编辑器及 role CLI 编辑。正文作为准备轮消息发送，附上本次范围及工单关联信息；准备分支继承原角色，不注入 Worker 指令。开工流程见[工作台 · 开工](../Think/PRD.md)。
 
-调度器排到工单时，将分支的角色标识改为 `worker` 并应用其模型配置，随后发送执行合同；Worker 指令按上述送达规则在合同轮开始前追加。保留继承的历史前缀，后续恢复与压缩后仍使用 Worker 角色。`worker.md` 只描述执行已建立工单的职责。
+排到工单时，执行分支切换为 Worker 角色和 Worker 模型配置，再收到合同。分支之前的讨论历史保留，之后恢复或压缩上下文都仍是 Worker。`worker.md` 只描述执行已建立工单的职责。
+
+## 模型配置
+
+角色文件可以指定这个角色的默认模型、推理档位和速度。新会话的配置逐项取角色的配置，角色没写的项沿用输入器上次的选择。设计伙伴的配置用来初始化新建会话的输入器，用户可以在发送前调整，之后以输入器当前选择为准，见[工作台 · 输入器](../Think/PRD.md#模型配置)。工作台自动发起的角色会话直接使用合成后的配置。
+
+Reviewer 和 Verifier 是 Worker 拉起的 subagent，创建时使用各自角色的模型配置，角色没写的项沿用引擎的 subagent 默认值。它们的正文和配置同样遵循全局与项目的覆盖、追加规则。引擎不支持某项显式配置时明确报错，不静默忽略。
 
 ## 监工
 
-监工是程序创建并唤醒的普通 Agent 会话，角色标识为 `supervisor`，关联所属工作及准备来源。程序从已结束的准备 turn fork，按本 workspace 解析 supervisor 角色正文和模型配置后发送首次检查消息；不继承第一张工单的执行身份，不绑定为 Worker。
+监工是工作台自动创建和唤醒的普通 Agent 会话，关联所属工作和准备来源。它从已结束的准备轮 fork 出来，使用本 workspace 的 supervisor 角色正文和模型配置，然后收到第一次检查消息；它不是 Worker，也不属于第一张工单。
 
-后续检查复用同一会话，角色正文按普通角色解析规则送达。创建、检查周期、暂停和结束条件统一见[工作与工单 · 监工](../Missions/PRD.md#监工)。判断、纠偏、恢复与交接动作由 supervisor.md 规定，程序不把该 prompt 加载成其他执行者的身份。
+后续检查复用同一个会话。创建、检查周期、暂停和结束条件见[工作与工单 · 监工](../Missions/PRD.md#监工)。监工如何判断、纠偏、恢复和交接由 supervisor.md 规定，这份 prompt 不会加载给其他角色。
 
 ## 编辑器
 
@@ -41,8 +45,6 @@ Maintainer 和 IM 接入属于扩展能力，不是基本执行循环的前提�
 - 从 append 切到 override 时，prompt 重新取全局正文，模型参数保留当前选择。
 - 模型配置：模型、推理档位、速度三个下拉，选项与输入器里的一致，各字段独立选择。override 下未指定的字段沿用输入器配置；append 下未覆写的字段沿用全局配置，全局未指定时沿用输入器配置。
 保存后重新打开，显示已保存的模式、prompt 和模型参数。角色定制只影响当前 workspace，全局角色保持原样。
-
-新会话默认配置逐字段取角色生效配置，未指定的字段沿用输入器上次选择。设计伙伴在草稿态以此初始化输入器；创建会话及发送首条消息均使用输入器当前配置，后续消息同样遵循当前选择。工作台自动发起的角色会话使用合成的默认配置。
 
 ## 会话
 
@@ -68,7 +70,7 @@ CLI `vermillion steer` 接收目标[会话标识](../../Foundation/Engines/PRD.m
 
 ### 询问开单来源
 
-CLI `vermillion asksource` 接收 `workspaceId`、`workItemId`、调用者 `sessionId` 与 `question`，仅供该工单绑定的 Worker 会话使用。程序核对调用者与工单归属，从工单记录的 `sourceSessionId` / `sourceTurnId` 所指开单位置临时 fork 设计伙伴会话，携带截至该位置的讨论上下文和本次问题；不改用来源会话的最新末端或 Worker 的执行位置。
+CLI `vermillion asksource` 接收 `workspaceId`、`workItemId`、调用者 `sessionId` 与 `question`，只能由这张工单的 Worker 调用。工作台从工单记录的开单位置临时 fork 一个设计伙伴会话，带着截至开单时的讨论上下文回答问题；不使用来源会话后来的最新内容，也不从 Worker 的位置 fork。
 
 临时会话使用该 workspace 解析后的设计伙伴角色与模型配置，不继承 Worker 的执行身份或工单归属。它回答本次问题，原设计讨论不会收到额外用户消息，也不改变用户查看位置。调用返回答复和临时会话标识；问答结束后归档临时 fork，失败和中断也执行回收，归档失败明确反馈。无有效来源位置或调用者不是对应 Worker 时明确拒绝，不冷启动无上下文的替代会话。
 
