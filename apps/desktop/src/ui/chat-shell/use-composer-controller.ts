@@ -388,7 +388,6 @@ type UseComposerControllerInput = {
   submitBranch?: (payload: Omit<import("../../transport/desktop-transport.js").ChatSendInput, "sessionId">) => Promise<boolean>;
   autoSendQueuedMessages?: boolean;
   onResumeSession?: () => Promise<void>;
-  onBeforeStop?: (sessionId: string) => Promise<"cancelled" | void>;
   onCancelBranchSend?: (operationId: string) => Promise<void>;
   onRequestTranscriptBottom?: (sessionId: string) => void;
   onExecutionPreferenceChange?: (
@@ -1077,10 +1076,6 @@ export const useComposerController = (
           content,
           attachments
         });
-        if (receipt.queued) {
-          input.onStatusNotice({ message: `等待发送：${receipt.queued.reason}`, source: "send" });
-          return true;
-        }
         if (!receipt.accepted) {
           throw new Error("The current runtime does not accept steer requests.");
         }
@@ -1091,10 +1086,6 @@ export const useComposerController = (
           attachments,
           execution: payload.execution
         });
-        if (receipt.queued) {
-          input.onStatusNotice({ message: `等待发送：${receipt.queued.reason}`, source: "send" });
-          return true;
-        }
         if (!receipt.accepted) {
           throw new Error("The current runtime rejected the send request.");
         }
@@ -1315,22 +1306,12 @@ export const useComposerController = (
     }
     setIsDispatching(true);
     try {
-      let pauseError: unknown;
-      try {
-        const stopHandling = await input.onBeforeStop?.(input.activeSessionId);
-        if (stopHandling === "cancelled") return;
-      } catch (error) {
-        pauseError = error;
-      }
       await input.transport.chat.interrupt({
         sessionId: input.activeSessionId,
         turnId: interruptTurnId
       });
       input.onStatusNotice({
-        message: pauseError
-          ? `Interrupt requested; Worker pause recording failed: ${pauseError instanceof Error ? pauseError.message : String(pauseError)}`
-          : "Interrupt requested.",
-        persistent: Boolean(pauseError),
+        message: "Interrupt requested.",
         source: "send"
       });
     } catch (error) {

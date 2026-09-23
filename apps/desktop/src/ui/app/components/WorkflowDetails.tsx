@@ -11,7 +11,6 @@ export const WorkflowDetails = ({ actions, item, onOpenSession }: { actions: Wor
     <DetailSection title="问题">{actionNote(action)}</DetailSection>
     {action.status !== "done" && action.status !== "cancelled" && !(action.kind === "integration" && action.agent) && <>
       <DetailSection title="等待条件">{recoveryCondition(action)}</DetailSection>
-      <DetailSection title="下一次重试">{action.retryAt ? new Date(action.retryAt).toLocaleString("zh-CN") : "未安排定时重试"}</DetailSection>
     </>}
     {!isUserPaused(action) && <DetailSection title="最近处置">{action.history.at(-1)?.message ?? "等待处理者接手"}</DetailSection>}
     {!isUserPaused(action) && action.history.length > 0 && <DetailSection title="问题历史">{action.history.map((entry, index) => <div key={index} className="mb-2">

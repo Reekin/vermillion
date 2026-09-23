@@ -67,7 +67,6 @@ export const createSessionSteerer = (shell: SessionShell) => async (target: stri
     ? { type: "steerTurn" as const, sessionId, turnId: activeTurnId, messageId: messageId ?? createId(), content, attachments: [] }
     : { type: "sendUserMessage" as const, sessionId, messageId: messageId ?? createId(), content, attachments: [] };
   const receipt = await shell.executeCommand({ commandId: createId(), command });
-  if (receipt.queued) return { sessionId, accepted: false, queued: receipt.queued };
   if (!receipt.accepted || !receipt.turnId) return {
     sessionId, accepted: false,
     error: receipt.error ?? { code: "message_rejected", message: "引擎未接受本次消息" }
@@ -240,7 +239,7 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
         attachments: options?.attachments ?? [], execution: options?.execution }
     });
     if (!receipt.accepted) return {
-      accepted: false, error: receipt.error, queued: receipt.queued, messageId,
+      accepted: false, error: receipt.error, messageId,
       turnId: receipt.turnId
     };
     return { turnId: receipt.turnId, messageId };
@@ -254,7 +253,7 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
       : { type: "sendUserMessage" as const, sessionId, messageId: id, content, attachments: [] };
     const receipt = await shell.executeCommand({ commandId: createId(), command });
     if (!receipt.accepted) return {
-      accepted: false, error: receipt.error, queued: receipt.queued, messageId: id,
+      accepted: false, error: receipt.error, messageId: id,
       turnId: receipt.turnId
     };
     return { turnId: receipt.turnId, messageId: id,

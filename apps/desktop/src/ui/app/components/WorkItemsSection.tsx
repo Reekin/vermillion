@@ -1,10 +1,12 @@
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { type AgentRun, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction, type WorkRequest } from "@vermillion/workbench/client";
+import { type AgentRun, type DecisionCard, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction, type WorkRequest } from "@vermillion/workbench/client";
 import type { TaskTarget, WorkbenchState } from "../workbench-store.js";
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
+import { Modal } from "./Modal.js";
+import { SupervisorDetails } from "./SupervisorDetails.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { currentWorkStatus, workItemBoardLabel, workRequestStatus } from "./task-labels.js";
+import { currentWorkStatus, workItemBoardLabel, workRequestStatus, workSessionLabel } from "./task-labels.js";
 import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, Stepper, Toggle } from "./ui.js";
 
 import { roleLabel, workItemProgress } from "./workflow-display.js";
@@ -28,14 +30,16 @@ const SessionLink = ({ sessionId, onOpenSession, children = "会话" }: { sessio
   <Button size="sm" variant="ghost" outlined onClick={() => onOpenSession(sessionId)}>{children}</Button>
 );
 
-const WorkRequestRow = ({ entry, sourceTitle, open, onToggle, busy, onOpenSession, action, children }: {
+const WorkRequestRow = ({ entry, sourceTitle, open, onToggle, busy, onOpenSession, action, children, client, workspaceId }: {
   entry: Extract<BoardEntry, { kind: "work" }>; sourceTitle: string; open: boolean; onToggle: () => void; busy: boolean;
   onOpenSession: (sessionId: string, turnId?: string) => void;
-  action: (method: "work.pause" | "work.resume" | "work.retry" | "work.cancel" | "work.confirm") => void; children: ReactNode;
+  action: (method: "work.pause" | "work.resume" | "work.retry" | "work.cancel") => void; children: ReactNode;
+  client: WorkbenchClient; workspaceId: string;
 }) => {
+  const [detail, setDetail] = useState(false);
   const { request, items } = entry;
   const state = workRequestStatus(request, items);
-  const paused = request.control === "paused";
+  const paused = request.paused;
   const title = request.scope?.trim() || sourceTitle;
   const finished = !entry.open;
   return <li className="border-t border-border first:border-t-0">
@@ -46,31 +50,37 @@ const WorkRequestRow = ({ entry, sourceTitle, open, onToggle, busy, onOpenSessio
       columns={{ controls: true, info: <span title={new Date(entry.updatedAt).toLocaleString("zh-CN")}><span className="block">{items.length} 工单</span>{relativeTime(entry.updatedAt)}</span>,
         status: <Badge status={state.status} muted={finished}>{state.label}</Badge>,
         hoverAction: !finished && <IconButton icon={X} size={12} label={"取消工作：" + title} disabled={busy} onClick={() => action("work.cancel")} />,
-        action: request.workerSessionId && <SessionLink sessionId={request.workerSessionId} onOpenSession={onOpenSession} />,
-        control: finished ? null : request.waitReason?.includes("受理状态不明") ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.confirm")}>确认状态</Button>
-          : paused ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.resume")}>恢复</Button>
+        action: <Button size="sm" variant="ghost" outlined onClick={() => setDetail(true)}>详情</Button>,
+        control: finished ? null : paused || request.userStopped ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.resume")}>恢复</Button>
           : request.status === "failed" ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.retry")}>重试</Button>
-          : request.control === "manual" ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.resume")}>恢复自动推进</Button>
           : <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.pause")}>暂停</Button> }}
     />
     {open && children}
+    {detail && <Modal title={title} width={520} onClose={() => setDetail(false)}><div className="space-y-3 p-4">
+      <p className="text-label">{state.label} · {items.length} 工单</p>
+      {request.workerSessionId && <SessionLink sessionId={request.workerSessionId} onOpenSession={onOpenSession}>准备会话</SessionLink>}
+      <SupervisorDetails request={request} client={client} workspaceId={workspaceId} onOpenSession={onOpenSession} />
+      {!finished && <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={busy} onClick={() => action(paused ? "work.resume" : "work.pause")}>{paused ? "恢复全部推进" : "暂停全部"}</Button>
+      </div>}
+    </div></Modal>}
   </li>;
 };
 
-const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, onOpenSession, onCancel, onPause, onResume, onRetry, onOpen }: {
+const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, hasDecision, onOpenSession, onCancel, onPause, onResume, onRetry, onOpen }: {
   item: WorkItem; run?: AgentRun; actions: WorkflowAction[]; waitingFor: string[]; depth: number; busy: boolean;
+  hasDecision: boolean;
   onOpenSession: (sessionId: string, turnId?: string) => void; onCancel: () => void; onPause: () => void; onResume: () => void; onRetry: () => void; onOpen: () => void;
 }) => {
   const progress = workItemProgress(item, actions, run, waitingFor);
   const sessionId = item.run.sessionId ?? run?.sessionId;
-  const info = [run && run.turns + " turn", relativeTime(item.updatedAt)].filter(Boolean).join(" · ");
+  const info = [workSessionLabel(item), run && run.turns + " turn", relativeTime(item.updatedAt)].filter(Boolean).join(" · ");
   const open = isOpenWorkItem(item);
-  const state = currentWorkStatus(item);
+  const state = currentWorkStatus(item, undefined, hasDecision);
   const label = workItemBoardLabel(item, progress.shortLabel);
-  const meta = open && state.kind !== "paused" ? waitingFor.length ? "等待 " + waitingFor.join("、") : progress.reason ?? item.run.waitReason : undefined;
-  const paused = item.run.pauseReason === "user" || item.run.control === "paused";
-  const manual = item.run.control === "manual" && !paused;
-  const retryable = item.status === "decision" && !paused && Boolean(item.run.waitReason?.includes("故障") || item.run.waitReason?.includes("工作受阻") || item.run.waitReason?.includes("次数"));
+  const meta = open && state.kind !== "paused" ? hasDecision ? "等待决策" : waitingFor.length ? "等待 " + waitingFor.join("、") : progress.reason ?? item.run.waitReason : undefined;
+  const paused = item.run.paused;
+  const retryable = state.kind === "interrupted";
   return (
     <li data-task-id={item.workItemId} className="border-t border-border first:border-t-0">
       <ListRow
@@ -83,10 +93,9 @@ const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, onOpenSessio
         columns={{
           controls: true,
           info: <span title={[new Date(item.updatedAt).toLocaleString("zh-CN"), run && roleLabel[run.role]].filter(Boolean).join(" · ")}>{info}</span>,
-          status: <Badge status={!open ? item.status : paused || manual || state.kind === "interrupted" ? "decision" : item.status} muted={!open}>{label}</Badge>,
+          status: <Badge status={!open ? item.status : state.kind === "running" ? "running" : paused || retryable || hasDecision ? "decision" : "queued"} muted={!open}>{label}</Badge>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
-          control: isOpenWorkItem(item) && (paused ? <Button size="sm" variant="ghost" disabled={busy} onClick={onResume}>恢复</Button>
-              : manual && item.status !== "decision" ? <Button size="sm" variant="ghost" disabled={busy} onClick={onRetry}>恢复自动推进</Button>
+          control: isOpenWorkItem(item) && (paused || item.run.userStopped ? <Button size="sm" variant="ghost" disabled={busy} onClick={onResume}>恢复</Button>
               : retryable ? <Button size="sm" variant="ghost" disabled={busy} onClick={onRetry}>重试</Button>
               : <Button size="sm" variant="ghost" disabled={busy} onClick={onPause}>暂停</Button>),
           action: sessionId && <SessionLink sessionId={sessionId} onOpenSession={onOpenSession} />
@@ -97,6 +106,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, onOpenSessio
 };
 
 type WorkItemsSectionProps = {
+  decisions?: DecisionCard[];
   sourceTitles: Record<string, string>; client: WorkbenchClient; workspaceId: string; scheduler: Scheduler; workItems: WorkItem[]; workRequests: WorkRequest[]; runs: AgentRun[]; actions: WorkflowAction[];
   onOpenSession: (sessionId: string, turnId?: string) => void; compact: boolean; onExpand: () => void;
   expandedWorkGroups: WorkbenchState["expandedWorkGroups"];
@@ -108,7 +118,7 @@ type WorkItemsSectionProps = {
   taskTarget?: TaskTarget;
 };
 
-export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, workRequests, runs, actions, onOpenSession, onOpenIssue, compact, onExpand, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
+export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, workRequests, runs, actions, decisions = [], onOpenSession, onOpenIssue, compact, onExpand, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
   const board = useRef<HTMLDivElement>(null);
   const located = useRef<TaskTarget | undefined>(undefined);
   const groups = useMemo(() => workBoardGroups(workRequests, workItems), [workRequests, workItems]);
@@ -157,6 +167,7 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
   const hidden = groups.reduce((n, group) => n + group.entries.length, 0) - visibleGroups.reduce((n, group) => n + group.entries.length, 0);
   const renderItem = (item: WorkItem, depth = 0) => (
     <WorkItemRow key={item.workItemId} item={item} actions={actions}
+      hasDecision={decisions.some((card) => !card.answer && !card.withdrawn && (card.workItemId === item.workItemId || item.decisions.includes(card.decisionId) || actions.some((action) => action.actionId === card.actionId && action.workItemId === item.workItemId)))}
       run={latestRuns.find((r) => r.workItemId === item.workItemId && (!item.run.sessionId || r.sessionId === item.run.sessionId))}
       waitingFor={item.status === "queued" ? item.dependsOn.flatMap((id) => {
         const dependency = workItems.find((w) => w.workItemId === id);
@@ -192,7 +203,7 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
               <ul>{group.entries.map((entry) => entry.kind === "item" ? renderItem(entry.item) : <WorkRequestRow key={entry.id}
                 entry={entry} sourceTitle={title} open={isExpanded(workExpansionKey(entry.id))}
                 onToggle={() => setWorkGroupExpanded(workspaceId, workExpansionKey(entry.id), !isExpanded(workExpansionKey(entry.id)))}
-                busy={busy} onOpenSession={onOpenSession}
+                busy={busy} onOpenSession={onOpenSession} client={client} workspaceId={workspaceId}
                 action={(method) => void perform(() => client.request(method, { workspaceId, requestId: entry.id }))}>
                 <ul>{entry.items.map((item) => renderItem(item, 1))}</ul>
               </WorkRequestRow>)}</ul>

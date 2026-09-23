@@ -11,7 +11,6 @@ import {
 } from "electron";
 import { createSessionRuntimeService } from "@vermillion/desktop-server";
 import { randomUUID } from "node:crypto";
-import { connectExecutionDispatch } from "./execution-dispatch.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -783,10 +782,7 @@ const boot = async (): Promise<void> => {
     sessionSteerer: async ({ sessionId, content, messageId }) => {
       return sessionSteerer(sessionId, content, messageId);
     },
-    executionTransfer: {
-      interrupt: (sessionId, turnId) => agentRunner.interrupt(sessionId, turnId),
-      fork: (input) => agentRunner.fork({ ...input, modelConfig: undefined })
-    },
+    sessionReader: (input) => service.readSession(input),
     deliveryConfirmer: (sessionId, messageId) => agentRunner.confirmMessage!(sessionId, messageId),
     sessionSearch: () => service.listSessionSearchEntries(),
     rolloutsDir: defaultCodexRolloutsDir(),
@@ -849,28 +845,6 @@ const boot = async (): Promise<void> => {
   });
   service.setSessionRoleResolver((workspaceId, metadata) =>
     workbenchService.resolveSessionInstructions(workspaceId, metadata));
-  const disconnectExecutionDispatch = connectExecutionDispatch(service, workbenchService);
-  const disconnectExecutionPreparer = workbenchService.setExecutionPreparer(async (sessionId, target) => {
-    if (!target.workItemId) return;
-    if (!await service.ensureSessionLoadedForRead(sessionId)) throw new Error("无法加载 Worker 会话：" + sessionId);
-    const metadata = service.getSessionMetadata(sessionId);
-    if (metadata?.executionRoleWorkItemId === target.workItemId) return;
-    const item = await workbenchService.getWorkItem(target.workspaceId, target.workItemId);
-    const session = service.listSessions().find((entry) => entry.sessionId === sessionId);
-    if (!session) throw new Error("Worker 会话不存在：" + sessionId);
-    const role = await workbenchService.resolveWorkerRole(target.workspaceId, session.engineId);
-    const resumed = await agentRunner.resume(sessionId, {
-      cwd: await workbenchService.workspaceRoot(target.workspaceId),
-      title: "Worker · " + item.title,
-      modelConfig: role.modelConfig,
-      metadata: {
-        role: "worker", workItemId: item.workItemId,
-        sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId,
-        executionRoleWorkItemId: item.workItemId
-      }
-    });
-    if (!resumed) throw new Error("无法准备 Worker 执行会话：" + sessionId);
-  });
   workbenchService.setSessionTreeResolver(async (sessionId) => service.getSessionTreeId(sessionId));
   const workbenchRpc = createWorkbenchRpcHandler(workbenchService);
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
@@ -937,8 +911,6 @@ const boot = async (): Promise<void> => {
   app.on("before-quit", () => {
     orchestrator.dispose();
     unsubscribeWorkbench();
-    disconnectExecutionDispatch();
-    disconnectExecutionPreparer();
     workbenchService.dispose();
     void localEndpoint.close();
   });

@@ -371,21 +371,17 @@ export class PiRuntimePort
         error: { code: "pi_command_invalid", message: "sessionId is required." }
       };
     }
-    const startIfPermitted = async (): Promise<PiRuntimeResponse> => {
-      if (payload.params.allowStart === false) return {
-        id: payload.id, ok: false,
-        error: { code: "execution_readmission_required", message: "当前轮次已变化，需要重新检查执行条件" }
-      };
+    const startOrSteer = async (): Promise<PiRuntimeResponse> => {
       const response = await this.sendUserMessage(payload);
       return response.ok ? { ...response, result: { ...response.result, delivery: "start_or_steer" } } : response;
     };
     const runtime = this.sessions.get(sessionId);
     if (!runtime?.process?.running || !runtime.streaming) {
-      return startIfPermitted();
+      return startOrSteer();
     }
     const images = await this.buildImages(payload.params.attachments);
     await this.syncRoleInstructions(runtime, payload.params);
-    if (!runtime.streaming) return startIfPermitted();
+    if (!runtime.streaming) return startOrSteer();
     await this.writePendingTurn(runtime, {
       messageId: asString(payload.params.messageId) ?? "",
       steer: true

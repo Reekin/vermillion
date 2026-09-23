@@ -44,13 +44,17 @@ export type { SearchHit, SearchQuery, SearchResult } from "./search-contract.js"
 const zWs = z.object({ workspaceId: z.string().min(1) });
 const zWi = zWs.extend({ workItemId: z.string().min(1) });
 const zEmpty = z.object({});
-const zWorkRequest = zStoredWorkRequest.omit({ deliveries: true, continuationSummary: true });
+const zWorkRequest = zStoredWorkRequest;
 
 /** A document call inside a session edits that conversation tree's draft; without a session it edits the main branch. */
 const zDocsScope = zWs.extend({ sessionId: z.string().min(1).optional() });
 
 /** Single method registry: name -> params/result schemas. Handler and client are both derived from it. */
 export const workbenchRpc = {
+  "session.read": {
+    params: z.object({ sessionId: z.string().min(1), limit: z.number().int().min(1).max(200).optional(), maxChars: z.number().int().min(1).max(200000).optional() }),
+    result: z.unknown()
+  },
   "worktree.list": { params: zWs, result: z.array(zWorktreeCleanup.extend({ workItemId: z.string() })) },
   "worktree.cleanup": { params: zWs, result: z.object({ removed: z.array(z.string()), retained: z.array(z.object({ workItemId: z.string().optional(), worktreePath: z.string(), reason: z.string() })) }) },
   "sessionNavigation.create": {
@@ -83,17 +87,8 @@ export const workbenchRpc = {
       turnId: z.string().min(1).optional(),
       accepted: z.boolean(),
       error: z.object({ code: z.string(), message: z.string() }).optional(),
-      queued: z.object({ messageId: z.string(), reason: z.string(), workItemId: z.string().optional() }).optional(),
-      delivery: z.enum(["steered", "started", "queued"])
+      delivery: z.enum(["steered", "started"])
     })
-  },
-  "session.messages.pending": {
-    params: z.object({ sessionId: z.string().min(1) }),
-    result: z.array(zWorkMessage.extend({ state: z.enum(["queued", "unknown"]), canWithdraw: z.boolean(), sessionId: z.string(), messageId: z.string(), reason: z.string().optional(), workItemId: z.string().optional(), requestId: z.string().optional(), blockerWorkItemIds: z.array(z.string()).optional(), createdAt: z.string() }))
-  },
-  "session.messages.cancel": {
-    params: z.object({ sessionId: z.string().min(1), messageId: z.string().min(1) }),
-    result: z.object({ cancelled: z.boolean() })
   },
   "workspace.list": { params: zEmpty, result: z.array(zWorkspace) },
   "workspace.add": { params: z.object({ rootPath: z.string().min(1), label: z.string().optional() }), result: zWorkspace },
@@ -173,12 +168,10 @@ export const workbenchRpc = {
   "work.start": { params: zWs.extend({ sessionId: z.string().min(1), turnId: z.string().min(1).optional(), scope: z.string().optional(), message: zWorkMessage.optional() }), result: zWorkRequest },
   "work.list": { params: zWs, result: z.array(zWorkRequest) },
   "work.diagnose": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkDiagnosis },
-  "work.retry": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
+  "work.retry": { params: zWs.extend({ requestId: z.string().min(1) , originatorSessionId: z.string().optional() }), result: zWorkRequest },
   "work.prepare.complete": { params: zWs.extend({ requestId: z.string().min(1), sessionId: z.string().min(1), workItemIds: z.array(z.string()), refs: z.array(zDocRef).optional() }), result: zWorkRequest },
-  "work.confirm": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
   "work.pause": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
-  "work.resume": { params: zWs.extend({ requestId: z.string().min(1) }), result: zWorkRequest },
-  "work.continueFrom": { params: zWs.extend({ requestId: z.string().min(1), sessionId: z.string().min(1), turnId: z.string().min(1) }), result: zWorkRequest },
+  "work.resume": { params: zWs.extend({ requestId: z.string().min(1) , originatorSessionId: z.string().optional() }), result: zWorkRequest },
   "work.cancel": { params: z.union([
     zWs.extend({ requestId: z.string().min(1) }),
     zWs.extend({ sessionId: z.string().min(1) })
@@ -209,12 +202,10 @@ export const workbenchRpc = {
   "inbox.acknowledge": { params: zWi, result: zWorkItem },
   "workItem.cancel": { params: zWi, result: zWorkItem },
   "workItem.pause": { params: zWs.extend({ sessionId: z.string().min(1).optional(), workItemId: z.string().min(1).optional() }), result: z.object({ paused: z.boolean(), workItem: zWorkItem.optional() }) },
-  "workItem.resume": { params: zWi, result: zWorkItem },
-  "workItem.retry": { params: zWi, result: zWorkItem },
-  "workItem.continueFrom": { params: zWi.extend({ sessionId: z.string().min(1), turnId: z.string().min(1) }), result: zWorkItem },
-  "workItem.confirm": { params: zWi, result: zWorkItem },
-  "workItem.integration.retry": { params: zWi, result: zWorkItem },
-  "workItem.integration.takeover": { params: zWi.extend({ note: z.string().trim().optional() }), result: zWorkItem },
+  "workItem.resume": { params: zWi.extend({ originatorSessionId: z.string().optional() }), result: zWorkItem },
+  "workItem.retry": { params: zWi.extend({ originatorSessionId: z.string().optional() }), result: zWorkItem },
+  "workItem.integration.retry": { params: zWi.extend({ originatorSessionId: z.string().optional() }), result: zWorkItem },
+  "workItem.integration.takeover": { params: zWi.extend({ note: z.string().trim().optional(), originatorSessionId: z.string().optional() }), result: zWorkItem },
   "workItem.integration.complete": { params: zWi.extend({ actionId: z.string().min(1), sessionId: z.string().min(1) }), result: zWorkItem },
   "workItem.diagnose": { params: zWi, result: zDiagnosis },
   "runtime.info": { params: zEmpty, result: z.object({ buildId: z.string(), pid: z.number(), startedAt: z.string(), schedulerOnline: z.boolean() }) },
@@ -245,7 +236,7 @@ export const workbenchRpc = {
   "decision.create": {
     params: zWs.extend({
       requestId: z.string().optional(),
-      kind: z.enum(["worker", "attempts"]).optional(),
+      kind: z.enum(["worker", "supervisor"]).optional(),
       actionId: z.string().optional(),
       question: z.string().min(1),
       context: z.string(),

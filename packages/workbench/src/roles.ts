@@ -6,7 +6,7 @@ import { assertDomainId } from "./domains.js";
 
 export const ROLES_DIR = STATE_DIR + "/roles";
 
-const retiredRoles = new Set(["steward", "supervisor", "workspace-repair"]);
+const retiredRoles = new Set(["steward", "workspace-repair"]);
 
 const roleFile = (dir: string, roleId: string): string => join(dir, roleId + ".md");
 

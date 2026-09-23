@@ -5,6 +5,7 @@ import { Badge, Button, CollapsibleDetails, DetailSection, DisclosureCard, Empty
 import { WorkflowDetails } from "./WorkflowDetails.js";
 import { IntegrationControls } from "./IntegrationControls.js";
 import { workItemEvents, workItemProgress } from "./workflow-display.js";
+import { currentWorkStatus, workPhaseLabel, workSessionLabel } from "./task-labels.js";
 
 type WorkItemDialogProps = {
   client: WorkbenchClient;
@@ -35,7 +36,8 @@ const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming, o
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          <Badge status={item.status}>{progress.shortLabel}</Badge>
+          <Badge status={currentWorkStatus(item).kind === "running" ? "running" : undefined}>{workPhaseLabel(item)}</Badge>
+          <span className="text-caption text-muted-foreground">{workSessionLabel(item)}</span>
           <span className="text-caption text-muted-foreground">{progress.handler}</span>
         </div>
         <h3 className="text-title-sm font-semibold text-strong">{progress.title}</h3>
@@ -47,7 +49,7 @@ const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming, o
       <dt className="text-muted-foreground">下一步</dt><dd>{progress.next}</dd>
       {progress.userAction && <><dt className="text-muted-foreground">你需要做什么</dt><dd>{progress.userAction}</dd></>}
     </dl>
-    {item.run.pauseReason === "user" && <Button className="mt-4" variant="primary" size="sm" disabled={resuming} onClick={onResume}>恢复执行</Button>}
+    {(item.run.paused || item.run.userStopped) && <Button className="mt-4" variant="primary" size="sm" disabled={resuming} onClick={onResume}>恢复执行</Button>}
     {pendingDecisions.length > 0 && <div className="mt-4 border-t border-border pt-3">
       <p className="text-label font-medium text-strong">待答复</p>
       {pendingDecisions.map((card) => <div key={card.decisionId} className="mt-2 space-y-1">
@@ -139,6 +141,7 @@ const Decisions = ({ cards }: { cards: DecisionCard[] }) => <div className="spac
   {cards.map((card) => <div key={card.decisionId} className="border-t border-border pt-3 first:border-t-0 first:pt-0">
     <p className="text-label text-foreground">{card.withdrawn ? "已撤回" : "已答复"}：{card.question}</p>
     {card.answer && <p className="mt-1 text-caption text-muted-foreground">答复：{(card.options.find((option) => option.key === card.answer?.key)?.label ?? card.answer.key) + (card.answer.note ? " · " + card.answer.note : "")}</p>}
+    {card.deliveryPending && <p className="mt-1 text-caption text-muted-foreground">答复尚未送达：{card.deliveryFailure ?? "等待执行会话接收"}</p>}
   </div>)}
 </div>;
 

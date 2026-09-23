@@ -1,13 +1,33 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceStore } from "../src/workspace-store.js";
 import { WorkbenchService } from "../src/workbench-service.js";
-import { workbenchRpc } from "../src/rpc.js";
-import { contract, git, setup, submission } from "./workflow-fixture.js";
+import { createWorkbenchClient, workbenchRpc } from "../src/rpc.js";
+import { createWorkbenchRpcHandler } from "../src/rpc-handler.js";
+import { contract, git, setup, submission as baseSubmission } from "./workflow-fixture.js";
+
+const submission = { ...baseSubmission, sessionId: "worker" };
+const connectExecution = (service: WorkbenchService) => service.setExecutionStarter(async (workspaceId, workItemId) => {
+  const item = await service.getWorkItem(workspaceId, workItemId);
+  await service.startWorkItem(workspaceId, workItemId, { sessionId: item.run.sessionId! });
+  const action = (await service.listActions(workspaceId)).find((entry) => entry.kind === "execute" && entry.workItemId === workItemId)!;
+  if (action.kind !== "execute") throw new Error("Expected execution");
+  await service.updateAction(workspaceId, action, (current) => ({ ...current, status: "running", stage: "execute", notices: [], activeTurnId: "continued-turn" }));
+});
 
 const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
-const fixture = async (now?: () => string) => { const f = await setup(now); fixtures.push(f); return f; };
+const fixture = async (now?: () => string) => {
+  const f = await setup(now);
+  const sessionSteerer = vi.fn(async ({ sessionId }: { sessionId: string }) => ({ sessionId, accepted: true, turnId: "answer-turn", delivery: "started" as const }));
+  const options = { ...f.options, sessionSteerer };
+  const service = new WorkbenchService(options);
+  connectExecution(service);
+  const client = createWorkbenchClient({ request: createWorkbenchRpcHandler(service), onEvent: (listener) => service.subscribe(listener) });
+  const result = { ...f, options, service, client, sessionSteerer, cleanup: async () => { await service.dispose(); await f.cleanup(); } };
+  fixtures.push(result);
+  return result;
+};
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.cleanup(); });
 
 it("keeps requests and every prepared item durable without dispatch until the preparation turn ends", async () => {
@@ -61,20 +81,20 @@ it("registers optional isolation separately from allowedPaths and rejects generi
   await expect(service.updateWorkItem(workspaceId, item.workItemId, { note: "invalid", needs: ["desktop"] })).rejects.toThrow("具体");
 });
 
-it("retains the preparation session through failure backoff and exposes exhausted recovery as work state", async () => {
+it("retains the preparation session and records an explicit retry request", async () => {
   const { service, workspaceId } = await fixture();
   const request = await service.startWork(workspaceId, { sessionId: "source", turnId: "turn" });
   await service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: "preparing-worker" });
-  for (let attempt = 0; attempt < 5; attempt++) await service.failWorkRequest(workspaceId, request.requestId, "preparation failed");
-  expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "failed", attempts: 5, workerSessionId: "preparing-worker" });
+  await service.failWorkRequest(workspaceId, request.requestId, "preparation failed");
+  expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ formatVersion: 2, status: "failed", failure: "preparation failed", workerSessionId: "preparing-worker" });
   expect(await service.listDecisions(workspaceId)).toEqual([]);
   expect(await service.listInbox()).toEqual([]);
   await service.retryWork(workspaceId, request.requestId);
-  expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "preparing", attempts: 0, workerSessionId: "preparing-worker" });
+  expect((await service.listWorkRequests(workspaceId))[0]).toMatchObject({ status: "preparing", dispatchRequested: true, workerSessionId: "preparing-worker" });
 });
 
 it("delivers worker decisions that also carry a preparation request id", async () => {
-  const { client, service, workspaceId } = await fixture();
+  const { client, service, workspaceId, sessionSteerer } = await fixture();
   const request = await service.startWork(workspaceId, { sessionId: "design", turnId: "source-turn" });
   await service.putWorkRequest(workspaceId, { ...request, status: "preparing", workerSessionId: "worker" });
   const item = await service.createWorkItem(workspaceId, { ...contract, requestId: request.requestId, sessionId: "worker" });
@@ -90,13 +110,14 @@ it("delivers worker decisions that also carry a preparation request id", async (
   await client.request("decision.answer", { workspaceId, decisionId: card.decisionId, key: "go" });
 
   expect((await service.listActions(workspaceId))[0]).toMatchObject({
-    actionId: action.actionId, status: "pending", stage: "deliver",
+    actionId: action.actionId, status: "running",
     history: [expect.objectContaining({ event: "decision.created" }), expect.objectContaining({ event: "decision.answered", decisionId: card.decisionId })]
   });
-  expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("queued");
+  expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("running");
+  expect(sessionSteerer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionId: "worker", content: expect.stringContaining("Continue") }));
 });
 
-it("enforces dependency cycles, concrete shared resource slots, and cancellation decisions", async () => {
+it("enforces dependency cycles and shared resources while keeping cancelled dependencies blocked", async () => {
   const { service, workspaceId } = await fixture();
   const first = await service.createWorkItem(workspaceId, { ...contract, needs: ["browser:qa"] });
   const second = await service.createWorkItem(workspaceId, { ...contract, needs: ["browser:qa"] });
@@ -106,29 +127,26 @@ it("enforces dependency cycles, concrete shared resource slots, and cancellation
   await expect(service.updateWorkItem(workspaceId, first.workItemId, { note: "cycle", dependsOn: [second.workItemId] })).rejects.toThrow();
   await service.cancelWorkItem(workspaceId, first.workItemId);
   await service.refreshActions(workspaceId);
-  expect(await service.getWorkItem(workspaceId, second.workItemId)).toMatchObject({ status: "decision" });
-  const card = (await service.listDecisions(workspaceId))[0]!;
-  await service.answerDecision(workspaceId, card.decisionId, { key: "cancel" });
+  expect(await service.getWorkItem(workspaceId, second.workItemId)).toMatchObject({ status: "queued" });
+  await expect(service.startWorkItem(workspaceId, second.workItemId, { sessionId: "two" })).rejects.toThrow();
+  await service.cancelWorkItem(workspaceId, second.workItemId);
   expect((await service.getWorkItem(workspaceId, second.workItemId)).status).toBe("cancelled");
 });
 
-it("persists 1/5/30/300 minute retry deadlines and the fifth-failure decision in the original session", async () => {
+it("keeps a failure in its business phase until explicit continuation in the original session", async () => {
   let now = Date.parse("2026-09-09T00:00:00Z");
   const { service, workspaceId } = await fixture(() => new Date(now).toISOString());
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "original" });
-  await service.refreshActions(workspaceId);
+  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "original" });
   const action = (await service.listActions(workspaceId))[0]!;
-  for (const [index, minutes] of [1, 5, 30, 300].entries()) {
-    const failed = await service.failAction(workspaceId, action.actionId, "failure " + index);
-    expect(failed).toMatchObject({ attempts: index + 1, status: "retry", sessionId: "original", retryAt: new Date(now + minutes * 60_000).toISOString() });
-    now += minutes * 60_000;
-  }
-  await service.failAction(workspaceId, action.actionId, "failure five");
+  const failed = await service.failAction(workspaceId, action.actionId, "unavailable");
+  now += 24 * 60 * 60_000;
+  await service.refreshActions(workspaceId);
   expect((await service.listDecisions(workspaceId))).toEqual([]);
-  expect((await service.listActions(workspaceId))[0]).toMatchObject({ status: "decision", control: "manual", waitReason: "自动恢复次数已用尽", failure: "failure five" });
-  expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("decision");
+  expect((await service.listActions(workspaceId))[0]).toEqual(failed);
+  expect((await service.getWorkItem(workspaceId, item.workItemId))).toMatchObject({ status: "running", run: { lastFailure: "unavailable" } });
   await service.retryWorkItem(workspaceId, item.workItemId);
-  expect((await service.listActions(workspaceId))[0]).toMatchObject({ attempts: 0, sessionId: "original", status: "pending" });
+  expect((await service.listActions(workspaceId))[0]).toMatchObject({ sessionId: "original", status: "running", activeTurnId: "continued-turn" });
 });
 
 it("persists a user pause separately from failure decisions and resumes the same work item", async () => {
@@ -137,20 +155,21 @@ it("persists a user pause separately from failure decisions and resumes the same
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
 
   const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
-  expect(paused).toMatchObject({ paused: true, workItem: { status: "running", run: { sessionId: "worker", control: "paused", pauseReason: "user", attempts: 0 } } });
+  expect(paused).toMatchObject({ paused: true, workItem: { status: "running", run: { sessionId: "worker", paused: true } } });
   expect(await service.listDecisions(workspaceId)).toEqual([]);
   expect(await service.diagnoseWorkItem(workspaceId, item.workItemId)).toMatchObject({
-    waiting: expect.arrayContaining(["用户已暂停 Worker"]),
+    waiting: expect.arrayContaining(["用户已暂停"]),
     availableActions: expect.arrayContaining([expect.objectContaining({ method: "workItem.resume" })])
   });
 
   const restarted = new WorkbenchService(options);
   try {
-    expect(await restarted.getWorkItem(workspaceId, item.workItemId)).toMatchObject({ status: "running", run: { control: "paused", pauseReason: "user" } });
+    expect(await restarted.getWorkItem(workspaceId, item.workItemId)).toMatchObject({ status: "running", run: { paused: true } });
+    connectExecution(restarted);
     const resumed = await restarted.resumeWorkItem(workspaceId, item.workItemId);
-    expect(resumed).toMatchObject({ status: "running", run: { sessionId: "worker", control: "auto" } });
-    expect(resumed.run.pauseReason).toBeUndefined();
-    expect((await restarted.listActions(workspaceId))[0]).toMatchObject({ status: "pending", stage: "deliver" });
+    expect(resumed).toMatchObject({ status: "running", run: { sessionId: "worker", paused: false } });
+    expect(resumed.run.userStopped).toBe(false);
+    expect((await restarted.listActions(workspaceId))[0]).toMatchObject({ status: "running", activeTurnId: "continued-turn" });
   } finally { await restarted.dispose(); }
 });
 
@@ -336,19 +355,19 @@ it("persists runtime only in Execution and preserves concurrent contract, heartb
   const stored = JSON.parse(await readFile(path, "utf8"));
   expect(stored.item).toMatchObject({ title: "Adjusted", status: "queued" });
   expect(stored.item).not.toHaveProperty("run");
-  expect(stored.execution).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", attempts: 1, failure: "model unavailable", stage: "deliver" });
+  expect(stored.execution).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", failure: "model unavailable", stage: "deliver" });
   expect(stored.execution.notices).toEqual([expect.objectContaining({ kind: "contract", text: expect.stringContaining("Read updated contract") })]);
   expect(stored.execution).not.toHaveProperty("resumeMessage");
   expect(stored.execution).not.toHaveProperty("lastFailure");
   const restarted = new WorkbenchService(options);
   try {
     const projected = await restarted.getWorkItem(workspaceId, item.workItemId);
-    expect(projected.run).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", attempts: 1, lastFailure: "model unavailable", retryAt: stored.execution.retryAt });
+    expect(projected.run).toMatchObject({ sessionId: "original", lastTurnId: "latest-turn", lastFailure: "model unavailable" });
     expect(projected.run.resumeMessage).toContain("Read updated contract");
     const decision = await restarted.createDecision(workspaceId, { workItemId: item.workItemId, question: "Continue?", context: "Retry", options: [{ key: "retry", label: "Retry" }] });
     await restarted.answerDecision(workspaceId, decision.decisionId, { key: "retry" });
-    expect((await restarted.getWorkItem(workspaceId, item.workItemId)).run).toMatchObject({ attempts: 0 });
-    expect((await restarted.getWorkItem(workspaceId, item.workItemId)).run.lastFailure).toBeUndefined();
+    expect((await restarted.getWorkItem(workspaceId, item.workItemId)).run).toMatchObject({ sessionId: "original", activeTurnId: "answer-turn" });
+    expect((await restarted.listDecisions(workspaceId))[0]?.deliveryPending).toBe(false);
     expect((await restarted.listActions(workspaceId))[0]!.actionId).toBe(execution.actionId);
   } finally { await restarted.dispose(); }
 });
@@ -382,7 +401,7 @@ it("claims only one active integration under the shared record lock", async () =
   const item = await service.createWorkItem(workspaceId, contract);
   const secondService = new WorkbenchService(options);
   const integration = { kind: "integration" as const, workItemId: item.workItemId, status: "pending" as const,
-    stage: "merge" as const, message: "Merge", attempts: 0, history: [], createdAt: item.createdAt, updatedAt: item.updatedAt,
+    stage: "merge" as const, message: "Merge", history: [], createdAt: item.createdAt, updatedAt: item.updatedAt,
     integration: { operation: "merge" as const, contractRevision: item.contractRevision, diffStat: "" } };
   try {
     const results = await Promise.all([service, secondService].map((owner) => owner.createAction(
@@ -393,7 +412,7 @@ it("claims only one active integration under the shared record lock", async () =
   } finally { await secondService.dispose(); }
 });
 
-it("surfaces a failed merge in Inbox, supports immediate retry, and closes it without waiting for backoff", async () => {
+it("surfaces a failed merge in Inbox and closes it after an explicit retry", async () => {
   const { client, root, service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker",
     scope: { ...contract.scope, allowedPaths: [join(root, "..", "external-artifact")] } });
@@ -406,11 +425,11 @@ it("surfaces a failed merge in Inbox, supports immediate retry, and closes it wi
 
   expect(await service.listInbox()).toMatchObject([{
     kind: "integration", workItem: { workItemId: item.workItemId, status: "merging" },
-    action: { actionId: action.actionId, status: "retry", attempts: 1 }
+    action: { actionId: action.actionId, status: "decision" }
   }]);
   const closed = await client.request("workItem.integration.retry", { workspaceId, workItemId: item.workItemId });
   expect(closed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
-  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done", attempts: 0 });
+  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done" });
 });
 
 it("transfers a failed merge to the original worker and completes it through the controlled integration entry", async () => {
@@ -425,18 +444,19 @@ it("transfers a failed merge to the original worker and completes it through the
 
   const delegated = await client.request("workItem.integration.takeover", { workspaceId, workItemId: item.workItemId, note: "请保留主目录修改，处理分支后合入" });
   const owned = (await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)!;
-  expect(delegated.status).toBe("queued");
-  expect(owned).toMatchObject({ status: "pending", agent: { sessionId: "worker", note: "请保留主目录修改，处理分支后合入" } });
-  expect(owned?.retryAt).toBeUndefined();
-  expect((await service.listInbox()).some((entry) => entry.kind === "integration")).toBe(false);
+  expect(delegated).toMatchObject({ status: "merging", run: { sessionId: "worker", activeTurnId: "continued-turn" } });
+  expect(owned).toMatchObject({ status: "decision", agent: { sessionId: "worker", note: "请保留主目录修改，处理分支后合入" } });
+  expect((await service.listActions(workspaceId)).find((entry) => entry.kind === "execute" && entry.workItemId === item.workItemId)).toMatchObject({ notices: [], activeTurnId: "continued-turn" });
+  expect((await service.listInbox()).find((entry) => entry.kind === "integration")).toMatchObject({ action: { agent: { sessionId: "worker" } } });
 
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   const completed = await client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
   expect(completed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
   expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done" });
+  expect((await service.listInbox()).some((entry) => entry.kind === "integration")).toBe(false);
 });
 
-it("pauses and resumes a delegated merge without returning it to automatic execution", async () => {
+it("pauses and resumes the original Worker handling a delegated merge", async () => {
   const { client, service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
@@ -449,16 +469,17 @@ it("pauses and resumes a delegated merge without returning it to automatic execu
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
 
   const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
-  expect(paused).toMatchObject({ paused: true, workItem: { status: "running", run: { control: "paused", pauseReason: "user" } } });
+  expect(paused).toMatchObject({ paused: true, workItem: { status: "merging", run: { paused: true } } });
   await expect(client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" })).rejects.toThrow("先恢复工单");
+  await service.settleExecutionTurn(workspaceId, "worker", "continued-turn", "interrupted");
 
   const resumed = await client.request("workItem.resume", { workspaceId, workItemId: item.workItemId });
-  expect(resumed).toMatchObject({ status: "running", run: { control: "auto" } });
-  expect(resumed.run.pauseReason).toBeUndefined();
-  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "pending", agent: { sessionId: "worker" } });
+  expect(resumed).toMatchObject({ status: "merging", run: { paused: false } });
+  expect(resumed.run.userStopped).toBe(false);
+  expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "decision", agent: { sessionId: "worker" } });
 });
 
-it("keeps exhausted merge failures in the integration Inbox instead of creating a duplicate generic decision card", async () => {
+it("keeps repeated merge failures in the integration Inbox instead of creating a duplicate generic decision card", async () => {
   const { service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
@@ -469,7 +490,7 @@ it("keeps exhausted merge failures in the integration Inbox instead of creating 
   for (let attempt = 0; attempt < 5; attempt++) await service.failAction(workspaceId, action.actionId, "持续阻塞");
 
   expect(await service.listDecisions(workspaceId)).toEqual([]);
-  expect(await service.listInbox()).toMatchObject([{ kind: "integration", action: { status: "decision", attempts: 5 } }]);
+  expect(await service.listInbox()).toMatchObject([{ kind: "integration", action: { status: "decision" } }]);
 });
 
 it("handles a real dirty-workspace merge through Worker takeover without losing the worker branch", async () => {
@@ -491,9 +512,9 @@ it("handles a real dirty-workspace merge through Worker takeover without losing 
   const blocked = await service.submitWorkItem(workspaceId, item.workItemId, submission);
   const action = (await service.listActions(workspaceId)).find((entry) => entry.workItemId === item.workItemId && entry.kind === "integration")!;
   expect(blocked.status).toBe("merging");
-  expect(action).toMatchObject({ status: "retry", attempts: 1 });
+  expect(action).toMatchObject({ status: "decision" });
   expect(action.failure).toContain("Your local changes");
-  expect(await service.listInbox()).toMatchObject([{ kind: "integration", workItem: { workItemId: item.workItemId }, action: { status: "retry" } }]);
+  expect(await service.listInbox()).toMatchObject([{ kind: "integration", workItem: { workItemId: item.workItemId }, action: { status: "decision" } }]);
 
   await client.request("workItem.integration.takeover", { workspaceId, workItemId: item.workItemId, note: "保留用户改动并合入 Worker 成果" });
   await writeFile(join(worktreePath, "result.txt"), "worker rebased\n");
@@ -518,17 +539,19 @@ it("publishes coherent execution and business states for failure, decision, answ
     if (event.type !== "actions.changed" && event.type !== "workItems.changed") return;
     observations.push((async () => {
       const stored = JSON.parse(await readFile(join(root, ".vermillion", "workitems", item.workItemId + ".json"), "utf8"));
-      expect(stored.item.status === "decision").toBe(stored.execution.status === "decision");
+      expect(stored.formatVersion).toBe(2);
+      expect(["running", "cancelled"]).toContain(stored.item.status);
       expect(stored.item.status === "cancelled").toBe(stored.execution.status === "cancelled");
-      if (stored.execution.status === "retry") expect(stored.item.status).toBe("queued");
     })());
   });
   try {
-    for (let index = 0; index < 5; index++) await service.failAction(workspaceId, action.actionId, "temporarily unavailable");
+    await service.failAction(workspaceId, action.actionId, "temporarily unavailable");
     expect(await service.listDecisions(workspaceId)).toEqual([]);
     await service.retryWorkItem(workspaceId, item.workItemId);
     const question = await service.createDecision(workspaceId, { workItemId: item.workItemId, question: "Continue?", context: "User choice", options: [{ key: "cancel", label: "Cancel" }] });
     await service.answerDecision(workspaceId, question.decisionId, { key: "cancel" });
+    expect((await service.getWorkItem(workspaceId, item.workItemId)).status).toBe("running");
+    await service.cancelWorkItem(workspaceId, item.workItemId);
     await Promise.all(observations);
   } finally { unsubscribe(); }
 });
@@ -548,7 +571,7 @@ it("serializes root code writers on the actual shared directory while allowing a
 
 it("exposes the work-item workflow without retired handoff commands", () => {
   expect(workbenchRpc["workItem.start"].params.safeParse({ workspaceId: "workspace", workItemId: "item", run: { sessionId: "worker", attempts: 99 } }).success).toBe(false);
-  for (const method of ["mission.create", "workItem.defer", "workItem.recover", "decision.withdraw", "workspace.repair.submit", "session.ask"])
+  for (const method of ["mission.create", "workItem.defer", "workItem.recover", "decision.withdraw", "workspace.repair.submit", "session.ask", "session.messages.pending", "session.messages.cancel", "work.continueFrom", "workItem.continueFrom", "work.confirm", "workItem.confirm"])
     expect(Object.hasOwn(workbenchRpc, method)).toBe(false);
 });
 
@@ -558,7 +581,7 @@ it("hides retired built-in roles while preserving their files and custom roles",
   for (const role of ["steward", "supervisor", "workspace-repair", "my-role"]) await writeFile(join(global, role + ".md"), "# " + role);
   const ids = (await roles.list(root)).map((role) => role.roleId);
   expect(ids).toContain("my-role");
-  expect(ids).not.toContain("steward"); expect(ids).not.toContain("supervisor"); expect(ids).not.toContain("workspace-repair");
+  expect(ids).not.toContain("steward"); expect(ids).toContain("supervisor"); expect(ids).not.toContain("workspace-repair");
   expect(await readFile(join(global, "steward.md"), "utf8")).toBe("# steward");
 });
 

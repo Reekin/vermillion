@@ -28,7 +28,7 @@ it("commits selected docs without touching another staged file, advances refs an
   expect(updated.run.resumeMessage).toContain("-Before");
   expect(updated.run.resumeMessage).toContain("+After");
   expect(updated.decisions).toEqual([]);
-  const returned = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+  const returned = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
   expect(returned).toMatchObject({ status: "queued" });
   expect(returned.evidence).toBeUndefined();
   expect((await service.getWorkItem(workspaceId, item.workItemId)).run.resumeMessage).toContain("+After");
@@ -94,7 +94,7 @@ it("removes only an empty residual directory after Git already unregistered a wo
   await expect(access(empty)).rejects.toThrow();
 });
 
-it("returns a branch needing rebase to its original worker while preserving unrelated root edits", async () => {
+it("records a merge needing rebase without automatically requeueing and preserves unrelated root edits", async () => {
   const { service, workspaceId, root } = await fixture();
   await writeFile(join(root, "result.txt"), "base\n");
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "base");
@@ -107,9 +107,9 @@ it("returns a branch needing rebase to its original worker while preserving unre
   await writeFile(join(root, "result.txt"), "upstream\n");
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "upstream");
   await writeFile(join(root, "unrelated.txt"), "keep me\n");
-  const result = await service.submitWorkItem(workspaceId, item.workItemId, submission);
-  expect(result).toMatchObject({ status: "queued", run: { sessionId: "original", worktreePath, branch } });
-  expect(result.rejections[0]?.reason).toContain("rebase");
+  const result = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
+  expect(result).toMatchObject({ status: "merging", run: { sessionId: "original", worktreePath, branch } });
+  expect((await service.listActions(workspaceId)).find((action) => action.kind === "integration")?.failure).toContain("merge conflict");
   expect(await readFile(join(root, "unrelated.txt"), "utf8")).toBe("keep me\n");
 });
 
@@ -122,7 +122,7 @@ it("records and rolls back a root execution commit rather than treating code wor
   await writeFile(join(root, "result.txt"), "result\n");
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "root result");
   const commit = await git(root, "rev-parse", "HEAD");
-  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, evidence: { ...submission.evidence, commit } });
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId, evidence: { ...submission.evidence, commit } });
   expect(closed).toMatchObject({ status: "closed", merge: { commit } });
   expect(release).not.toHaveBeenCalled();
   await service.releaseIdleWorkers(workspaceId);
@@ -138,7 +138,7 @@ it("closes a root work item whose allowed paths contain only an external artifac
     scope: { ...contract.scope, allowedPaths: [join(root, "..", "external-artifact")] } });
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "artifact-worker" });
 
-  const closed = await service.submitWorkItem(workspaceId, item.workItemId, submission);
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
 
   expect(closed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
   expect((await service.listActions(workspaceId)).find((action) => action.workItemId === item.workItemId && action.kind === "integration")).toMatchObject({ status: "done" });
@@ -152,16 +152,14 @@ it("checks repository paths in a mixed root scope while ignoring external artifa
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "mixed-worker" });
   await writeFile(join(root, "owned.txt"), "owned\n");
 
-  const pending = await service.submitWorkItem(workspaceId, item.workItemId, submission);
-  expect(pending).toMatchObject({ status: "queued" });
+  const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
+  expect(pending).toMatchObject({ status: "running" });
   expect(pending.rejections[0]?.reason).toContain("未提交");
   expect(pending.rejections[0]?.reason).not.toContain("outside repository");
-
-  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "mixed-worker" });
   await git(root, "add", "owned.txt");
   await git(root, "commit", "-qm", "owned result");
   const commit = await git(root, "rev-parse", "HEAD");
-  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, evidence: { ...submission.evidence, commit } });
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId, evidence: { ...submission.evidence, commit } });
 
   expect(closed).toMatchObject({ status: "closed", merge: { commit } });
   expect(closed.merge?.diffStat).toContain("owned.txt");
@@ -187,10 +185,9 @@ it("rejects untracked scoped root code and reverts every owned commit while reta
   const item = await service.createWorkItem(workspaceId, { ...contract, scope: { ...contract.scope, allowedPaths: ["result.txt"] }, sessionId: "root-worker" });
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "root-worker" });
   await writeFile(join(root, "result.txt"), "first\n");
-  const pending = await service.submitWorkItem(workspaceId, item.workItemId, submission);
-  expect(pending.status).toBe("queued");
+  const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
+  expect(pending.status).toBe("running");
   expect(pending.rejections[0]?.reason).toContain("未提交");
-  await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "root-worker" });
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "implementation");
   const first = await git(root, "rev-parse", "HEAD");
   await service.writeDoc(workspaceId, ".vermillion/docs/retained.md", "retained docs\n");
@@ -200,7 +197,7 @@ it("rejects untracked scoped root code and reverts every owned commit while reta
   await writeFile(join(root, "result.txt"), "reviewed\n");
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "review fixes");
   const tip = await git(root, "rev-parse", "HEAD");
-  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, evidence: { ...submission.evidence, commit: tip } });
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId, evidence: { ...submission.evidence, commit: tip } });
   expect(closed).toMatchObject({ status: "closed", merge: { commits: [first, tip] } });
   await service.rollbackWorkItem(workspaceId, item.workItemId, "Redo");
   await expect(access(join(root, "result.txt"))).rejects.toThrow();

@@ -199,6 +199,7 @@ export const createCodexEngineIntegration = (
           runtimePort.releaseSessionExecutionAndWait(sessionId),
         clearSessionHistory,
         getActiveTurnId: (sessionId: string) => runtimePort.getActiveTurnId(sessionId),
+        isSessionLive: (sessionId: string) => runtimePort.isSessionLive(sessionId),
         listSkills: async (input) => {
           const result = await runtimePort.listSkills({
             cwds: input?.cwds,

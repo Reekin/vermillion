@@ -60,6 +60,57 @@ const block = (
 });
 
 describe("buildReadSessionTranscript", () => {
+  it("keeps concurrent current-turn activity and pending input outside the message budget", () => {
+    const snapshot = baseSnapshot([
+      turn({ turnId: "old" }),
+      turn({ turnId: "live", status: "streaming", startedAt: "2026-06-06T00:02:00.000Z", completedAt: undefined, finishReason: undefined })
+    ], [
+      block({ blockId: "a", messageId: "a", turnId: "live", role: "user", text: "first" }),
+      block({ blockId: "b", messageId: "b", turnId: "live", role: "assistant", text: "second" })
+    ]);
+    const startedAt = "2026-06-06T00:02:01.000Z";
+    const completedAt = "2026-06-06T00:02:04.000Z";
+    snapshot.toolCalls = [
+      { sessionId: "session-1", turnId: "live", toolCallId: "running-a", toolName: "exec", status: "running", startedAt, inputSummary: "build", outputSummary: "private output" },
+      { sessionId: "session-1", turnId: "live", toolCallId: "running-b", toolName: "fetch", status: "running", startedAt },
+      { sessionId: "session-1", turnId: "live", toolCallId: "done", toolName: "read", status: "completed", startedAt, completedAt },
+      { sessionId: "session-1", turnId: "old", toolCallId: "old-tool", toolName: "old", status: "running", startedAt },
+      { sessionId: "other", turnId: "live", toolCallId: "other-tool", toolName: "other", status: "running", startedAt }
+    ];
+    snapshot.terminalStreams = [{ sessionId: "session-1", turnId: "live", terminalId: "terminal", toolCallId: "running-a", status: "running", startedAt, outputText: "private terminal output" }];
+    snapshot.approvalRequests = [{ sessionId: "session-1", turnId: "live", requestId: "approval", approvalKind: "command", status: "pending", title: "Run command", requestedAt: completedAt, availableActions: [] }];
+    snapshot.runtimeInteractions = [{ sessionId: "session-1", turnId: "live", requestId: "input", interactionKind: "tool_user_input", status: "pending", title: "Choose", requestedAt: completedAt, payload: {} }];
+    const result = buildReadSessionTranscript({ snapshot, sessionId: "session-1", limit: 1, maxTextChars: 1,
+      runtimeState: { confirmed: true, activeTurnId: "live" } });
+    expect(result.activity).toMatchObject({ confirmation: "live", status: "active", currentTurn: { turnId: "live" }, lastKnownAt: completedAt,
+      recentCompleted: { id: "done" }, pendingApprovals: [{ requestId: "approval" }], pendingInputs: [{ requestId: "input" }] });
+    expect(result.activity.running.map((entry) => entry.id)).toEqual(["running-a", "running-b", "terminal"]);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.text).toHaveLength(1);
+    expect(JSON.stringify(result.activity)).not.toContain("private");
+    expect(buildReadSessionTranscript({ snapshot, sessionId: "session-1" }).activity).toEqual({
+      ...result.activity, confirmation: "unknown", status: "unknown"
+    });
+  });
+
+  it("does not present inherited activity as the child's current turn", () => {
+    const snapshot = baseSnapshot([turn({ sessionId: "parent", turnId: "ancestor", status: "streaming" })], []);
+    snapshot.sessionRelations = [{ relationId: "fork", parentSessionId: "parent", childSessionId: "session-1", relationType: "fork", createdAt: baseSession.createdAt }];
+    snapshot.toolCalls = [{ sessionId: "parent", turnId: "ancestor", toolCallId: "ancestor-tool", toolName: "exec", status: "running", startedAt: baseSession.createdAt }];
+    const result = buildReadSessionTranscript({ snapshot, sessionId: "session-1" });
+    expect(result.turns).toHaveLength(1);
+    expect(result.activeTurnId).toBeUndefined();
+    expect(result.activity).toEqual({ confirmation: "unknown", status: "unknown", running: [], pendingApprovals: [], pendingInputs: [] });
+  });
+
+  it("keeps a confirmed turn active with no running tools and marks disconnected records unknown", () => {
+    const snapshot = baseSnapshot([turn({ turnId: "live", status: "streaming", completedAt: undefined })], []);
+    expect(buildReadSessionTranscript({ snapshot, sessionId: "session-1", runtimeState: { confirmed: true, activeTurnId: "live" } }).activity)
+      .toMatchObject({ confirmation: "live", status: "active", running: [] });
+    const cold = buildReadSessionTranscript({ snapshot, sessionId: "session-1", runtimeState: { confirmed: false, activeTurnId: "live" } }).activity;
+    expect(cold).toMatchObject({ confirmation: "unknown", status: "unknown", lastKnownAt: "2026-06-06T00:01:00.000Z" });
+  });
+
   it("returns user, commentary, final, and in-progress agent messages", () => {
     const snapshot = baseSnapshot([
       turn({

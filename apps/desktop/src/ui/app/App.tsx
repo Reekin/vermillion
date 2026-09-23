@@ -21,7 +21,6 @@ import { SettingsPage } from "./components/SettingsPage.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
-import { continueWorkFrom } from "./continue-work-from.js";
 import { currentWorkContext, decisionsForWork } from "./current-work-context.js";
 import { Button, Field, InlineNotice, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
@@ -71,19 +70,19 @@ export const App = ({ sessionStore, transport }: AppProps) => {
 
   /** undefined = draft: the next message creates a session in draftWorkspaceId. */
   const [sessionId, setSessionId] = useState<string | undefined>();
-  const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string; canContinueFrom?: boolean }>({});
+  const [workTarget, setWorkTarget] = useState<{ sessionId?: string; turnId?: string }>({});
   const workSessionId = workTarget.sessionId ?? sessionId;
   const discussionIssue = store((s) => s.view?.issues.find((issue) => issue.discussionSessionId === sessionId));
   const workItems = store((s) => s.view?.workItems);
   const workRequests = store((s) => s.view?.workRequests);
   const workContext = useMemo(() => currentWorkContext(workItems ?? [], workRequests ?? [], workSessionId), [workItems, workRequests, workSessionId]);
-  const { item: currentWorkItem, request: currentWorkRequest, transferredSessionId } = workContext;
+  const { item: currentWorkItem, request: currentWorkRequest } = workContext;
   const decisions = store((s) => s.view?.decisions);
   const actions = store((s) => s.view?.actions);
   const currentDecisions = useMemo(() => decisionsForWork(decisions ?? [], actions ?? [], workContext, workSessionId), [decisions, actions, workContext, workSessionId]);
-  const [decisionMode, setDecisionMode] = useState<{ sessionId?: string; decisionId?: string; ordinary: boolean }>({ ordinary: false });
+  const [decisionMode, setDecisionMode] = useState<{ sessionId?: string; decisionId?: string; ordinary: boolean }>({ ordinary: true });
   const currentDecision = currentDecisions.find((card) => card.decisionId === decisionMode.decisionId) ?? (currentDecisions.length === 1 ? currentDecisions[0] : undefined);
-  const answeringDecision = Boolean(currentDecision && !(decisionMode.sessionId === workSessionId && decisionMode.ordinary));
+  const answeringDecision = Boolean(currentDecision && decisionMode.sessionId === workSessionId && decisionMode.decisionId === currentDecision.decisionId && !decisionMode.ordinary);
   const [workspaceFilterId, setWorkspaceFilterId] = useState<string | undefined>();
   const [composerActions, setComposerActions] = useState<ComposerActions>();
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; workspaceId: string }>();
@@ -299,17 +298,6 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   reloadSignal={reloadSignal}
                   createSession={createSession}
                   initializeDraftExecution={initializeDraftExecution}
-                  onBeforeStop={sessionWorkspaceId && (currentWorkItem || currentWorkRequest) ? async (workerSessionId) => {
-                    const preparation = store.getState().view?.workRequests.find((request) => request.workerSessionId === workerSessionId && ["pending", "preparing"].includes(request.status));
-                    if (preparation) {
-                      await store.getState().client.request("work.pause", { workspaceId: sessionWorkspaceId, requestId: preparation.requestId });
-                      return;
-                    }
-                    await store.getState().client.request("workItem.pause", {
-                      workspaceId: sessionWorkspaceId,
-                      sessionId: workerSessionId
-                    });
-                  } : undefined}
                   onViewChange={setWorkTarget}
                   composerDraftKey="think"
                   onComposerChange={setComposerActions}
@@ -318,23 +306,15 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   renderImageContextMenu={({ onCopy, ...props }) => <ContextMenu {...props} zIndex={1001}
                     items={[{ key: "copy-image", label: "复制图片", onSelect: onCopy }]} />}
                   renderFileLinkContextMenu={renderFileLinkContextMenu}
-                  composerHeader={currentWorkRequest || currentWorkItem || transferredSessionId || currentDecisions.length > 0 ? <>
-                    {!currentWorkItem && !currentWorkRequest && transferredSessionId && sessionWorkspaceId && <section className="vm-current-work" aria-label="已转移的工作">
-                      <span className="text-caption text-muted-foreground">已转移到其他分支</span>
-                      <Button size="sm" variant="ghost" outlined onClick={() => void openSessionTarget(sessionWorkspaceId, transferredSessionId)}>前往当前执行</Button>
-                    </section>}
+                  composerHeader={currentWorkRequest || currentWorkItem || currentDecisions.length > 0 ? <>
                     {sessionWorkspaceId && <CurrentWorkBar key={currentWorkItem?.workItemId ?? currentWorkRequest?.requestId ?? workSessionId} client={store.getState().client} workspaceId={sessionWorkspaceId}
                       sourceTitle={sidebar.findSession(currentWorkRequest?.sourceSessionId ?? workSessionId ?? "")?.title ?? openSession?.title}
                       request={currentWorkRequest} item={currentWorkItem} hasDecision={currentDecisions.length > 0}
-                      onOpenRelatedWorkItem={(workItemId) => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: workItemId })}
-                      onContinueFrom={(currentWorkItem || currentWorkRequest) && workTarget.canContinueFrom && workTarget.turnId && workSessionId && (!composerActions?.hasContent || composerActions.canSubmit)
-                        ? (target) => continueWorkFrom({ client: store.getState().client, transport, composer: composerActions,
-                          workspaceId: sessionWorkspaceId, target, sessionId: workSessionId,
-                          turnId: workTarget.turnId!, open: openSessionTarget }) : undefined}
+                      onOpenSession={(id) => void openSessionTarget(sessionWorkspaceId, id)}
                       onOpenWorkItem={currentWorkItem ? () => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: currentWorkItem.workItemId }) : undefined} />}
                     {currentDecisions.length > 0 && <section className="vm-decision-context" aria-label="决策回复">
                       {currentDecisions.length > 1 ? <Field kind="select" aria-label="选择待回复决策" compact value={currentDecision?.decisionId ?? ""}
-                        onChange={(event) => setDecisionMode({ sessionId: workSessionId, decisionId: event.target.value, ordinary: false })}>
+                        onChange={(event) => setDecisionMode({ sessionId: workSessionId, decisionId: event.target.value, ordinary: true })}>
                         <option value="">选择要回复的决策</option>
                         {currentDecisions.map((card) => <option key={card.decisionId} value={card.decisionId}>{card.question}</option>)}
                       </Field> : <p className="vm-decision-context__question">{currentDecision?.question}</p>}
@@ -349,6 +329,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                     submit: async (payload) => {
                       if (payload.attachments?.length) throw new Error("决策答复使用文字；附件可切换为普通消息发送。");
                       await store.getState().client.request("decision.answer", { workspaceId: sessionWorkspaceId, decisionId: currentDecision.decisionId, note: payload.content });
+                      setDecisionMode({ ordinary: true });
                     }
                   } : undefined}
                   composerExtras={<>

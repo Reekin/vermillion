@@ -3,25 +3,25 @@ import type { AgentRun, WorkflowAction, WorkItem } from "@vermillion/workbench/c
 import { actionRoleLabel, actionStatusText, integrationFailureSummary, integrationProgress, integrationShortStatus, waitingActions, workItemEvents, workItemProgress } from "../src/ui/app/components/workflow-display.js";
 
 describe("execution and integration presentation", () => {
-  it("associates retry and decision records with their single work item", () => {
+  it("associates blocked actions with their single work item", () => {
     const actions = [
-      { actionId: "worker", kind: "execute", workItemId: "one", status: "retry", updatedAt: "2" },
+      { actionId: "worker", kind: "execute", workItemId: "one", status: "decision", updatedAt: "2" },
       { actionId: "merge", kind: "integration", workItemId: "one", status: "decision", updatedAt: "3" },
       { actionId: "running", kind: "execute", workItemId: "one", status: "running", updatedAt: "4" },
-      { actionId: "elsewhere", kind: "integration", workItemId: "two", status: "retry", updatedAt: "5" }
+      { actionId: "elsewhere", kind: "integration", workItemId: "two", status: "decision", updatedAt: "5" }
     ] as WorkflowAction[];
     expect(waitingActions(actions, { workItemId: "one" } as WorkItem).map((action) => action.actionId)).toEqual(["merge", "worker"]);
     expect(actionRoleLabel(actions[0]!)).toBe("Worker");
     expect(actionRoleLabel(actions[1]!)).toBe("工作台");
   });
 
-  it("shows integration retry progress and the delegated worker state", () => {
-    const retry = { actionId: "merge", kind: "integration", workItemId: "one", status: "retry", attempts: 2, retryAt: "2026-01-01T00:00:00.000Z", updatedAt: "3" } as WorkflowAction;
+  it("shows blocked integration and the delegated worker state", () => {
+    const retry = { actionId: "merge", kind: "integration", workItemId: "one", status: "decision", updatedAt: "3" } as WorkflowAction;
     const delegated = { ...retry, status: "running", agent: { sessionId: "worker", requestedAt: "now", deliveredAt: "later" } } as WorkflowAction;
-    expect(integrationProgress(retry)).toBe("合入失败 · 自动重试第 2/4 次");
-    expect(integrationShortStatus(retry)).toBe("等待重试");
+    expect(integrationProgress(retry)).toBe("合入受阻");
+    expect(integrationShortStatus(retry)).toBe("待处置");
     expect(integrationFailureSummary({ ...retry, failure: "Command failed\nerror: Your local changes to the following files would be overwritten by merge:\n\tresult.txt\nPlease commit" } as WorkflowAction)).toBe("主工作区有未提交修改：result.txt");
-    expect(actionStatusText(delegated)).toBe("Agent 处理合入");
+    expect(actionStatusText(delegated)).toBe("等待 Worker 处理合入");
     expect(actionRoleLabel(delegated)).toBe("Worker");
   });
 
@@ -52,10 +52,10 @@ describe("execution and integration presentation", () => {
 
   it("turns workflow history into readable events without internal stage names", () => {
     const item = { workItemId: "one", status: "closed", rejections: [{ reason: "Worker must commit its worktree before integration.", at: "2026-01-01T00:00:02.000Z" }], merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:04.000Z" }, run: { sessionId: "worker" } } as WorkItem;
-    const actions = [{ actionId: "merge-old", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", attempts: 0, history: [
+    const actions = [{ actionId: "merge-old", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", history: [
       { at: "2026-01-01T00:00:01.000Z", event: "created", message: "验收通过" },
       { at: "2026-01-01T00:00:02.000Z", event: "failed:merge", message: "Worker must commit its worktree before integration." }
-    ] }, { actionId: "merge-new", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", attempts: 0, history: [
+    ] }, { actionId: "merge-new", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", history: [
       { at: "2026-01-01T00:00:03.000Z", event: "created", message: "重新提交，验收通过" }
     ] } as WorkflowAction];
     const events = workItemEvents(item, actions, []);
@@ -65,7 +65,7 @@ describe("execution and integration presentation", () => {
 
   it("does not expose internal work-item stage messages in event details", () => {
     const item = { workItemId: "one", status: "closed", dependsOn: [], rejections: [], run: {} } as WorkItem;
-    const actions = [{ actionId: "worker", kind: "execute", workItemId: "one", status: "done", stage: "execute", updatedAt: "2026-01-01T00:00:02.000Z", attempts: 0, notices: [], history: [
+    const actions = [{ actionId: "worker", kind: "execute", workItemId: "one", status: "done", stage: "execute", updatedAt: "2026-01-01T00:00:02.000Z", notices: [], history: [
       { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: "工单已进入 merging" }
     ] } as WorkflowAction];
     expect(workItemEvents(item, actions, [])[0]?.detail).toBe("本轮执行已交接后续处理。");
@@ -74,7 +74,7 @@ describe("execution and integration presentation", () => {
 
   it("labels a resolved handoff caused by a merge failure as a failed check", () => {
     const item = { workItemId: "one", status: "queued", dependsOn: [], rejections: [], run: {} } as WorkItem;
-    const actions = [{ actionId: "merge", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:02.000Z", attempts: 0, history: [
+    const actions = [{ actionId: "merge", kind: "integration", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:02.000Z", history: [
       { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: "转回原 Worker：Worker must commit its worktree before integration." }
     ] } as WorkflowAction];
     expect(workItemEvents(item, actions, [])[0]?.title).toBe("合入检查未通过");

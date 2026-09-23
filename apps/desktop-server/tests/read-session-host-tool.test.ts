@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DomainSnapshot } from "@vermillion/shared";
 import { HostToolRegistry } from "../src/host-tools.js";
+import { SessionShellService } from "../src/session-shell-service.js";
 import {
   createReadSessionHostTool,
   type ReadSessionRuntime,
@@ -94,6 +95,22 @@ const createTool = (runtime: Omit<ReadSessionRuntime, "resolveSessionId"> &
   });
 
 describe("createReadSessionHostTool", () => {
+  it("uses the public session reader for the exact same tool and CLI payload", async () => {
+    const shell = new SessionShellService({
+      runtimeService: { getSnapshot: () => snapshot } as never,
+      sessionCatalog: {} as never,
+      sessionIdentity: { resolveSessionIdentifier: () => "session-1" } as never,
+      capabilities: { isSessionLive: () => true, getActiveTurnId: () => undefined } as never
+    });
+    const input = { sessionId: "session-1", limit: 1, maxChars: 3 };
+    const tool = createReadSessionHostTool((args) => shell.readSession(args));
+    const result = await tool.handle({ definition: tool, arguments: input, context: invocationContext });
+    expect(result.success).toBe(true);
+    const text = result.contentItems[0]?.type === "inputText" ? result.contentItems[0].text : "";
+    expect(JSON.parse(text)).toEqual(await shell.readSession(input));
+    expect(JSON.parse(text).activity).toMatchObject({ confirmation: "live", status: "idle" });
+  });
+
   it("registers as a host tool definition", async () => {
     const registry = new HostToolRegistry([
       createTool({

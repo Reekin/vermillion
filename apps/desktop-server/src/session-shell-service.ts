@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readSession, type ReadSessionArgs } from "./read-session-host-tool.js";
+import type { ReadSessionTranscriptResult } from "./read-session-transcript.js";
 import type { HostToolRegistry } from "./host-tools.js";
 import type { ChatTreeScope, WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import type {
@@ -150,11 +152,6 @@ const resolveComposerSlashSuggestions = (
   return items;
 };
 
-export type SessionCommandDispatch = (
-  input: CommandEnvelope,
-  send: (input: CommandEnvelope) => Promise<RuntimeCommandReceiptRpc>
-) => Promise<RuntimeCommandReceiptRpc>;
-
 export type SessionShellServiceOptions = {
   runtimeService: SessionRuntimeService;
   wrapperChatTree?: WrapperChatTreeService;
@@ -178,6 +175,19 @@ export type SessionShellServiceOptions = {
 };
 
 export class SessionShellService {
+  public readSession(input: ReadSessionArgs): Promise<ReadSessionTranscriptResult> {
+    return readSession({
+      getSnapshot: () => this.getSnapshot(),
+      resolveSessionId: (id) => this.resolveSessionIdentifier(id),
+      ensureSessionLoaded: (id, options) => this.ensureSessionLoadedForRead(id, options),
+      isSessionPartiallyHydrated: (id) => this.isSessionPartiallyHydrated(id),
+      getRuntimeState: (id) => ({
+        confirmed: this.capabilities?.isSessionLive(id) === true,
+        activeTurnId: this.getActiveTurnId(id)
+      })
+    }, input);
+  }
+
   private readonly wrapperChatTree: WrapperChatTreeService | undefined;
   private readonly runtimeService: SessionRuntimeService;
   private readonly sessionCatalog: SessionCatalogService;
@@ -302,19 +312,7 @@ export class SessionShellService {
     return this.getSettings();
   }
 
-  private commandDispatch?: SessionCommandDispatch;
-
-  /** The host supplies execution admission; ordinary session commands use the same runtime. */
-  public setCommandDispatch(dispatch: SessionCommandDispatch): void {
-    this.commandDispatch = dispatch;
-  }
-
   public async executeCommand(input: CommandEnvelope): Promise<RuntimeCommandReceiptRpc> {
-    const send = (command: CommandEnvelope) => this.executeAdmittedCommand(command);
-    return this.commandDispatch ? this.commandDispatch(input, send) : send(input);
-  }
-
-  private async executeAdmittedCommand(input: CommandEnvelope): Promise<RuntimeCommandReceiptRpc> {
     if ("sessionId" in input.command && typeof input.command.sessionId === "string") {
       await this.ensureSessionReadyForCommand(input.command);
     }

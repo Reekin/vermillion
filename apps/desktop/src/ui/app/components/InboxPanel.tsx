@@ -51,7 +51,8 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
     setBusy(true);
     setError(null);
     try {
-      await client.request("decision.answer", { workspaceId: item.workspaceId, decisionId: item.card.decisionId, key, note: note.trim() || undefined });
+      await client.request("decision.answer", { workspaceId: item.workspaceId, decisionId: item.card.decisionId,
+        key: card.answer?.key ?? key, note: card.answer ? card.answer.note : note.trim() || undefined });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -98,7 +99,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
           );
         })}
       </ul>
-      {card.kind !== "attempts" && <form
+      <form
         className="mt-3 flex items-end gap-2"
         onSubmit={(event) => {
           event.preventDefault();
@@ -107,11 +108,13 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       >
         <Field kind="textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注" className="min-w-0 flex-1" />
         <Button type="submit" disabled={busy || !note.trim()} className="shrink-0">仅以备注答复</Button>
-      </form>}
+      </form>
       </>}
       {answered && <DetailSection title="答复结果">
         <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
-        <p>{card.kind === "attempts" ? (card.deliveryPending ? "操作已保存，等待处理" : "操作已处理") : (card.deliveryPending ? "答复已保存，等待送达 Worker" : "答复已送达 Worker")}</p>
+        <p>{card.deliveryPending ? "答复已保存，等待送达执行会话" : "答复已送达执行会话"}</p>
+        {card.deliveryFailure && <InlineNotice tone="error" className="px-0">{card.deliveryFailure}</InlineNotice>}
+        {card.deliveryPending && <Button size="sm" disabled={busy} onClick={() => void answer()}>重试送达</Button>}
       </DetailSection>}
       {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
         <p>{actionRoleLabel(action)} · {actionStatusText(action)}</p>
@@ -120,7 +123,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       {relatedIds.length > 0 && <DetailSection title="相关工单">{relatedIds.map((id) => {
         const related = data?.workItems.find((entry) => entry.workItemId === id);
         return <ListRow key={id} title={related?.title ?? id} leading={related && <Badge>{related.risk}</Badge>}
-          trailing={related && <Badge status={related.status}>{statusLabel[related.status]}</Badge>} onClick={() => setDetailId(id)} />;
+          trailing={related && <Badge>{statusLabel[related.status]}</Badge>} onClick={() => setDetailId(id)} />;
       })}</DetailSection>}
       {contextError && <InlineNotice tone="error">{contextError}</InlineNotice>}
       {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}

@@ -170,6 +170,19 @@ describe("Codex app-server runtime port", () => {
     expect(rpc).toHaveBeenCalledWith("config/read", { includeLayers: false, cwd: null });
   });
 
+  it("only confirms attached execution while its engine connection remains ready", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
+    disposers.push(() => port.stop());
+    await port.start();
+    port.attachThreadToSession("cold", "cold-thread", false);
+    expect(port.isSessionLive("cold")).toBe(false);
+    expect(port.isSessionLive("unknown")).toBe(false);
+    port.attachThreadToSession("live", "live-thread");
+    expect(port.isSessionLive("live")).toBe(true);
+    await port.stop();
+    expect(port.isSessionLive("live")).toBe(false);
+  });
+
   it("forwards state-db-only thread listing to the app server", async () => {
     const port = createCodexAppServerRuntimePort({
       commandPath: process.execPath,
@@ -781,24 +794,6 @@ describe("Codex app-server runtime port", () => {
         force: true
       });
     }
-  });
-
-  it("returns a readmission request without starting a turn when only steering was admitted", async () => {
-    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
-    vi.spyOn(port, "start").mockResolvedValue();
-    const rpc = vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
-      .mockResolvedValueOnce({ thread: { id: "thread" } })
-      .mockResolvedValueOnce({ turn: { id: "old" } });
-    await port.request({ id: "start", method: "turn/start", params: { sessionId: "worker", content: "initial" } });
-    rpc.mockReset().mockRejectedValueOnce(Object.assign(new Error("no active turn to steer"), {
-      code: "runtime_protocol_error", details: { method: "turn/steer", jsonRpcCode: -32600 }
-    }));
-    const response = await port.request({ id: "append", method: "turn/steer", params: {
-      sessionId: "worker", turnId: "old", content: "continue", allowStart: false
-    } });
-    expect(response).toMatchObject({ ok: false, error: { code: "execution_readmission_required" } });
-    expect(rpc.mock.calls.map(([method]) => method)).toEqual(["turn/steer"]);
-    expect(port.getActiveTurnId("worker")).toBeUndefined();
   });
 
   it.each([

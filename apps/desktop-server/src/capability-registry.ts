@@ -248,6 +248,7 @@ export type SessionRuntimeCapability = {
   releaseSessionExecution?: (sessionId: string) => Promise<void>;
   clearSessionHistory?: (sessionId: string) => Promise<boolean>;
   getActiveTurnId?: (sessionId: string) => string | undefined;
+  isSessionLive?: (sessionId: string) => boolean;
   listSkills?: (input?: {
     cwds?: string[];
     forceReload?: boolean;
@@ -412,6 +413,10 @@ export class CapabilityRegistry {
 
   public getActiveTurnId(sessionId: string): string | undefined {
     return this.sessionRuntime(sessionId)?.getActiveTurnId?.(sessionId);
+  }
+
+  public isSessionLive(sessionId: string): boolean {
+    return this.sessionRuntime(sessionId)?.isSessionLive?.(sessionId) === true;
   }
 
   /** 技能是用户级资源，按引擎聚合后去重，界面不区分来源引擎。 */

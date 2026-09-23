@@ -129,8 +129,7 @@ export type SessionPaneProps = {
   composerDraftKey?: string;
   onComposerChange?: (actions: ComposerActions | undefined) => void;
   /** Records preparation cancellation or a Worker pause before the shared session Stop command interrupts its turn. */
-  onBeforeStop?: (sessionId: string) => Promise<"cancelled" | void>;
-  onViewChange?: (view: { sessionId?: string; turnId?: string; canContinueFrom?: boolean }) => void;
+  onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
   /** Compact readers reserve all available width for messages. */
   allowChatTree?: boolean;
 };
@@ -645,7 +644,6 @@ export const SessionPane = ({
   composerSubmitOverride,
   composerDraftKey,
   onComposerChange,
-  onBeforeStop,
   onViewChange,
   renderChatTree,
   renderImageContextMenu,
@@ -792,7 +790,6 @@ export const SessionPane = ({
   const domain = store.getDomainReadModel();
   const viewNode = activeChatTree?.nodes.find((node) => node.nodeId === activeChatTree.currentNodeId);
   const viewTurnId = viewNode?.turnId;
-  const canContinueFrom = Boolean(viewTurnId && viewNode?.status && viewNode.status !== "pending");
   const [windowVisible, setWindowVisible] = useState(() => typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus());
   useEffect(() => {
     const update = () => setWindowVisible(document.visibilityState === "visible" && document.hasFocus());
@@ -819,8 +816,8 @@ export const SessionPane = ({
     });
   }, [readNodeId, unreadVisibleKey, isVisible, windowVisible, sessionId, transport, setStatusNotice]);
   useEffect(() => {
-    onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId, canContinueFrom });
-  }, [onViewChange, viewSessionId, viewTurnId, canContinueFrom]);
+    onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId });
+  }, [onViewChange, viewSessionId, viewTurnId]);
 
   const { session: displayedSession, goal: activeThreadGoal } = useRendererSessionSelection(
     store, viewSessionId, () => ({
@@ -1287,7 +1284,6 @@ export const SessionPane = ({
           submitBranch={sessionId ? submitBranch : undefined}
           autoSendQueuedMessages={currentTurn?.turnId === displayedSession?.lastTurnId}
           onResumeSession={viewSessionId ? onResumeSession : undefined}
-          onBeforeStop={onBeforeStop}
           onCancelBranchSend={(operationId) => cancelChatTreeSend(operationId, "cancel")}
           onRequestTranscriptBottom={onRequestTranscriptBottom}
           onExecutionPreferenceChange={onExecutionPreferenceChange}

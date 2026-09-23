@@ -1282,10 +1282,6 @@ export class CodexAppServerRuntimePort
         }
       case "turn/steer": {
         const result = await this.handleTurnSteer(payload, options);
-        if (!result) return {
-          id: payload.id, ok: false,
-          error: { code: "execution_readmission_required", message: "当前轮次已变化，需要重新检查执行条件" }
-        };
         return {
           id: payload.id,
           ok: true,
@@ -1692,6 +1688,12 @@ export class CodexAppServerRuntimePort
     return active?.sessionId === sessionId ? active.turnId : undefined;
   }
 
+  public isSessionLive(sessionId: string): boolean {
+    const threadId = this.threadIdBySessionId.get(sessionId);
+    return this.getState() === "ready" && !!threadId &&
+      !this.detachedThreadIds.has(threadId) && !this.closedThreadIds.has(threadId);
+  }
+
   public trackResumedTurn(sessionId: string, thread: Thread): void {
     const active = thread.turns?.filter((turn) => turn.status === "inProgress").at(-1);
     if (active) this.setActiveTurnForThread(thread.id, active.id, sessionId);
@@ -2072,7 +2074,7 @@ export class CodexAppServerRuntimePort
   private async handleTurnSteer(
     payload: CodexRuntimeRequest,
     options: RuntimeOperationOptions
-  ): Promise<{ sessionId: string; turnId: string; delivery: "steered" | "start_or_steer" } | undefined> {
+  ): Promise<{ sessionId: string; turnId: string; delivery: "steered" | "start_or_steer" }> {
     const sessionId = String(payload.params.sessionId ?? "");
     const expectedTurnId = String(payload.params.turnId ?? "");
     const content = String(payload.params.content ?? "");
@@ -2123,7 +2125,6 @@ export class CodexAppServerRuntimePort
         if (currentActive?.turnId === observedActive?.turnId && currentActive?.sessionId === observedActive?.sessionId) {
           this.activeTurnByThreadId.delete(threadId);
         }
-        if (payload.params.allowStart === false) return undefined;
         // Native turn/start is StartOrSteer: a concurrent new turn receives the
         // input atomically. Its response does not distinguish start from steer.
         const started = await this.handleTurnStart(payload, options, false, false);
