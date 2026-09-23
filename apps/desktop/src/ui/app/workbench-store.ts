@@ -115,7 +115,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       epoch: number;
       pending: Set<WorkspaceViewField>;
       scheduled: boolean;
-      running: boolean;
+      running: Set<WorkspaceViewField>;
+      values: Partial<WorkspaceView>;
+      errors: Map<WorkspaceViewField, string>;
     };
     const viewRefreshes = new Map<string, ViewRefresh>();
     let inboxLoadScheduledEpoch: number | undefined;
@@ -124,6 +126,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     let taskLoadScheduledEpoch: number | undefined;
     let taskLoadRunningEpoch: number | undefined;
     const pendingTaskWorkspaceIds = new Set<string>();
+    const workspaceOwners = new Map<string, object>();
     let connected = false;
     let connectionEpoch = 0;
 
@@ -157,6 +160,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       const epoch = connectionEpoch;
       taskLoadRunningEpoch = epoch;
       const workspaceIds = [...pendingTaskWorkspaceIds];
+      const owners = new Map(workspaceIds.map((id) => [id, workspaceOwners.get(id)]));
       pendingTaskWorkspaceIds.clear();
       try {
         const groups = await Promise.all(workspaceIds.map(async (workspaceId) => {
@@ -168,7 +172,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         }));
         if (!connected || epoch !== connectionEpoch) return;
         const freshGroups = groups.filter(({ workspaceId }) =>
-          !pendingTaskWorkspaceIds.has(workspaceId)
+          !pendingTaskWorkspaceIds.has(workspaceId) &&
+          owners.get(workspaceId) !== undefined &&
+          workspaceOwners.get(workspaceId) === owners.get(workspaceId)
         );
         const refreshed = new Set(freshGroups.map(({ workspaceId }) => workspaceId));
         set((state) => ({
@@ -192,7 +198,9 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
 
     const scheduleTasks = (workspaceIds: readonly string[]) => {
       if (!connected) return;
-      for (const workspaceId of workspaceIds) pendingTaskWorkspaceIds.add(workspaceId);
+      for (const workspaceId of workspaceIds) {
+        if (workspaceOwners.has(workspaceId)) pendingTaskWorkspaceIds.add(workspaceId);
+      }
       if (
         taskLoadScheduledEpoch === connectionEpoch ||
         taskLoadRunningEpoch === connectionEpoch ||
@@ -215,6 +223,18 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       const browsing = get().browsingWorkspaceId;
       const browsingWorkspaceId = workspaces.some((w) => w.workspaceId === browsing) ? browsing : draftWorkspaceId;
       const workspaceIds = new Set(workspaces.map((workspace) => workspace.workspaceId));
+      for (const id of workspaceOwners.keys()) {
+        if (!workspaceIds.has(id)) {
+          workspaceOwners.delete(id);
+          pendingTaskWorkspaceIds.delete(id);
+        }
+      }
+      for (const id of workspaceIds) {
+        if (!workspaceOwners.has(id)) workspaceOwners.set(id, {});
+      }
+      for (const [key, refresh] of viewRefreshes) {
+        if (!workspaceIds.has(refresh.workspaceId)) viewRefreshes.delete(key);
+      }
       set((state) => ({
         workspaces,
         draftWorkspaceId,
@@ -231,75 +251,43 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       docsSessionId: string | undefined
     ) => JSON.stringify([workspaceId, docsSessionId ?? null]);
 
-    const drainView = async (refresh: ViewRefresh) => {
+    const isCurrentRefresh = (refresh: ViewRefresh) =>
+      connected && refresh.epoch === connectionEpoch &&
+      viewRefreshes.get(viewRefreshKey(refresh.workspaceId, refresh.docsSessionId)) === refresh;
+
+    const drainView = (refresh: ViewRefresh) => {
       if (
-        !connected ||
-        refresh.epoch !== connectionEpoch ||
-        refresh.running ||
+        !isCurrentRefresh(refresh) ||
         refresh.pending.size === 0
       ) return;
-      const fields = [...refresh.pending];
-      refresh.pending.clear();
-      refresh.running = true;
-      try {
-        const results = await Promise.allSettled(
-          fields.map((field) =>
-            readViewField(field, refresh.workspaceId, refresh.docsSessionId)
-          )
-        );
-        if (
-          !connected ||
-          refresh.epoch !== connectionEpoch ||
-          refresh.workspaceId !== get().browsingWorkspaceId ||
-          refresh.docsSessionId !== get().docsSessionId
-        ) return;
-        const freshPatches: Partial<WorkspaceView>[] = [];
-        const freshFields: WorkspaceViewField[] = [];
-        const errors: unknown[] = [];
-        results.forEach((result, index) => {
-          const field = fields[index]!;
-          if (result.status === "rejected") {
-            errors.push(result.reason);
-          } else if (!refresh.pending.has(field)) {
-            freshFields.push(field);
-            freshPatches.push(result.value);
-          }
-        });
-        const patch = Object.assign({}, ...freshPatches) as Partial<WorkspaceView>;
-        set((state) => {
-          const current = state.view?.workspaceId === refresh.workspaceId
-            ? state.view
-            : undefined;
-          if (!current && freshFields.length !== allWorkspaceViewFields.length) {
-            if (fields.length < allWorkspaceViewFields.length || refresh.pending.size > 0) {
-              for (const field of allWorkspaceViewFields) refresh.pending.add(field);
+      for (const field of refresh.pending) {
+        if (refresh.running.has(field)) continue;
+        refresh.pending.delete(field);
+        refresh.running.add(field);
+        void (async () => {
+          try {
+            const patch = await readViewField(field, refresh.workspaceId, refresh.docsSessionId);
+            if (!isCurrentRefresh(refresh) || refresh.pending.has(field)) return;
+            Object.assign(refresh.values, patch);
+            refresh.errors.delete(field);
+          } catch (error) {
+            if (!isCurrentRefresh(refresh) || refresh.pending.has(field)) return;
+            refresh.errors.set(field, error instanceof Error ? error.message : String(error));
+          } finally {
+            refresh.running.delete(field);
+            if (isCurrentRefresh(refresh)) {
+              if (refresh.workspaceId === get().browsingWorkspaceId &&
+                  refresh.docsSessionId === get().docsSessionId) {
+                const ready = allWorkspaceViewFields.every((key) => key in refresh.values);
+                set({
+                  ...(ready ? { view: { ...refresh.values, workspaceId: refresh.workspaceId } as WorkspaceView } : {}),
+                  viewError: refresh.errors.values().next().value
+                });
+              }
+              if (refresh.pending.size > 0) scheduleView([], refresh);
             }
-            return {
-              viewError: errors.length > 0
-                ? String(errors[0] instanceof Error ? errors[0].message : errors[0])
-                : undefined
-            };
           }
-          return {
-            view: {
-              ...(current ?? {}),
-              ...patch,
-              workspaceId: refresh.workspaceId
-            } as WorkspaceView,
-            viewError: errors.length > 0
-              ? String(errors[0] instanceof Error ? errors[0].message : errors[0])
-              : undefined
-          };
-        });
-      } finally {
-        refresh.running = false;
-        if (
-          connected &&
-          refresh.epoch === connectionEpoch &&
-          refresh.pending.size > 0
-        ) {
-          scheduleView([], refresh);
-        }
+        })();
       }
     };
 
@@ -309,23 +297,29 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     ) => {
       if (!connected) return;
       const workspaceId = existingRefresh?.workspaceId ?? get().browsingWorkspaceId;
-      const docsSessionId = existingRefresh?.docsSessionId ?? get().docsSessionId;
+      const docsSessionId = existingRefresh ? existingRefresh.docsSessionId : get().docsSessionId;
       if (!workspaceId) {
         set({ view: undefined });
         return;
       }
       const key = viewRefreshKey(workspaceId, docsSessionId);
+      // Only the visible target owns view requests and their accumulated results.
+      for (const otherKey of viewRefreshes.keys()) {
+        if (otherKey !== key) viewRefreshes.delete(otherKey);
+      }
       const refresh = existingRefresh ?? viewRefreshes.get(key) ?? {
         workspaceId,
         docsSessionId,
         epoch: connectionEpoch,
         pending: new Set<WorkspaceViewField>(),
         scheduled: false,
-        running: false
+        running: new Set<WorkspaceViewField>(),
+        values: {},
+        errors: new Map<WorkspaceViewField, string>()
       };
       viewRefreshes.set(key, refresh);
       for (const field of fields) refresh.pending.add(field);
-      if (refresh.scheduled || refresh.running || refresh.pending.size === 0) return;
+      if (refresh.scheduled || refresh.pending.size === 0) return;
       refresh.scheduled = true;
       queueMicrotask(() => {
         refresh.scheduled = false;
@@ -489,6 +483,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
           connected = false;
           connectionEpoch += 1;
           viewRefreshes.clear();
+          workspaceOwners.clear();
           pendingTaskWorkspaceIds.clear();
           inboxDirty = false;
         };

@@ -79,6 +79,67 @@ describe("global task summary", () => {
 });
 
 describe("workspace view invalidation", () => {
+  it("updates decisions without waiting for a pending document request", async () => {
+    const { store, request, emit, disconnect } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    let release!: (value: unknown[]) => void;
+    request.mockImplementation(async (method: string) => {
+      if (method === "docs.list") return new Promise<unknown[]>((resolve) => { release = resolve; });
+      if (method === "decision.list") return [{ decisionId: "new" }];
+      return [];
+    });
+    try {
+      emit({ type: "docs.changed", workspaceId: "a" });
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      emit({ type: "decisions.changed", workspaceId: "a" });
+      await vi.waitFor(() => expect(store.getState().view?.decisions).toEqual([{ decisionId: "new" }]));
+    } finally {
+      release?.([]);
+      disconnect();
+    }
+  });
+
+  it("does not restore removed workspace tasks from an in-flight response", async () => {
+    const data: Record<string, { items: WorkItem[] }> = { a: { items: [] }, b: { items: [] } };
+    const { store, request, emit, disconnect } = setup(data);
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    let release!: (value: WorkItem[]) => void;
+    request.mockImplementationOnce(() => new Promise<WorkItem[]>((resolve) => { release = resolve; }));
+    try {
+      emit({ type: "workItems.changed", workspaceId: "b" });
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      delete data.b;
+      emit({ type: "workspaces.changed" });
+      await vi.waitFor(() => expect(store.getState().workspaces).toHaveLength(1));
+      release([item("removed", "running")]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(store.getState().tasks).toEqual([]);
+    } finally {
+      release?.([]);
+      disconnect();
+    }
+  });
+
+  it("retains successful initial fields when only the failed field is retried", async () => {
+    const { store, request, emit, disconnect } = setup({ a: { items: [] } });
+    await vi.waitFor(() => expect(store.getState().view).toBeDefined());
+    let fail = true;
+    request.mockImplementation(async (method: string) => {
+      if (method === "docs.list" && fail) throw new Error("documents unavailable");
+      if (method === "decision.list") return [{ decisionId: "initial" }];
+      return [];
+    });
+    store.getState().setDocsSessionId("new-session");
+    await vi.waitFor(() => expect(store.getState().viewError).toBe("documents unavailable"));
+    request.mockClear();
+    fail = false;
+    emit({ type: "docs.changed", workspaceId: "a" });
+    await vi.waitFor(() => expect(store.getState().view?.decisions).toEqual([{ decisionId: "initial" }]));
+    expect(request.mock.calls.map(([method]) => method).sort()).toEqual(["docs.list", "docs.pending"]);
+    expect(store.getState().viewError).toBeUndefined();
+    disconnect();
+  });
+
   it("coalesces a docs burst and refreshes only document data", async () => {
     const { store, request, emit } = setup({ a: { items: [] } });
     await vi.waitFor(() => expect(store.getState().view).toBeDefined());

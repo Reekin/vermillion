@@ -97,9 +97,59 @@ const treeResponse = (thread) => ({
 });
 const send = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
 
+// Optional finite live load through the same protocol as ordinary engine output.
+const streamTicks = Number(process.env.VERMILLION_MULTI_SESSION_STREAM_TICKS ?? "0");
+const startStreams = () => {
+  const active = threads.map((thread) => {
+    const turn = makeTurn(threads.indexOf(thread), turnsPerSession);
+    turn.status = "inProgress";
+    turn.completedAt = null;
+    const message = turn.items[1];
+    message.text = "";
+    const command = { type: "commandExecution", id: `${turn.id}-command`, command: "fixture load",
+      cwd: projectPath, status: "inProgress", commandActions: [], aggregatedOutput: "",
+      exitCode: null, durationMs: null };
+    turn.items.push(command);
+    thread.turns.push(turn);
+    send({ method: "turn/started", params: { threadId: thread.id, turn: { id: turn.id } } });
+    for (const item of [message, command]) {
+      send({ method: "item/started", params: { threadId: thread.id, turnId: turn.id, item } });
+    }
+    return { thread, turn, message, command };
+  });
+  let tick = 0;
+  const timer = setInterval(() => {
+    tick += 1;
+    for (const { thread, turn, message, command } of active) {
+      const delta = `${tick} `;
+      message.text += delta;
+      command.aggregatedOutput += delta;
+      send({ method: "item/agentMessage/delta", params: {
+        threadId: thread.id, turnId: turn.id, itemId: message.id, delta
+      } });
+      send({ method: "item/commandExecution/outputDelta", params: {
+        threadId: thread.id, turnId: turn.id, itemId: command.id, delta
+      } });
+    }
+    if (tick < streamTicks) return;
+    clearInterval(timer);
+    for (const { thread, turn, message, command } of active) {
+      turn.status = "completed";
+      turn.completedAt = Math.floor(Date.now() / 1000);
+      command.status = "completed";
+      command.exitCode = 0;
+      for (const item of [message, command]) {
+        send({ method: "item/completed", params: { threadId: thread.id, turnId: turn.id, item } });
+      }
+      send({ method: "turn/completed", params: { threadId: thread.id, turn } });
+    }
+  }, 100);
+};
+
 const handle = (request) => {
   if (request.method === "initialized") return;
   if (request.method === "initialize") {
+    if (streamTicks > 0) setTimeout(startStreams, 30_000);
     send({ id: request.id, result: {
       userAgent: "vermillion-multi-session-fixture/1",
       codexHome: process.env.CODEX_HOME ?? null,
