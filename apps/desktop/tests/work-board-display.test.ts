@@ -75,4 +75,25 @@ describe("work board projection", () => {
     expect(workBoardCounts(requests, [active, item("done", "closed", 4, "tree", "work"), item("waiting", "running", 5)]))
       .toEqual({ active: 2, waiting: 1, ended: 1 });
   });
+
+  it.each([
+    ["closed", "closed", "已完成"],
+    ["cancelled", "cancelled", "已取消"],
+    ["closed", "cancelled", "部分完成"]
+  ] as const)("keeps paused work with %s/%s children ended in both ordering and labels", (first, second, label) => {
+    const r = { ...request("work", "ready", 2, "ended"), paused: true };
+    const children = [item("one", first, 3, "ended", "work"), item("two", second, 4, "ended", "work")];
+    const groups = workBoardGroups([r], [...children, item("waiting", "queued", 1, "open")]);
+    expect(groups.map((group) => group.id)).toEqual(["open", "ended"]);
+    expect(groups[1]!.entries[0]!.open).toBe(false);
+    expect(workRequestStatus(r, children).label).toBe(label);
+  });
+
+  it("only shows a parent pause while preparation or a child remains unfinished", () => {
+    const r = { ...request("work", "ready", 2), paused: true };
+    expect(workRequestStatus(r, [item("waiting", "queued", 3)]).label).toBe("已暂停");
+    expect(workRequestStatus({ ...r, status: "preparing" }, []).label).toBe("已暂停");
+    expect(workRequestStatus(r, []).label).toBe("已交接");
+    expect(workRequestStatus({ ...r, status: "cancelled" }, []).label).toBe("已取消");
+  });
 });

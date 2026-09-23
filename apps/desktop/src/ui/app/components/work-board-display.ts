@@ -2,6 +2,7 @@ import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
 
 export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
 export const isPreparingWork = (request: WorkRequest) => request.status !== "cancelled" && (request.status !== "ready" || Boolean(request.activeTurnId));
+export const isOpenWorkRequest = (request: WorkRequest, items: WorkItem[]) => isPreparingWork(request) || items.some(isOpenWorkItem);
 export const workExpansionKey = (requestId: string) => "work/" + requestId;
 
 type BoardOrder = { id: string; open: boolean; updatedAt: string };
@@ -28,7 +29,7 @@ export const workBoardGroups = (requests: WorkRequest[], items: WorkItem[]): Boa
     return {
       kind: "work", id: request.requestId, request, items: children,
       treeId: request.treeId ?? children.find((item) => item.treeId)?.treeId ?? "standalone",
-      open: isPreparingWork(request) || children.some(isOpenWorkItem),
+      open: isOpenWorkRequest(request, children),
       updatedAt: latest([request.updatedAt, ...children.map((item) => item.updatedAt)])
     };
   });

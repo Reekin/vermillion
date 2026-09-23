@@ -1,5 +1,5 @@
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
-import { isPreparingWork } from "./work-board-display.js";
+import { isOpenWorkItem, isOpenWorkRequest, isPreparingWork } from "./work-board-display.js";
 
 export const statusLabel: Record<WorkItem["status"], string> = { preparing: "准备", queued: "排队", running: "执行", merging: "待合入", closed: "已关闭", cancelled: "已取消" };
 export type CurrentWorkState = "running" | "queued" | "paused" | "stopped" | "interrupted" | "confirmation" | "decision" | "finished";
@@ -32,13 +32,14 @@ export const currentWorkStatus = (item?: WorkItem, request?: WorkRequest, hasDec
 };
 
 export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { label: string; status: WorkItem["status"] | "decision" } => {
+  if (!isOpenWorkRequest(request, items)) {
+    if (!items.length) return { label: request.status === "cancelled" ? "已取消" : "已交接", status: request.status === "cancelled" ? "cancelled" : "closed" };
+    const closed = items.filter((item) => item.status === "closed").length;
+    return { label: closed === items.length ? "已完成" : closed ? "部分完成" : "已取消", status: closed ? "closed" : "cancelled" };
+  }
   if (request.paused) return { label: "已暂停", status: "decision" };
   if (!isPreparingWork(request) && items.length) {
-    const open = items.filter((item) => item.status !== "closed" && item.status !== "cancelled");
-    if (!open.length) {
-      const closed = items.filter((item) => item.status === "closed").length;
-      return { label: closed === items.length ? "已完成" : closed ? "部分完成" : "已取消", status: closed ? "closed" : "cancelled" };
-    }
+    const open = items.filter(isOpenWorkItem);
     if (open.some((item) => item.run.activeTurnId && item.run.turnStatus !== "unknown")) return { label: "会话运行中", status: "running" };
     if (open.every((item) => item.run.paused)) return { label: "已暂停", status: "decision" };
     if (open.some((item) => item.run.turnStatus === "unknown")) return { label: "运行状态未确认", status: "decision" };
