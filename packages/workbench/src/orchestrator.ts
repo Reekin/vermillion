@@ -73,8 +73,8 @@ export class Orchestrator {
       this.service.setTurnInterrupter((id, turnId) => this.runner.interrupt(id, turnId)),
       this.service.setWorkerEnvironmentReleaser((id) => this.runner.release(id)),
       this.service.registerScheduler(),
-      this.service.setExecutionStarter((workspaceId, workItemId) =>
-        this.enqueue(workspaceId, () => this.dispatchItem(workspaceId, workItemId, true)))
+      this.service.setExecutionStarter((workspaceId, workItemId, automatic) =>
+        this.enqueue(workspaceId, () => this.dispatchItem(workspaceId, workItemId, !automatic)))
     );
     if (this.runner.inspectTurn) this.disposers.push(this.service.setTurnInspector(this.runner.inspectTurn));
     if (this.runner.resolveSourceTurn) this.disposers.push(this.service.setSourceTurnResolver(this.runner.resolveSourceTurn));

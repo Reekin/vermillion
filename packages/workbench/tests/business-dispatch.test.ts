@@ -127,3 +127,36 @@ it("confirmation of an older dispatch cannot acknowledge a new decision answer",
     expect((await service.listDecisions(f.workspaceId))[0]?.deliveryPending).toBe(false);
   } finally { await service.dispose(); }
 });
+
+it("an active supervisor cannot bypass a disabled automatic-progression switch through explicit retry", async () => {
+  const f = await fixture();
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+  await f.service.updateWorkRequest(f.workspaceId, request.requestId, current => ({ ...current, supervisor: { sessionId: "supervisor" } }));
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  const starter = vi.fn(async () => {});
+  f.service.setExecutionStarter(starter);
+  await f.service.setScheduler(f.workspaceId, { enabled: false, maxWorkers: 2 });
+  await expect(f.service.retryWorkItem(f.workspaceId, item.workItemId, "supervisor")).rejects.toThrow("自动推进未启用");
+  expect(starter).not.toHaveBeenCalled();
+  await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
+  starter.mockImplementation(async (...args: unknown[]) => {
+    expect(args[2]).toBe(true);
+    await f.service.observeSessionTurn("worker", "resumed");
+  });
+  await f.service.retryWorkItem(f.workspaceId, item.workItemId, "supervisor");
+  expect(starter).toHaveBeenCalledOnce();
+});
+
+it("rechecks automatic eligibility after preparation while leaving explicit user delivery available", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  const port = delivery("worker");
+  const prepare = async () => {
+    await f.service.setScheduler(f.workspaceId, { enabled: false, maxWorkers: 2 });
+    return { sessionId: "worker", content: "Continue" };
+  };
+  expect(await f.service.dispatchBusiness(f.workspaceId, { workItemId: item.workItemId }, { ...port, prepare, automatic: true })).toMatchObject({ status: "failed" });
+  expect(port.send).not.toHaveBeenCalled();
+  expect(await f.service.dispatchBusiness(f.workspaceId, { workItemId: item.workItemId }, port)).toMatchObject({ status: "delivered" });
+  expect(port.send).toHaveBeenCalledOnce();
+});

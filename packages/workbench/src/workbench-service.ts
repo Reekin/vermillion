@@ -171,7 +171,7 @@ export class WorkbenchService {
   private readonly contextLoads = new Map<string, Promise<WorkspaceContext>>();
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
   private readonly integrations = new Map<string, Promise<unknown>>();
-  private executionStarter?: (workspaceId: string, workItemId: string) => Promise<void>;
+  private executionStarter?: (workspaceId: string, workItemId: string, automatic?: boolean) => Promise<void>;
   private readonly dispatchesInFlight = new Set<string>();
   private readonly patrolScans = new Map<string, Promise<unknown>>();
   private readonly decisionDeliveries = new Map<string, Promise<void>>();
@@ -258,7 +258,7 @@ export class WorkbenchService {
     });
   }
 
-  setExecutionStarter(starter: (workspaceId: string, workItemId: string) => Promise<void>): () => void {
+  setExecutionStarter(starter: (workspaceId: string, workItemId: string, automatic?: boolean) => Promise<void>): () => void {
     this.executionStarter = starter;
     return () => { if (this.executionStarter === starter) this.executionStarter = undefined; };
   }
@@ -1389,11 +1389,15 @@ export class WorkbenchService {
     return saved;
   }
 
-  private async assertUserResume(workspaceId: string, _requestId: string | undefined, originatorSessionId: string | undefined, stopped: boolean): Promise<void> {
-    if (!stopped || !originatorSessionId) return;
+  private async assertUserResume(workspaceId: string, _requestId: string | undefined, originatorSessionId: string | undefined, stopped: boolean): Promise<boolean> {
+    if (!originatorSessionId) return false;
     const requests = await this.listWorkRequests(workspaceId);
-    if (requests.some((request) => request.supervisor?.sessionId === originatorSessionId))
-      throw new Error("监工不能解除用户暂停或主动停止。");
+    if (requests.some((request) => request.supervisor?.sessionId === originatorSessionId)) {
+      if (stopped) throw new Error("监工不能解除用户暂停或主动停止。");
+      if (!(await this.getScheduler(workspaceId)).enabled) throw new Error("自动推进未启用，监工不能启动业务执行。");
+      return true;
+    }
+    return false;
   }
 
   async retryWork(workspaceId: string, requestId: string, originatorSessionId?: string): Promise<WorkRequest> {
@@ -1494,14 +1498,6 @@ export class WorkbenchService {
     const result = await this.deliveryConfirmer(request.workerSessionId, request.pendingMessageId);
     if (!result.accepted) return request;
     return this.confirmPreparationDelivery(workspaceId, requestId, request.pendingMessageId, result.turnId, result.active !== false, request.workerSessionId);
-  }
-
-  private async confirmWorkItemDelivery(workspaceId: string, workItemId: string): Promise<WorkItem> {
-    const item = await this.getWorkItem(workspaceId, workItemId);
-    if (!item.run.pendingMessageId || !item.run.sessionId || !this.deliveryConfirmer) return item;
-    const result = await this.deliveryConfirmer(item.run.sessionId, item.run.pendingMessageId);
-    if (!result.accepted) return item;
-    return this.acknowledgeWorkerDispatch(workspaceId, workItemId, item.run.pendingMessageId, result.active === false ? undefined : result.turnId);
   }
 
   async acknowledgeWorkerDispatch(workspaceId: string, workItemId: string, messageId: string, turnId?: string): Promise<WorkItem> {
@@ -1964,9 +1960,10 @@ export class WorkbenchService {
   }
 
   async takeoverIntegration(workspaceId: string, workItemId: string, note?: string, originatorSessionId?: string): Promise<WorkItem> {
+    let automatic = false;
     await this.integrate(workspaceId, async () => {
       const item = await this.getWorkItem(workspaceId, workItemId);
-      await this.assertUserResume(workspaceId, item.requestId, originatorSessionId, !!(item.run.paused || item.run.userStopped));
+      automatic = await this.assertUserResume(workspaceId, item.requestId, originatorSessionId, !!(item.run.paused || item.run.userStopped));
       if (item.run.paused || item.run.userStopped) throw new Error("用户已暂停或停止工单，请先恢复。");
       if (item.run.pendingMessageId) throw new Error("业务交付结果未确认，请明确重试后核对。");
       const action = (await this.listActions(workspaceId)).find((entry): entry is Integration =>
@@ -1994,7 +1991,7 @@ export class WorkbenchService {
     });
     const target = await this.getWorkItem(workspaceId, workItemId);
     await this.assertDispatchable(workspaceId, target);
-    await this.executionStarter!(workspaceId, workItemId);
+    await this.executionStarter!(workspaceId, workItemId, automatic);
     const delivered = await this.getWorkItem(workspaceId, workItemId);
     const execution = (await this.listActions(workspaceId)).find((entry): entry is Execution => entry.kind === "execute" && entry.workItemId === workItemId)!;
     if (delivered.run.pendingMessageId || execution.notices.length) throw new Error(execution.failure ?? "合入处理要求尚未确认交付。");
@@ -2175,12 +2172,15 @@ export class WorkbenchService {
   }
 
   async retryWorkItem(workspaceId: string, workItemId: string, originatorSessionId?: string): Promise<WorkItem> {
+    let automatic = false;
     const dispatch = await this.integrate(workspaceId, async () => {
       let item = await this.getWorkItem(workspaceId, workItemId);
-      await this.assertUserResume(workspaceId, item.requestId, originatorSessionId, !!(item.run.paused || item.run.userStopped));
-      if (item.run.pendingMessageId) item = await this.confirmWorkItemDelivery(workspaceId, workItemId);
-      if (item.run.pendingMessageId) throw new Error("业务交付结果未确认，不能重复派发。");
+      automatic = await this.assertUserResume(workspaceId, item.requestId, originatorSessionId, !!(item.run.paused || item.run.userStopped));
       if (["closed", "cancelled"].includes(item.status)) throw new Error("工单已结束。");
+      if (item.run.pendingMessageId) {
+        if (!this.executionStarter) throw new Error("执行调度器未在线，无法核对派发。");
+        return true;
+      }
       if (item.run.activeTurnId || item.run.sessionId && this.workerActive?.(item.run.sessionId)) return false;
       if (item.run.userStopped && !item.run.paused) {
         item = await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record, execution: { ...record.execution, userStopped: false } }));
@@ -2195,7 +2195,7 @@ export class WorkbenchService {
       return true;
     });
     if (dispatch) {
-      try { await this.executionStarter!(workspaceId, workItemId); }
+      try { await this.executionStarter!(workspaceId, workItemId, automatic); }
       catch (error) {
         const action = (await this.listActions(workspaceId)).find((entry) => entry.kind === "execute" && entry.workItemId === workItemId)!;
         await this.failAction(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
