@@ -289,9 +289,11 @@ export class Orchestrator {
           workspaceId, sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId,
           title: "开工准备", modelConfig: role.modelConfig,
           metadata: { role: "work-preparation", requestId: request.requestId, sourceSessionId: request.sourceSessionId }
-        }) : { sessionId: request.sourceSessionId };
+        }) : { sessionId: request.sourceSessionId, treeId: request.treeId };
         sessionId = fork.sessionId;
-        await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({ ...current, workerSessionId: sessionId, status: "preparing" }));
+        await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
+          ...current, workerSessionId: sessionId, treeId: fork.treeId ?? current.treeId, status: "preparing"
+        }));
       }
       if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备会话。");
       const latest = (await this.service.listWorkRequests(workspaceId)).find((entry) => entry.requestId === request.requestId)!;

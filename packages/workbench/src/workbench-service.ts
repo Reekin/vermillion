@@ -1185,8 +1185,9 @@ export class WorkbenchService {
     if (!input.turnId && !this.sourceTurnResolver) throw new Error("需要有效 turnId；省略时必须连接桌面解析当前会话节点。");
     const turnId = input.turnId ?? await this.sourceTurnResolver?.(input.sessionId);
     if (!turnId && !input.message?.content.trim() && !input.message?.attachments?.length) throw new Error("空会话需要提供开工内容。");
+    const treeId = await this.sessionTreeResolver?.(input.sessionId);
     return this.putWorkRequest(workspaceId, { formatVersion: 2, requestId: createId("work"), sourceSessionId: input.sessionId,
-      sourceTurnId: turnId, message: input.message, scope: input.scope, status: "pending",
+      sourceTurnId: turnId, treeId, message: input.message, scope: input.scope, status: "pending",
       createdAt: this.now(), updatedAt: this.now() });
   }
 

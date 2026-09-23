@@ -222,12 +222,16 @@ it("requires explicit business continuation after a user stops the Worker", asyn
 it("forks one configured supervisor from completed preparation and waits five minutes after every check", async () => {
   let at = "2026-09-23T01:00:00.000Z";
   const f = await fixture(() => at);
+  f.service.setSessionTreeResolver(async () => "tree");
   await f.roles.writeOverride(f.root, "supervisor", "---\nmodel: observer-model\nreasoningOptionId: high\n---\n# 监工");
   const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+  expect(request.treeId).toBe("tree");
   f.orchestrator.start();
   await vi.waitFor(async () => expect((await f.service.listWorkRequests(f.workspaceId))[0]?.activeTurnId).toBeDefined());
   const prep = (await f.service.listWorkRequests(f.workspaceId))[0]!;
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: prep.workerSessionId });
+  expect(prep.treeId).toBe("tree");
+  expect(item.treeId).toBe("tree");
   await f.service.completePreparation(f.workspaceId, { requestId: request.requestId, sessionId: prep.workerSessionId!, workItemIds: [item.workItemId] });
   expect(vi.mocked(f.runner.fork).mock.calls.filter(([input]) => input.metadata.role === "supervisor")).toHaveLength(0);
   const prepTurn = prep.activeTurnId;
