@@ -1,5 +1,6 @@
 import { ArrowUpRight, ChevronDown, ChevronRight, FileText, ListTodo, MessageSquare } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SearchHit, SearchResult, WorkbenchClient } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
 import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, SectionLabel } from "./ui.js";
@@ -130,7 +131,7 @@ const SearchResultRow = ({
   const line = matchingLine(hit);
   const shortLine = line ? snippetLine(line) : undefined;
   return (
-    <li
+    <div
       onDoubleClick={onOpen}
       onFocusCapture={onSelect}
       onMouseDown={(event) => event.stopPropagation()}
@@ -150,7 +151,7 @@ const SearchResultRow = ({
         selected={selected}
         onClick={onSelect}
       />
-    </li>
+    </div>
   );
 };
 
@@ -159,6 +160,66 @@ type SessionTreeGroup = {
   title: string;
   activityAt: string;
   hits: SearchHit[];
+};
+
+type ResultRow = { key: string } & (
+  | { type: "hit"; hit: SearchHit }
+  | { type: "label"; kind: SearchHit["kind"]; count: number }
+  | { type: "tree"; tree: SessionTreeGroup; expanded: boolean }
+  | { type: "more"; kind: SearchHit["kind"] }
+);
+
+/** A single viewport bounds mounted rows across both trees and their matches. */
+const SearchResults = ({ rows, selectedId, onSelect, onOpen, onToggleTree, onExpandKind }: {
+  rows: ResultRow[];
+  selectedId: string | undefined;
+  onSelect: (id: string) => void;
+  onOpen: (hit: SearchHit) => void;
+  onToggleTree: (id: string) => void;
+  onExpandKind: (kind: SearchHit["kind"]) => void;
+}) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const getItemKey = useCallback((index: number) => rows[index]!.key, [rows]);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey,
+    estimateSize: (index) => rows[index]!.type === "hit" ? 80 : 36,
+    overscan: 6
+  });
+  return (
+    <div ref={scrollRef} className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto" aria-label="搜索结果">
+      <ul className="relative" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const row = rows[item.index]!;
+          return (
+            <li key={item.key} data-index={item.index} ref={virtualizer.measureElement}
+              className="absolute left-0 top-0 w-full" style={{ transform: `translateY(${item.start}px)` }}>
+              {row.type === "hit" ? (
+                <SearchResultRow hit={row.hit} selected={row.hit.id === selectedId}
+                  onSelect={() => onSelect(row.hit.id)} onOpen={() => onOpen(row.hit)} />
+              ) : row.type === "label" ? (
+                <SectionLabel>{kindLabel[row.kind]} <span className="font-mono text-faint-foreground">{row.count}</span></SectionLabel>
+              ) : row.type === "tree" ? (
+                <Button variant="ghost" size="sm" className="vm-search-tree-header w-full justify-start"
+                  aria-expanded={row.expanded} onClick={() => onToggleTree(row.tree.treeId)}>
+                  {row.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span className="min-w-0 flex-1 truncate text-left" title={row.tree.title}>{row.tree.title}</span>
+                  <span className="font-mono text-micro text-faint-foreground">{row.tree.hits.length}</span>
+                </Button>
+              ) : (
+                <div className="px-3 pb-2">
+                  <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => onExpandKind(row.kind)}>
+                    展开更多
+                  </Button>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 };
 
 export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpenSession }: SearchDialogProps) => {
@@ -236,7 +297,9 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
     const grouped = new Map<SearchHit["kind"], SearchHit[]>();
     for (const hit of hits) {
       if (hit.kind === "session") continue;
-      grouped.set(hit.kind, [...(grouped.get(hit.kind) ?? []), hit]);
+      const group = grouped.get(hit.kind);
+      if (group) group.push(hit);
+      else grouped.set(hit.kind, [hit]);
     }
     return (["workItem", "doc"] as const).flatMap((kind) => {
       const items = grouped.get(kind);
@@ -280,29 +343,29 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
     else if (hit.kind === "doc") onOpenDoc(hit);
     else onOpenSession(hit);
   };
-  const renderFlatGroup = (kind: "workItem" | "doc", kindHits: SearchHit[]) => (
-    <section key={kind}>
-      <SectionLabel>{kindLabel[kind]} <span className="font-mono text-faint-foreground">{kindHits.length}</span></SectionLabel>
-      <ul>
-        {(expandedKinds.has(kind) ? kindHits : kindHits.slice(0, 10)).map((hit) => (
-          <SearchResultRow
-            key={hit.id}
-            hit={hit}
-            selected={hit.id === selected?.id}
-            onSelect={() => setSelectedId(hit.id)}
-            onOpen={() => openHit(hit)}
-          />
-        ))}
-      </ul>
-      {kindHits.length > 10 && !expandedKinds.has(kind) && (
-        <div className="px-3 pb-2">
-          <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setExpandedKinds((current) => new Set(current).add(kind))}>
-            展开更多
-          </Button>
-        </div>
-      )}
-    </section>
-  );
+  const rows = useMemo(() => {
+    const result: ResultRow[] = [];
+    const addHit = (hit: SearchHit) => result.push({ type: "hit", key: `hit:${hit.id}`, hit });
+    for (const { kind, hits: kindHits } of flatGroups) {
+      result.push({ type: "label", key: kind, kind, count: kindHits.length });
+      (expandedKinds.has(kind) ? kindHits : kindHits.slice(0, 10)).forEach(addHit);
+      if (kindHits.length > 10 && !expandedKinds.has(kind)) {
+        result.push({ type: "more", key: `more:${kind}`, kind });
+      }
+    }
+    if (sessionTrees.length) {
+      result.push({ type: "label", key: "session", kind: "session", count: sessionTrees.length });
+      for (const tree of expandedKinds.has("session") ? sessionTrees : sessionTrees.slice(0, 10)) {
+        const expanded = !collapsedTrees.has(tree.treeId);
+        result.push({ type: "tree", key: `tree:${tree.treeId}`, tree, expanded });
+        if (expanded) tree.hits.forEach(addHit);
+      }
+      if (sessionTrees.length > 10 && !expandedKinds.has("session")) {
+        result.push({ type: "more", key: "more:session", kind: "session" });
+      }
+    }
+    return result;
+  }, [flatGroups, sessionTrees, expandedKinds, collapsedTrees]);
 
   return (
     <Modal title="搜索" onClose={onClose} width={980} height="74vh" contentClassName="overflow-hidden">
@@ -322,60 +385,19 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
           />
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.15fr)]">
-          <div className="vm-scrollbar-hidden min-h-0 overflow-y-auto border-b border-border md:border-b-0 md:border-r">
+          <div className="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r">
             {error && <InlineNotice tone="error" className="pt-3">{error}</InlineNotice>}
             {!trimmed && <EmptyState title="输入关键词开始搜索" />}
             {scanning && hits.length === 0 && <InlineNotice className="pt-3">搜索中…</InlineNotice>}
             {!scanning && trimmed && stats && hits.length === 0 && <EmptyState title="没有找到匹配内容" hint="换一个关键词试试。" />}
-            {flatGroups.map(({ kind, hits: kindHits }) => renderFlatGroup(kind, kindHits))}
-            {sessionTrees.length > 0 && (
-              <section>
-                <SectionLabel>会话 <span className="font-mono text-faint-foreground">{sessionTrees.length}</span></SectionLabel>
-                {(expandedKinds.has("session") ? sessionTrees : sessionTrees.slice(0, 10)).map((tree) => {
-                  const expanded = !collapsedTrees.has(tree.treeId);
-                  return (
-                    <section key={tree.treeId} className="border-b border-border last:border-b-0">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="vm-search-tree-header w-full justify-start"
-                        aria-expanded={expanded}
-                        onClick={() => setCollapsedTrees((current) => {
-                          const next = new Set(current);
-                          if (next.has(tree.treeId)) next.delete(tree.treeId);
-                          else next.add(tree.treeId);
-                          return next;
-                        })}
-                      >
-                        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                        <span className="min-w-0 flex-1 truncate text-left" title={tree.title}>{tree.title}</span>
-                        <span className="font-mono text-micro text-faint-foreground">{tree.hits.length}</span>
-                      </Button>
-                      {expanded && (
-                        <ul>
-                          {tree.hits.map((hit) => (
-                            <SearchResultRow
-                              key={hit.id}
-                              hit={hit}
-                              selected={hit.id === selected?.id}
-                              onSelect={() => setSelectedId(hit.id)}
-                              onOpen={() => openHit(hit)}
-                            />
-                          ))}
-                        </ul>
-                      )}
-                    </section>
-                  );
-                })}
-                {sessionTrees.length > 10 && !expandedKinds.has("session") && (
-                  <div className="px-3 pb-2">
-                    <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setExpandedKinds((current) => new Set(current).add("session"))}>
-                      展开更多
-                    </Button>
-                  </div>
-                )}
-              </section>
-            )}
+            <SearchResults key={trimmed} rows={rows} selectedId={selected?.id} onSelect={setSelectedId} onOpen={openHit}
+              onExpandKind={(kind) => setExpandedKinds((current) => new Set(current).add(kind))}
+              onToggleTree={(id) => setCollapsedTrees((current) => {
+                const next = new Set(current);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                return next;
+              })} />
           </div>
           <SearchPreview hit={selected} />
         </div>
