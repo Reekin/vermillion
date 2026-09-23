@@ -39,7 +39,7 @@ export const loadSourceTreeTitles = async (
   if (pending.size === 0) {
     return titles;
   }
-  const snapshot = await list({ workspaceId, kind: "user" });
+  const snapshot = await list({ workspaceId });
   for (const session of snapshot.items) {
     const ids = new Set([session.sessionId, ...(session.memberSessionIds ?? [])]);
     for (const [treeId, sourceId] of pending) {

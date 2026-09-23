@@ -10,23 +10,25 @@ const snapshot = (items: SessionBrowserSnapshotRpc["items"]): SessionBrowserSnap
 });
 
 describe("source tree titles", () => {
-  it("uses the indexed tree title through member aliases", async () => {
-    const list = vi.fn().mockResolvedValue(snapshot([
+  it("uses the indexed design-partner tree title through member aliases", async () => {
+    const indexed = snapshot([
       {
         sessionId: "canonical",
         memberSessionIds: ["source-alias"],
         engineId: "codex",
+        role: "design-partner",
         title: "真实讨论标题",
         statusDot: "none",
         isActive: false,
         isPinned: false,
         subagents: []
       }
-    ]));
+    ]);
+    const list = vi.fn(async (input: { kind?: string }) => input.kind === "user" ? snapshot([]) : indexed);
     expect(await loadSourceTreeTitles(list, "workspace", [{ treeId: "tree-alias", sourceSessionId: "source-alias" }]))
       .toEqual({ "tree-alias": "真实讨论标题" });
     expect(list).toHaveBeenCalledTimes(1);
-    expect(list).toHaveBeenCalledWith(expect.objectContaining({ kind: "user", workspaceId: "workspace" }));
+    expect(list).toHaveBeenCalledWith({ workspaceId: "workspace" });
   });
 
   it("resolves an older tree from the single full snapshot", async () => {
