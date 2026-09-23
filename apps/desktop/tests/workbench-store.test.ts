@@ -34,8 +34,11 @@ it("refreshes pending counts and durable Inbox history together after processing
   const disconnect = store.getState().connect();
   await vi.waitFor(() => expect(store.getState().inbox).toHaveLength(2));
   inbox = inbox.map((entry) => entry.kind === "decision"
-    ? { ...entry, card: { ...entry.card, answer: { key: "go", at: "now" } } }
+    ? { ...entry, card: { ...entry.card, answer: { key: "go", at: "now" }, deliveryPending: true, deliveryFailure: "Session offline" } }
     : { ...entry, workItem: { ...entry.workItem, merge: { ...entry.workItem.merge!, acknowledgedAt: "now" } } });
+  listener({ type: "decisions.changed", workspaceId: "a" });
+  await vi.waitFor(() => expect(store.getState().inbox).toMatchObject([{ kind: "decision", card: { deliveryPending: true, deliveryFailure: "Session offline" } }]));
+  inbox = inbox.map((entry) => entry.kind === "decision" ? { ...entry, card: { ...entry.card, deliveryPending: false, deliveryFailure: undefined } } : entry);
   listener({ type: "decisions.changed", workspaceId: "a" });
   await vi.waitFor(() => expect(store.getState().inbox).toEqual([]));
   expect(store.getState().inboxHistory).toEqual(inbox);

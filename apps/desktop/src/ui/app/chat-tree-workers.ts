@@ -1,5 +1,6 @@
 import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
+import { workSessionLabel } from "./components/task-labels.js";
 
 const requestWorkerStatus = (status: WorkRequest["status"]): "preparing" | "failed" | "cancelled" | "closed" =>
   status === "ready" ? "closed" : status === "failed" ? "failed" : status === "cancelled" ? "cancelled" : "preparing";
@@ -33,6 +34,7 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
       ?? relevantItems.find((entry) => entry.run.sessionId === sessionId);
     const nodes = tree.nodes.filter((node) => node.sessionId === sessionId).sort((a, b) => a.order - b.order);
     return { key: sessionId, requestId: request?.requestId ?? item?.requestId, sessionId: sessionId as string | undefined, title: item?.title ?? request?.scope ?? "Worker", status: item?.status ?? (request ? requestWorkerStatus(request.status) : "preparing"), failure: request?.failure,
+      activity: workSessionLabel(item, request), active: Boolean((item?.run ?? request)?.activeTurnId && (item?.run ?? request)?.turnStatus !== "unknown"),
       nodeId: nodes.at(-1)?.nodeId, nodeIds: nodes.map((node) => node.nodeId) };
   });
   for (const request of relevantRequests) {
@@ -40,7 +42,7 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
     if (request.workerSessionId && !treeSessionIds.has(request.workerSessionId)) continue;
     if (workers.some((worker) => worker.requestId === request.requestId || (request.workerSessionId && worker.sessionId === request.workerSessionId))) continue;
     const item = items.find((entry) => entry.requestId === request.requestId);
-    workers.push({ key: request.requestId, requestId: request.requestId, sessionId: request.workerSessionId, title: item?.title ?? request.scope ?? "开工准备", status: item?.status ?? requestWorkerStatus(request.status), failure: request.failure, nodeId: undefined, nodeIds: [] });
+    workers.push({ key: request.requestId, requestId: request.requestId, sessionId: request.workerSessionId, title: item?.title ?? request.scope ?? "开工准备", status: item?.status ?? requestWorkerStatus(request.status), failure: request.failure, activity: workSessionLabel(item, request), active: Boolean(request.activeTurnId && request.turnStatus !== "unknown"), nodeId: undefined, nodeIds: [] });
   }
   const selected = workers.find((worker) => worker.nodeIds.includes(tree?.currentNodeId ?? ""));
   const hiddenIds = new Set(workers.filter((worker) => worker !== selected).flatMap((worker) => worker.nodeIds));

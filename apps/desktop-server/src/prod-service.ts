@@ -223,14 +223,7 @@ export const createSessionRuntimeService = (
   });
   shellService.hostTools = hostTools;
   hostTools.register(
-    createReadSessionHostTool({
-      getSnapshot: () => runtimeService.getSnapshot(),
-      resolveSessionId: (sessionId) => shellService.resolveSessionIdentifier(sessionId),
-      ensureSessionLoaded: (sessionId, options) =>
-        shellService.ensureSessionLoadedForRead(sessionId, options),
-      isSessionPartiallyHydrated: (sessionId) =>
-        shellService.isSessionPartiallyHydrated(sessionId)
-    })
+    createReadSessionHostTool((input) => shellService.readSession(input))
   );
   return shellService;
 };

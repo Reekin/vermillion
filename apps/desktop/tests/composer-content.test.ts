@@ -258,20 +258,20 @@ describe("composer content lifetime", () => {
     expect(c.draft).toBe("tree b");
   });
 
-  it("clears a server-retained message without reporting engine acceptance", async () => {
+  it("retains text and attachments when the ordinary runtime rejects a send", async () => {
     const notice = vi.fn();
     const h = setup({ onStatusNotice: notice });
     let c = await h.flush();
-    c.onDraftChange("wait for the dependency");
+    c.onDraftChange("ordinary message");
     c.onComposerDrop({ preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] } } as Parameters<typeof c.onComposerDrop>[0]);
     c = await h.flush();
-    h.send.mockResolvedValueOnce({ accepted: false, queued: { messageId: "pending-1", reason: "等待前置工单", workItemId: "predecessor" } });
+    h.send.mockResolvedValueOnce({ accepted: false });
     await c.onPrimaryAction();
-    expect(h.render().draft).toBe("");
-    expect(h.render().attachments).toEqual([]);
+    expect(h.render().draft).toBe("ordinary message");
+    expect(h.render().attachments).toEqual([attachment]);
     expect(h.send).toHaveBeenCalledOnce();
     expect(h.send).toHaveBeenCalledWith(expect.objectContaining({ attachments: [attachment.attachment] }));
-    expect(notice).toHaveBeenLastCalledWith({ message: "等待发送：等待前置工单", source: "send" });
+    expect(notice).toHaveBeenLastCalledWith(expect.objectContaining({ message: "Send failed: The current runtime rejected the send request.", source: "send", severity: "error" }));
   });
 
   it("clears only the submitted tree after an asynchronous send", async () => {

@@ -21,6 +21,8 @@ export * from "./session-discovery.js";
 export * from "./session-actions.js";
 export * from "./chat-tree-provider.js";
 export * from "./session-shell-service.js";
+export * from "./read-session-transcript.js";
+export * from "./read-session-host-tool.js";
 export * from "./engines/index.js";
 export * from "./engines/codex/index.js";
 export * from "./engines/codex/session-discovery.js";

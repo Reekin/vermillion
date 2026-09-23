@@ -45,8 +45,8 @@ export const workBoardGroups = (requests: WorkRequest[], items: WorkItem[]): Boa
 export const workBoardCounts = (requests: WorkRequest[], items: WorkItem[]) => {
   const preparation = requests.filter((request) => isPreparingWork(request) || (request.status === "cancelled" && !items.some((item) => item.requestId === request.requestId)));
   const states = [
-    ...items.filter((item) => item.status !== "preparing").map((item) => !isOpenWorkItem(item) ? "ended" : item.run.activeTurnId ? "active" : "waiting"),
-    ...preparation.map((request) => request.status === "cancelled" ? "ended" : request.activeTurnId ? "active" : "waiting")
+    ...items.filter((item) => item.status !== "preparing").map((item) => !isOpenWorkItem(item) ? "ended" : item.run.activeTurnId && item.run.turnStatus !== "unknown" ? "active" : "waiting"),
+    ...preparation.map((request) => request.status === "cancelled" ? "ended" : request.activeTurnId && request.turnStatus !== "unknown" ? "active" : "waiting")
   ];
   return { active: states.filter((s) => s === "active").length, waiting: states.filter((s) => s === "waiting").length, ended: states.filter((s) => s === "ended").length };
 };

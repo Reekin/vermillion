@@ -103,6 +103,7 @@ export const createPiEngineIntegration = (
         releaseSessionExecution: (sessionId: string) =>
           runtimePort.releaseSession(sessionId),
         getActiveTurnId: (sessionId: string) => runtimePort.getActiveTurnId(sessionId),
+        isSessionLive: (sessionId: string) => runtimePort.isSessionRunning(sessionId),
         listSkills: (input) => runtimePort.listSkills(input)
       }
     }

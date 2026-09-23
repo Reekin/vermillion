@@ -19,9 +19,10 @@ export type ReadSessionRuntime = {
     options?: { force?: boolean }
   ) => Promise<boolean> | boolean;
   isSessionPartiallyHydrated?: (sessionId: string) => boolean;
+  getRuntimeState?: (sessionId: string) => { confirmed: boolean; activeTurnId?: string };
 };
 
-type ReadSessionArgs = {
+export type ReadSessionArgs = {
   sessionId: string;
   limit?: number;
   maxChars?: number;
@@ -90,13 +91,35 @@ const parseArgs = (value: unknown): ReadSessionArgs => {
 const snapshotHasSession = (snapshot: DomainSnapshot, sessionId: string): boolean =>
   snapshot.sessions.some((session) => session.sessionId === sessionId);
 
+export const readSession = async (runtime: ReadSessionRuntime, input: ReadSessionArgs) => {
+  const args = parseArgs(input);
+  const sessionId = runtime.resolveSessionId(args.sessionId);
+  if (!sessionId) {
+    throw new Error(`Unknown session: ${args.sessionId}. Tried it as a Vermillion sessionId and as an engine session id.`);
+  }
+  let snapshot = runtime.getSnapshot();
+  const hadSession = snapshotHasSession(snapshot, sessionId);
+  const needsFullHydration = hadSession && runtime.isSessionPartiallyHydrated?.(sessionId) === true;
+  if ((!hadSession || needsFullHydration) && runtime.ensureSessionLoaded) {
+    const loaded = await runtime.ensureSessionLoaded(sessionId, { force: needsFullHydration });
+    if (loaded) snapshot = runtime.getSnapshot();
+    else if (needsFullHydration) throw new Error(`Session could not be fully loaded: ${sessionId}`);
+  } else if (needsFullHydration) {
+    throw new Error(`Session could not be fully loaded: ${sessionId}`);
+  }
+  return buildReadSessionTranscript({
+    snapshot, sessionId, limit: args.limit, maxTextChars: args.maxChars,
+    runtimeState: runtime.getRuntimeState?.(sessionId)
+  });
+};
+
 export const createReadSessionHostTool = (
-  runtime: ReadSessionRuntime
+  runtime: ReadSessionRuntime | ((input: ReadSessionArgs) => ReturnType<typeof readSession>)
 ): HostToolRegistration => ({
   namespace: readSessionToolNamespace,
   name: readSessionToolName,
   description:
-    "Read a Vermillion session by sessionId and return visible user and agent messages, turn status, and timestamps as JSON.",
+    "Read a Vermillion session's visible user and agent messages, turn status, timestamps, and current activity. Activity lists running tools/commands and pending input independently of message limits; unknown confirmation means only historical or disconnected facts are available.",
   inputSchema: {
     type: "object",
     properties: {
@@ -128,34 +151,7 @@ export const createReadSessionHostTool = (
   handle: async (invocation) => {
     try {
       const args = parseArgs(invocation.arguments);
-      const sessionId = runtime.resolveSessionId(args.sessionId);
-      if (!sessionId) {
-        throw new Error(
-          `Unknown session: ${args.sessionId}. Tried it as a Vermillion sessionId and as an engine session id.`
-        );
-      }
-      let snapshot = runtime.getSnapshot();
-      const hadSession = snapshotHasSession(snapshot, sessionId);
-      const needsFullHydration =
-        hadSession && runtime.isSessionPartiallyHydrated?.(sessionId) === true;
-      if ((!hadSession || needsFullHydration) && runtime.ensureSessionLoaded) {
-        const loaded = await runtime.ensureSessionLoaded(sessionId, {
-          force: needsFullHydration
-        });
-        if (loaded) {
-          snapshot = runtime.getSnapshot();
-        } else if (needsFullHydration) {
-          throw new Error(`Session could not be fully loaded: ${sessionId}`);
-        }
-      } else if (needsFullHydration) {
-        throw new Error(`Session could not be fully loaded: ${sessionId}`);
-      }
-      const transcript = buildReadSessionTranscript({
-        snapshot,
-        sessionId,
-        limit: args.limit,
-        maxTextChars: args.maxChars
-      });
+      const transcript = await (typeof runtime === "function" ? runtime(args) : readSession(runtime, args));
       return textResult(serializeReadSessionTranscript(transcript));
     } catch (error) {
       return textResult(

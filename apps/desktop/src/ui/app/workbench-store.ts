@@ -337,7 +337,7 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       try {
         const inboxHistory = await client.request("inbox.list", { includeProcessed: true });
         if (!connected || epoch !== connectionEpoch || inboxDirty) return;
-        const inbox = inboxHistory.filter((item) => item.kind === "decision" ? !item.card.answer && !item.card.withdrawn : !item.workItem.merge?.acknowledgedAt);
+        const inbox = inboxHistory.filter((item) => item.kind === "decision" ? (!item.card.answer || item.card.deliveryPending) && !item.card.withdrawn : !item.workItem.merge?.acknowledgedAt);
         set({ inbox, inboxHistory, inboxError: undefined });
       } catch (error) {
         if (connected && epoch === connectionEpoch) {

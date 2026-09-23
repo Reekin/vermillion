@@ -19,7 +19,7 @@ export function workerOpeningMessage(workspaceId: string, item: WorkItem, root: 
       "rebase 冲突在自己的分支解决并继续；基于 rebase 后的结果做 review 和验收。workItem.submit 前再次读取主分支 HEAD，若已前进则重复 rebase 并更新受影响的验证和提交材料。"
     ] : []),
     "先用 CLI 读取完整工单：vermillion workItem.get '" + JSON.stringify({ workspaceId, workItemId: item.workItemId }) + "'",
-    ...(item.run.migratedFromSessionId ? ["本工单已从历史节点迁移到当前分支；调用 workItem.submit 时必须传当前 sessionId: " + item.run.sessionId] : []),
+    "调用 workItem.submit 时传本单固定 sessionId: " + item.run.sessionId,
     "完成后必须调用 workItem.submit，需要用户决定时调用 decision.create，发现依赖另一张未合入的工单时通过 workItem.update 修改 dependsOn，需要用户取舍时直接创建决策卡；调用后结束会话。",
     "sessionId: " + item.run.sessionId,
     "actionId: execution-" + item.workItemId

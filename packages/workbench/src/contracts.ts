@@ -10,8 +10,8 @@ export const zWorkspace = z.object({
 });
 export type Workspace = z.infer<typeof zWorkspace>;
 
-/** queued -> running -> closed; decision parks a work item until the user answers. */
-export const workItemStatuses = ["preparing", "queued", "running", "merging", "decision", "closed", "cancelled"] as const;
+/** Business phase is independent from conversation activity and blocking decisions. */
+export const workItemStatuses = ["preparing", "queued", "running", "merging", "closed", "cancelled"] as const;
 export const zWorkItemStatus = z.enum(workItemStatuses);
 export type WorkItemStatus = z.infer<typeof zWorkItemStatus>;
 
@@ -161,23 +161,14 @@ export const zRun = z.object({
   heartbeatAt: z.string().optional(),
   worktreePath: z.string().optional(),
   branch: z.string().optional(),
-  /** Pending execution delivery; cleared only after delivery succeeds. */
   resumeMessage: z.string().optional(),
-  /** Set by the scheduler when the worker session ended without submit/decision; the item goes back to queued with this note. */
   lastFailure: z.string().optional(),
-  attempts: z.number().int().nonnegative().optional(),
-  /** Earliest automatic retry time from the persisted execution. */
-  retryAt: z.string().datetime().optional(),
-  /** Set when the user stopped a Worker turn; only an explicit work-item resume clears it. */
-  pauseReason: z.literal("user").optional(),
-  /** Automatic or user-owned execution. */
-  control: z.enum(["auto", "manual", "paused"]).optional(),
-  attemptId: z.string().optional(),
+  paused: z.boolean().optional(),
+  userStopped: z.boolean().optional(),
   activeTurnId: z.string().optional(),
   waitReason: z.string().optional(),
-  pendingMessageId: z.string().optional(),
-  deliveryUncertain: z.boolean().optional(),
-  migratedFromSessionId: z.string().optional(),
+  /** Receipt of a business dispatch, not a chat queue. */
+  pendingMessageId: z.string().optional()
 });
 
 export const zWorkItem = z.object({
@@ -245,45 +236,42 @@ export const zWorkMessage = z.object({
 });
 export type WorkMessage = z.infer<typeof zWorkMessage>;
 
-export const zSessionDelivery = zWorkMessage.extend({
-  decisionId: z.string().optional(),
-  mode: z.enum(["start", "supplement"]).optional(),
-  targetTurnId: z.string().optional(),
-  sessionId: z.string(), messageId: z.string(), origin: z.enum(["scheduler", "user"]),
-  state: z.enum(["queued", "sending", "unknown", "rejected", "accepted", "cancelled"]),
-  reason: z.string().optional(), workItemId: z.string().optional(), requestId: z.string().optional(),
-  blockerWorkItemIds: z.array(z.string()).optional(),
-  noticeCount: z.number().int().nonnegative().optional(),
-  turnId: z.string().optional(), createdAt: z.string()
+export const zSupervisor = z.object({
+  sessionId: z.string().optional(),
+  activeTurnId: z.string().optional(),
+  pendingMessageId: z.string().optional(),
+  startedAt: z.string().optional(),
+  lastCheckedAt: z.string().optional(),
+  nextCheckAt: z.string().optional(),
+  failure: z.string().optional()
 });
-export type SessionDelivery = z.infer<typeof zSessionDelivery>;
 
 export const zWorkRequest = z.object({
-  turnStatus: z.enum(["active", "unknown"]).optional(),
-  continuationSummary: z.string().optional(),
-  deliveries: z.array(zSessionDelivery).optional(),
-  deliveryUncertain: z.boolean().optional(),
-  idleTurns: z.number().int().nonnegative().optional(),
-  requestId: z.string(), sourceSessionId: z.string(), sourceTurnId: z.string().optional(),
+  formatVersion: z.literal(2),
+  requestId: z.string(),
+  sourceSessionId: z.string(),
+  sourceTurnId: z.string().optional(),
   message: zWorkMessage.optional(),
-  scope: z.string().optional(), treeId: z.string().optional(), workerSessionId: z.string().optional(),
+  scope: z.string().optional(),
+  treeId: z.string().optional(),
+  workerSessionId: z.string().optional(),
   status: z.enum(["pending", "preparing", "ready", "failed", "cancelled"]),
-  attempts: z.number().int().nonnegative().optional(), retryAt: z.string().optional(),
+  paused: z.boolean().optional(),
+  userStopped: z.boolean().optional(),
   failure: z.string().optional(),
-  /** Automatic dispatch, explicit user continuation, or durable pause. */
-  control: z.enum(["auto", "manual", "paused"]).optional(),
-  /** Stable identity for the preparation execution currently being reconciled. */
-  attemptId: z.string().optional(),
   activeTurnId: z.string().optional(),
+  turnStatus: z.enum(["active", "unknown"]).optional(),
   waitReason: z.string().optional(),
-  handoff: z.object({
-    sessionId: z.string(), workItemIds: z.array(z.string()), refs: z.array(zDocRef), at: z.string()
-  }).optional(),
+  dispatchRequested: z.boolean().optional(),
   pendingMessageId: z.string().optional(),
+  handoff: z.object({
+    sessionId: z.string(), turnId: z.string().optional(),
+    workItemIds: z.array(z.string()), refs: z.array(zDocRef), at: z.string()
+  }).optional(),
+  supervisor: zSupervisor.optional(),
   workItemIds: z.array(z.string()).optional(),
-  migratedToSessionId: z.string().optional(),
-  migratedFromSessionId: z.string().optional(),
-  createdAt: z.string(), updatedAt: z.string()
+  createdAt: z.string(),
+  updatedAt: z.string()
 });
 export type WorkRequest = z.infer<typeof zWorkRequest>;
 
@@ -302,8 +290,10 @@ export const zDecisionCard = z.object({
   actionId: z.string().optional(),
   withdrawn: z.object({ reason: z.string().min(1), at: z.string(), sessionId: z.string() }).optional(),
   deliveryPending: z.boolean().optional(),
-  /** Who raised it: a worker (default) or the workbench after repeated failures. */
-  kind: z.enum(["worker", "attempts"]).optional(),
+  messageId: z.string().optional(),
+  deliveryFailure: z.string().optional(),
+  /** Business decisions may be raised by a Worker or the supervisor. */
+  kind: z.enum(["worker", "supervisor"]).optional(),
   /** One plain sentence: what is blocked. */
   question: z.string().min(1),
   /** Two or three sentences: what happened and why the user has to decide. */
@@ -373,7 +363,7 @@ export const zScheduler = z.object({
 export type Scheduler = z.infer<typeof zScheduler>;
 
 export const zWorkDiagnosis = z.object({
-  request: zWorkRequest.omit({ deliveries: true, continuationSummary: true }),
+  request: zWorkRequest,
   workItems: z.array(zWorkItem),
   scheduler: zScheduler,
   waiting: z.array(z.string()),
@@ -404,9 +394,7 @@ export type AgentRun = z.infer<typeof zAgentRun>;
 const zProcess = z.object({
   actionId: z.string(),
   workItemId: z.string(),
-  status: z.enum(["pending", "running", "retry", "decision", "done", "cancelled"]),
-  attempts: z.number().int().nonnegative(),
-  retryAt: z.string().optional(),
+  status: z.enum(["pending", "running", "decision", "done", "cancelled"]),
   failure: z.string().optional(),
   history: z.array(z.object({ at: z.string(), event: z.string(), message: z.string(), decisionId: z.string().optional() })),
   createdAt: z.string(),
@@ -414,7 +402,7 @@ const zProcess = z.object({
 });
 
 /** One pending delivery to a worker. Writers only append; the scheduler renders and consumes the list. */
-export const executionNoticeKinds = ["contract", "docs", "rejected", "resumed", "nag"] as const;
+export const executionNoticeKinds = ["contract", "docs", "rejected", "resumed"] as const;
 export const zExecutionNotice = z.object({
   at: z.string(),
   kind: z.enum(executionNoticeKinds),
@@ -423,7 +411,7 @@ export const zExecutionNotice = z.object({
 export type ExecutionNotice = z.infer<typeof zExecutionNotice>;
 
 const executionNoticeLabels: Record<ExecutionNotice["kind"], string> = {
-  contract: "合同调整", docs: "文档合入", rejected: "提交退回", resumed: "恢复执行", nag: "催办"
+  contract: "合同调整", docs: "文档合入", rejected: "提交退回", resumed: "恢复执行"
 };
 
 /** Every pending notice as the one message a worker receives, each labeled by why it arrived. */
@@ -432,26 +420,13 @@ export const renderExecutionNotices = (notices: ExecutionNotice[]): string =>
 
 /** The sole owner of a worker's runtime state and pending delivery. */
 export const zExecution = zProcess.extend({
-  continuationSummary: z.string().optional(),
-  deliveries: z.array(zSessionDelivery).optional(),
-  ...zRun.omit({ resumeMessage: true, lastFailure: true, attempts: true, retryAt: true, pauseReason: true, turnStatus: true }).shape,
+  ...zRun.omit({ resumeMessage: true, lastFailure: true, turnStatus: true }).shape,
   kind: z.literal("execute"),
   stage: z.enum(["open", "deliver", "execute"]),
-  /** Git checkpoint being handled by this Worker execution. */
   integrationActionId: z.string().optional(),
   runId: z.string().optional(),
   deliveredAt: z.string().optional(),
-  /** Most recent turn started by scheduler delivery, used to recover its origin. */
-  scheduledTurnId: z.string().optional(),
-  /** Notices waiting for the next delivery; emptied by the scheduler once they are delivered. */
-  notices: z.array(zExecutionNotice),
-  idleTurns: z.number().int().nonnegative(),
-  control: z.enum(["auto", "manual", "paused"]).optional(),
-  attemptId: z.string().optional(),
-  activeTurnId: z.string().optional(),
-  waitReason: z.string().optional(),
-  pendingMessageId: z.string().optional(),
-  migratedFromSessionId: z.string().optional()
+  notices: z.array(zExecutionNotice)
 });
 export type Execution = z.infer<typeof zExecution>;
 
@@ -482,7 +457,7 @@ export type Integration = z.infer<typeof zIntegration>;
 export const zWorkflowAction = z.discriminatedUnion("kind", [zExecution, zIntegration]);
 export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
-export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.control === "paused";
+export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.paused === true;
 /** The pending state of whichever process this action runs. */
 export const actionNote = (action: WorkflowAction): string =>
   action.kind === "integration" ? action.message : renderExecutionNotices(action.notices);
@@ -505,6 +480,7 @@ export type WorktreeCleanup = z.infer<typeof zWorktreeCleanup>;
 
 /** Contract and business state stay distinct from the process, but commit atomically. */
 export const zWorkItemRecord = z.object({
+  formatVersion: z.literal(2),
   workItemId: z.string(),
   item: zWorkItem.omit({ run: true }),
   execution: zExecution,
@@ -515,7 +491,7 @@ export type WorkItemRecord = z.infer<typeof zWorkItemRecord>;
 
 export const projectWorkItem = ({ item, execution }: WorkItemRecord): WorkItem => ({
   ...item,
-  run: zRun.parse({ ...execution, pauseReason: execution.control === "paused" ? "user" : undefined, lastFailure: execution.failure, resumeMessage: renderExecutionNotices(execution.notices) || undefined })
+  run: zRun.parse({ ...execution, lastFailure: execution.failure, resumeMessage: renderExecutionNotices(execution.notices) || undefined })
 });
 
 export const zSessionNavigation = z.object({
@@ -532,7 +508,6 @@ export type SessionNavigation = z.infer<typeof zSessionNavigation>;
 
 /** Change notifications emitted by the workbench service after every write, and by the docs watcher. */
 export const zWorkbenchEvent = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("session.messages.changed"), workspaceId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal("workspaces.changed") }),
   z.object({ type: z.literal("sessionNavigation.changed"), sessionId: z.string(), workspaceId: z.string() }),
   z.object({ type: z.literal("docs.changed"), workspaceId: z.string() }),

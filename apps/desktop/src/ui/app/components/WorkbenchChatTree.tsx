@@ -114,8 +114,8 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
       <SectionLabel>Worker</SectionLabel>
       {current?.error && <InlineNotice tone="error">{current.error}</InlineNotice>}
       <ul>{activeWorkers.map((worker) => <li key={worker.key}>
-        <ListRow title={worker.title} meta={worker.failure} selected={worker.sessionId === props.chatTree?.currentSessionId}
-          trailing={<Badge status={worker.status === "failed" ? "decision" : worker.status}>{worker.status === "failed" ? "失败" : statusLabel[worker.status]}</Badge>}
+        <ListRow title={worker.title} meta={[worker.activity, worker.failure].filter(Boolean).join(" · ")} selected={worker.sessionId === props.chatTree?.currentSessionId}
+          trailing={<Badge status={worker.status === "failed" ? "decision" : worker.active ? "running" : "queued"}>{worker.status === "failed" ? "准备受阻" : statusLabel[worker.status]}</Badge>}
           onClick={worker.sessionId ? () => worker.nodeId ? props.onJump?.(worker.nodeId) : onSelectSession(worker.sessionId!) : undefined} />
       </li>)}</ul>
     </div>} />

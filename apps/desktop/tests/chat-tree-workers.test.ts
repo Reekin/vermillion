@@ -21,7 +21,7 @@ const tree = (currentSessionId = "design"): ChatTreeSnapshotRpc => ({
 describe("Worker branch presentation", () => {
   it("lists the preparation branch without assigning it a Worker role", () => {
     const source = tree();
-    const request = { requestId: "prep", sourceSessionId: "design", workerSessionId: "worker", status: "preparing" } as WorkRequest;
+    const request = { formatVersion: 2, requestId: "prep", sourceSessionId: "design", workerSessionId: "worker", status: "preparing" } as WorkRequest;
     const result = projectChatTreeWorkers(source, [boundItems[1]!], [request]);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ nodeId: "worker-tip", status: "preparing" });
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
@@ -29,7 +29,7 @@ describe("Worker branch presentation", () => {
 
   it("keeps an unbound preparation visible while a request awaits its explicit session binding", () => {
     const source = tree();
-    const request = { requestId: "prep", sourceSessionId: "design", status: "preparing", scope: "Prepare this work" } as WorkRequest;
+    const request = { formatVersion: 2, requestId: "prep", sourceSessionId: "design", status: "preparing", scope: "Prepare this work" } as WorkRequest;
     const result = projectChatTreeWorkers(source, [], [request]);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "other-tip"]);
     expect(result.workers).toHaveLength(1);
@@ -41,7 +41,7 @@ describe("Worker branch presentation", () => {
 
   it("keeps ordinary branches visible after their preparation request is ready", () => {
     const source = tree();
-    const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
+    const requests = [{ formatVersion: 2, requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     const result = projectChatTreeWorkers(source, [], requests);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "other-tip"]);
     expect(result.workers).toMatchObject([{ sessionId: "worker", status: "closed" }]);
@@ -106,7 +106,7 @@ describe("Worker branch presentation", () => {
       { nodeId: "ordinary", turnId: "ordinary", sessionId: "ordinary", parentNodeId: "worker-tip", order: 3, isCurrent: false, label: "Follow-up" },
       { nodeId: "worker-later", turnId: "worker-later", sessionId: "worker", parentNodeId: "worker-tip", order: 4, isCurrent: false, label: "Execution" }
     );
-    const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
+    const requests = [{ formatVersion: 2, requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
     for (const currentNodeId of ["source", "ordinary"]) {
       const result = projectChatTreeWorkers({ ...source, currentNodeId }, [boundItems[1]!], requests);
       expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "ordinary"]);
@@ -121,8 +121,8 @@ describe("Worker branch presentation", () => {
       { title: "Cancelled", status: "cancelled", run: { sessionId: "other-worker" } }
     ] as WorkItem[];
     const requests = [
-      { requestId: "pending", sourceSessionId: "design", status: "pending", scope: "Preparing" },
-      { requestId: "failed", sourceSessionId: "design", status: "failed", scope: "Retry needed" }
+      { formatVersion: 2, requestId: "pending", sourceSessionId: "design", status: "pending", scope: "Preparing" },
+      { formatVersion: 2, requestId: "failed", sourceSessionId: "design", status: "failed", scope: "Retry needed" }
     ] as WorkRequest[];
     const hidden = projectChatTreeWorkers(source, items, requests);
     const all = projectChatTreeWorkers(source, items, requests, true);
@@ -154,9 +154,9 @@ describe("Worker branch presentation", () => {
 
   it("keeps pending and failed kickoff records before a worker or work item exists", () => {
     const requests = [
-      { requestId: "one", sourceSessionId: "design", status: "pending", scope: "第一项" },
-      { requestId: "two", sourceSessionId: "design", status: "failed", scope: "第二项", failure: "无法创建分支" },
-      { requestId: "elsewhere", sourceSessionId: "another-tree", status: "pending" }
+      { formatVersion: 2, requestId: "one", sourceSessionId: "design", status: "pending", scope: "第一项" },
+      { formatVersion: 2, requestId: "two", sourceSessionId: "design", status: "failed", scope: "第二项", failure: "无法创建分支" },
+      { formatVersion: 2, requestId: "elsewhere", sourceSessionId: "another-tree", status: "pending" }
     ] as WorkRequest[];
     const result = projectChatTreeWorkers(tree(), [], requests);
     expect(result.workers.filter((worker) => !worker.sessionId)).toMatchObject([
@@ -167,7 +167,7 @@ describe("Worker branch presentation", () => {
 
   it("keeps cancelled kickoff records out of the active worker list", () => {
     const result = projectChatTreeWorkers(tree(), [], [
-      { requestId: "cancelled", sourceSessionId: "design", status: "cancelled", scope: "Cancelled preparation" }
+      { formatVersion: 2, requestId: "cancelled", sourceSessionId: "design", status: "cancelled", scope: "Cancelled preparation" }
     ] as WorkRequest[]);
 
     expect(result.workers).toEqual([]);
@@ -175,17 +175,17 @@ describe("Worker branch presentation", () => {
   });
 
   it("replaces preparation with the bound work item's title and state without duplication", () => {
-    const requests = [{ requestId: "one", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
-    const items = [{ requestId: "one", title: "实际工单", status: "decision", run: { sessionId: "worker" } }] as WorkItem[];
+    const requests = [{ formatVersion: 2, requestId: "one", sourceSessionId: "design", workerSessionId: "worker", status: "ready" }] as WorkRequest[];
+    const items = [{ requestId: "one", title: "实际工单", status: "running", run: { sessionId: "worker" } }] as WorkItem[];
     const result = projectChatTreeWorkers(tree(), items, requests);
     expect(result.workers).toHaveLength(1);
-    expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "实际工单", status: "decision" });
+    expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "实际工单", status: "running" });
     const partialTree = { ...tree(), memberSessionIds: ["design", "worker"], nodes: [tree().nodes[0]!] };
     const partialItems = [{ ...items[0], treeId: "design", sourceSessionId: "design" }] as WorkItem[];
     const partialRequests = [{ ...requests[0], treeId: "design" }] as WorkRequest[];
     const waitingForTree = projectChatTreeWorkers(partialTree, partialItems, partialRequests);
-    expect(waitingForTree.workers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "decision", nodeIds: [] }]);
-    expect(waitingForTree.activeWorkers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "decision" }]);
+    expect(waitingForTree.workers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "running", nodeIds: [] }]);
+    expect(waitingForTree.activeWorkers).toMatchObject([{ sessionId: "worker", title: "实际工单", status: "running" }]);
   });
 
   it("ignores work records for archived branches removed from the tree", () => {
@@ -203,7 +203,7 @@ describe("Worker branch presentation", () => {
     const source = tree();
     source.memberSessionIds = ["design"];
     source.nodes = [source.nodes[0]!];
-    const requests = [{ requestId: "archived", sourceSessionId: "design", workerSessionId: "worker", status: "failed" }] as WorkRequest[];
+    const requests = [{ formatVersion: 2, requestId: "archived", sourceSessionId: "design", workerSessionId: "worker", status: "failed" }] as WorkRequest[];
     const result = projectChatTreeWorkers(source, [], requests);
     expect(result.workers).toEqual([]);
     expect(result.activeWorkers).toEqual([]);
@@ -212,24 +212,24 @@ describe("Worker branch presentation", () => {
   it.each(["closed", "cancelled"])("keeps the active item visible when a reused session also has a %s item", (status) => {
     const items = [
       { title: "Ended work", status, createdAt: "2026-09-10T02:00:00Z", run: { sessionId: "worker" } },
-      { title: "Active work", status: "decision", createdAt: "2026-09-10T01:00:00Z", run: { sessionId: "worker" } }
+      { title: "Active work", status: "running", createdAt: "2026-09-10T01:00:00Z", run: { sessionId: "worker" } }
     ] as WorkItem[];
     for (const orderedItems of [items, [...items].reverse()]) {
       const result = projectChatTreeWorkers(tree(), orderedItems);
       expect(result.workers.filter((worker) => worker.sessionId === "worker")).toMatchObject([
-        { title: "Active work", status: "decision", nodeId: "worker-tip" }
+        { title: "Active work", status: "running", nodeId: "worker-tip" }
       ]);
-      expect(result.activeWorkers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "Active work", status: "decision" });
+      expect(result.activeWorkers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "Active work", status: "running" });
     }
   });
 
   it("ends a ready preparation branch while keeping its actual worker in the unfinished list", () => {
     const source = tree();
-    const requests = [{ requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready", scope: "Preparation" }] as WorkRequest[];
-    const items = [{ requestId: "ready", title: "Actual work", status: "decision", run: { sessionId: "other-worker" } }] as WorkItem[];
+    const requests = [{ formatVersion: 2, requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready", scope: "Preparation" }] as WorkRequest[];
+    const items = [{ requestId: "ready", title: "Actual work", status: "running", run: { sessionId: "other-worker" } }] as WorkItem[];
     const result = projectChatTreeWorkers(source, items, requests);
     expect(result.workers.find((worker) => worker.sessionId === "worker")).toMatchObject({ title: "Preparation", status: "closed", nodeId: "worker-tip" });
-    expect(result.activeWorkers).toMatchObject([{ sessionId: "other-worker", title: "Actual work", status: "decision" }]);
+    expect(result.activeWorkers).toMatchObject([{ sessionId: "other-worker", title: "Actual work", status: "running" }]);
     expect(result.activeWorkers).toHaveLength(1);
     expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
     const all = projectChatTreeWorkers(source, items, requests, true);

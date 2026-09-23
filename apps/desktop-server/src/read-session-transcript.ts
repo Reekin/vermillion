@@ -40,6 +40,29 @@ export type ReadSessionTranscriptResult = {
   maxTextChars: number;
   turns: ReadSessionTranscriptTurn[];
   messages: ReadSessionTranscriptMessage[];
+  activity: ReadSessionActivity;
+};
+
+export type ReadSessionActivityItem = {
+  kind: "tool" | "terminal";
+  id: string;
+  turnId: string;
+  name: string;
+  status: string;
+  summary?: string;
+  startedAt: string;
+  completedAt?: string;
+};
+
+export type ReadSessionActivity = {
+  confirmation: "live" | "unknown";
+  status: "active" | "idle" | "unknown";
+  currentTurn?: ReadSessionTranscriptTurn;
+  lastKnownAt?: string;
+  running: ReadSessionActivityItem[];
+  recentCompleted?: ReadSessionActivityItem;
+  pendingApprovals: { requestId: string; turnId: string; name: string; requestedAt: string }[];
+  pendingInputs: { requestId: string; turnId?: string; name: string; requestedAt: string }[];
 };
 
 export type ReadSessionTranscriptInput = {
@@ -47,6 +70,7 @@ export type ReadSessionTranscriptInput = {
   sessionId: string;
   limit?: number;
   maxTextChars?: number;
+  runtimeState?: { confirmed: boolean; activeTurnId?: string };
 };
 
 export const maxReadSessionMessageLimit = 200;
@@ -246,6 +270,59 @@ const activeTurnId = (turns: Turn[]): string | undefined => {
   return undefined;
 };
 
+const buildActivity = (input: ReadSessionTranscriptInput): ReadSessionActivity => {
+  const { snapshot, sessionId, runtimeState } = input;
+  const ownTurns = snapshot.turns.filter((turn) => turn.sessionId === sessionId)
+    .sort((left, right) => compareIsoAsc(left.startedAt, right.startedAt));
+  const turn = runtimeState?.confirmed && runtimeState.activeTurnId
+    ? ownTurns.find((entry) => entry.turnId === runtimeState.activeTurnId)
+    : ownTurns.at(-1);
+  const confirmed = runtimeState?.confirmed === true &&
+    (runtimeState.activeTurnId ? turn?.turnId === runtimeState.activeTurnId : !turn || turn.status === "completed");
+  const belongs = (entry: { sessionId: string; turnId?: string }) =>
+    entry.sessionId === sessionId && !!turn && entry.turnId === turn.turnId;
+  const summarize = (text?: string) => text ? text.slice(0, 300) : undefined;
+  const tools = snapshot.toolCalls.filter(belongs);
+  const activities: ReadSessionActivityItem[] = [
+    ...tools.map((tool): ReadSessionActivityItem => ({
+      kind: "tool", id: tool.toolCallId, turnId: tool.turnId, name: tool.toolName,
+      status: tool.status, summary: summarize(tool.inputSummary),
+      startedAt: tool.startedAt, completedAt: tool.completedAt
+    })),
+    ...snapshot.terminalStreams.filter(belongs).map((terminal): ReadSessionActivityItem => {
+      const tool = tools.find((entry) => entry.toolCallId === terminal.toolCallId);
+      return {
+        kind: "terminal", id: terminal.terminalId, turnId: terminal.turnId,
+        name: tool?.toolName ?? "terminal", status: terminal.status,
+        summary: summarize(tool?.inputSummary), startedAt: terminal.startedAt, completedAt: terminal.completedAt
+      };
+    })
+  ];
+  const pendingApprovals = snapshot.approvalRequests.filter((entry) => belongs(entry) && entry.status === "pending")
+    .map((entry) => ({ requestId: entry.requestId, turnId: entry.turnId, name: entry.title, requestedAt: entry.requestedAt }));
+  const pendingInputs = snapshot.runtimeInteractions.filter((entry) =>
+    entry.sessionId === sessionId && entry.status === "pending" && (!entry.turnId || belongs(entry)))
+    .map((entry) => ({ requestId: entry.requestId, turnId: entry.turnId, name: entry.title, requestedAt: entry.requestedAt }));
+  const recentCompleted = activities.filter((entry) => entry.status !== "running")
+    .sort((left, right) => compareIsoAsc(left.completedAt, right.completedAt)).at(-1);
+  const lastKnownAt = latest([
+    turn?.startedAt, turn?.completedAt,
+    ...activities.flatMap((entry) => [entry.startedAt, entry.completedAt]),
+    ...pendingApprovals.map((entry) => entry.requestedAt),
+    ...pendingInputs.map((entry) => entry.requestedAt),
+    ...snapshot.messageBlocks.filter(belongs).flatMap((entry) => [entry.startedAt, entry.completedAt])
+  ].filter((value): value is string => !!value));
+  return {
+    confirmation: confirmed ? "live" : "unknown",
+    status: confirmed ? runtimeState?.activeTurnId ? "active" : "idle" : "unknown",
+    ...(turn ? { currentTurn: { turnId: turn.turnId, status: turn.status, startedAt: turn.startedAt,
+      completedAt: turn.completedAt, finishReason: turn.finishReason } } : {}),
+    ...(lastKnownAt ? { lastKnownAt } : {}),
+    running: activities.filter((entry) => entry.status === "running"),
+    ...(recentCompleted ? { recentCompleted } : {}), pendingApprovals, pendingInputs
+  };
+};
+
 export const buildReadSessionTranscript = (
   input: ReadSessionTranscriptInput
 ): ReadSessionTranscriptResult => {
@@ -268,7 +345,7 @@ export const buildReadSessionTranscript = (
     message.startedAt
   ].filter((value): value is string => Boolean(value))));
   const truncatedByMessages = selectedMessages.length < allMessages.length;
-  const currentTurnId = activeTurnId(turns);
+  const currentTurnId = activeTurnId(turns.filter((turn) => turn.sessionId === input.sessionId));
 
   return {
     sessionId: session.sessionId,
@@ -291,7 +368,8 @@ export const buildReadSessionTranscript = (
       startedAt: turn.startedAt,
       ...(turn.completedAt ? { completedAt: turn.completedAt } : {})
     })),
-    messages: budgeted.messages
+    messages: budgeted.messages,
+    activity: buildActivity(input)
   };
 };
 

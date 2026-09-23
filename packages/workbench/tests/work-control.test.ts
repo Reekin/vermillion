@@ -6,105 +6,93 @@ it("exposes a work immediately and pauses preparation without losing the request
   const f = await setup();
   try {
     const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "turn" });
-    expect(request).toMatchObject({ status: "pending", control: "auto" });
+    expect(request).toMatchObject({ status: "pending", formatVersion: 2 });
     const paused = await f.service.pauseWork(f.workspaceId, request.requestId);
-    expect(paused).toMatchObject({ requestId: request.requestId, control: "paused", waitReason: "用户已暂停当前工作" });
-    const diagnosed = await f.service.diagnoseWork(f.workspaceId, request.requestId);
-    expect(diagnosed.waiting).toContain("用户已暂停当前工作");
-    const resumed = await f.service.resumeWork(f.workspaceId, request.requestId);
-    expect(resumed).toMatchObject({ requestId: request.requestId, control: "auto", status: "pending" });
+    expect(paused).toMatchObject({ requestId: request.requestId, paused: true, waitReason: "用户已暂停当前工作" });
+    expect((await f.service.diagnoseWork(f.workspaceId, request.requestId)).waiting).toContain("用户已暂停当前工作");
+    expect(await f.service.resumeWork(f.workspaceId, request.requestId)).toMatchObject({
+      requestId: request.requestId, paused: false, status: "pending", dispatchRequested: true
+    });
   } finally { await f.cleanup(); }
 });
 
-it("requires explicit preparation handoff before releasing prepared items", async () => {
-  const f = await setup();
-  try {
-    const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "turn" });
-    await f.service.putWorkRequest(f.workspaceId, { ...request, status: "preparing", workerSessionId: "prep", treeId: "tree" });
-    const item = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "prep" });
-    await f.service.finishPreparation(f.workspaceId, "prep", "prep-turn");
-    expect(await f.service.getWorkItem(f.workspaceId, item.workItemId)).toMatchObject({ status: "preparing" });
-    await f.service.completePreparation(f.workspaceId, { requestId: request.requestId, sessionId: "prep", workItemIds: [item.workItemId] });
-    await f.service.finishPreparation(f.workspaceId, "prep", "prep-turn");
-    expect(await f.service.getWorkItem(f.workspaceId, item.workItemId)).toMatchObject({ status: "queued" });
-    expect(await f.service.listWorkRequests(f.workspaceId)).toEqual([expect.objectContaining({ status: "ready", handoff: expect.any(Object) })]);
-  } finally { await f.cleanup(); }
-});
-
-it("allows an explicit retry during preparation backoff without accepting unknown delivery", async () => {
+it("explicit preparation retry preserves uncertain delivery until the original receipt is confirmed", async () => {
   const f = await setup();
   try {
     const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "turn" });
     await f.service.failWorkRequest(f.workspaceId, request.requestId, "network timeout");
-    expect((await f.service.listWorkRequests(f.workspaceId))[0]?.retryAt).toBeDefined();
+    expect((await f.service.listWorkRequests(f.workspaceId))[0]).toMatchObject({ status: "failed", failure: "network timeout" });
     const resumed = await f.service.retryWork(f.workspaceId, request.requestId);
-    expect(resumed).toMatchObject({ status: "pending", control: "auto", attempts: 0 });
-    expect(resumed.retryAt).toBeUndefined();
-    await f.service.putWorkRequest(f.workspaceId, { ...resumed, retryAt: new Date().toISOString(), pendingMessageId: "unknown" });
-    await expect(f.service.retryWork(f.workspaceId, request.requestId)).rejects.toThrow("work.confirm");
+    expect(resumed).toMatchObject({ status: "pending", dispatchRequested: true });
+    await f.service.updateWorkRequest(f.workspaceId, request.requestId, (current) => ({ ...current, pendingMessageId: "unknown" }));
+    await expect(f.service.retryWork(f.workspaceId, request.requestId)).rejects.toThrow("未确认");
   } finally { await f.cleanup(); }
 });
 
-it("turns a queued retry into manual execution and clears the old retry deadline", async () => {
+it("retains handoff registered concurrently with a whole-work pause", async () => {
+  const f = await setup();
+  try {
+    const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+    await f.service.updateWorkRequest(f.workspaceId, request.requestId, (current) => ({ ...current, status: "preparing", workerSessionId: "prep" }));
+    const item = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "prep" });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const pause = f.service.pauseWorkItem.bind(f.service);
+    vi.spyOn(f.service, "pauseWorkItem").mockImplementationOnce(async (...args) => { entered(); await gate; return pause(...args); });
+    const pausing = f.service.pauseWork(f.workspaceId, request.requestId);
+    await started;
+    await f.service.completePreparation(f.workspaceId, { requestId: request.requestId, sessionId: "prep", workItemIds: [item.workItemId] });
+    release();
+    await pausing;
+    await f.service.finishPreparation(f.workspaceId, "prep", "end");
+    expect((await f.service.listWorkRequests(f.workspaceId))[0]).toMatchObject({ paused: true, status: "ready", handoff: { workItemIds: [item.workItemId], turnId: "end" } });
+    await expect(f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "prep" })).rejects.toThrow("暂停");
+  } finally { await f.cleanup(); }
+});
+
+it("keeps a late accepted cancelled business turn occupied until it actually exits", async () => {
   const f = await setup();
   try {
     const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
-    await f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
     const action = (await f.service.listActions(f.workspaceId))[0]!;
-    await f.service.failAction(f.workspaceId, action.actionId, "temporary runtime failure");
-    expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.retryAt).toEqual(expect.any(String));
-    await f.service.dispatchSessionMessage({ sessionId: "worker", messageId: "manual", content: "continue" }, async () => ({ accepted: true, turnId: "user-turn" }));
-    const current = await f.service.getWorkItem(f.workspaceId, item.workItemId);
-    expect(current).toMatchObject({ status: "running", run: { control: "manual", activeTurnId: "user-turn" } });
-    expect(current.run.retryAt).toBeUndefined();
-  } finally { await f.cleanup(); }
-});
-
-it("keeps operational failures out of business decision cards after recovery is exhausted", async () => {
-  const f = await setup();
-  try {
-    const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
-    await f.service.refreshActions(f.workspaceId);
-    const action = (await f.service.listActions(f.workspaceId))[0]!;
-    for (let attempt = 0; attempt < 5; attempt++) await f.service.failAction(f.workspaceId, action.actionId, "429 Too Many Requests");
-    expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.waitReason).toContain("次数");
-    expect(await f.service.listDecisions(f.workspaceId)).toEqual([]);
-  } finally { await f.cleanup(); }
-});
-
-it("transfers a work item through the execution port and leaves the old session revoked", async () => {
-  const f = await setup();
-  try {
-    const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "old-worker" });
+    await f.service.updateAction(f.workspaceId, action, (current) => ({ ...current, pendingMessageId: "dispatch" }));
     const interrupt = vi.fn(async () => {});
-    const fork = vi.fn(async () => ({ sessionId: "new-worker", treeId: "tree" }));
-    const service = new WorkbenchService({ ...f.options, executionTransfer: { interrupt, fork } });
-    const moved = await service.continueWorkItemFrom(f.workspaceId, item.workItemId, { sessionId: "history-session", turnId: "history-turn" });
-    expect(fork).toHaveBeenCalledWith(expect.objectContaining({ sourceSessionId: "history-session", sourceTurnId: "history-turn" }));
-    expect(interrupt).toHaveBeenCalledWith("old-worker");
-    expect(moved).toMatchObject({ status: "queued", run: { sessionId: "new-worker", control: "manual", migratedFromSessionId: "old-worker" } });
-    await service.dispose();
+    f.service.setTurnInterrupter(interrupt);
+    const release = vi.fn(async () => {});
+    f.service.setWorkerEnvironmentReleaser(release);
+    await f.service.cancelWorkItem(f.workspaceId, item.workItemId);
+    await f.service.releaseIdleWorkers(f.workspaceId);
+    expect(release).not.toHaveBeenCalled();
+    await f.service.observeSessionTurn("worker", "cancelled-turn", "dispatch");
+    expect(interrupt).toHaveBeenCalledWith("worker", "cancelled-turn");
+    expect((await f.service.getExecutionOccupancy(f.workspaceId)).sessionIds).toContain("worker");
+    await f.service.settleExecutionTurn(f.workspaceId, "worker", "cancelled-turn", "interrupted");
+    expect((await f.service.getExecutionOccupancy(f.workspaceId)).sessionIds).toEqual([]);
+    await f.service.releaseIdleWorkers(f.workspaceId);
+    expect(release).toHaveBeenCalledWith("worker");
   } finally { await f.cleanup(); }
 });
 
-it("delivers a business decision directly through a manually owned session", async () => {
+it("retains a rejected business answer and delivers it once on explicit resubmission", async () => {
   const f = await setup();
-  const delivered: Array<{ sessionId: string; content: string; messageId?: string }> = [];
-  const service = new WorkbenchService({ ...f.options, sessionSteerer: async (input) => {
-    delivered.push(input);
-    return { sessionId: input.sessionId, turnId: "manual-decision-turn", delivery: "started" };
-  } });
+  let available = false;
+  const send = vi.fn(async (input: { sessionId: string }) => available
+    ? { sessionId: input.sessionId, accepted: true, turnId: "answer" }
+    : { sessionId: input.sessionId, accepted: false, error: { code: "unavailable", message: "Provider unavailable" } });
+  const service = new WorkbenchService({ ...f.options, sessionSteerer: send });
   try {
     const item = await service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
-    await service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
-    await service.dispatchSessionMessage({ sessionId: "worker", messageId: "manual", content: "continue" }, async () => ({ accepted: true, turnId: "manual-turn" }));
-    await service.settleManualTurn("worker", "manual-turn");
-    const action = (await service.listActions(f.workspaceId))[0]!;
-    const card = await service.createDecision(f.workspaceId, { workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker", kind: "worker",
-      question: "Continue?", context: "A business choice is required.", options: [{ key: "go", label: "Continue" }] });
+    const card = await service.createDecision(f.workspaceId, { workItemId: item.workItemId, sessionId: "worker",
+      question: "Continue?", context: "Choose", options: [{ key: "go", label: "Go" }] });
+    expect(await service.answerDecision(f.workspaceId, card.decisionId, { key: "go" })).toMatchObject({
+      deliveryPending: true, deliveryFailure: "Provider unavailable"
+    });
+    available = true;
+    expect(await service.answerDecision(f.workspaceId, card.decisionId, { key: "go" })).toMatchObject({ deliveryPending: false });
     await service.answerDecision(f.workspaceId, card.decisionId, { key: "go" });
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0]).toMatchObject({ sessionId: "worker", messageId: "decision-" + card.decisionId });
-    expect((await service.getWorkItem(f.workspaceId, item.workItemId)).run.control).toBe("manual");
+    expect(send).toHaveBeenCalledTimes(2);
+    expect((await service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("queued");
   } finally { await service.dispose(); await f.cleanup(); }
 });

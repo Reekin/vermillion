@@ -21,6 +21,16 @@ const setup = async () => {
 };
 
 describe("role prompt composition", () => {
+  it("lists the supervisor and composes its project prompt and model configuration", async () => {
+    const { root, globalDir, roles } = await setup();
+    await writeFile(join(globalDir, "supervisor.md"), "---\nmodel: supervisor-model\nreasoning: max\n---\n# Supervisor\nCheck the work.\n");
+    expect((await roles.list(root)).map((role) => role.roleId)).toContain("supervisor");
+    await roles.writeOverride(root, "supervisor", "---\nmode: append\n---\nProject supervision.");
+    expect(await roles.resolve(root, "supervisor")).toMatchObject({ content: "# Supervisor\nCheck the work.\n\nProject supervision.", modelConfig: { modelId: "supervisor-model" } });
+    expect((await roles.read(root, "supervisor")).source).toBe("workspace");
+    await roles.removeOverride(root, "supervisor");
+    expect((await roles.read(root, "supervisor")).source).toBe("global");
+  });
   it.each(["", "---\nmode: override\n---\n"])("uses only the workspace body with header %j", async (header) => {
     const { root, roles } = await setup();
     await roles.writeOverride(root, "worker", header + "# Project\nProject instructions.\n");

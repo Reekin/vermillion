@@ -7,34 +7,32 @@ const at = (day: number) => `2026-09-${String(day).padStart(2, "0")}T00:00:00.00
 const item = (id: string, status: WorkItem["status"], day: number, treeId?: string, requestId?: string): WorkItem => ({
   workItemId: id, title: id, status, updatedAt: at(day), createdAt: at(1), treeId, requestId,
   risk: "R2", objective: "", contractRevision: 0, scope: { inScope: [], outOfScope: [], allowedPaths: [] },
-  refs: [], acceptance: [], needs: [], dependsOn: [], review: [], rejections: [], decisions: [], run: { attempts: 0 }
+  refs: [], acceptance: [], needs: [], dependsOn: [], review: [], rejections: [], decisions: [], run: {}
 });
 const request = (id: string, status: WorkRequest["status"], day: number, treeId?: string): WorkRequest => ({
-  requestId: id, sourceSessionId: "source", treeId, status, updatedAt: at(day), createdAt: at(1)
+  formatVersion: 2, requestId: id, sourceSessionId: "source", treeId, status, updatedAt: at(day), createdAt: at(1)
 });
 
 describe("work board projection", () => {
   it("keeps preparation active through partial creation, child cancellation and handoff turn exit", () => {
     const r = { ...request("prep", "preparing", 2, "tree"), activeTurnId: "turn" };
     const child = item("child", "preparing", 3, "tree", "prep");
-    expect(workRequestStatus(r, [child])).toEqual({ label: "准备中", status: "running" });
+    expect(workRequestStatus(r, [child])).toEqual({ label: "会话运行中", status: "running" });
     expect(workBoardCounts([r], [child])).toEqual({ active: 1, waiting: 0, ended: 0 });
     expect(workBoardGroups([r], [{ ...child, status: "cancelled" }])[0]!.open).toBe(true);
-    expect(workRequestStatus(r, [{ ...child, status: "cancelled" }]).label).toBe("准备中");
-    expect(workRequestStatus({ ...r, status: "ready" }, [child]).label).toBe("准备收尾");
+    expect(workRequestStatus(r, [{ ...child, status: "cancelled" }]).label).toBe("会话运行中");
+    expect(workRequestStatus({ ...r, status: "ready" }, [child]).label).toBe("会话运行中");
     expect(workBoardGroups([{ ...r, status: "ready", activeTurnId: undefined }], [{ ...child, status: "closed" }])[0]!.open).toBe(false);
   });
 
-  it("retains specific retry stages while distinguishing interrupted work", () => {
-    const retry = { ...item("retry", "queued", 2), run: { attempts: 1, retryAt: at(4) } };
-    expect(workItemBoardLabel(retry, "等待重试")).toBe("等待重试");
-    expect(workItemBoardLabel({ ...retry, status: "merging" }, "等待重试")).toBe("等待重试");
-    expect(workItemBoardLabel({ ...retry, status: "decision" }, "等待用户")).toBe("已中断");
+  it("reports interruption from runtime failure", () => {
+    const failed = { ...item("failed", "running", 2), run: { lastFailure: "connection lost" } };
+    expect(workItemBoardLabel(failed, "执行")).toBe("已中断");
   });
   it("keeps each tree together and orders each level by open state then latest change", () => {
     const requests = [request("older", "ready", 2, "a"), request("newer", "ready", 5, "a"), request("prep", "preparing", 8, "b")];
     const items = [item("closed-new", "closed", 20, "a", "older"), item("active-old", "running", 3, "a", "older"),
-      item("waiting-new", "queued", 6, "a", "older"), item("newer-child", "decision", 5, "a", "newer"),
+      item("waiting-new", "queued", 6, "a", "older"), item("newer-child", "running", 5, "a", "newer"),
       item("independent", "queued", 7, "a"), item("ended-tree", "closed", 22, "c"), item("no-tree", "cancelled", 23)];
     const groups = workBoardGroups(requests, items);
     expect(groups.map((g) => g.id)).toEqual(["a", "b", "standalone", "c"]);
@@ -66,15 +64,15 @@ describe("work board projection", () => {
     expect(workRequestStatus(r, [done])).toEqual({ label: "已完成", status: "closed" });
     expect(workRequestStatus(r, [cancelled])).toEqual({ label: "已取消", status: "cancelled" });
     expect(workRequestStatus(r, [done, cancelled])).toEqual({ label: "部分完成", status: "closed" });
-    expect(workRequestStatus(r, [{ ...done, status: "queued", run: { attempts: 0, control: "paused" } }]).label).toBe("已暂停");
-    expect(workRequestStatus(r, [{ ...done, status: "decision", run: { attempts: 0, control: "paused", pauseReason: "user" } }, item("queued", "queued", 4)]).label).toBe("等待推进");
+    expect(workRequestStatus(r, [{ ...done, status: "queued", run: { paused: true } }]).label).toBe("已暂停");
+    expect(workRequestStatus(r, [{ ...done, status: "running", run: { paused: true } }, item("queued", "queued", 4)]).label).toBe("等待推进");
     expect(workRequestStatus(request("prep", "preparing", 2), []).status).not.toBe("running");
   });
 
   it("counts actual preparation and child executions without counting their parent work twice", () => {
     const requests = [request("work", "ready", 2), { ...request("prep", "preparing", 3), activeTurnId: "turn" }];
-    const active = { ...item("active", "running", 3, "tree", "work"), run: { attempts: 0, activeTurnId: "child-turn" } };
-    expect(workBoardCounts(requests, [active, item("done", "closed", 4, "tree", "work"), item("waiting", "decision", 5)]))
+    const active = { ...item("active", "running", 3, "tree", "work"), run: { activeTurnId: "child-turn" } };
+    expect(workBoardCounts(requests, [active, item("done", "closed", 4, "tree", "work"), item("waiting", "running", 5)]))
       .toEqual({ active: 2, waiting: 1, ended: 1 });
   });
 });

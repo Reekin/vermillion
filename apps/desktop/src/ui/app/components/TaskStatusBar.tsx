@@ -33,7 +33,7 @@ export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
               className="min-w-0 flex-1"
               title={task.title}
               meta={workspaces.find((w) => w.workspaceId === task.workspaceId)?.label}
-              trailing={<Badge status={task.status}>{statusLabel[task.status]}</Badge>}
+              trailing={<Badge>{statusLabel[task.status]}</Badge>}
               onClick={() => { setOpen(false); showTask(task); }}
             />
           );

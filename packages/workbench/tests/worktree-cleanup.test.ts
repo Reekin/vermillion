@@ -22,7 +22,7 @@ async function merge(f: Awaited<ReturnType<typeof fixture>>) {
   await writeFile(join(f.worktreePath, "result.txt"), "worker\n");
   await git(f.worktreePath, "add", "result.txt");
   await git(f.worktreePath, "commit", "-qm", "worker result");
-  return f.service.submitWorkItem(f.workspaceId, f.item.workItemId, submission);
+  return f.service.submitWorkItem(f.workspaceId, f.item.workItemId, { ...submission, sessionId: f.item.run.sessionId });
 }
 
 async function detach(f: Awaited<ReturnType<typeof fixture>>) {

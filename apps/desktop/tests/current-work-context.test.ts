@@ -2,16 +2,17 @@ import { describe, expect, it } from "vitest";
 import type { DecisionCard, WorkflowAction, WorkItem, WorkRequest } from "@vermillion/workbench/client";
 import { currentWorkContext, decisionsForWork } from "../src/ui/app/current-work-context.js";
 
-const request = { requestId: "request", workerSessionId: "old", sourceSessionId: "design", status: "ready" } as WorkRequest;
-const moved = { workItemId: "item", requestId: "request", status: "queued", run: { sessionId: "new", migratedFromSessionId: "old" } } as WorkItem;
+const request = { formatVersion: 2, requestId: "request", workerSessionId: "old", sourceSessionId: "design", status: "ready" } as WorkRequest;
+const moved = { workItemId: "item", requestId: "request", status: "queued", run: { sessionId: "new" } } as WorkItem;
 
 describe("current work ownership projection", () => {
   it("does not bind the source design discussion merely because it started work", () => {
     expect(currentWorkContext([moved], [request], "design")).toEqual({});
   });
-  it("lets a transfer notice supersede a ready preparation and a completed result on the old session", () => {
+  it("keeps ordinary forks unbound and preserves completed results", () => {
     const closed = { workItemId: "closed", status: "closed", run: { sessionId: "old" } } as WorkItem;
-    expect(currentWorkContext([closed, moved], [request], "old")).toEqual({ transferredSessionId: "new" });
+    expect(currentWorkContext([closed, moved], [request], "fork")).toEqual({});
+    expect(currentWorkContext([closed, moved], [request], "old")).toEqual({ item: closed });
     expect(currentWorkContext([moved], [request], "new")).toMatchObject({ item: moved });
   });
   it("keeps active preparation ahead of its preregistered first item", () => {
@@ -19,12 +20,12 @@ describe("current work ownership projection", () => {
     const child = { ...moved, status: "preparing" as const, run: { sessionId: "old" } };
     expect(currentWorkContext([child], [preparing], "old")).toEqual({ request: preparing, item: child });
   });
-  it("shows a finished result when there is no active or transferred work", () => {
+  it("shows a finished result when there is no active work", () => {
     const closed = { ...moved, status: "closed" as const, run: { sessionId: "old" } };
     expect(currentWorkContext([closed], [request], "old")).toEqual({ item: closed });
     expect(decisionsForWork([{ workItemId: closed.workItemId, sessionId: "old" } as DecisionCard], [], { item: closed }, "old")).toEqual([]);
   });
-  it("keeps decisions on their owning work after migration without absorbing sibling decisions", () => {
+  it("keeps decisions on their owning work without absorbing sibling decisions", () => {
     const cards = [
       { decisionId: "own", workItemId: "item", requestId: "request", sessionId: "old" },
       { decisionId: "sibling", workItemId: "other", requestId: "request", sessionId: "old" },

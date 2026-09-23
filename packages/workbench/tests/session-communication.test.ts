@@ -67,6 +67,10 @@ it("routes generic steer through the session port and returns its delivery mode"
   const service = new WorkbenchService({ ...fixture.options, sessionSteerer });
   services.push(service);
   const client = createWorkbenchClient({ request: createWorkbenchRpcHandler(service), onEvent: () => () => {} });
+  const item = await service.createWorkItem(fixture.workspaceId, { ...contract, sessionId: "idle" });
+  await service.startWorkItem(fixture.workspaceId, item.workItemId, { sessionId: "idle" });
+  await service.pauseWorkItem(fixture.workspaceId, { workItemId: item.workItemId });
+  const before = await service.getWorkItem(fixture.workspaceId, item.workItemId);
 
   await expect(client.request("steer", { sessionId: "active", content: "Continue the current turn." })).resolves.toMatchObject({
     sessionId: "active",
@@ -80,4 +84,5 @@ it("routes generic steer through the session port and returns its delivery mode"
   });
   expect(sessionSteerer).toHaveBeenNthCalledWith(1, expect.objectContaining({ sessionId: "active", content: "Continue the current turn.", messageId: expect.any(String) }));
   expect(sessionSteerer).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: "idle", content: "Start a new turn.", messageId: expect.any(String) }));
+  expect(await service.getWorkItem(fixture.workspaceId, item.workItemId)).toEqual(before);
 });
