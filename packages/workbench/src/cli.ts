@@ -9,7 +9,7 @@ import { createWorkbenchRpcHandler } from "./rpc-handler.js";
 import { RoleService } from "./roles.js";
 import { WorkbenchService } from "./workbench-service.js";
 import { AppLauncher } from "./app-launcher.js";
-import { methodHelp } from "./cli-help.js";
+import { globalHelp, methodHelp } from "./cli-help.js";
 import { createFileSessionSearchSource, defaultCodexRolloutsDir } from "./search.js";
 
 const desktopSessionMethods = ["sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.readProgress", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead", "clipboard.writeImage"];
@@ -54,7 +54,7 @@ const executeCli = async (argv: string[]): Promise<number> => {
     return 0;
   }
   if (!method || method === "--help" || method === "-h") {
-    process.stdout.write("usage: vermillion [--target <app.start target file>] <method> [json-params]\n单方法帮助: vermillion <method> --help\n\nmethods:\n" + [...Object.keys(workbenchRpc), ...desktopSessionMethods].map((m) => "  " + m).join("\n") + "\n");
+    process.stdout.write(globalHelp([...Object.keys(workbenchRpc), ...desktopSessionMethods]));
     return method ? 0 : 1;
   }
   const desktopSessionMethod = desktopSessionMethods.includes(method);

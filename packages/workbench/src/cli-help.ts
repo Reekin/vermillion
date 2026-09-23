@@ -8,6 +8,7 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "worktree.list": "查询工单已登记的延迟清理候选。",
   "worktree.cleanup": "立即尝试清理无未结束工单占用的候选和已合入的文档草稿；忙目录与有未合入修改的草稿保留至下次调用。只接受 workspaceId，不接受任意路径。",
   "workItem.diagnose": "任何现存工单；只读，不触发调度。",
+  "workItem.list": "只读查询 workspace 的执行工单（WorkItem），包含已结束的工单；不返回 Issues 中的问题与建议。",
   "work.cancel": "准备中的开工请求；通过 requestId 或准备分支 sessionId 取消本次开工及尚未执行的关联工单。",
   "work.prepare.complete": "准备分支已登记本请求全部工单；在准备轮结束前登记完整 workItemIds 与文档 refs，交接后才开放执行。",
   "work.diagnose": "现存工作；只读汇总准备、关联工单、等待原因和合法操作。",
@@ -41,6 +42,7 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "search.start": "只读查询；开始一次流式搜索，命中通过 search.hits 事件推送，结束时推送 search.completed。发起新的流式搜索会终止上一次。",
   "search.cancel": "停止指定 queryId 的流式搜索及其扫描进程。",
   "issue.discuss": "桌面在线；为 Issue 创建或返回已有设计伙伴讨论会话。",
+  "issue.list": "只读查询 Issues 中的问题与建议记录，可按领域和状态筛选；不返回执行工单（WorkItem）。",
   "issue.update": "更新 Issue 分诊、证据或处理结果；关闭和重复需要处理原因。",
   "domain.config.set": "用户管理领域巡检与自动开单授权；按领域独立保存。",
   "domain.instruction.write": "编辑领域专属 Maintainer developer instruction；保存到当前 workspace。",
@@ -51,6 +53,32 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "domain.patrol.complete": "当前 Maintainer 巡检会话登记结果和关联 Issue。",
   "domain.issue.workItem.create": "当前 Maintainer 巡检会话；仅在领域授权、固定要求引用和证据均有效时自动创建关联修复工单。"
 };
+
+const methodGroups = [
+  { title: "工作区（项目目录）", prefixes: ["workspace"] },
+  { title: "会话与消息", prefixes: ["session", "sessionNavigation", "sessionBrowser", "chatTree", "clipboard", "steer", "asksource"] },
+  { title: "文档", prefixes: ["docs"] },
+  { title: "工作 Work（一次开工及准备过程）", prefixes: ["work"] },
+  { title: "执行工单 WorkItem（独立执行与验收的工单）", prefixes: ["workItem", "worktree"] },
+  { title: "Issues（问题与建议的分诊记录，不是执行工单）", prefixes: ["issue"] },
+  { title: "领域与巡检", prefixes: ["domain"] },
+  { title: "搜索", prefixes: ["search"] },
+  { title: "角色", prefixes: ["role"] },
+  { title: "决策与通知", prefixes: ["decision", "inbox"] },
+  { title: "调度与运行", prefixes: ["scheduler", "run", "runtime", "action"] },
+  { title: "应用与验收实例", prefixes: ["app"] }
+];
+
+export function globalHelp(methods: string[]): string {
+  const groups = new Map(methodGroups.map(({ title }) => [title, [] as string[]]));
+  groups.set("其他", []);
+  for (const method of methods) {
+    const title = methodGroups.find(({ prefixes }) => prefixes.includes(method.split(".")[0]!))?.title ?? "其他";
+    groups.get(title)!.push(method);
+  }
+  return "usage: vermillion [--target <app.start target file>] <method> [json-params]\n单方法帮助: vermillion <method> --help\n\nmethods:\n"
+    + [...groups].filter(([, names]) => names.length).map(([title, names]) => `  ${title}\n${names.map((name) => `    ${name}`).join("\n")}`).join("\n") + "\n";
+}
 
 /** Parameters and examples come from the RPC schema rather than a second parameter registry. */
 function describe(schema: z.ZodTypeAny, sample = false, key = "value"): unknown {

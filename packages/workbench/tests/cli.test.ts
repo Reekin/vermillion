@@ -16,6 +16,19 @@ afterEach(async () => {
 });
 
 describe("vermillion cli", () => {
+  it("distinguishes Issues from execution work items in help", async () => {
+    const out: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
+    expect(await runCli(["--help"])).toBe(0);
+    const global = out.pop()!;
+    expect(global).toMatch(/执行工单 WorkItem[^\n]*\n(?:    [^\n]*\n)*    workItem\.list/);
+    expect(global).toMatch(/Issues（问题与建议的分诊记录，不是执行工单）\n(?:    [^\n]*\n)*    issue\.list/);
+    expect(await runCli(["workItem.list", "--help"])).toBe(0);
+    expect(out.pop()).toContain("不返回 Issues 中的问题与建议");
+    expect(await runCli(["issue.list", "--help"])).toBe(0);
+    expect(out.pop()).toContain("不返回执行工单（WorkItem）");
+  });
+
   it("updates, preserves and clears resource claims through workItem.update", async () => {
     const base = await mkdtemp(join(tmpdir(), "verm-cli-needs-"));
     const root = await mkdtemp(join(tmpdir(), "verm-cli-needs-ws-"));
