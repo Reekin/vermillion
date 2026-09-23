@@ -1,5 +1,5 @@
 import type { FSWatcher } from "node:fs";
-import type { TurnInspector } from "./execution-runtime.js";
+import type { TurnInspector, BusinessTarget, BusinessDispatch, BusinessDispatchResult } from "./execution-runtime.js";
 import { basename, resolve } from "node:path";
 import type {
   AgentRun,
@@ -172,6 +172,7 @@ export class WorkbenchService {
   private readonly listeners = new Set<(event: WorkbenchEvent) => void>();
   private readonly integrations = new Map<string, Promise<unknown>>();
   private executionStarter?: (workspaceId: string, workItemId: string) => Promise<void>;
+  private readonly dispatchesInFlight = new Set<string>();
   private readonly patrolScans = new Map<string, Promise<unknown>>();
   private readonly decisionDeliveries = new Map<string, Promise<void>>();
   private schedulerOwner?: object;
@@ -262,6 +263,161 @@ export class WorkbenchService {
     return () => { if (this.executionStarter === starter) this.executionStarter = undefined; };
   }
 
+  private async dispatchOwner(workspaceId: string, target: BusinessTarget) {
+    if ("workItemId" in target) {
+      const item = await this.getWorkItem(workspaceId, target.workItemId);
+      const execution = (await this.listActions(workspaceId)).find((entry): entry is Execution =>
+        entry.kind === "execute" && entry.workItemId === target.workItemId)!;
+      return { item, request: undefined, state: execution, sessionId: execution.sessionId };
+    }
+    const request = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === target.requestId);
+    if (!request) throw new Error("Unknown preparation: " + target.requestId);
+    return { item: undefined, request, state: request, sessionId: request.workerSessionId };
+  }
+
+  private async businessBlocker(workspaceId: string, owner: Awaited<ReturnType<WorkbenchService["dispatchOwner"]>>, automatic = false): Promise<string | undefined> {
+    const { item, request, state, sessionId } = owner;
+    if (state.paused || state.userStopped) return "用户已暂停或停止工作。";
+    if (item && ["closed", "cancelled", "preparing"].includes(item.status) || request && ["ready", "cancelled"].includes(request.status)) return "当前工作不能派发。";
+    if (automatic && !(await this.getScheduler(workspaceId)).enabled) return "自动推进未启用。";
+    if (item) {
+      const parent = item.requestId ? (await this.listWorkRequests(workspaceId)).find(entry => entry.requestId === item.requestId) : undefined;
+      if (parent?.paused || parent?.userStopped || parent?.status === "cancelled") return "所属工作已暂停、停止或取消。";
+      if (await this.isWorkItemBlocked(workspaceId, item.workItemId)) return "工单仍有未解决的依赖或决策等待。";
+      if (item.status === "merging" && !("integrationActionId" in state && state.integrationActionId)) return "工单正在等待合入。";
+    } else if ((await this.listDecisions(workspaceId)).some(card => card.requestId === request!.requestId && !card.answer && !card.withdrawn)) {
+      return "准备仍有未答复的业务决策。";
+    }
+    if (state.activeTurnId || sessionId && this.workerActive?.(sessionId)) return undefined;
+    const occupancy = await this.getExecutionOccupancy(workspaceId);
+    const identity = sessionId ?? (item ? "workItem:" + item.workItemId : "request:" + request!.requestId);
+    if (occupancy.sessionIds.filter(id => id !== identity).length >= (await this.getScheduler(workspaceId)).maxWorkers) return "执行并发名额尚未释放。";
+    if (item && occupancy.workItems.some(entry => entry.workItemId !== item.workItemId &&
+      effectiveNeeds(entry).some(need => effectiveNeeds(item).includes(need)))) return "共享资源尚未释放。";
+    return undefined;
+  }
+
+  /** One business operation owns admission, reservation, delivery and settlement. Chat never enters here. */
+  async dispatchBusiness(workspaceId: string, target: BusinessTarget, operation: BusinessDispatch): Promise<BusinessDispatchResult> {
+    const reserved = await this.integrate(workspaceId, async () => {
+      const owner = await this.dispatchOwner(workspaceId, target);
+      const { item, request, state, sessionId } = owner;
+      if (operation.decisionId) {
+        const card = await (await this.context(workspaceId)).store.decisions.get(operation.decisionId);
+        if (card?.messageId) return { pending: card.messageId, sessionId };
+      }
+      if (state.pendingMessageId) return { pending: state.pendingMessageId, sessionId };
+      if (item && ["closed", "cancelled", "preparing"].includes(item.status) || request && ["ready", "cancelled"].includes(request.status))
+        return { result: { status: "idle" } as BusinessDispatchResult };
+      if (operation.automatic && state.failure) return { result: { status: "failed", reason: state.failure } as BusinessDispatchResult };
+      const active = !!sessionId && (!!state.activeTurnId || !!this.workerActive?.(sessionId));
+      const notices = "notices" in state ? state.notices : [];
+      if (operation.automatic && !operation.decisionId && !notices.length &&
+          (item ? state.status !== "pending" : request!.status !== "pending" && !request!.dispatchRequested))
+        return { result: { status: "idle" } as BusinessDispatchResult };
+      if (!operation.decisionId && active && !notices.length)
+        return { result: { status: "active" } as BusinessDispatchResult };
+      const reason = await this.businessBlocker(workspaceId, owner, operation.automatic);
+      if (reason) return { result: { status: "blocked", reason } as BusinessDispatchResult };
+      const messageId = operation.decisionId ? "decision-" + operation.decisionId : createId("dispatch");
+      if (item) await this.mutateRecord(workspaceId, item.workItemId, (record) => ({ ...record,
+        execution: { ...record.execution, pendingMessageId: messageId,
+          pendingNoticeCount: operation.decisionId ? 0 : notices.length, failure: undefined }
+      }));
+      else await this.updateWorkRequest(workspaceId, request!.requestId, (current) => ({ ...current,
+        pendingMessageId: messageId, dispatchRequested: false, failure: undefined }));
+      if (operation.decisionId) {
+        const { store } = await this.context(workspaceId);
+        const card = (await store.decisions.get(operation.decisionId))!;
+        await store.decisions.put({ ...card, messageId });
+      }
+      this.dispatchesInFlight.add(messageId);
+      return { messageId, owner };
+    });
+    if (reserved.result) return reserved.result;
+    if (reserved.pending) {
+      if (this.dispatchesInFlight.has(reserved.pending)) return { status: "unconfirmed", reason: "业务派发正在交付。" };
+      const confirm = operation.confirm ?? this.deliveryConfirmer;
+      const receipt = reserved.sessionId && confirm ? await confirm(reserved.sessionId, reserved.pending) : undefined;
+      if (!receipt?.accepted) return { status: "unconfirmed", reason: "业务派发结果尚未确认。" };
+      await this.acknowledgeBusinessDispatch(workspaceId, target, reserved.pending, receipt.turnId);
+      await this.reconcileExecutionTurns(workspaceId);
+      return { status: "delivered" };
+    }
+    const messageId = reserved.messageId!;
+    let enteredEngine = false;
+    try {
+      const prepared = await operation.prepare(reserved.owner!);
+      const baseCommit = "workItemId" in target
+        ? (await this.getWorkItem(workspaceId, target.workItemId)).run.baseCommit ?? await (await this.context(workspaceId)).docs.head().catch(() => undefined)
+        : undefined;
+      const permitted = await this.integrate(workspaceId, async () => {
+        const owner = await this.dispatchOwner(workspaceId, target);
+        const { item, request, state, sessionId } = owner;
+        if (state.pendingMessageId !== messageId || state.paused || state.userStopped ||
+            item && ["closed", "cancelled"].includes(item.status) || request?.status === "cancelled") return false;
+        if (sessionId && sessionId !== prepared.sessionId) throw new Error("固定执行会话已改变。");
+        const blocked = await this.businessBlocker(workspaceId, owner, operation.automatic);
+        if (blocked) throw new Error(blocked);
+        if (item) await this.mutateRecord(workspaceId, item.workItemId, (record) => ({ ...record,
+          item: { ...record.item, status: !operation.decisionId && record.item.status === "queued" ? "running" : record.item.status },
+          execution: { ...record.execution, sessionId: prepared.sessionId, baseCommit: record.execution.baseCommit ?? baseCommit }
+        }));
+        else await this.updateWorkRequest(workspaceId, request!.requestId, (current) => ({ ...current,
+          workerSessionId: prepared.sessionId, status: "preparing" }));
+        return true;
+      });
+      if (!permitted) throw new Error("执行控制已改变，本次未发送。");
+      enteredEngine = true;
+      const receipt = await operation.send(prepared.sessionId, prepared.content, messageId);
+      if (receipt?.accepted === false || receipt?.error) {
+        enteredEngine = false;
+        throw new Error(receipt.error?.message ?? "引擎未受理业务派发。");
+      }
+      if (!receipt?.turnId && receipt?.accepted !== true) throw new Error("业务派发受理结果未确认。");
+      await this.acknowledgeBusinessDispatch(workspaceId, target, messageId, receipt?.turnId);
+      return { status: "delivered" };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const owner = await this.dispatchOwner(workspaceId, target);
+      // A start event can confirm the operation before the send promise fails.
+      if (owner.state.pendingMessageId !== messageId) return { status: "delivered" };
+      await this.integrate(workspaceId, async () => {
+        if ("workItemId" in target) await this.mutateRecord(workspaceId, target.workItemId, (record) =>
+          record.execution.pendingMessageId !== messageId ? record : ({ ...record, execution: { ...record.execution,
+            pendingMessageId: enteredEngine ? messageId : undefined,
+            pendingNoticeCount: enteredEngine ? record.execution.pendingNoticeCount : undefined,
+            status: record.execution.status === "cancelled" ? "cancelled" : "decision", failure: reason
+          } }));
+        else await this.updateWorkRequest(workspaceId, target.requestId, (current) => current.pendingMessageId !== messageId ? current : ({ ...current,
+          pendingMessageId: enteredEngine ? messageId : undefined, dispatchRequested: false, failure: reason }));
+        if (operation.decisionId && !enteredEngine) {
+          const { store } = await this.context(workspaceId);
+          const card = (await store.decisions.get(operation.decisionId))!;
+          await store.decisions.put({ ...card, messageId: undefined });
+        }
+      });
+      return { status: enteredEngine ? "unconfirmed" : "failed", reason };
+    } finally { this.dispatchesInFlight.delete(messageId); }
+  }
+
+  private async acknowledgeBusinessDispatch(workspaceId: string, target: BusinessTarget, messageId: string, turnId?: string): Promise<void> {
+    if ("workItemId" in target) await this.acknowledgeWorkerDispatch(workspaceId, target.workItemId, messageId, turnId);
+    else await this.confirmPreparationDelivery(workspaceId, target.requestId, messageId, turnId);
+    const { store } = await this.context(workspaceId);
+    for (const card of await store.decisions.list()) {
+      if (card.messageId === messageId && card.deliveryPending) {
+        await store.decisions.put({ ...card, deliveryPending: false, deliveryFailure: undefined });
+        if ("workItemId" in target && !(await store.decisions.list()).some(other =>
+          other.workItemId === target.workItemId && !other.answer && !other.withdrawn)) {
+          await this.mutateRecord(workspaceId, target.workItemId, record => ({ ...record,
+            execution: { ...record.execution, status: record.execution.status === "decision" && !record.execution.paused ? "running" : record.execution.status }
+          }));
+        }
+      }
+    }
+  }
+
   private async executionBinding(sessionId: string) {
     for (const { workspaceId } of await this.listWorkspaces()) {
       const items = await this.listWorkItems(workspaceId);
@@ -288,8 +444,8 @@ export class WorkbenchService {
     const workItems = await this.listOccupiedWorkItems(workspaceId);
     const requests = await this.listWorkRequests(workspaceId);
     const sessionIds = [...new Set([
-      ...workItems.map((item) => item.run.sessionId),
-      ...requests.filter((request) => (!!request.activeTurnId || !!request.pendingMessageId || !!request.workerSessionId && this.workerActive?.(request.workerSessionId))).map((request) => request.workerSessionId)
+      ...workItems.map((item) => item.run.sessionId ?? "workItem:" + item.workItemId),
+      ...requests.filter((request) => (!!request.activeTurnId || !!request.pendingMessageId || !!request.workerSessionId && this.workerActive?.(request.workerSessionId))).map((request) => request.workerSessionId ?? "request:" + request.requestId)
     ].filter((sessionId): sessionId is string => !!sessionId))];
     return { workItems, sessionIds };
   }
@@ -312,8 +468,9 @@ export class WorkbenchService {
     const ended = binding.request?.status === "cancelled" || !!binding.item && ["closed", "cancelled"].includes(binding.item.status);
     if (ended && !businessReceipt && owner.activeTurnId !== turnId) return;
     this.turnInspections.set(sessionId, { turnId, status: "active" });
-    if (binding.item && businessReceipt) {
-      await this.acknowledgeWorkerDispatch(binding.workspaceId, binding.item.workItemId, messageId!, turnId);
+    if (businessReceipt) {
+      await this.acknowledgeBusinessDispatch(binding.workspaceId,
+        binding.item ? { workItemId: binding.item.workItemId } : { requestId: binding.request!.requestId }, messageId!, turnId);
       return;
     }
     if (binding.request) await this.updateWorkRequest(binding.workspaceId, binding.request.requestId, (current) => ({
@@ -1665,18 +1822,8 @@ export class WorkbenchService {
   }
 
   private async assertDispatchable(workspaceId: string, item: WorkItem): Promise<void> {
-    if (["closed", "cancelled", "preparing"].includes(item.status)) throw new Error("当前工单不能派发：" + item.status);
-    if (item.run.paused || item.run.userStopped) throw new Error("用户已暂停或停止工单，请明确恢复。");
-    const request = item.requestId ? (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === item.requestId) : undefined;
-    if (request?.paused || request?.userStopped || request?.status === "cancelled") throw new Error("所属工作已暂停、停止或取消。");
-    if (await this.isWorkItemBlocked(workspaceId, item.workItemId)) throw new Error("工单仍有未解决的依赖或决策等待。");
-    const occupancy = await this.getExecutionOccupancy(workspaceId);
-    const occupied = occupancy.workItems.filter((entry) => entry.workItemId !== item.workItemId);
-    const scheduler = await this.getScheduler(workspaceId);
-    if (occupancy.sessionIds.filter((sessionId) => sessionId !== item.run.sessionId).length >= scheduler.maxWorkers)
-      throw new Error("执行并发名额尚未释放。");
-    if (occupied.some((entry) => effectiveNeeds(entry).some((need) => effectiveNeeds(item).includes(need))))
-      throw new Error("共享资源尚未释放。");
+    const reason = await this.businessBlocker(workspaceId, await this.dispatchOwner(workspaceId, { workItemId: item.workItemId }));
+    if (reason) throw new Error(reason);
   }
 
   private async startWorkItemRecord(workspaceId: string, workItemId: string, run: Pick<Execution, "sessionId" | "heartbeatAt">): Promise<WorkItem> {
@@ -2332,18 +2479,18 @@ export class WorkbenchService {
     if (card.withdrawn) throw new Error("决策已撤回。");
     if (card.answer) {
       if (card.answer.key !== answer.key || (card.answer.note ?? "") !== (answer.note ?? "")) throw new Error("决策已答复，不能修改答复。");
-      if (card.deliveryPending) await this.flushDecision(workspaceId, card);
+      if (card.deliveryPending) await this.flushDecision(workspaceId, card, true);
       return (await store.decisions.get(decisionId))!;
     }
     if (!answer.key && !answer.note?.trim()) throw new Error("Answer needs an option key or a note");
     if (answer.key && !card.options.some((o) => o.key === answer.key)) throw new Error("Unknown option: " + answer.key);
     const answered = await store.decisions.put({ ...card, answer: { ...answer, at: this.now() }, deliveryPending: true });
-    await this.flushDecision(workspaceId, answered);
+    await this.flushDecision(workspaceId, answered, true);
     this.emit({ type: "decisions.changed", workspaceId });
     return (await store.decisions.get(decisionId))!;
   }
 
-  private async flushDecision(workspaceId: string, card: DecisionCard): Promise<void> {
+  private async flushDecision(workspaceId: string, card: DecisionCard, explicit = false): Promise<void> {
     const key = workspaceId + ":" + card.decisionId;
     const existing = this.decisionDeliveries.get(key);
     if (existing) return existing;
@@ -2352,7 +2499,7 @@ export class WorkbenchService {
       const current = await store.decisions.get(card.decisionId);
       if (!current?.answer || !current.deliveryPending) return;
       try {
-        await this.deliverDecision(workspaceId, current, "用户决策答复：" + describeAnswer(current, current.answer));
+        await this.deliverDecision(workspaceId, current, "用户决策答复：" + describeAnswer(current, current.answer), explicit);
         await store.decisions.put({ ...(await store.decisions.get(card.decisionId))!, deliveryPending: false, deliveryFailure: undefined });
       } catch (error) {
         const latest = (await store.decisions.get(card.decisionId))!;
@@ -2366,66 +2513,25 @@ export class WorkbenchService {
     try { await delivery; } finally { this.decisionDeliveries.delete(key); }
   }
 
-  private async deliverDecision(workspaceId: string, card: DecisionCard, message: string): Promise<void> {
-    const { store } = await this.context(workspaceId);
+  private async deliverDecision(workspaceId: string, card: DecisionCard, message: string, explicit: boolean): Promise<void> {
     const item = card.workItemId ? await this.getWorkItem(workspaceId, card.workItemId) : undefined;
-    const request = card.requestId ? (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === card.requestId)
-      : item?.requestId ? (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === item.requestId) : undefined;
-    const action = card.actionId ? await this.getAction(workspaceId, card.actionId) : undefined;
+    const request = card.requestId ? (await this.listWorkRequests(workspaceId)).find(entry => entry.requestId === card.requestId) : undefined;
     const sessionId = item?.run.sessionId ?? request?.workerSessionId ?? card.sessionId;
-    if (!sessionId) throw new Error("尚无可交付的固定执行会话。");
-    if (item && ["closed", "cancelled"].includes(item.status) || request?.status === "cancelled")
-      throw new Error("目标工作已结束，不再交付。");
-    if (item?.run.paused || item?.run.userStopped || request?.paused || request?.userStopped)
-      throw new Error("目标工作已暂停或由用户停止。");
-    const waiting = (await this.listDecisions(workspaceId)).some((other) => !other.answer && !other.withdrawn &&
-      (item ? other.workItemId === item.workItemId : other.requestId === request?.requestId && !!request));
-    if (waiting) throw new Error("仍有其他决策等待答复。");
-    if (item) await this.assertDispatchable(workspaceId, item);
-    if (!this.sessionSteerer) throw new Error("执行会话未在线。");
-    const messageId = card.messageId ?? "decision-" + card.decisionId;
-    let result: SessionSteerResult;
-    if (card.messageId) {
-      if (!this.deliveryConfirmer) throw new Error("答复交付结果未确认。");
-      const confirmed = await this.deliveryConfirmer(sessionId, messageId);
-      if (!confirmed.accepted) throw new Error("答复交付结果未确认，保留原消息标识等待核对。");
-      result = { sessionId, accepted: true, turnId: confirmed.active === false ? undefined : confirmed.turnId };
-    } else {
-      if (request && !item) await this.integrate(workspaceId, async () => {
-        const current = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === request.requestId)!;
-        if (current.paused || current.userStopped || current.status === "cancelled") throw new Error("准备已暂停、停止或取消。");
-        if (current.pendingMessageId) throw new Error("准备已有业务派发尚未确认，不能交付新的答复。");
-        const active = this.workerActive?.(sessionId) || current.turnStatus === "active";
-        if (current.activeTurnId && !active) throw new Error("准备当前轮次状态尚未确认。");
-        if (!active && (await this.getExecutionOccupancy(workspaceId)).sessionIds.filter((id) => id !== sessionId).length >= (await this.getScheduler(workspaceId)).maxWorkers)
-          throw new Error("执行并发名额尚未释放，准备答复等待交付。");
-        await this.updateWorkRequest(workspaceId, current.requestId, (latest) => ({ ...latest, pendingMessageId: messageId }));
-      });
-      await store.decisions.put({ ...card, messageId, deliveryPending: true });
-      try {
-        result = await this.sessionSteerer({ sessionId, messageId, content: message });
-      } catch (error) {
-        const confirmed = await this.deliveryConfirmer?.(sessionId, messageId);
-        if (!confirmed?.accepted) throw error;
-        result = { sessionId, accepted: true, turnId: confirmed.active === false ? undefined : confirmed.turnId };
-      }
-    }
-    if (result.accepted === false || result.error) {
-      await store.decisions.put({ ...(await store.decisions.get(card.decisionId))!, messageId: undefined });
-      if (request && !item) await this.updateWorkRequest(workspaceId, request.requestId, (current) => current.pendingMessageId === messageId ? { ...current, pendingMessageId: undefined } : current);
-      throw new Error(result.error?.message ?? "会话未接收决策答复。");
-    }
-    if (!result.turnId && result.accepted !== true) throw new Error("答复交付结果未确认。");
-    if (item) await this.mutateRecord(workspaceId, item.workItemId, (record) => ({ ...record,
-      item: { ...record.item, decisions: record.item.decisions.includes(message) ? record.item.decisions : [...record.item.decisions, message] },
-      execution: { ...record.execution, activeTurnId: result.turnId ?? record.execution.activeTurnId,
-        status: record.execution.status === "decision" ? "running" : record.execution.status, waitReason: undefined,
-        history: record.execution.history.some((entry) => entry.decisionId === card.decisionId) ? record.execution.history
+    if (!sessionId || !this.sessionSteerer) throw new Error("尚无可交付的固定执行会话。");
+    const target = item ? { workItemId: item.workItemId } : request ? { requestId: request.requestId } : undefined;
+    if (!target) throw new Error("决策没有关联的工作。");
+    const result = await this.dispatchBusiness(workspaceId, target, {
+      automatic: !explicit, decisionId: card.decisionId,
+      prepare: async () => ({ sessionId, content: message }),
+      send: (sessionId, content, messageId) => this.sessionSteerer!({ sessionId, content, messageId })
+    });
+    if (result.status !== "delivered") throw new Error(result.reason ?? "决策答复尚未交付。");
+    if (item) await this.mutateRecord(workspaceId, item.workItemId, record => ({
+      ...record, item: { ...record.item, decisions: record.item.decisions.includes(message) ? record.item.decisions : [...record.item.decisions, message] },
+      execution: { ...record.execution, waitReason: undefined,
+        history: record.execution.history.some(entry => entry.decisionId === card.decisionId) ? record.execution.history
           : [...record.execution.history, { at: this.now(), event: "decision.answered", message, decisionId: card.decisionId }] }
     }));
-    else if (request) await this.confirmPreparationDelivery(workspaceId, request.requestId, messageId, result.turnId);
-    else if (action) await this.updateAction(workspaceId, action, (current) => ({ ...current,
-      history: [...current.history, { at: this.now(), event: "decision.answered", message, decisionId: card.decisionId }] }));
   }
 
   // ---- inbox ----
