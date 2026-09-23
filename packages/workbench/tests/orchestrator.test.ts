@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { Orchestrator, type AgentRunner } from "../src/orchestrator.js";
+import { WorkbenchService } from "../src/workbench-service.js";
 import { DocsService } from "../src/docs.js";
 import { contract, git, setup, submission } from "./workflow-fixture.js";
 
@@ -258,10 +259,31 @@ it("forks one configured supervisor from completed preparation and waits five mi
   expect(vi.mocked(f.runner.fork).mock.calls.filter(([input]) => input.metadata.role === "supervisor")).toHaveLength(1);
   f.complete(supervisor);
   await vi.waitFor(async () => expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBeDefined());
-  await f.service.cancelWorkItem(f.workspaceId, item.workItemId);
+  await f.service.pauseWork(f.workspaceId, request.requestId);
+  f.complete(prep.workerSessionId!, undefined, "interrupted");
   await reconcile(f.orchestrator, f.workspaceId);
   expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBeUndefined();
+  at = "2026-09-23T01:21:00.000Z";
+  await reconcile(f.orchestrator, f.workspaceId);
   expect(count()).toBe(2);
+  await f.service.resumeWork(f.workspaceId, request.requestId);
+  await vi.waitFor(() => expect(count()).toBe(3));
+  await f.orchestrator.dispose();
+  const reloaded = new WorkbenchService(f.options);
+  const restarted = new Orchestrator({ service: reloaded, roles: f.roles, runner: f.runner, now: () => at });
+  try {
+    restarted.start();
+    await reconcile(restarted, f.workspaceId);
+    expect(count()).toBe(3);
+    expect((await reloaded.listWorkRequests(f.workspaceId))[0]?.supervisor?.sessionId).toBe(supervisor);
+    expect(vi.mocked(f.runner.fork).mock.calls.filter(([input]) => input.metadata.role === "supervisor")).toHaveLength(1);
+    f.complete(supervisor);
+    await vi.waitFor(async () => expect((await reloaded.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBeDefined());
+    await reloaded.cancelWorkItem(f.workspaceId, item.workItemId);
+    await reconcile(restarted, f.workspaceId);
+    expect((await reloaded.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBeUndefined();
+    expect(count()).toBe(3);
+  } finally { await restarted.dispose(); await reloaded.dispose(); }
 });
 
 it("does not backfill supervisors for independent or historical work", async () => {
