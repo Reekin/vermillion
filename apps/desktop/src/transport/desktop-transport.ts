@@ -1,4 +1,5 @@
 import { recordUiOperation } from "../diagnostics/ui-performance.js";
+import type { SessionReadProgress } from "@vermillion/shared";
 import { sessionLoadMark, sessionLoadTrace } from "../diagnostics/session-load-trace.js";
 import type {
   Attachment,
@@ -294,6 +295,7 @@ export type DesktopTransport = {
         includeWindow?: boolean;
         readId?: string;
         signal?: AbortSignal;
+        onProgress?: (progress: SessionReadProgress) => void;
       }
     ) => Promise<{ page?: SessionWindowRpc }>;
     activate: (sessionId: string, options?: { focusTree?: boolean }) => Promise<{ sessionId: string }>;
@@ -336,7 +338,7 @@ export type DesktopTransport = {
     operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
     get: (
       sessionId: string,
-      options?: { scope?: "tree" | "path"; knownWindows?: Record<string, { revision: string; cursor?: string }>; readId?: string; signal?: AbortSignal }
+      options?: { scope?: "tree" | "path"; knownWindows?: Record<string, { revision: string; cursor?: string }>; readId?: string; signal?: AbortSignal; onProgress?: (progress: SessionReadProgress) => void }
     ) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
       sessionId: string;
@@ -578,13 +580,17 @@ export const createDesktopTransport = (
   );
 
   const historyRequest = async <T,>(
-    sessionId: string, method: string, signal: AbortSignal | undefined, readId: string | undefined, request: (readId?: string) => Promise<T>
+    sessionId: string, method: string, signal: AbortSignal | undefined, readId: string | undefined,
+    onProgress: ((progress: SessionReadProgress) => void) | undefined, request: (readId?: string) => Promise<T>
   ): Promise<T> => {
     signal?.throwIfAborted();
     const trace = sessionLoadTrace(sessionId);
     const id = readId ?? (trace ? `${trace.id}::${createId()}` : signal ? createId() : undefined);
     const startedAt = performance.now();
     const fields = { method, readId: id ?? "" };
+    const unsubscribe = onProgress ? preloadApi.subscribeReadProgress?.((progress) => {
+      if (progress.readId === id && progress.sessionId === sessionId && !signal?.aborted) onProgress(progress);
+    }) : undefined;
     sessionLoadMark(trace, "rpc.begin", fields);
     const cancel = () => {
       sessionLoadMark(trace, "rpc.cancel-requested", fields);
@@ -601,7 +607,7 @@ export const createDesktopTransport = (
       sessionLoadMark(trace, "rpc.end", { ...fields, outcome: signal?.aborted ? "cancelled" : "error", durationMs: performance.now() - startedAt });
       throw error;
     }
-    finally { signal?.removeEventListener("abort", cancel); }
+    finally { unsubscribe?.(); signal?.removeEventListener("abort", cancel); }
   };
 
   const requestEngineList = async (): Promise<EngineDefinitionRpc[]> => {
@@ -833,7 +839,7 @@ export const createDesktopTransport = (
           workspaceIds
         }),
       create: (input) => rpc.request("sessionBrowser.create", input),
-      open: (sessionId, options) => historyRequest(sessionId, "sessionBrowser.open", options?.signal, options?.readId, (readId) =>
+      open: (sessionId, options) => historyRequest(sessionId, "sessionBrowser.open", options?.signal, options?.readId, options?.onProgress, (readId) =>
         rpc.request("sessionBrowser.open", {
           sessionId,
           forceProviderHydration: options?.forceProviderHydration,
@@ -922,7 +928,7 @@ export const createDesktopTransport = (
       remove: (input) => rpc.request("chatTree.remove", input),
       operations: (input) => rpc.request("chatTree.operations", input),
       get: async (sessionId, options) => {
-        const result = await historyRequest(sessionId, `chatTree.get.${options?.scope ?? "tree"}`, options?.signal, options?.readId, (readId) => rpc.request("chatTree.get", {
+        const result = await historyRequest(sessionId, `chatTree.get.${options?.scope ?? "tree"}`, options?.signal, options?.readId, options?.onProgress, (readId) => rpc.request("chatTree.get", {
           sessionId,
           ...(options?.scope ? { scope: options.scope } : {}),
           ...(options?.knownWindows ? { knownWindows: options.knownWindows } : {}),

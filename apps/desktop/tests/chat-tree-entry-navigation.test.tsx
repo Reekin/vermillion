@@ -74,12 +74,12 @@ describe("chat tree entry navigation", () => {
       "open:worker", "activate:worker", "jump:historical", "get:path:worker", "get:tree:worker"
     ]);
     expect(test.activate).toHaveBeenCalledWith("worker", { focusTree: true });
-    expect(test.open).toHaveBeenCalledWith("worker", { includeWindow: false, signal: expect.any(AbortSignal), readId: expect.stringContaining("::open::") });
+    expect(test.open).toHaveBeenCalledWith("worker", { includeWindow: false, signal: expect.any(AbortSignal), readId: expect.stringContaining("::open::"), onProgress: expect.any(Function) });
     await test.controller.refreshChatTree();
     expect(test.open).toHaveBeenCalledTimes(1);
     expect(test.activate).toHaveBeenCalledTimes(1);
     expect(test.jump).toHaveBeenCalledTimes(1);
-    expect(test.get).toHaveBeenNthCalledWith(1, "worker", { scope: "path", knownWindows: {}, readId: expect.any(String), signal: expect.any(AbortSignal) });
+    expect(test.get).toHaveBeenNthCalledWith(1, "worker", { scope: "path", knownWindows: {}, readId: expect.any(String), signal: expect.any(AbortSignal), onProgress: expect.any(Function) });
   });
 
   it("shares the pending open across refresh notifications", async () => {

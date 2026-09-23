@@ -8,11 +8,13 @@ import type {
 } from "@vermillion/shared";
 import {
   safeParseSessionEventPushBatch,
+  zSessionReadProgress,
   safeParseSessionEventPush,
   safeParseSessionRpcResponse
 } from "@vermillion/shared";
 import {
   SESSION_IPC_EVENTS_PUSH_CHANNEL,
+  SESSION_IPC_READ_PROGRESS_CHANNEL,
   SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
   SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
   SESSION_IPC_REQUEST_CHANNEL,
@@ -143,7 +145,15 @@ const subscribe: SessionClientApi["subscribe"] = async (params, handler) => {
 
 const api: SessionClientApi = {
   request,
-  subscribe
+  subscribe,
+  subscribeReadProgress: (handler) => {
+    const listener = (_event: unknown, payload: unknown) => {
+      const parsed = zSessionReadProgress.safeParse(payload);
+      if (parsed.success) handler(parsed.data);
+    };
+    ipcRenderer.on(SESSION_IPC_READ_PROGRESS_CHANNEL, listener);
+    return () => { ipcRenderer.removeListener(SESSION_IPC_READ_PROGRESS_CHANNEL, listener); };
+  }
 };
 
 const localAssetsApi: SessionLocalAssetsApi = {

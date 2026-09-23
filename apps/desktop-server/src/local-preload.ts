@@ -29,6 +29,7 @@ export const createLocalDesktopPreloadApi = (
   });
 
   return {
+    subscribeReadProgress: (handler) => "subscribeReadProgress" in service ? service.subscribeReadProgress(handler) : () => {},
     request: async (request: SessionRpcRequest): Promise<SessionRpcResponse> =>
       rpc.handleRequest(request),
     subscribe: async (params, handler) => {

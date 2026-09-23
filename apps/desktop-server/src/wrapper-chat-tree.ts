@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { beginSessionStage } from "./session-load-trace.js";
+import { beginSessionStage, reportSessionReadCounts } from "./session-load-trace.js";
 import type { Turn, ChatTreeSendInput, ChatTreeSendOperation, CommandEnvelope } from "@vermillion/shared";
 import type { ChatTreeSnapshot, ChatTreeNodeSnapshot } from "./chat-tree-provider.js";
 import type { SessionIndexStore } from "./session-index.js";
@@ -418,10 +418,13 @@ export class WrapperChatTreeService {
   private async getViewPath(sessionId: string, knownWindows?: KnownSessionWindows, signal?: AbortSignal): Promise<ChatTreeSnapshot> {
     const chain = this.viewPathMembers(sessionId);
     const members = new Set<string>();
+    let completed = 0;
+    reportSessionReadCounts(completed, chain.length);
     await Promise.all(chain.map(async (memberId) => {
       signal?.throwIfAborted();
       await this.options.ensureHistoryCurrent?.(memberId, signal);
       await this.loadMember(members, memberId, signal, false);
+      reportSessionReadCounts(++completed, chain.length);
     }));
     signal?.throwIfAborted();
     return this.buildProjection(sessionId, members, true, knownWindows).tree;

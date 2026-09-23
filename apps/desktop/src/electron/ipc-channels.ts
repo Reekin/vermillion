@@ -3,6 +3,7 @@ export const SESSION_IPC_REQUEST_CHANNEL =
 
 export const SESSION_IPC_EVENTS_PUSH_CHANNEL =
   "vermillion:session:events-push";
+export const SESSION_IPC_READ_PROGRESS_CHANNEL = "vermillion:session:read-progress";
 
 export const SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL =
   "vermillion:attachments:materialize";

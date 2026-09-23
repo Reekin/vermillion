@@ -445,6 +445,9 @@ export const createWorkbenchRpcHandler = (
               id: request.id, method: request.method, ok: true,
               result: shellService.cancelRead(request.params.readId)
             });
+          case "chatTree.readProgress":
+            if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");
+            return parseSessionRpcResponse({ id: request.id, method: request.method, ok: true, result: { progress: shellService.getReadProgress(request.params.readId) } });
           case "chatTree.submit":
           case "chatTree.nodeAction":
             if (!shellService) return toErrorResponse(request, "CHAT_TREE_UNAVAILABLE", "Chat tree is unavailable.");

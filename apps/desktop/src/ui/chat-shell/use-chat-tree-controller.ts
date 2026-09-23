@@ -1,5 +1,8 @@
 import { isHistoricalChatTreePosition } from "./chat-tree-send-target.js";
 import { recordUiOperation } from "../../diagnostics/ui-performance.js";
+import type { SessionReadProgress } from "@vermillion/shared";
+import { advanceLoadingTimeline, type SessionLoadingStage, type SessionLoadingTimeline } from "./session-loading-progress.js";
+export type { SessionLoadingStage } from "./session-loading-progress.js";
 import { sessionLoadTrace, sessionLoadMark } from "../../diagnostics/session-load-trace.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
@@ -14,12 +17,13 @@ import {
 } from "./composer-status.js";
 
 const emptyOperations: ChatTreeSendOperation[] = [];
-export type SessionLoadingStage = "opening" | "history" | "preparing";
 /** Explicit navigation supplied by a work-item, search or session link. */
 export type ChatTreeNavigationEntry = { focusTree?: boolean; turnId?: string };
 type SessionRequest = { sessionId: string; promise: Promise<void>; signal?: AbortSignal };
 type ChatTreeEntry = {
   loadingStage?: SessionLoadingStage;
+  loadingTimeline?: SessionLoadingTimeline;
+  loadingDetail?: SessionReadProgress;
   opened: { current: SessionRequest | undefined };
   activation: { current: SessionRequest | undefined };
   refresh: ReturnType<typeof createCoalescedRefresh>;
@@ -96,7 +100,7 @@ export const useChatTreeController = (input: {
   sessionIdRef.current = sessionId;
   navigationEntryRef.current = navigationEntry;
 
-  const ensureSessionOpened = useCallback((signal: AbortSignal): Promise<void> => {
+  const ensureSessionOpened = useCallback((signal: AbortSignal, onProgress: (progress: SessionReadProgress) => void): Promise<void> => {
     if (!sessionId || !entry) return Promise.resolve();
     const current = entry.opened.current;
     if (current?.sessionId === sessionId && !current.signal?.aborted) return current.promise;
@@ -104,7 +108,7 @@ export const useChatTreeController = (input: {
     const opened: SessionRequest = {
       sessionId,
       signal,
-      promise: transport.sessionBrowser.open(sessionId, { includeWindow: false, signal,
+      promise: transport.sessionBrowser.open(sessionId, { includeWindow: false, signal, onProgress,
         readId: `${sessionLoadTrace(sessionId)?.id ?? globalThis.crypto.randomUUID()}::open::${globalThis.crypto.randomUUID()}` }).then(() => undefined)
     };
     entry.opened.current = opened;
@@ -251,9 +255,17 @@ export const useChatTreeController = (input: {
       let outcome = "ok";
       let finishRead = () => {};
       const isCurrent = () => entryRef.current === entry && !signal.aborted;
+      entry.loadingTimeline = {};
+      const onProgress = (progress: SessionReadProgress) => {
+        if (!isCurrent()) return;
+        entry.loadingDetail = progress;
+        setCacheRevision((revision) => revision + 1);
+      };
       const setStage = (stage: SessionLoadingStage) => {
         if (!isCurrent()) return;
         entry.loadingStage = stage;
+        entry.loadingDetail = undefined;
+        entry.loadingTimeline = advanceLoadingTimeline(entry.loadingTimeline ?? {}, stage, performance.now());
         setCacheRevision((revision) => revision + 1);
       };
       const navigationForRequest = requestedNavigation ?? navigationEntry;
@@ -261,7 +273,7 @@ export const useChatTreeController = (input: {
         setFailedEntry(undefined);
         setTreeFailure(undefined);
         setStage("opening");
-        await ensureSessionOpened(signal);
+        await ensureSessionOpened(signal, onProgress);
         sessionLoadMark(trace, "open.ready", { readId });
         if (!isCurrent()) return;
         await ensureNavigation(navigationForRequest);
@@ -272,7 +284,7 @@ export const useChatTreeController = (input: {
         finishRead = store.beginSessionWindowRead(readId);
         signal.addEventListener("abort", finishRead, { once: true });
         const [initialPath, result] = await Promise.all([
-          transport.chatTree.get(sessionId, { scope: "path", knownWindows: store.getKnownSessionWindows(), readId, signal }),
+          transport.chatTree.get(sessionId, { scope: "path", knownWindows: store.getKnownSessionWindows(), readId, signal, onProgress }),
           transport.chatTree.operations({ sessionId })
         ]);
         if (!isCurrent()) return;
@@ -314,6 +326,11 @@ export const useChatTreeController = (input: {
         setTreeFailure({ entry, message: `Chat tree refresh failed: ${(error as Error).message}` });
         throw error;
       } finally {
+        if (isCurrent() && entry.loadingStage && entry.loadingTimeline?.[entry.loadingStage]) {
+          const stage = entry.loadingStage;
+          entry.loadingTimeline = { ...entry.loadingTimeline, [stage]: { ...entry.loadingTimeline[stage]!, end: performance.now() } };
+          setCacheRevision((revision) => revision + 1);
+        }
         sessionLoadMark(trace, "refresh.end", { readId, outcome: signal.aborted ? "cancelled" : outcome,
           durationMs: performance.now() - startedAt });
         signal.removeEventListener("abort", finishRead);
@@ -406,6 +423,8 @@ export const useChatTreeController = (input: {
     pendingSend,
     isOpening,
     openingStage: entry?.loadingStage ?? "opening",
+    openingTimeline: entry?.loadingTimeline,
+    openingDetail: entry?.loadingDetail,
     viewSessionId: chatTree?.currentSessionId ?? sessionId,
     refreshChatTree,
     onJumpChatTree: async (nodeId: string): Promise<void> => {

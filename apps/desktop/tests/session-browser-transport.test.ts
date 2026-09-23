@@ -28,6 +28,26 @@ const createPreloadMock = (
 };
 
 describe("session browser transport contracts", () => {
+  it("delivers only the current read's progress and unsubscribes when it settles", async () => {
+    let receive!: Parameters<NonNullable<SessionClientApi["subscribeReadProgress"]>>[0];
+    let finish!: () => void;
+    const stop = vi.fn();
+    const preload = createPreloadMock(async (request) => {
+      if (request.method !== "sessionBrowser.open") throw new Error(request.method);
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { id: request.id, method: request.method, ok: true, result: {} };
+    });
+    preload.api.subscribeReadProgress = (handler) => { receive = handler; return stop; };
+    const onProgress = vi.fn();
+    const pending = createDesktopTransport(preload.api).sessionBrowser.open("s", { includeWindow: false, readId: "current", onProgress });
+    receive({ readId: "old", sessionId: "s", stage: "waiting-engine" });
+    receive({ readId: "current", sessionId: "other", stage: "waiting-engine" });
+    receive({ readId: "current", sessionId: "s", stage: "converting" });
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    finish();
+    await pending;
+    expect(stop).toHaveBeenCalledOnce();
+  });
   it("cancels the actual history request and removes the cancellation listener on settlement", async () => {
     let finish!: () => void;
     const preload = createPreloadMock(async (request) => {

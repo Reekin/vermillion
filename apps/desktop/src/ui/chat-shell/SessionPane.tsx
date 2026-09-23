@@ -1,6 +1,8 @@
 import { sessionContentCommitted } from "../../diagnostics/session-load-trace.js";
 import { SessionLoadingState } from "./SessionLoadingState.js";
 import type { SessionLoadingStage } from "./use-chat-tree-controller.js";
+import type { SessionLoadingTimeline } from "./session-loading-progress.js";
+import type { SessionReadProgress } from "@vermillion/shared";
 import type {
   SessionExecutionProfileInput,
   TurnExecutionOptions
@@ -154,6 +156,8 @@ type TranscriptPaneProps = {
   activeSessionId?: string;
   isOpeningSelectedSession: boolean;
   openingStage?: SessionLoadingStage;
+  openingTimeline?: SessionLoadingTimeline;
+  openingDetail?: SessionReadProgress;
   openingError?: string;
   onRetryOpening?: () => void;
   /** A session switch is in flight; hold the empty state so it doesn't flash before content arrives. */
@@ -410,6 +414,8 @@ const TranscriptPane = memo(
     activeSessionId,
     isOpeningSelectedSession,
     openingStage,
+    openingTimeline,
+    openingDetail,
     openingError,
     onRetryOpening,
     isSwitchPending,
@@ -435,7 +441,7 @@ const TranscriptPane = memo(
     >
       <div className="awb-transcript__content" ref={transcriptContentRef}>
         {!pendingSend && renderedTranscriptRows.length === 0 && (isOpeningSelectedSession || openingError) && (
-          <SessionLoadingState stage={openingStage} failed={Boolean(openingError)} onRetry={onRetryOpening} />
+          <SessionLoadingState stage={openingStage} timeline={openingTimeline} progress={openingDetail} failed={Boolean(openingError)} onRetry={onRetryOpening} />
         )}
         {!pendingSend && renderedTranscriptRows.length === 0 && !isSwitchPending && !openingError && (
           <div className="awb-transcript__empty">
@@ -630,6 +636,8 @@ const TranscriptPane = memo(
     previous.activeSessionId === next.activeSessionId &&
     previous.isOpeningSelectedSession === next.isOpeningSelectedSession &&
     previous.openingStage === next.openingStage &&
+    previous.openingTimeline === next.openingTimeline &&
+    previous.openingDetail === next.openingDetail &&
     previous.openingError === next.openingError &&
     previous.onRetryOpening === next.onRetryOpening &&
     previous.isSwitchPending === next.isSwitchPending &&
@@ -764,6 +772,8 @@ export const SessionPane = ({
     viewSessionId,
     isOpening: isOpeningSelectedSession,
     openingStage,
+    openingTimeline,
+    openingDetail,
     refreshChatTree,
     onJumpChatTree,
     prepareSend: prepareChatTreeSend,
@@ -1225,6 +1235,8 @@ export const SessionPane = ({
             activeSessionId={activeSessionId}
             isOpeningSelectedSession={showOpeningIndicator}
             openingStage={isOpeningSelectedSession ? openingStage : undefined}
+            openingTimeline={isOpeningSelectedSession || !activeChatTree ? openingTimeline : undefined}
+            openingDetail={isOpeningSelectedSession ? openingDetail : undefined}
             openingError={activeChatTree ? undefined : chatTreeError}
             onRetryOpening={retryOpening}
             isSwitchPending={isOpeningSelectedSession}

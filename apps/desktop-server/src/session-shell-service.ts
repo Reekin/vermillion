@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { traceSessionRead, sessionStage } from "./session-load-trace.js";
+import { SessionReadProgressTracker } from "./session-read-progress.js";
+import type { SessionReadProgress } from "@vermillion/shared";
 import { readSession, type ReadSessionArgs } from "./read-session-host-tool.js";
 import type { ReadSessionTranscriptResult } from "./read-session-transcript.js";
 import type { HostToolRegistry } from "./host-tools.js";
@@ -211,6 +213,17 @@ export class SessionShellService {
   private readonly diagnosticLogService: DiagnosticLogService;
   private openSessionAbortController: AbortController | undefined;
   private readonly reads = new Map<string, AbortController>();
+  private readonly readProgress = new Map<string, SessionReadProgressTracker>();
+  private readonly readProgressListeners = new Set<(value: SessionReadProgress) => void>();
+
+  public subscribeReadProgress(listener: (value: SessionReadProgress) => void): () => void {
+    this.readProgressListeners.add(listener);
+    return () => { this.readProgressListeners.delete(listener); };
+  }
+
+  public getReadProgress(readId: string): SessionReadProgress | null {
+    return this.readProgress.get(readId)?.value ?? null;
+  }
   private activationQueue: Promise<void> = Promise.resolve();
   private readonly partiallyHydratedSessionIds = new Set<string>();
   private readonly executionRecoveryBySessionId = new Map<string, Promise<void>>();
@@ -885,10 +898,18 @@ export class SessionShellService {
   }
 
   private async withRead<T>(readId: string | undefined, sessionId: string, read: (signal?: AbortSignal) => Promise<T>): Promise<T> {
-    const traced = (signal?: AbortSignal) => traceSessionRead(readId ?? randomUUID(), sessionId,
-      (entry) => { void this.diagnosticLogService.write(entry).catch(() => undefined); }, () => read(signal));
+    const id = readId ?? randomUUID();
+    const progress = new SessionReadProgressTracker(id, sessionId, (value) => {
+      if (this.readProgress.get(id) !== progress) return;
+      for (const listener of this.readProgressListeners) {
+        try { listener(value); } catch { /* A closed observer cannot fail history loading. */ }
+      }
+    });
+    const traced = (signal?: AbortSignal) => traceSessionRead(id, sessionId,
+      (entry) => { void this.diagnosticLogService.write(entry).catch(() => undefined); }, () => read(signal), progress);
     if (!readId) return traced();
     if (this.reads.has(readId)) throw new Error(`Read already in progress: ${readId}`);
+    this.readProgress.set(id, progress);
     const controller = new AbortController();
     this.reads.set(readId, controller);
     try {
@@ -896,6 +917,7 @@ export class SessionShellService {
       controller.signal.throwIfAborted();
       return result;
     } finally {
+      if (this.readProgress.get(id) === progress) this.readProgress.delete(id);
       if (this.reads.get(readId) === controller) this.reads.delete(readId);
     }
   }

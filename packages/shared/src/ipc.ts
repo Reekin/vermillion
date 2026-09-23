@@ -52,6 +52,7 @@ export const sessionRpcMethods = [
   "skills.list",
   "chatTree.get",
   "chatTree.cancelRead",
+  "chatTree.readProgress",
   "chatTree.nodeAction",
   "chatTree.jump",
   "chatTree.markRead",
@@ -777,6 +778,16 @@ const zChatTreeCancelReadRequestSchema = z.object({
   params: z.object({ readId: z.string().min(1) })
 });
 
+export const zSessionReadProgress = z.object({
+  readId: z.string(), sessionId: z.string(),
+  stage: z.enum(["checking", "rebuilding", "waiting-engine", "reading", "converting", "committing", "building"]),
+  completed: z.number().int().nonnegative().optional(), total: z.number().int().nonnegative().optional()
+});
+export type SessionReadProgress = z.infer<typeof zSessionReadProgress>;
+const zChatTreeReadProgressRequestSchema = z.object({
+  id: zRequestId, method: z.literal("chatTree.readProgress"), params: z.object({ readId: z.string().min(1) })
+});
+
 const zChatTreeJumpRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("chatTree.jump"),
@@ -997,6 +1008,7 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zSkillsListRequestSchema,
   zChatTreeGetRequestSchema,
   zChatTreeCancelReadRequestSchema,
+  zChatTreeReadProgressRequestSchema,
   zChatTreeNodeActionRequestSchema,
   zChatTreeJumpRequestSchema,
   zChatTreeMarkReadRequestSchema,
@@ -1263,6 +1275,10 @@ const zChatTreeCancelReadResponseSchema = z.object({
   ok: z.literal(true),
   result: z.object({ cancelled: z.boolean() })
 });
+const zChatTreeReadProgressResponseSchema = z.object({
+  id: zRequestId, method: z.literal("chatTree.readProgress"), ok: z.literal(true),
+  result: z.object({ progress: zSessionReadProgress.nullable() })
+});
 
 const zChatTreeJumpResponseSchema = z.object({
   id: zRequestId,
@@ -1504,6 +1520,7 @@ export const zSessionRpcResponseSchema = z.union([
   zSkillsListResponseSchema,
   zChatTreeGetResponseSchema,
   zChatTreeCancelReadResponseSchema,
+  zChatTreeReadProgressResponseSchema,
   zChatTreeNodeActionResponseSchema,
   zChatTreeJumpResponseSchema,
   zChatTreeMarkReadResponseSchema,
@@ -1620,6 +1637,7 @@ export type CodexTurnChangesUndoResultRpc = z.infer<
 export type SessionEventHandler = (event: SessionEventPush) => void;
 
 export type SessionClientApi = {
+  subscribeReadProgress?: (handler: (progress: SessionReadProgress) => void) => () => void;
   request: (request: SessionRpcRequest) => Promise<SessionRpcResponse>;
   subscribe: (
     params: Extract<SessionRpcRequest, { method: "events.subscribe" }>["params"],

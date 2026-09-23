@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   SESSION_IPC_EVENTS_PUSH_CHANNEL,
+  SESSION_IPC_READ_PROGRESS_CHANNEL,
   SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
   SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
   SESSION_IPC_REQUEST_CHANNEL,
@@ -752,6 +753,9 @@ const boot = async (): Promise<void> => {
   ipcMain.handle(SESSION_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
     router.handleRequest(payload)
   );
+  const stopReadProgress = service.subscribeReadProgress((progress) => {
+    if (!window.isDestroyed()) window.webContents.send(SESSION_IPC_READ_PROGRESS_CHANNEL, progress);
+  });
   const roleService = new RoleService({ globalDir: join(persistenceBaseDir, "roles"), defaultsDir: roleDefaultsDir });
   await roleService.ensureGlobal();
   const agentRunner = createAgentRunner(service);
@@ -894,7 +898,7 @@ const boot = async (): Promise<void> => {
       }
       return { ok: true, result: await writeVerifiedClipboardImage(clipboard, source) };
     }
-    if (["engine.listModels", "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
+    if (["engine.listModels", "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.readProgress", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
       const response = await router.handleRequest({ ...request, id: randomUUID() });
       return response.ok
         ? { ok: true, result: response.result }
@@ -968,6 +972,7 @@ const boot = async (): Promise<void> => {
   });
 
   app.once("will-quit", () => {
+    stopReadProgress();
     if (completionTrayDestroyTimer) {
       clearTimeout(completionTrayDestroyTimer);
     }
