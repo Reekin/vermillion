@@ -2181,7 +2181,9 @@ export class WorkbenchService {
         if (!this.executionStarter) throw new Error("执行调度器未在线，无法核对派发。");
         return true;
       }
-      if (item.run.activeTurnId || item.run.sessionId && this.workerActive?.(item.run.sessionId)) return false;
+      const active = item.run.activeTurnId || item.run.sessionId && this.workerActive?.(item.run.sessionId);
+      const execution = (await this.listActions(workspaceId)).find((entry): entry is Execution => entry.kind === "execute" && entry.workItemId === workItemId)!;
+      if (active && !execution.notices.length) return false;
       if (item.run.userStopped && !item.run.paused) {
         item = await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record, execution: { ...record.execution, userStopped: false } }));
       }

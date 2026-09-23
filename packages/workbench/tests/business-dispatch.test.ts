@@ -160,3 +160,24 @@ it("rechecks automatic eligibility after preparation while leaving explicit user
   expect(await f.service.dispatchBusiness(f.workspaceId, { workItemId: item.workItemId }, port)).toMatchObject({ status: "delivered" });
   expect(port.send).toHaveBeenCalledOnce();
 });
+
+it("explicit retry can deliver a failed notice into the existing active turn", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  await f.service.observeSessionTurn("worker", "active-turn");
+  const action = (await f.service.listActions(f.workspaceId))[0]!;
+  await f.service.updateAction(f.workspaceId, action, current => current.kind === "execute" ? { ...current,
+    notices: [{ kind: "contract", at: new Date().toISOString(), text: "Changed contract" }] } : current);
+  const port = delivery("worker");
+  expect(await f.service.dispatchBusiness(f.workspaceId, { workItemId: item.workItemId }, {
+    ...port, send: async () => ({ accepted: false, error: { code: "refused", message: "refused" } })
+  })).toMatchObject({ status: "failed" });
+  port.send.mockResolvedValue({ accepted: true, turnId: "active-turn" });
+  f.service.setExecutionStarter(async () => {
+    expect(await f.service.dispatchBusiness(f.workspaceId, { workItemId: item.workItemId }, port)).toMatchObject({ status: "delivered" });
+  });
+  await f.service.retryWorkItem(f.workspaceId, item.workItemId);
+  expect(port.send).toHaveBeenCalledOnce();
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.activeTurnId).toBe("active-turn");
+  expect((await f.service.listActions(f.workspaceId))[0]).toMatchObject({ notices: [] });
+});
