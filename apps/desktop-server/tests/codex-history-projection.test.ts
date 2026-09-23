@@ -72,6 +72,21 @@ describe("CodexHistoryProjection", () => {
     });
   });
 
+  it("does not start a cleanup transaction when cancelled during source resolution", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "vermillion-history-cancel-"));
+    tempDirs.push(directory);
+    const database = new DatabaseSync(join(directory, "thread_history_1.sqlite"));
+    database.exec("CREATE TABLE thread_turns (thread_id TEXT); INSERT INTO thread_turns VALUES ('target')");
+    const controller = new AbortController();
+    const projection = new CodexHistoryProjection({ resolveSqliteHome: async () => {
+      controller.abort();
+      return directory;
+    } });
+    await expect(projection.clearThread("target", controller.signal)).rejects.toThrow();
+    expect(database.prepare("SELECT thread_id FROM thread_turns").all()).toHaveLength(1);
+    database.close();
+  });
+
   it("keeps the caller responsive during a lock timeout and can clear after the lock is released", async () => {
     const directory = await mkdtemp(join(tmpdir(), "vermillion-history-lock-"));
     tempDirs.push(directory);

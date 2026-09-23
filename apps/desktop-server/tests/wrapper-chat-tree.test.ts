@@ -10,7 +10,8 @@ const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
 
 const fixture = async (
-  logDiagnostic?: (input: { message: string; sessionId?: string }) => void
+  logDiagnostic?: (input: { message: string; sessionId?: string }) => void,
+  ensureHistoryCurrent?: (sessionId: string, signal?: AbortSignal) => Promise<boolean>
 ) => {
   const baseDir = await mkdtemp(join(tmpdir(), "wrapper-tree-"));
   dirs.push(baseDir);
@@ -44,11 +45,14 @@ const fixture = async (
       getSnapshot: () => snapshot,
       getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
       getRevision: () => "initial",
+      getSessionHistoryRevision: (id: string) => `history-${id}`,
+      hasSessionWindow: (id: string, known?: { revision: string }) => known?.revision === `history-${id}`,
       updateSessionMetadata,
       notifyChatTreeChanged: changed,
       subscribe: (next: typeof listener) => { listener = next; return () => {}; }
     } as never,
     capabilities: { forkSessionFromTurn: fork } as never,
+    ensureHistoryCurrent,
     ...(logDiagnostic ? { logDiagnostic } : {})
   });
   return { service, index, snapshot, load, fork, baseDir, changed, updateSessionMetadata,
@@ -57,6 +61,26 @@ const fixture = async (
 };
 
 describe("wrapper session trees", () => {
+  it("stops a cancelled path at source validation before starting member reads", async () => {
+    const controller = new AbortController();
+    const signals: (AbortSignal | undefined)[] = [];
+    const finishes: (() => void)[] = [];
+    const f = await fixture(undefined, async (_sessionId, signal) => {
+      signals.push(signal);
+      await new Promise<void>((resolve) => { finishes.push(resolve); });
+      return true;
+    });
+    const reading = f.service.get("branch", "path", undefined, controller.signal);
+    const rejected = expect(reading).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    controller.abort();
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    finishes.forEach((finish) => finish());
+    await rejected;
+    expect(f.load).not.toHaveBeenCalled();
+    f.service.dispose();
+  });
+
   it("opens the requested discussion branch even when preparation is newer", async () => {
     const f = await fixture();
     const preparation = f.snapshot.sessions.find((session) => session.sessionId === "branch")!;
@@ -170,6 +194,20 @@ describe("wrapper session trees", () => {
     const rootPath = await f.service.get("root", "path");
     expect(rootPath.windows?.map((window) => window.sessionId)).toEqual(["root"]);
     expect(rootPath.visibleTurnIds).toEqual(["a", "b"]);
+    f.service.dispose();
+  });
+
+  it("omits only acknowledged member bodies while preserving path structure", async () => {
+    const f = await fixture();
+    const first = await f.service.get("branch", "path");
+    const known = Object.fromEntries(first.windows!.map((window) => [window.sessionId, { revision: window.revision! }]));
+    const cached = await f.service.get("branch", "path", known);
+    expect(cached.windows).toEqual([]);
+    expect(cached.visibleTurnIds).toEqual(first.visibleTurnIds);
+    expect(cached.nodes).toEqual(first.nodes);
+    const changed = await f.service.get("branch", "path", { ...known, branch: { revision: "stale" } });
+    expect(changed.windows?.map((window) => window.sessionId)).toEqual(["branch"]);
+    expect((await f.service.get("branch", "path")).windows).toHaveLength(2);
     f.service.dispose();
   });
 

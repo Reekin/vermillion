@@ -9,13 +9,13 @@ import {
   type ReactNode,
   type ReactElement
 } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import remarkGfm from "remark-gfm";
+import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import { isExternalLinkHref, messageMarkdownAstCache, unsupportedLinkHrefPrefix } from "./markdown-ast-cache.js";
 import type { MessageBlock } from "@vermillion/shared";
 import { fileUriToPath } from "@vermillion/shared";
 import { createDesktopTransport } from "../../transport/desktop-transport.js";
-import { localMarkdownFileUrl, resolveLocalFileLinkTarget } from "./local-markdown-target.js";
+import { resolveLocalFileLinkTarget } from "./local-markdown-target.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { writeClipboardText } from "./clipboard.js";
 
@@ -40,54 +40,6 @@ export type MessageMarkdownViewProps = {
   copyBlocks?: readonly MessageBlock[];
   onPreviewImage?: (input: { src: string; alt: string }) => void;
   renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
-};
-
-const sanitizeSchema = {
-  ...defaultSchema,
-  protocols: {
-    ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "file"],
-    src: [...(defaultSchema.protocols?.src ?? []), "file", "data"]
-  }
-};
-const allowLocalFileUrls = (url: string): string => url;
-
-const externalLinkProtocols = new Set(["http:", "https:", "mailto:"]);
-const unsupportedLinkHrefPrefix = "#awb-unsupported-link:";
-
-const isExternalLinkHref = (href: string): boolean => {
-  try {
-    return externalLinkProtocols.has(new URL(href).protocol);
-  } catch {
-    return false;
-  }
-};
-
-type HtmlAstNode = {
-  tagName?: string;
-  properties?: Record<string, unknown>;
-  children?: HtmlAstNode[];
-};
-
-const protectUnsupportedLinkTargets = () => {
-  const visit = (node: HtmlAstNode): void => {
-    const href = node.tagName === "a" ? node.properties?.href : undefined;
-    const src = node.tagName === "img" ? node.properties?.src : undefined;
-    if (typeof src === "string" && node.properties) {
-      node.properties.src = localMarkdownFileUrl(src) ?? src;
-    }
-    const localHref = typeof href === "string" ? localMarkdownFileUrl(href) : undefined;
-    if (localHref && node.properties) {
-      node.properties.href = localHref;
-    } else if (typeof href === "string" && href.length > 0 && !isExternalLinkHref(href)) {
-      node.properties = {
-        ...node.properties,
-        href: `${unsupportedLinkHrefPrefix}${encodeURIComponent(href)}`
-      };
-    }
-    node.children?.forEach(visit);
-  };
-  return visit;
 };
 
 const openExternalLink = (href: string): void => {
@@ -589,17 +541,19 @@ const UnsupportedFileLink = ({ target, children, renderFileLinkContextMenu }: {
   );
 };
 
-const MarkdownRenderer = memo(({
+export const renderMessageMarkdown = ({
   text,
   cacheKey,
   onPreviewImage,
   renderFileLinkContextMenu
-}: MarkdownRendererProps): ReactElement => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    rehypePlugins={[protectUnsupportedLinkTargets, [rehypeSanitize, sanitizeSchema]]}
-    urlTransform={allowLocalFileUrls}
-    components={{
+}: MarkdownRendererProps): ReactElement => toJsxRuntime(messageMarkdownAstCache.get(cacheKey, text), {
+    Fragment,
+    jsx,
+    jsxs,
+    ignoreInvalidStyle: true,
+    passKeys: true,
+    passNode: true,
+    components: {
       a: ({ href, children, node: _ignoredNode, ...props }) => {
         if (href && fileUriToPath(href) !== undefined) {
           return (
@@ -643,7 +597,7 @@ const MarkdownRenderer = memo(({
           </span>
         );
       },
-      img: ({ src, alt, ...props }) => {
+      img: ({ src, alt, node: _ignoredNode, ...props }) => {
         const previewSrc = buildLocalImagePreviewSrc(src, cacheKey);
         if (!src || !onPreviewImage) {
           return <img src={previewSrc} alt={alt ?? ""} {...props} />;
@@ -660,11 +614,10 @@ const MarkdownRenderer = memo(({
           </button>
         );
       }
-    }}
-  >
-    {text}
-  </ReactMarkdown>
-));
+    }
+  });
+
+const MarkdownRenderer = memo(renderMessageMarkdown);
 
 type MermaidBlockProps = {
   source: string;
@@ -758,15 +711,18 @@ export const MessageMarkdownView = memo(({
     )
     .join("\n\n");
   const deferredText = useDeferredValue(sourceText);
-  const userMessageParts = splitUserMessageText(deferredText);
+  const userMessageParts = useMemo(
+    () => block.role === "user" ? splitUserMessageText(deferredText) : { text: "" },
+    [block.role, deferredText]
+  );
   const { stableMarkdown, tailText } = useMemo(
     () => resolveRenderableMarkdownText(block, deferredText),
     [block, deferredText]
   );
   const isEmpty = deferredText.trim().length === 0;
   const renderableSegments = useMemo(
-    () => buildRenderableSegments(stableMarkdown),
-    [stableMarkdown]
+    () => block.role === "user" ? [] : buildRenderableSegments(stableMarkdown),
+    [block.role, stableMarkdown]
   );
   const hasMermaidSegment = renderableSegments.some((segment) => segment.kind === "mermaid");
   const roleClass =

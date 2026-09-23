@@ -31,6 +31,8 @@ describe("renderer refresh signals", () => {
     ]);
 
     expect(signals.sessionBrowser).toBe(2);
+    // A new turn changes the reading path even when sidebar-only changes are ignored.
+    expect(signals.chatTree).toBe(1);
   });
 
   it("refreshes the session browser only for terminal session errors", () => {

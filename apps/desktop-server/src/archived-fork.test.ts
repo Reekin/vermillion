@@ -50,7 +50,8 @@ it("excludes archived forks from loading and projection while keeping live forks
     runtimeService: {
       getSnapshot: () => snapshot,
       getSession: (id: string) => snapshot.sessions.find((session) => session.sessionId === id),
-      getRevision: () => "initial", subscribe: () => () => {}
+      getRevision: () => "initial", getSessionHistoryRevision: () => "history", hasSessionWindow: () => false,
+      subscribe: () => () => {}
     } as never,
     capabilities: { forkSessionFromTurn: vi.fn() } as never
   });
@@ -88,7 +89,8 @@ it("repairs a missing archive marker from the provider without breaking the firs
   await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "root", childSessionId: "clarification", relationType: "fork", sourceTurnId: "root-turn" });
   const runtimeService = {
     getSnapshot: () => snapshot, getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
-    listSessions: () => snapshot.sessions, getRevision: () => "initial", subscribe: () => () => {}
+    listSessions: () => snapshot.sessions, getRevision: () => "initial",
+    getSessionHistoryRevision: () => "history", hasSessionWindow: () => false, subscribe: () => () => {}
   } as never;
   const hydrate = vi.fn(async () => { throw new Error("session archived-provider is archived. Run `codex unarchive archived-provider` to unarchive it first."); });
   const reconciliation = new SessionReconciliationService({

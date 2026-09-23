@@ -769,7 +769,7 @@ export const SessionPane = ({
     transport,
     sessionId,
     navigationEntry,
-    refreshSignal: state.refreshSignals.chatTree + state.refreshSignals.sessionBrowser,
+    refreshSignal: state.refreshSignals.chatTree,
     onStatusNotice: setStatusNotice
   });
   const visibleTurnIds = activeChatTree?.visibleTurnIds ?? emptyTurnIds;
@@ -916,7 +916,7 @@ export const SessionPane = ({
   }, [sessionId]);
   const onResumeSession = useCallback(async () => {
     if (!viewSessionId) return;
-    await transport.sessionBrowser.open(viewSessionId);
+    await transport.sessionBrowser.open(viewSessionId, { includeWindow: false });
     await refreshChatTree();
   }, [transport, viewSessionId, refreshChatTree]);
   const lastExecution = useMemo(() => toComposerExecution(
@@ -930,7 +930,7 @@ export const SessionPane = ({
 
   useEffect(() => {
     if (!viewSessionId || !reloadSignal) return;
-    void transport.sessionBrowser.open(viewSessionId, { forceProviderHydration: true })
+    void transport.sessionBrowser.open(viewSessionId, { forceProviderHydration: true, includeWindow: false })
       .then(() => refreshChatTree())
       .catch((error) => setStatusNotice({
         message: `Session refresh failed: ${(error as Error).message}`,

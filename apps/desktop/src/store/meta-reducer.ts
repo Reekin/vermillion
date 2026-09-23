@@ -45,18 +45,14 @@ export const compareCursorPosition = (
 export const isSessionWindowStale = (
   state: RendererStoreState,
   sessionId: string,
-  cursor: string | undefined,
-  conversationId?: string
+  cursor: string | undefined
 ): boolean => {
   const currentCursor = state.eventStream.lastCursorBySessionId?.[sessionId];
-  const conversationCursor = conversationId
-    ? state.eventStream.lastCursorByConversationId?.[conversationId]
-    : undefined;
-  if (!cursor) return Boolean(currentCursor || conversationCursor);
+  // A member window owns only that session's history. Sibling activity must
+  // not prevent a cold ancestor from acquiring its complete baseline.
+  if (!cursor) return Boolean(currentCursor);
   const sessionComparison = compareCursorPosition(currentCursor, cursor);
-  if (sessionComparison !== undefined && sessionComparison > 0) return true;
-  const conversationComparison = compareCursorPosition(conversationCursor, cursor);
-  return conversationComparison !== undefined && conversationComparison > 0;
+  return sessionComparison !== undefined && sessionComparison > 0;
 };
 
 export const isGlobalSnapshotStale = (
@@ -369,8 +365,7 @@ export const rendererMetaReducer = (
       if (action.mode !== "prepend" && isSessionWindowStale(
         state,
         action.sessionId,
-        action.cursor,
-        action.snapshot.conversations[0]?.conversationId
+        action.cursor
       )) {
         return state;
       }

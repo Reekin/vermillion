@@ -30,7 +30,8 @@ const setup = async () => {
   const create = (store: SessionIndexStore) => new WrapperChatTreeService({ sessionIndexStore: store,
     reconciliation: { ensureSessionLoaded: load } as never,
     runtimeService: { getSnapshot: () => snapshot, getSession: (id: string) => snapshot.sessions.find((s) => s.sessionId === id),
-      getRevision: () => "initial", subscribe: () => () => {}, notifyChatTreeChanged: vi.fn() } as never,
+      getRevision: () => "initial", getSessionHistoryRevision: () => "history", hasSessionWindow: () => false,
+      subscribe: () => () => {}, notifyChatTreeChanged: vi.fn() } as never,
     capabilities: { forkSessionFromTurn: fork } as never });
   return { baseDir, index, load, create };
 };

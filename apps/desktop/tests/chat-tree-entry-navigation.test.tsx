@@ -26,15 +26,34 @@ const setup = (navigationEntry?: ChatTreeNavigationEntry) => {
     chatTree: { get, jump, operations: vi.fn(async () => ({ operations: [] })) }
   } as unknown as DesktopTransport;
   let controller!: ReturnType<typeof useChatTreeController>;
+  const store = createRendererStore();
   const Probe = () => {
-    controller = useChatTreeController({ store: createRendererStore(), transport, sessionId: "worker", navigationEntry, refreshSignal: 0, onStatusNotice: vi.fn() });
+    controller = useChatTreeController({ store, transport, sessionId: "worker", navigationEntry, refreshSignal: 0, onStatusNotice: vi.fn() });
     return null;
   };
   renderToStaticMarkup(createElement(Probe));
-  return { controller, calls, open, activate, get, jump };
+  return { controller, calls, open, activate, get, jump, store, tree };
 };
 
 describe("chat tree entry navigation", () => {
+  it("applies a cold baseline with its in-flight tail without a second body read", async () => {
+    const test = setup();
+    test.store.ingestEnvelope({ eventId: "new", cursor: "1", occurredAt: "2026-09-22T00:00:00Z", event: { type: "session.created", sessionId: "worker", conversationId: "c", engineId: "e", status: "idle" } });
+    let reads = 0;
+    test.get.mockImplementation(async (_id, options) => {
+      if (options?.scope !== "path") return test.tree;
+      reads++;
+      const snapshot = test.store.getDomainReadModel().getSnapshot();
+      test.store.ingestEnvelope({ eventId: "tail", cursor: "2", occurredAt: "2026-09-22T00:00:01Z", event: {
+        type: "message.delta", sessionId: "worker", turnId: "live", messageId: "m", delta: "continues"
+      } });
+      return { ...test.tree, windows: [{ sessionId: "worker", snapshot, cursor: "1", revision: "epoch", replaceSessionHistory: true, hasOlder: false, hasNewer: false }] } as ChatTreeSnapshotRpc;
+    });
+    await test.controller.refreshChatTree();
+    expect(reads).toBe(1);
+    expect(test.store.getKnownSessionWindows().worker).toEqual({ revision: "epoch", cursor: "2" });
+    expect(test.store.getDomainReadModel().getMessageBlock("m:md")?.text).toBe("continues");
+  });
   it("opens once and focuses the requested branch and turn before reading its tree", async () => {
     const test = setup({ focusTree: true, turnId: "historical" });
     expect(test.controller.isOpening).toBe(true);
@@ -46,10 +65,12 @@ describe("chat tree entry navigation", () => {
       "open:worker", "activate:worker", "jump:historical", "get:path:worker", "get:tree:worker"
     ]);
     expect(test.activate).toHaveBeenCalledWith("worker", { focusTree: true });
+    expect(test.open).toHaveBeenCalledWith("worker", { includeWindow: false, signal: expect.any(AbortSignal) });
     await test.controller.refreshChatTree();
     expect(test.open).toHaveBeenCalledTimes(1);
     expect(test.activate).toHaveBeenCalledTimes(1);
     expect(test.jump).toHaveBeenCalledTimes(1);
+    expect(test.get).toHaveBeenNthCalledWith(1, "worker", { scope: "path", knownWindows: {}, readId: expect.any(String), signal: expect.any(AbortSignal) });
   });
 
   it("shares the pending open across refresh notifications", async () => {

@@ -12,6 +12,7 @@ import { CodexHookActivityService } from "./extensions/hook-activity-service.js"
 import { CodexTurnChangesService } from "./extensions/turn-changes-service.js";
 import { CodexTurnChangesStore } from "./extensions/turn-changes-store.js";
 import { CodexHistoryProjection } from "./history-projection.js";
+import { CodexHistorySource } from "./history-source.js";
 import { codexProgram } from "./program.js";
 import { createCodexAppServerRuntimePort } from "./runtime-port.js";
 import { CodexSessionActionsProvider } from "./session-actions-provider.js";
@@ -105,17 +106,39 @@ export const createCodexEngineIntegration = (
       });
     }
   });
-  const clearSessionHistory = async (sessionId: string): Promise<boolean> => {
+  const clearSessionHistory = async (sessionId: string, signal?: AbortSignal): Promise<boolean> => {
     await host.sessionIndexStore.ready();
+    signal?.throwIfAborted();
     const entry = host.sessionIndexStore.getEntry(sessionId);
     const threadId =
       runtimePort.getThreadIdForSession(sessionId) ?? entry?.providerSessionId;
     if (!threadId) {
       return false;
     }
-    const result = await historyProjection.clearThread(threadId);
+    const result = await historyProjection.clearThread(threadId, signal);
     return result.status !== "failed" && result.status !== "unavailable";
   };
+  const historySource = new CodexHistorySource({
+    resolvePath: async (entry, signal) => {
+      if (typeof entry.metadata?.rolloutPath === "string" && entry.metadata.rolloutPath) {
+        return entry.metadata.rolloutPath;
+      }
+      if (!entry.providerSessionId) return undefined;
+      return (await runtimePort.readThread(entry.providerSessionId, false, { signal })).path ?? undefined;
+    },
+    isActive: (sessionId) => Boolean(runtimePort.getActiveTurnId(sessionId)),
+    rebuild: async (sessionId, signal) => {
+      signal?.throwIfAborted();
+      const entry = host.sessionIndexStore.getEntry(sessionId);
+      const threadId = runtimePort.getThreadIdForSession(sessionId) ?? entry?.providerSessionId;
+      if (!threadId) throw new Error(`No Codex thread for ${sessionId}.`);
+      await runtimePort.releaseThreadForHistoryRefresh(threadId, signal);
+      signal?.throwIfAborted();
+      if (!await clearSessionHistory(sessionId, signal)) {
+        throw new Error(`Could not rebuild Codex history for ${sessionId}.`);
+      }
+    }
+  });
 
   return {
     engineId: codexEngineId,
@@ -155,6 +178,7 @@ export const createCodexEngineIntegration = (
       checkpoint: new CodexCheckpointProvider({ codexRuntimePort: runtimePort, now }),
       diagnostics: new CodexDiagnosticsProvider({ codexRuntimePort: runtimePort, now }),
       sessionDiscovery: new CodexSessionDiscoveryProvider({
+        historySource,
         codexRuntimePort: runtimePort,
         turnChangesStore,
         resolveHistoryCwd: (workspaceId: string) =>
@@ -164,6 +188,13 @@ export const createCodexEngineIntegration = (
           Promise.resolve(undefined)
       }),
       sessionRuntime: {
+        historySource: {
+          isCurrent: async (sessionId, signal) => {
+            await host.sessionIndexStore.ready();
+            const entry = host.sessionIndexStore.getEntry(sessionId);
+            return entry ? historySource.isCurrent(entry, signal) : false;
+          }
+        },
         releaseSessionExecution: (sessionId: string) =>
           runtimePort.releaseSessionExecutionAndWait(sessionId),
         clearSessionHistory,

@@ -1,10 +1,79 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   MessageMarkdownView,
+  renderMessageMarkdown,
   splitStreamingMarkdown,
   splitUserMessageText
 } from "../src/ui/chat-shell/MessageMarkdownView.js";
+import { messageMarkdownAstCache } from "../src/ui/chat-shell/markdown-ast-cache.js";
+
+const compiledElement = (tree: ReactNode, tag: string): ReactElement<any> | undefined => {
+  for (const child of Children.toArray(tree)) {
+    if (!isValidElement<{ node?: { tagName?: string }; children?: ReactNode }>(child)) continue;
+    if (child.props.node?.tagName === tag) return child;
+    const found = compiledElement(child.props.children, tag);
+    if (found) return found;
+  }
+  return undefined;
+};
+
+describe("compiled Markdown reuse", () => {
+  it("reuses compilation across independent mounts, including cloned blocks, and recompiles edits", () => {
+    const block = { blockId: "reuse:md", messageId: "reuse", sessionId: "s", turnId: "t", role: "user" as const, kind: "markdown" as const, text: "Image\n\n![image](data:image/png;base64,AAAA)", startedAt: "2026-09-22T00:00:00Z", completedAt: "2026-09-22T00:00:00Z" };
+    const read = vi.spyOn(messageMarkdownAstCache, "get");
+    try {
+      const first = renderToStaticMarkup(<MessageMarkdownView block={block} />);
+      const second = renderToStaticMarkup(<MessageMarkdownView block={{ ...block }} />);
+      expect(second).toBe(first);
+      expect(read.mock.results[1]!.value).toBe(read.mock.results[0]!.value);
+      const edited = renderToStaticMarkup(<MessageMarkdownView block={{ ...block, text: "Image\n\n![image](data:image/png;base64,BBBB)" }} />);
+      expect(edited).toContain("BBBB");
+      expect(edited).not.toContain("AAAA");
+      expect(read.mock.results[2]!.value).not.toBe(read.mock.results[0]!.value);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("binds current preview and file menu callbacks when reusing a compiled tree", () => {
+    const text = "![preview](file:///I:/image.png) [file](file:///I:/file.md)";
+    const cacheKey = "callbacks:markdown:0";
+    const oldPreview = vi.fn();
+    const currentPreview = vi.fn();
+    const oldMenu = vi.fn();
+    const currentMenu = vi.fn();
+    renderMessageMarkdown({ text, cacheKey, onPreviewImage: oldPreview, renderFileLinkContextMenu: oldMenu });
+    const ast = messageMarkdownAstCache.get(cacheKey, text);
+    const current = renderMessageMarkdown({ text, cacheKey, onPreviewImage: currentPreview, renderFileLinkContextMenu: currentMenu });
+    expect(messageMarkdownAstCache.get(cacheKey, text)).toBe(ast);
+    const image = compiledElement(current, "img")!;
+    const button = (image.type as (props: unknown) => ReactElement<any>)(image.props);
+    button.props.onClick();
+    expect(currentPreview).toHaveBeenCalledWith(expect.objectContaining({ alt: "preview" }));
+    expect(oldPreview).not.toHaveBeenCalled();
+    const anchor = compiledElement(current, "a")!;
+    const fileLink = (anchor.type as (props: unknown) => ReactElement<any>)(anchor.props);
+    expect(fileLink.props.renderFileLinkContextMenu).toBe(currentMenu);
+    expect(oldMenu).not.toHaveBeenCalled();
+  });
+
+  it("preserves GFM and safe URL handling on both cold and cached renders", () => {
+    const text = "| a | b |\n| - | - |\n| x | y |\n\n- [x] checked\n\n~~removed~~ https://example.com\n\nFootnote[^1]\n\n[^1]: detail\n\n<script>alert(1)</script>\n\n[bad](javascript:alert%281%29) ![bad](javascript:alert%281%29)";
+    const render = () => renderToStaticMarkup(renderMessageMarkdown({ text, cacheKey: "safe:markdown:0" }));
+    const first = render();
+    expect(render()).toBe(first);
+    expect(first).toContain("<table>");
+    expect(first).toContain('type="checkbox"');
+    expect(first).toContain("<del>removed</del>");
+    expect(first).toContain("data-footnotes");
+    expect(first).toContain('href="https://example.com"');
+    expect(first).not.toContain("<script");
+    expect(first).not.toContain('href="javascript:');
+    expect(first).not.toContain('src="javascript:');
+  });
+});
 
 describe("MessageMarkdownView", () => {
   it("renders markdown content into semantic HTML", () => {

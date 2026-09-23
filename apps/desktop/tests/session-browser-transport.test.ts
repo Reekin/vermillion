@@ -28,6 +28,32 @@ const createPreloadMock = (
 };
 
 describe("session browser transport contracts", () => {
+  it("cancels the actual history request and removes the cancellation listener on settlement", async () => {
+    let finish!: () => void;
+    const preload = createPreloadMock(async (request) => {
+      if (request.method === "sessionBrowser.open") {
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return { id: request.id, method: request.method, ok: true, result: {} };
+      }
+      if (request.method === "chatTree.cancelRead") {
+        expect(request.params.readId).toBe("read-owner");
+        finish();
+        return { id: request.id, method: request.method, ok: true, result: { cancelled: true } };
+      }
+      throw new Error(request.method);
+    });
+    const transport = createDesktopTransport(preload.api);
+    const controller = new AbortController();
+    const pending = transport.sessionBrowser.open("s", { includeWindow: false, readId: "read-owner", signal: controller.signal });
+    controller.abort();
+    await pending;
+    expect(preload.request.mock.calls.filter(([request]) => request.method === "chatTree.cancelRead")).toHaveLength(1);
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort();
+    await expect(transport.chatTree.get("s", { signal: alreadyAborted.signal })).rejects.toThrow();
+    expect(preload.request.mock.calls.filter(([request]) => request.method === "chatTree.get")).toHaveLength(0);
+  });
+
   it("wires workspace + paged session browser operations through typed rpc methods", async () => {
     const preload = createPreloadMock(async (request) => {
       switch (request.method) {

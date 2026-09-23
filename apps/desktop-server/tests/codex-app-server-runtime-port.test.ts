@@ -114,6 +114,39 @@ const readSessionSnapshot: DomainSnapshot = {
 describe("Codex app-server runtime port", () => {
   const disposers: Array<() => Promise<void>> = [];
 
+  it("releases only the requested thread without requiring the engine to evict its idle cache", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath });
+    const read = vi.spyOn(port, "readThread").mockResolvedValue({ status: { type: "idle" } } as never);
+    const release = vi.spyOn(port, "releaseThreadExecution").mockResolvedValue(undefined);
+    const releaseTree = vi.spyOn(port, "releaseSessionExecution").mockResolvedValue(undefined);
+    await port.releaseThreadForHistoryRefresh("thread-parent");
+    expect(release).toHaveBeenCalledExactlyOnceWith("thread-parent");
+    expect(releaseTree).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not release a thread the engine reports as active for history refresh", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath });
+    vi.spyOn(port, "readThread").mockResolvedValue({ status: { type: "active" } } as never);
+    const release = vi.spyOn(port, "releaseThreadExecution").mockResolvedValue(undefined);
+    await expect(port.releaseThreadForHistoryRefresh("thread-active")).rejects.toThrow("a turn is active");
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("cancels history refresh during the engine header read before releasing execution", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath });
+    const controller = new AbortController();
+    const read = vi.spyOn(port, "readThread").mockImplementation(async (_id, _turns, options) => {
+      expect(options?.signal).toBe(controller.signal);
+      controller.abort();
+      return { status: { type: "idle" } } as never;
+    });
+    const release = vi.spyOn(port, "releaseThreadExecution").mockResolvedValue(undefined);
+    await expect(port.releaseThreadForHistoryRefresh("thread", controller.signal)).rejects.toThrow();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+  });
+
   afterEach(async () => {
     clearCodexTurnChangesStore();
     clearCodexHookActivityStore();

@@ -22,10 +22,13 @@ type TreeProjection = {
 
 /** `tree` 只给树结构，`path` 给当前查看路径的位置与正文窗口。 */
 export type ChatTreeScope = "tree" | "path";
+export type KnownSessionWindows = Record<string, { revision: string; cursor?: string }>;
 
 type TreeLoad = {
   controller: AbortController;
   promise: Promise<void>;
+  consumers: Set<symbol>;
+  background: boolean;
   /** 本代加载完成的成员，完成后整体成为当前投影的成员集合。 */
   members: Set<string>;
 };
@@ -50,6 +53,8 @@ export class WrapperChatTreeService {
     sessionIndexStore: SessionIndexStore;
     reconciliation: SessionReconciliationService;
     capabilities: CapabilityRegistry;
+    /** Source validation belongs to the engine/shell, not the tree projection. */
+    ensureHistoryCurrent?: (sessionId: string, signal?: AbortSignal) => Promise<boolean>;
     /** 诊断通道：记录被失效中止的一代树加载。 */
     logDiagnostic?: (input: {
       message: string;
@@ -96,17 +101,19 @@ export class WrapperChatTreeService {
     state.load = undefined;
     previous?.controller.abort();
     if (state.published) {
-      void this.startTreeLoad(sessionId, state).promise.catch(() => undefined);
+      void this.startTreeLoad(sessionId, state, true).promise.catch(() => undefined);
     }
   }
 
-  private startTreeLoad(sessionId: string, state: TreeState): TreeLoad {
+  private startTreeLoad(sessionId: string, state: TreeState, background = false): TreeLoad {
     const force = state.reload;
     state.reload = false;
     state.error = undefined;
     const load: TreeLoad = {
       controller: new AbortController(),
       promise: Promise.resolve(),
+      consumers: new Set(),
+      background,
       members: new Set()
     };
     state.load = load;
@@ -178,6 +185,7 @@ export class WrapperChatTreeService {
     signal: AbortSignal | undefined,
     force: boolean
   ): Promise<void> {
+    signal?.throwIfAborted();
     if (members.has(sessionId)) return;
     const index = this.options.sessionIndexStore;
     const isProviderSession = Boolean(index.getEntry(sessionId)?.providerSessionId);
@@ -186,6 +194,7 @@ export class WrapperChatTreeService {
       requireFull: isProviderSession,
       signal
     });
+    signal?.throwIfAborted();
     if (loaded) {
       if (!signal?.aborted) members.add(sessionId);
       return;
@@ -214,7 +223,8 @@ export class WrapperChatTreeService {
   private buildProjection(
     sessionId: string,
     loaded: ReadonlySet<string>,
-    withWindows = false
+    withWindows = false,
+    knownWindows?: KnownSessionWindows
   ): TreeProjection {
     const { runtimeService, sessionIndexStore: index } = this.options;
     const treeId = index.getTreeId(sessionId);
@@ -293,7 +303,8 @@ export class WrapperChatTreeService {
     const windows = !withWindows ? undefined : members.flatMap((memberId) => {
       const memberSession = sessionsById.get(memberId);
       if (!memberSession) return [];
-      return [buildSessionWindowSnapshotFromPage({
+      if (runtimeService.hasSessionWindow(memberId, knownWindows?.[memberId])) return [];
+      const window = buildSessionWindowSnapshotFromPage({
         ...snapshot,
         sessionId: memberId,
         session: memberSession,
@@ -308,7 +319,9 @@ export class WrapperChatTreeService {
         hasOlder: false,
         hasNewer: false,
         replaceSessionHistory: true
-      })];
+      });
+      window.revision = runtimeService.getSessionHistoryRevision(memberId);
+      return [window];
     });
     const tree: ChatTreeSnapshot = {
       sessionId, treeId, currentSessionId, memberSessionIds: treeMembers,
@@ -358,15 +371,18 @@ export class WrapperChatTreeService {
    * 读取会话树：没有快照时等待本代加载完成；快照稳定时从已加载成员派生新投影；
    * 刷新进行中或刷新失败时保持已发布快照，不让中间结果覆盖已显示的树。
    */
-  public async get(sessionId: string, scope: ChatTreeScope = "tree"): Promise<ChatTreeSnapshot> {
+  public async get(sessionId: string, scope: ChatTreeScope = "tree", knownWindows?: KnownSessionWindows, signal?: AbortSignal): Promise<ChatTreeSnapshot> {
+    signal?.throwIfAborted();
     await this.options.sessionIndexStore.ready();
-    if (scope === "path") return this.getViewPath(sessionId);
+    signal?.throwIfAborted();
+    if (scope === "path") return this.getViewPath(sessionId, knownWindows, signal);
     const state = this.treeState(sessionId);
     if (state.published) {
-      await this.rebuildIfSettled(sessionId, state);
+      await this.rebuildIfSettled(sessionId, state, signal);
     } else {
-      await this.awaitTreeLoad(sessionId, state);
+      await this.awaitTreeLoad(sessionId, state, signal);
     }
+    signal?.throwIfAborted();
     if (!state.published) {
       throw state.error ?? new Error(`Unable to load tree: ${sessionId}`);
     }
@@ -374,6 +390,7 @@ export class WrapperChatTreeService {
       const tree = this.publishedProjection(sessionId).tree;
       const view = { sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true };
       await this.options.sessionIndexStore.setTreeView(sessionId, view);
+      signal?.throwIfAborted();
       this.applyPublishedView(sessionId, view);
     }
     return this.publishedProjection(sessionId).tree;
@@ -383,11 +400,16 @@ export class WrapperChatTreeService {
    * 读取当前查看路径：只加载被查看分支及其 fork 祖先，并附带这些成员的正文窗口，
    * 使消息区不必等待整棵树的其余分支。
    */
-  private async getViewPath(sessionId: string): Promise<ChatTreeSnapshot> {
+  private async getViewPath(sessionId: string, knownWindows?: KnownSessionWindows, signal?: AbortSignal): Promise<ChatTreeSnapshot> {
     const chain = this.viewPathMembers(sessionId);
     const members = new Set<string>();
-    await Promise.all(chain.map((memberId) => this.loadMember(members, memberId, undefined, false)));
-    return this.buildProjection(sessionId, members, true).tree;
+    await Promise.all(chain.map(async (memberId) => {
+      signal?.throwIfAborted();
+      await this.options.ensureHistoryCurrent?.(memberId, signal);
+      await this.loadMember(members, memberId, signal, false);
+    }));
+    signal?.throwIfAborted();
+    return this.buildProjection(sessionId, members, true, knownWindows).tree;
   }
 
   /** 查看路径的成员：被查看分支及其 fork 祖先，按祖先在前排列。 */
@@ -413,7 +435,7 @@ export class WrapperChatTreeService {
    * 稳定状态下补齐索引新成员并重建投影。等待期间开始的刷新由新代接管发布，
    * 这里不再用中间结果覆盖已发布快照。
    */
-  private async rebuildIfSettled(sessionId: string, state: TreeState): Promise<void> {
+  private async rebuildIfSettled(sessionId: string, state: TreeState, signal?: AbortSignal): Promise<void> {
     if (state.load || state.error || state.reload) return;
     const index = this.options.sessionIndexStore;
     const pendingTargets = new Set([...this.operations.values()]
@@ -424,8 +446,9 @@ export class WrapperChatTreeService {
       !state.members.has(memberId) &&
       !pendingTargets.has(memberId));
     await Promise.all(missing.map((memberId) =>
-      this.loadMember(state.members, memberId, undefined, false)
+      this.loadMember(state.members, memberId, signal, false)
     ));
+    signal?.throwIfAborted();
     if (state.load || state.error || state.reload) return;
     state.published = this.buildProjection(sessionId, state.members);
   }
@@ -433,12 +456,34 @@ export class WrapperChatTreeService {
   /** 失效会打断本代加载，本次读取接续新一代，直到有发布结果或确定失败。 */
   private async awaitTreeLoad(
     sessionId: string,
-    state: TreeState
+    state: TreeState,
+    signal?: AbortSignal
   ): Promise<TreeProjection | undefined> {
+    signal?.throwIfAborted();
     const load = state.load ?? this.startTreeLoad(sessionId, state);
-    await load.promise;
+    const consumer = Symbol();
+    load.consumers.add(consumer);
+    let onAbort: (() => void) | undefined;
+    try {
+      await (signal ? Promise.race([
+        load.promise,
+        new Promise<never>((_, reject) => {
+          onAbort = () => reject(signal.reason);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        })
+      ]) : load.promise);
+    } finally {
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+      load.consumers.delete(consumer);
+      if (!load.background && load.consumers.size === 0 && state.load === load) {
+        state.load = undefined;
+        load.controller.abort();
+      }
+    }
+    signal?.throwIfAborted();
     if (state.load || state.reload) {
-      return this.awaitTreeLoad(sessionId, state);
+      return this.awaitTreeLoad(sessionId, state, signal);
     }
     return state.published;
   }

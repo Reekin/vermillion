@@ -20,6 +20,7 @@ const increment = (value: number): number => value + 1;
 const invalidatesChatTree = (event: RuntimeEvent): boolean => {
   switch (event.type) {
     case "conversationGraph.updated":
+    case "turn.started":
     case "session.disposed":
       return true;
     case "session.created":

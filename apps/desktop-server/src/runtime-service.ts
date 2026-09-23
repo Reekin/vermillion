@@ -37,6 +37,9 @@ import type { WorkspaceRegistryService } from "./workspace-registry.js";
 type Clock = () => string;
 type IdFactory = () => string;
 
+const changesSessionBody = (event: EventEnvelope["event"]): boolean =>
+  /^(turn\.|message\.|tool\.|terminal\.|approval\.|interaction\.|thread\.goal\.|runtime\.error$)/.test(event.type);
+
 export type {
   EngineSelectionInput,
   EventReplayResult,
@@ -68,6 +71,7 @@ export class SessionRuntimeService {
   private readonly runtimeOrchestrator: RuntimeOrchestrator;
   private readonly sessionIndexTasks = new Set<Promise<void>>();
   private sessionBrowserRevision = 0;
+  private readonly contentCursors = new Map<string, string>();
 
   public constructor(options: SessionRuntimeServiceOptions = {}) {
     this.workspaceRegistry = options.workspaceRegistry;
@@ -92,6 +96,13 @@ export class SessionRuntimeService {
       createId: options.createEventId,
       resolveConversationIdBySessionId: (sessionId) =>
         this.resolveConversationIdForSession(sessionId)
+    });
+    // Registered before consumers so a published content event and its watermark agree.
+    this.eventBus.subscribe(({ event, cursor }) => {
+      if ("sessionId" in event && typeof event.sessionId === "string" &&
+          changesSessionBody(event)) {
+        this.contentCursors.set(event.sessionId, cursor);
+      }
     });
     const workspaceSelectionService = new WorkspaceSelectionService({
       workspaceRegistry: this.workspaceRegistry
@@ -264,6 +275,11 @@ export class SessionRuntimeService {
     occurredAt?: string
   ): void {
     this.domainService.ingestRuntimeEvent(event, occurredAt);
+    // This explicit ingestion API does not publish an event to subscribers.
+    if ("sessionId" in event && typeof event.sessionId === "string" &&
+        (changesSessionBody(event) || event.type === "session.disposed")) {
+      this.domainService.invalidateHistoryRevision(event.sessionId);
+    }
     this.advanceSessionBrowserRevision(event);
   }
 
@@ -276,6 +292,18 @@ export class SessionRuntimeService {
 
   public getRevision(): string {
     return this.eventBus.getLatestCursor() ?? "initial";
+  }
+
+  public getSessionHistoryRevision(sessionId: string): string {
+    return this.domainService.getHistoryRevision(sessionId);
+  }
+
+  public hasSessionWindow(sessionId: string, known?: { revision: string; cursor?: string }): boolean {
+    if (!known || known.revision !== this.getSessionHistoryRevision(sessionId)) return false;
+    const latest = this.contentCursors.get(sessionId);
+    if (!latest) return true;
+    return Boolean(known.cursor && /^\d+$/.test(known.cursor) && /^\d+$/.test(latest) &&
+      BigInt(known.cursor) >= BigInt(latest));
   }
 
   public getSessionBrowserRevision(): number {

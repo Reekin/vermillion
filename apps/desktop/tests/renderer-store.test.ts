@@ -54,6 +54,90 @@ const envelope = (eventId: string): EventEnvelope => ({
 });
 
 describe("renderer store domain replica", () => {
+  it("confirms only complete versioned history and advances only that member's applied cursor", () => {
+    const store = createRendererStore();
+    const window = { sessionId: "session-a", snapshot: sessionSnapshot(), cursor: "cursor-1", revision: "epoch-a", replaceSessionHistory: true };
+    store.hydrateSessionWindows([window]);
+    expect(store.getKnownSessionWindows()).toEqual({ "session-a": { revision: "epoch-a", cursor: "cursor-1" } });
+    store.ingestEnvelope({ ...envelope("other"), cursor: "cursor-9" });
+    expect(store.getKnownSessionWindows()["session-a"]?.cursor).toBe("cursor-1");
+    store.ingestEnvelope({ eventId: "own", cursor: "cursor-10", occurredAt: now, event: { type: "message.delta", sessionId: "session-a", turnId: "turn-a", messageId: "message-a", delta: "live" } });
+    expect(store.getKnownSessionWindows()["session-a"]?.cursor).toBe("cursor-10");
+    store.hydrateSessionWindows([{ ...window, revision: "stale-epoch", cursor: "cursor-2" }]);
+    expect(store.getKnownSessionWindows()["session-a"]?.revision).toBe("epoch-a");
+    expect(store.getDomainReadModel().getMessageBlock("message-a:md")?.text).toBe("live");
+    store.hydrateSessionWindows([{ ...window, cursor: "cursor-11", replaceSessionHistory: false }]);
+    expect(store.getKnownSessionWindows()).toEqual({});
+  });
+
+  it("clears confirmations on unversioned replacement, reset, gap and disposal", () => {
+    const store = createRendererStore();
+    const window = { sessionId: "session-a", snapshot: sessionSnapshot(), cursor: "cursor-1", revision: "epoch-a", replaceSessionHistory: true };
+    const confirm = () => { store.hydrateSessionWindows([window]); expect(store.getKnownSessionWindows()["session-a"]).toBeDefined(); };
+    confirm();
+    store.hydrateSessionWindow("session-a", sessionSnapshot(), "replace", "cursor-1", true);
+    expect(store.getKnownSessionWindows()).toEqual({});
+    confirm();
+    store.clearKnownSessionWindows();
+    expect(store.getKnownSessionWindows()).toEqual({});
+    confirm();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-1");
+    expect(store.getKnownSessionWindows()).toEqual({});
+    confirm();
+    store.disposeSession("session-a");
+    expect(store.getKnownSessionWindows()).toEqual({});
+    const empty = createRendererStore();
+    empty.ingestEnvelope({ ...envelope("only-event"), cursor: "cursor-8" });
+    expect(empty.getKnownSessionWindows()).toEqual({});
+  });
+
+  it("does not invalidate chat history when activation refreshes the session list", () => {
+    const store = createRendererStore();
+    const before = store.getState().refreshSignals;
+    store.dispatch({ type: "store/sessionBrowserChanged" });
+    const after = store.getState().refreshSignals;
+    expect(after.sessionBrowser).toBe(before.sessionBrowser + 1);
+    expect(after.chatTree).toBe(before.chatTree);
+  });
+
+  it("accepts a replaced history epoch even when no new stream event occurred", () => {
+    const store = createRendererStore();
+    const window = { sessionId: "session-a", snapshot: sessionSnapshot(), cursor: "cursor-1", revision: "epoch-a", replaceSessionHistory: true };
+    store.hydrateSessionWindows([window]);
+    store.hydrateSessionWindows([{ ...window, revision: "epoch-b" }]);
+    expect(store.getKnownSessionWindows()["session-a"]).toEqual({ revision: "epoch-b", cursor: "cursor-1" });
+  });
+
+  it("hydrates a cold ancestor and its replacement while a sibling in the same conversation streams", () => {
+    const store = createRendererStore();
+    store.ingestEvent({ type: "session.created", conversationId: "conversation-a", sessionId: "session-b", engineId: "agent-a", status: "idle" });
+    const stream = (cursor: string) => store.ingestEnvelope({ eventId: cursor, cursor, occurredAt: now, event: { type: "message.delta", sessionId: "session-b", turnId: "turn-b", messageId: "message-b", delta: "live" } });
+    stream("cursor-10");
+    const ancestor = sessionSnapshot();
+    ancestor.turns.push({ turnId: "ancestor-turn", sessionId: "session-a", status: "completed", startedAt: now, messageIds: [], toolCallIds: [], terminalIds: [], approvalRequestIds: [], interactionRequestIds: [] });
+    const window = { sessionId: "session-a", snapshot: ancestor, cursor: "cursor-5", revision: "ancestor-a", replaceSessionHistory: true };
+    store.hydrateSessionWindows([window]);
+    expect(store.getKnownSessionWindows()["session-a"]).toEqual({ revision: "ancestor-a", cursor: "cursor-5" });
+    expect(store.getDomainReadModel().getTurn("ancestor-turn")).toBeDefined();
+    stream("cursor-20");
+    store.hydrateSessionWindows([{ ...window, snapshot: sessionSnapshot(), cursor: "cursor-15", revision: "ancestor-b" }]);
+    expect(store.getKnownSessionWindows()["session-a"]).toEqual({ revision: "ancestor-b", cursor: "cursor-15" });
+    expect(store.getDomainReadModel().getTurn("ancestor-turn")).toBeUndefined();
+    expect(store.getDomainReadModel().getMessageBlock("message-b:md")?.text).toBe("livelive");
+  });
+
+  it("leaves a stale same-member response unconfirmed until a fresh complete window arrives", () => {
+    const store = createRendererStore();
+    store.hydrateSnapshot(sessionSnapshot(), "cursor-1");
+    store.ingestEnvelope({ eventId: "new", cursor: "cursor-10", occurredAt: now, event: { type: "message.delta", sessionId: "session-a", turnId: "turn-a", messageId: "message-a", delta: "live" } });
+    const window = { sessionId: "session-a", snapshot: sessionSnapshot(), cursor: "cursor-5", revision: "epoch", replaceSessionHistory: true };
+    store.hydrateSessionWindows([window]);
+    expect(store.getKnownSessionWindows()).toEqual({});
+    expect(store.getDomainReadModel().getMessageBlock("message-a:md")?.text).toBe("live");
+    store.hydrateSessionWindows([{ ...window, cursor: "cursor-10" }]);
+    expect(store.getKnownSessionWindows()["session-a"]).toEqual({ revision: "epoch", cursor: "cursor-10" });
+  });
+
   it("keeps background and later-turn streams outside visible turn notifications while retaining content", () => {
     const store = createRendererStore();
     store.hydrateSnapshot(sessionSnapshot());
@@ -586,6 +670,7 @@ describe("renderer store domain replica", () => {
     store.hydrateSessionWindow("session-a", olderWindow, "replace", "cursor-1");
 
     expect(store.getDomainReadModel().getSession("session-a")?.title).toBe("Initial session");
+    expect(store.getDomainReadModel().getParticipant("conversation-a:agent-a")?.capabilities).toEqual([]);
   });
 
   it("advances the conversation cursor for a sibling session event", () => {

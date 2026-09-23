@@ -15,6 +15,7 @@ import {
 import { SessionIndexStore } from "../src/session-index.js";
 import { SessionRuntimeService } from "../src/runtime-service.js";
 import { WrapperChatTreeService } from "../src/wrapper-chat-tree.js";
+import { SessionShellService } from "../src/session-shell-service.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";
 import {
   consumeCodexRolloutTimestampForItem,
@@ -125,6 +126,76 @@ afterEach(async () => {
       await rm(dir, { recursive: true, force: true });
     }
   }
+});
+
+describe("identified history read cancellation", () => {
+  const setup = async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const sessionIndexStore = new SessionIndexStore({ baseDir });
+    const runtimeService = new SessionRuntimeService({
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
+    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: baseDir, label: "Test" });
+    await sessionIndexStore.upsertSession({
+      workspaceId: "workspace-1", session: buildHydratedWindow().session as never,
+      providerKind: "codex-thread", providerSessionId: "thread-1"
+    });
+    const reads: { signal: AbortSignal; finish: () => void }[] = [];
+    const hydrateSession = vi.fn((_entry, input) => new Promise<ReturnType<typeof buildHydratedWindow>>((resolve) => {
+      reads.push({ signal: input.signal, finish: () => resolve(buildHydratedWindow()) });
+    }));
+    const reconciliation = new SessionReconciliationService({
+      workspaceRegistry, sessionIndexStore, runtimeService,
+      providers: [{ engineId: "codex", discoverWorkspaces: vi.fn(), hydrateSession }] as never
+    });
+    const tree = new WrapperChatTreeService({
+      sessionIndexStore, runtimeService, reconciliation, capabilities: {} as never
+    });
+    const shell = new SessionShellService({ runtimeService, sessionReconciliation: reconciliation, wrapperChatTree: tree });
+    return { shell, reads, hydrateSession, runtimeService };
+  };
+
+  it.each(["path", "tree"] as const)("cancels an actual %s member read and allows immediate revisit", async (scope) => {
+    const f = await setup();
+    const first = f.shell.getChatTree("session-1", scope, undefined, "first");
+    const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(f.reads).toHaveLength(1));
+    expect(f.shell.cancelRead("first")).toEqual({ cancelled: true });
+    await vi.waitFor(() => expect(f.reads[0]!.signal.aborted).toBe(true));
+    const revisit = f.shell.getChatTree("session-1", scope, undefined, "revisit");
+    await vi.waitFor(() => expect(f.reads).toHaveLength(2));
+    f.reads[0]!.finish();
+    await rejected;
+    expect(f.runtimeService.getSnapshot().turns).toHaveLength(0);
+    const joined = f.shell.getChatTree("session-1", scope, undefined, "joined");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.hydrateSession).toHaveBeenCalledTimes(2);
+    expect(f.reads[1]!.signal.aborted).toBe(false);
+    f.reads[1]!.finish();
+    await expect(revisit).resolves.toMatchObject({ currentSessionId: "session-1" });
+    await expect(joined).resolves.toMatchObject({ currentSessionId: "session-1" });
+    expect(f.shell.cancelRead("revisit")).toEqual({ cancelled: false });
+    await f.shell.dispose();
+  });
+
+  it.each([["path", "path"], ["tree", "tree"], ["tree", "path"]] as const)("preserves a shared member read when %s cancels and %s remains", async (scope, remainingScope) => {
+    const f = await setup();
+    const first = f.shell.getChatTree("session-1", scope, undefined, "first");
+    const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(f.reads).toHaveLength(1));
+    const second = f.shell.getChatTree("session-1", remainingScope, undefined, "second");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    f.shell.cancelRead("first");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.reads[0]!.signal.aborted).toBe(false);
+    expect(f.hydrateSession).toHaveBeenCalledTimes(1);
+    f.reads[0]!.finish();
+    await rejected;
+    await expect(second).resolves.toMatchObject({ currentSessionId: "session-1" });
+    expect(f.shell.cancelRead("second")).toEqual({ cancelled: false });
+    await f.shell.dispose();
+  });
 });
 
 describe("cold history hydration", () => {

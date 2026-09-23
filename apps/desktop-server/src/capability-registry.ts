@@ -242,6 +242,9 @@ export type BackgroundRunCapability = {
  * 未实现的操作按调用点各自的默认行为处理，不伪造成功。
  */
 export type SessionRuntimeCapability = {
+  historySource?: {
+    isCurrent: (sessionId: string, signal?: AbortSignal) => Promise<boolean>;
+  };
   releaseSessionExecution?: (sessionId: string) => Promise<void>;
   clearSessionHistory?: (sessionId: string) => Promise<boolean>;
   getActiveTurnId?: (sessionId: string) => string | undefined;

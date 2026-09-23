@@ -29,8 +29,10 @@ export class CodexHistoryProjection {
     });
   }
 
-  public async clearThread(threadId: string): Promise<CodexHistoryProjectionClearResult> {
+  public async clearThread(threadId: string, signal?: AbortSignal): Promise<CodexHistoryProjectionClearResult> {
+    signal?.throwIfAborted();
     const sqliteHome = (await this.resolveSqliteHome())?.trim();
+    signal?.throwIfAborted();
     if (!sqliteHome || !threadId.trim()) {
       return { status: "unavailable" };
     }
@@ -46,6 +48,7 @@ export class CodexHistoryProjection {
       return { status: "failed", path };
     }
 
+    signal?.throwIfAborted();
     try {
       // Each transaction owns its thread; completion includes closing the database and exiting.
       const status = await new Promise<"cleared" | "missing">((resolve, reject) => {

@@ -3,6 +3,30 @@ import type { RuntimeEvent } from "@vermillion/shared";
 import { DomainService } from "../src/domain-service.js";
 
 describe("DomainService", () => {
+  it("keeps history baselines for identical bodies and invalidates only changed members", () => {
+    const service = new DomainService({
+      assertEngineRegistered: () => {}, resolveEngineCapabilities: () => [], publishRuntimeEvent: () => {},
+      createSessionId: () => "history-session"
+    });
+    service.createSession({ conversationId: "history-conversation", engineId: "codex" });
+    service.commitAcceptedUserMessage({ type: "sendUserMessage", sessionId: "history-session", messageId: "user", content: "before", attachments: [] }, "turn");
+    const snapshot = service.getSnapshot();
+    const history = {
+      workspaceId: "workspace", conversation: snapshot.conversations[0]!, session: snapshot.sessions[0]!,
+      turns: snapshot.turns, messageBlocks: snapshot.messageBlocks, toolCalls: snapshot.toolCalls,
+      terminalStreams: snapshot.terminalStreams, sessionRelations: snapshot.sessionRelations
+    };
+    const revision = service.getHistoryRevision("history-session");
+    const unrelated = service.getHistoryRevision("unrelated-session");
+    service.hydrateDiscoveredSession(history, { replaceSessionHistory: true });
+    expect(service.getHistoryRevision("history-session")).toBe(revision);
+    service.hydrateDiscoveredSession({ ...history, session: { ...history.session, updatedAt: "2026-09-22T00:00:00Z" } }, { replaceSessionHistory: true });
+    expect(service.getHistoryRevision("history-session")).toBe(revision);
+    service.hydrateDiscoveredSession({ ...history, messageBlocks: history.messageBlocks.map((block) => ({ ...block, text: "after" })) }, { replaceSessionHistory: true });
+    expect(service.getHistoryRevision("history-session")).not.toBe(revision);
+    expect(service.getHistoryRevision("unrelated-session")).toBe(unrelated);
+  });
+
   it("creates sessions and projects participant, session, and conversation state", () => {
     const publishedEvents: RuntimeEvent[] = [];
     const service = new DomainService({

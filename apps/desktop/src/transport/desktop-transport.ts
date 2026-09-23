@@ -290,8 +290,11 @@ export type DesktopTransport = {
       sessionId: string,
       options?: {
         forceProviderHydration?: boolean;
+        includeWindow?: boolean;
+        readId?: string;
+        signal?: AbortSignal;
       }
-    ) => Promise<{ page: SessionWindowRpc }>;
+    ) => Promise<{ page?: SessionWindowRpc }>;
     activate: (sessionId: string, options?: { focusTree?: boolean }) => Promise<{ sessionId: string }>;
     loadOlder: (input: {
       sessionId: string;
@@ -332,7 +335,7 @@ export type DesktopTransport = {
     operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
     get: (
       sessionId: string,
-      options?: { scope?: "tree" | "path" }
+      options?: { scope?: "tree" | "path"; knownWindows?: Record<string, { revision: string; cursor?: string }>; readId?: string; signal?: AbortSignal }
     ) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
       sessionId: string;
@@ -573,6 +576,21 @@ export const createDesktopTransport = (
     }
   );
 
+  const historyRequest = async <T,>(
+    signal: AbortSignal | undefined, readId: string | undefined, request: (readId?: string) => Promise<T>
+  ): Promise<T> => {
+    signal?.throwIfAborted();
+    const id = readId ?? (signal ? createId() : undefined);
+    const cancel = () => {
+      if (id) void rpc.request("chatTree.cancelRead", { readId: id }).catch((error) => {
+        console.warn("[vermillion] History read cancellation failed", error);
+      });
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    try { return await request(id); }
+    finally { signal?.removeEventListener("abort", cancel); }
+  };
+
   const requestEngineList = async (): Promise<EngineDefinitionRpc[]> => {
     const result = await rpc.request("engine.list", {});
     return result.engines;
@@ -802,11 +820,13 @@ export const createDesktopTransport = (
           workspaceIds
         }),
       create: (input) => rpc.request("sessionBrowser.create", input),
-      open: (sessionId: string, options?: { forceProviderHydration?: boolean }) =>
+      open: (sessionId, options) => historyRequest(options?.signal, options?.readId, (readId) =>
         rpc.request("sessionBrowser.open", {
           sessionId,
-          forceProviderHydration: options?.forceProviderHydration
-        }),
+          forceProviderHydration: options?.forceProviderHydration,
+          ...(options?.includeWindow !== undefined ? { includeWindow: options.includeWindow } : {}),
+          ...(readId ? { readId } : {})
+        })),
       activate: (sessionId: string, options?: { focusTree?: boolean }) =>
         rpc.request("sessionBrowser.activate", {
           sessionId,
@@ -888,11 +908,13 @@ export const createDesktopTransport = (
       cancel: (input) => rpc.request("chatTree.cancel", input),
       remove: (input) => rpc.request("chatTree.remove", input),
       operations: (input) => rpc.request("chatTree.operations", input),
-      get: async (sessionId: string, options?: { scope?: "tree" | "path" }) => {
-        const result = await rpc.request("chatTree.get", {
+      get: async (sessionId, options) => {
+        const result = await historyRequest(options?.signal, options?.readId, (readId) => rpc.request("chatTree.get", {
           sessionId,
-          ...(options?.scope ? { scope: options.scope } : {})
-        });
+          ...(options?.scope ? { scope: options.scope } : {}),
+          ...(options?.knownWindows ? { knownWindows: options.knownWindows } : {}),
+          ...(readId ? { readId } : {})
+        }));
         return result.chatTree;
       },
       jump: (input: { sessionId: string; nodeId: string; expectedRevision?: number }) =>

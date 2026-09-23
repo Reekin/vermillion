@@ -51,6 +51,7 @@ export const sessionRpcMethods = [
   "chat.getCapabilities",
   "skills.list",
   "chatTree.get",
+  "chatTree.cancelRead",
   "chatTree.nodeAction",
   "chatTree.jump",
   "chatTree.markRead",
@@ -688,7 +689,9 @@ const zSessionBrowserOpenRequestSchema = z.object({
   method: z.literal("sessionBrowser.open"),
   params: z.object({
     sessionId: zSessionId,
-    forceProviderHydration: z.boolean().optional()
+    forceProviderHydration: z.boolean().optional(),
+    includeWindow: z.boolean().optional(),
+    readId: z.string().min(1).optional()
   })
 });
 
@@ -761,8 +764,17 @@ const zChatTreeGetRequestSchema = z.object({
   params: z.object({
     sessionId: zSessionId,
     /** tree：树结构；path：当前查看路径的位置与正文窗口。 */
-    scope: z.enum(["tree", "path"]).optional()
+    scope: z.enum(["tree", "path"]).optional(),
+    /** Complete member baselines actually held by the caller, with applied event watermarks. */
+    knownWindows: z.record(z.object({ revision: z.string().min(1), cursor: z.string().min(1).optional() })).optional(),
+    readId: z.string().min(1).optional()
   })
+});
+
+const zChatTreeCancelReadRequestSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.cancelRead"),
+  params: z.object({ readId: z.string().min(1) })
 });
 
 const zChatTreeJumpRequestSchema = z.object({
@@ -984,6 +996,7 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zChatGetCapabilitiesRequestSchema,
   zSkillsListRequestSchema,
   zChatTreeGetRequestSchema,
+  zChatTreeCancelReadRequestSchema,
   zChatTreeNodeActionRequestSchema,
   zChatTreeJumpRequestSchema,
   zChatTreeMarkReadRequestSchema,
@@ -1169,7 +1182,7 @@ const zSessionBrowserOpenResponseSchema = z.object({
   method: z.literal("sessionBrowser.open"),
   ok: z.literal(true),
   result: z.object({
-    page: zSessionWindowSchema
+    page: zSessionWindowSchema.optional()
   })
 });
 
@@ -1242,6 +1255,13 @@ const zChatTreeGetResponseSchema = z.object({
   result: z.object({
     chatTree: zChatTreeSnapshotSchema
   })
+});
+
+const zChatTreeCancelReadResponseSchema = z.object({
+  id: zRequestId,
+  method: z.literal("chatTree.cancelRead"),
+  ok: z.literal(true),
+  result: z.object({ cancelled: z.boolean() })
 });
 
 const zChatTreeJumpResponseSchema = z.object({
@@ -1488,6 +1508,7 @@ export const zSessionRpcResponseSchema = z.union([
   zChatGetCapabilitiesResponseSchema,
   zSkillsListResponseSchema,
   zChatTreeGetResponseSchema,
+  zChatTreeCancelReadResponseSchema,
   zChatTreeNodeActionResponseSchema,
   zChatTreeJumpResponseSchema,
   zChatTreeMarkReadResponseSchema,
