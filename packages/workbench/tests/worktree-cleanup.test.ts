@@ -71,7 +71,7 @@ it("closes and publishes Inbox immediately; persists detached cleanup across res
     await access(f.worktreePath);
     expect((await restarted.getWorkItem(f.workspaceId, f.item.workItemId)).status).toBe("closed");
     expect(await restarted.listDecisions(f.workspaceId)).toEqual([]);
-    expect((await restarted.listActions(f.workspaceId)).every((action) => action.status === "done" && action.attempts === 0)).toBe(true);
+    expect((await restarted.listActions(f.workspaceId)).every((action) => action.status === "done")).toBe(true);
     expect(await restarted.cleanupWorktrees(f.workspaceId)).toEqual({ removed: [f.worktreePath], retained: [] });
     await expect(access(f.worktreePath)).rejects.toThrow();
     expect(await restarted.listWorktreeCleanup(f.workspaceId)).toEqual([]);

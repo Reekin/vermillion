@@ -426,6 +426,7 @@ export const zExecution = zProcess.extend({
   integrationActionId: z.string().optional(),
   runId: z.string().optional(),
   deliveredAt: z.string().optional(),
+  pendingNoticeCount: z.number().int().nonnegative().optional(),
   notices: z.array(zExecutionNotice)
 });
 export type Execution = z.infer<typeof zExecution>;

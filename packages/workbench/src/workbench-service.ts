@@ -318,6 +318,10 @@ export class WorkbenchService {
     const ended = binding.request?.status === "cancelled" || !!binding.item && ["closed", "cancelled"].includes(binding.item.status);
     if (ended && !businessReceipt && owner.activeTurnId !== turnId) return;
     this.turnInspections.set(sessionId, { turnId, status: "active" });
+    if (binding.item && businessReceipt) {
+      await this.acknowledgeWorkerDispatch(binding.workspaceId, binding.item.workItemId, messageId!, turnId);
+      return;
+    }
     if (binding.request) await this.updateWorkRequest(binding.workspaceId, binding.request.requestId, (current) => ({
       ...current, activeTurnId: turnId, userStopped: false,
       pendingMessageId: messageId === current.pendingMessageId ? undefined : current.pendingMessageId
@@ -1345,14 +1349,24 @@ export class WorkbenchService {
     if (!item.run.pendingMessageId || !item.run.sessionId || !this.deliveryConfirmer) return item;
     const result = await this.deliveryConfirmer(item.run.sessionId, item.run.pendingMessageId);
     if (!result.accepted) return item;
-    const confirmed = await this.mutateRecord(workspaceId, workItemId, (record) =>
-      record.execution.pendingMessageId !== item.run.pendingMessageId || record.execution.sessionId !== item.run.sessionId ? record : ({
-        ...record, execution: { ...record.execution, pendingMessageId: undefined,
-          activeTurnId: result.active !== false ? result.turnId ?? record.execution.activeTurnId : record.execution.activeTurnId,
-          deliveredAt: this.now(), failure: undefined, updatedAt: this.now() }
-      }));
-    if (confirmed.status === "cancelled" && confirmed.run.sessionId && confirmed.run.activeTurnId)
-      await this.turnInterrupter?.(confirmed.run.sessionId, confirmed.run.activeTurnId);
+    return this.acknowledgeWorkerDispatch(workspaceId, workItemId, item.run.pendingMessageId, result.active === false ? undefined : result.turnId);
+  }
+
+  async acknowledgeWorkerDispatch(workspaceId: string, workItemId: string, messageId: string, turnId?: string): Promise<WorkItem> {
+    let interruptSessionId: string | undefined;
+    const confirmed = await this.mutateRecord(workspaceId, workItemId, (record) => {
+      const execution = record.execution;
+      if (execution.pendingMessageId !== messageId) return record;
+      const stopped = execution.paused || ["closed", "cancelled"].includes(record.item.status);
+      if (stopped && turnId) interruptSessionId = execution.sessionId;
+      return { ...record, execution: { ...execution, pendingMessageId: undefined, pendingNoticeCount: undefined,
+        notices: execution.notices.slice(execution.pendingNoticeCount ?? 0),
+        activeTurnId: turnId ?? execution.activeTurnId, deliveredAt: this.now(),
+        status: !stopped && execution.status === "pending" ? "running" : execution.status,
+        stage: !stopped ? "execute" : execution.stage,
+        failure: undefined, updatedAt: this.now() } };
+    });
+    if (interruptSessionId && turnId) await this.turnInterrupter?.(interruptSessionId, turnId);
     return confirmed;
   }
 
@@ -1762,6 +1776,22 @@ export class WorkbenchService {
       const reason = "验收未通过：" + (statusText || (missing ? "验收报告未覆盖全部条目" : "验收报告要求返工"));
       return this.returnWorkItem(workspaceId, workItemId, reason);
     }
+    if (!submitted.run.worktreePath) {
+      const { docs } = await this.context(workspaceId);
+      try {
+        await docs.rootResult(submitted.evidence?.commit, submitted.run.baseCommit, submitted.scope.allowedPaths);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+          item: { ...record.item, rejections: [...record.item.rejections, { reason, at: this.now() }], updatedAt: this.now() },
+          execution: { ...record.execution, failure: reason, waitReason: reason,
+            history: [...record.execution.history, { at: this.now(), event: "submission.rejected", message: reason }], updatedAt: this.now() }
+        }));
+      }
+    }
+    await this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
+      execution: { ...record.execution, failure: undefined, waitReason: undefined, updatedAt: this.now() }
+    }));
     await this.createAction(workspaceId, { kind: "integration", workItemId: workItemId, status: "pending", stage: "merge", message: "验收通过，等待合入。", integration: { operation: "merge", contractRevision: submitted.contractRevision, diffStat: "" } },
       (item) => ({ ...item, status: "merging", updatedAt: this.now() }));
     await this.drainIntegrations(workspaceId);
@@ -2366,6 +2396,16 @@ export class WorkbenchService {
       if (!confirmed.accepted) throw new Error("答复交付结果未确认，保留原消息标识等待核对。");
       result = { sessionId, accepted: true, turnId: confirmed.active === false ? undefined : confirmed.turnId };
     } else {
+      if (request && !item) await this.integrate(workspaceId, async () => {
+        const current = (await this.listWorkRequests(workspaceId)).find((entry) => entry.requestId === request.requestId)!;
+        if (current.paused || current.userStopped || current.status === "cancelled") throw new Error("准备已暂停、停止或取消。");
+        if (current.pendingMessageId) throw new Error("准备已有业务派发尚未确认，不能交付新的答复。");
+        const active = this.workerActive?.(sessionId) || current.turnStatus === "active";
+        if (current.activeTurnId && !active) throw new Error("准备当前轮次状态尚未确认。");
+        if (!active && (await this.getExecutionOccupancy(workspaceId)).sessionIds.filter((id) => id !== sessionId).length >= (await this.getScheduler(workspaceId)).maxWorkers)
+          throw new Error("执行并发名额尚未释放，准备答复等待交付。");
+        await this.updateWorkRequest(workspaceId, current.requestId, (latest) => ({ ...latest, pendingMessageId: messageId }));
+      });
       await store.decisions.put({ ...card, messageId, deliveryPending: true });
       try {
         result = await this.sessionSteerer({ sessionId, messageId, content: message });
@@ -2377,6 +2417,7 @@ export class WorkbenchService {
     }
     if (result.accepted === false || result.error) {
       await store.decisions.put({ ...(await store.decisions.get(card.decisionId))!, messageId: undefined });
+      if (request && !item) await this.updateWorkRequest(workspaceId, request.requestId, (current) => current.pendingMessageId === messageId ? { ...current, pendingMessageId: undefined } : current);
       throw new Error(result.error?.message ?? "会话未接收决策答复。");
     }
     if (!result.turnId && result.accepted !== true) throw new Error("答复交付结果未确认。");
@@ -2387,9 +2428,7 @@ export class WorkbenchService {
         history: record.execution.history.some((entry) => entry.decisionId === card.decisionId) ? record.execution.history
           : [...record.execution.history, { at: this.now(), event: "decision.answered", message, decisionId: card.decisionId }] }
     }));
-    else if (request) await this.updateWorkRequest(workspaceId, request.requestId, (current) => ({
-      ...current, activeTurnId: result.turnId ?? current.activeTurnId, waitReason: undefined
-    }));
+    else if (request) await this.confirmPreparationDelivery(workspaceId, request.requestId, messageId, result.turnId);
     else if (action) await this.updateAction(workspaceId, action, (current) => ({ ...current,
       history: [...current.history, { at: this.now(), event: "decision.answered", message, decisionId: card.decisionId }] }));
   }

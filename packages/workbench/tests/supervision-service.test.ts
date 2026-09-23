@@ -170,3 +170,41 @@ it("session reading is a read-only port with an explicit offline failure", async
   expect(await service.readSession({ sessionId: "worker", limit: 10, maxChars: 500 })).toMatchObject({ activity: { state: "unknown" } });
   expect(reader).toHaveBeenCalledWith({ sessionId: "worker", limit: 10, maxChars: 500 });
 });
+
+it("acknowledges only the dispatched notice prefix and interrupts a late accepted paused turn once", async () => {
+  const { service, workspaceId } = await fixture();
+  const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
+  const action = (await service.listActions(workspaceId))[0]!;
+  const notice = (text: string) => ({ kind: "contract" as const, text, at: new Date().toISOString() });
+  await service.updateAction(workspaceId, action, (current) => current.kind === "execute" ? { ...current,
+    pendingMessageId: "business", pendingNoticeCount: 1, notices: [notice("sent"), notice("arrived later")] } : current);
+  await service.observeSessionTurn("worker", "chat", "ordinary");
+  expect((await service.listActions(workspaceId))[0]).toMatchObject({ pendingNoticeCount: 1, notices: [{ text: "sent" }, { text: "arrived later" }] });
+  await service.pauseWorkItem(workspaceId, { workItemId: item.workItemId });
+  const interrupt = vi.fn(async () => {});
+  service.setTurnInterrupter(interrupt);
+  await service.observeSessionTurn("worker", "accepted", "business");
+  await service.acknowledgeWorkerDispatch(workspaceId, item.workItemId, "business", "accepted");
+  expect((await service.listActions(workspaceId))[0]).toMatchObject({ paused: true, activeTurnId: "accepted", notices: [{ text: "arrived later" }] });
+  expect((await service.listActions(workspaceId))[0]).not.toHaveProperty("pendingNoticeCount");
+  expect(interrupt).toHaveBeenCalledExactlyOnceWith("worker", "accepted");
+});
+
+it("keeps an idle preparation answer pending while Worker capacity is occupied", async () => {
+  const f = await fixture();
+  const send = vi.fn(async ({ sessionId }: { sessionId: string }) => ({ sessionId, accepted: true, turnId: "answer" }));
+  const service = new WorkbenchService({ ...f.options, sessionSteerer: send });
+  services.push(service);
+  await service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 1 });
+  const item = await service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  await service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "worker" });
+  await service.observeSessionTurn("worker", "occupied");
+  const request = await service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+  await service.updateWorkRequest(f.workspaceId, request.requestId, (current) => ({ ...current, status: "preparing", workerSessionId: "prep" }));
+  const card = await service.createDecision(f.workspaceId, { requestId: request.requestId, sessionId: "prep", question: "Scope?", context: "Choose", options: [] });
+  expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: true, deliveryFailure: expect.stringContaining("并发") });
+  expect(send).not.toHaveBeenCalled();
+  await service.settleExecutionTurn(f.workspaceId, "worker", "occupied", "completed");
+  expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: false });
+  expect(send).toHaveBeenCalledTimes(1);
+});

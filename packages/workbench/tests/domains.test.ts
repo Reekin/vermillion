@@ -142,8 +142,8 @@ describe("domain owner patrols", () => {
     orchestrator.start();
     const run = await fixture.client.request("domain.patrol.run", { workspaceId: fixture.workspaceId, domainId: "ui-ux" });
     await vi.waitFor(() => expect(sent[0]).toContain("domain.patrol.complete"));
-    expect(await fixture.client.request("domain.patrol.get", { workspaceId: fixture.workspaceId, patrolRunId: run.patrolRunId }))
-      .toMatchObject({ status: "running", sessionId: "patrol-session", turnId: "turn-1" });
+    await vi.waitFor(async () => expect(await fixture.client.request("domain.patrol.get", { workspaceId: fixture.workspaceId, patrolRunId: run.patrolRunId }))
+      .toMatchObject({ status: "running", sessionId: "patrol-session", turnId: "turn-1" }));
     await fixture.client.request("domain.patrol.complete", { workspaceId: fixture.workspaceId, patrolRunId: run.patrolRunId,
       sessionId: "patrol-session", issueIds: [], summary: "Checked" });
     completed?.({ sessionId: "patrol-session", turnId: "turn-1", finishReason: "completed" });

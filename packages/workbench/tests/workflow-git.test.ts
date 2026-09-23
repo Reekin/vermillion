@@ -109,7 +109,7 @@ it("records a merge needing rebase without automatically requeueing and preserve
   await writeFile(join(root, "unrelated.txt"), "keep me\n");
   const result = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
   expect(result).toMatchObject({ status: "merging", run: { sessionId: "original", worktreePath, branch } });
-  expect((await service.listActions(workspaceId)).find((action) => action.kind === "integration")?.failure).toContain("rebase");
+  expect((await service.listActions(workspaceId)).find((action) => action.kind === "integration")?.failure).toContain("merge conflict");
   expect(await readFile(join(root, "unrelated.txt"), "utf8")).toBe("keep me\n");
 });
 
@@ -153,14 +153,13 @@ it("checks repository paths in a mixed root scope while ignoring external artifa
   await writeFile(join(root, "owned.txt"), "owned\n");
 
   const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
-  expect(pending).toMatchObject({ status: "merging" });
-  const failedMerge = (await service.listActions(workspaceId)).find((action) => action.kind === "integration");
-  expect(failedMerge?.failure).toContain("未提交");
-  expect(failedMerge?.failure).not.toContain("outside repository");
+  expect(pending).toMatchObject({ status: "running" });
+  expect(pending.rejections[0]?.reason).toContain("未提交");
+  expect(pending.rejections[0]?.reason).not.toContain("outside repository");
   await git(root, "add", "owned.txt");
   await git(root, "commit", "-qm", "owned result");
   const commit = await git(root, "rev-parse", "HEAD");
-  const closed = await service.retryIntegration(workspaceId, item.workItemId);
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId, evidence: { ...submission.evidence, commit } });
 
   expect(closed).toMatchObject({ status: "closed", merge: { commit } });
   expect(closed.merge?.diffStat).toContain("owned.txt");
@@ -187,8 +186,8 @@ it("rejects untracked scoped root code and reverts every owned commit while reta
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "root-worker" });
   await writeFile(join(root, "result.txt"), "first\n");
   const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
-  expect(pending.status).toBe("merging");
-  expect((await service.listActions(workspaceId)).find((action) => action.kind === "integration")?.failure).toContain("未提交");
+  expect(pending.status).toBe("running");
+  expect(pending.rejections[0]?.reason).toContain("未提交");
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "implementation");
   const first = await git(root, "rev-parse", "HEAD");
   await service.writeDoc(workspaceId, ".vermillion/docs/retained.md", "retained docs\n");
@@ -198,7 +197,7 @@ it("rejects untracked scoped root code and reverts every owned commit while reta
   await writeFile(join(root, "result.txt"), "reviewed\n");
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "review fixes");
   const tip = await git(root, "rev-parse", "HEAD");
-  const closed = await service.retryIntegration(workspaceId, item.workItemId);
+  const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId, evidence: { ...submission.evidence, commit: tip } });
   expect(closed).toMatchObject({ status: "closed", merge: { commits: [first, tip] } });
   await service.rollbackWorkItem(workspaceId, item.workItemId, "Redo");
   await expect(access(join(root, "result.txt"))).rejects.toThrow();

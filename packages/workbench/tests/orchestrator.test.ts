@@ -262,6 +262,21 @@ it("does not backfill supervisors for independent or historical work", async () 
   expect(vi.mocked(f.runner.fork).mock.calls.filter(([input]) => input.metadata.role === "supervisor")).toHaveLength(0);
 });
 
+it("does not interrupt ordinary follow-up chat merely because its task remains paused", async () => {
+  const f = await fixture();
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+  f.orchestrator.start();
+  await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  await f.service.pauseWorkItem(f.workspaceId, { workItemId: item.workItemId });
+  f.complete("worker", undefined, "interrupted");
+  await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.activeTurnId).toBeUndefined());
+  vi.mocked(f.runner.interrupt).mockClear();
+  f.startTurn("worker", "ordinary-question", "user-message");
+  await reconcile(f.orchestrator, f.workspaceId);
+  expect(f.runner.interrupt).not.toHaveBeenCalled();
+  expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.paused).toBe(true);
+});
+
 async function reconcile(orchestrator: Orchestrator, workspaceId: string) {
   const runtime = orchestrator as unknown as { enqueue(id: string, task: () => Promise<void>): Promise<void>; reconcile(id: string): Promise<void> };
   await runtime.enqueue(workspaceId, () => runtime.reconcile(workspaceId));

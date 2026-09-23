@@ -189,16 +189,10 @@ export class Orchestrator {
     await this.service.refreshActions(workspaceId);
     const enabled = (await this.service.getScheduler(workspaceId)).enabled;
     for (const request of await this.service.listWorkRequests(workspaceId)) {
-      if (request.paused && request.workerSessionId && this.runner.isActive?.(request.workerSessionId)) {
-        await this.runner.interrupt(request.workerSessionId, request.activeTurnId);
-      }
       if (enabled) await this.prepareRequest(workspaceId, request);
       await this.checkSupervisor(workspaceId, request, enabled);
     }
     for (const item of await this.service.listWorkItems(workspaceId)) {
-      if (item.run.paused && item.run.sessionId && this.runner.isActive?.(item.run.sessionId)) {
-        await this.runner.interrupt(item.run.sessionId, item.run.activeTurnId);
-      }
       if (enabled) await this.dispatchItem(workspaceId, item.workItemId);
     }
     await this.service.continueIntegrations(workspaceId);
@@ -214,10 +208,7 @@ export class Orchestrator {
     if (action.pendingMessageId) {
       if (action.sessionId && this.runner.confirmMessage) {
         const receipt = await this.runner.confirmMessage(action.sessionId, action.pendingMessageId);
-        if (receipt.accepted) await this.service.updateAction(workspaceId, action, (current) => ({
-          ...current, pendingMessageId: undefined, activeTurnId: receipt.turnId,
-          status: "running", stage: "execute", deliveredAt: this.now()
-        }));
+        if (receipt.accepted) await this.service.acknowledgeWorkerDispatch(workspaceId, workItemId, action.pendingMessageId, receipt.turnId);
       }
       return;
     }
@@ -258,18 +249,15 @@ export class Orchestrator {
       const content = [!action.deliveredAt ? workerOpeningMessage(workspaceId, { ...latest, run: { ...latest.run, sessionId } }, root) : undefined,
         renderExecutionNotices(action.notices)].filter(Boolean).join("\n\n") || "继续当前工单，读取最新合同与已有成果后完成交接。";
       const messageId = createId("dispatch");
-      await this.service.updateAction(workspaceId, action, (current) => ({ ...current, pendingMessageId: messageId }));
+      await this.service.updateAction(workspaceId, action, (current) => ({ ...current,
+        pendingMessageId: messageId, pendingNoticeCount: action.notices.length }));
       const receipt = active ? await this.runner.steer(sessionId, content, messageId)
         : await this.runner.send(sessionId, content, { messageId });
       if (receipt?.accepted === false) {
         await this.service.updateAction(workspaceId, action, (current) => ({ ...current, pendingMessageId: undefined }));
         throw new Error(receipt.error?.message ?? "引擎未受理派发。");
       }
-      await this.service.updateAction(workspaceId, action, (current) => ({
-        ...current, pendingMessageId: undefined, activeTurnId: receipt?.turnId ?? current.activeTurnId,
-        status: "running", stage: "execute", deliveredAt: this.now(), failure: undefined,
-        notices: current.notices.slice(action.notices.length)
-      }));
+      await this.service.acknowledgeWorkerDispatch(workspaceId, workItemId, messageId, receipt?.turnId);
     } catch (error) {
       await this.service.failAction(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
       if (explicit) throw error;
