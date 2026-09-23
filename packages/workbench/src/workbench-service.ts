@@ -179,7 +179,6 @@ export class WorkbenchService {
   private sourceTurnResolver?: (sessionId: string) => Promise<string | undefined>;
   private sessionTreeResolver?: (sessionId: string) => Promise<string | undefined>;
   private workerActive?: (sessionId: string) => boolean;
-  private workerSettling?: (sessionId: string) => boolean;
   private turnInspector?: TurnInspector;
   private turnInterrupter?: (sessionId: string, turnId: string) => Promise<void>;
   private readonly turnInspections = new Map<string, { turnId: string; status: "active" | "completed" | "unknown" }>();
@@ -193,11 +192,6 @@ export class WorkbenchService {
   setWorkerActiveChecker(checker: (sessionId: string) => boolean): () => void {
     this.workerActive = checker;
     return () => { if (this.workerActive === checker) this.workerActive = undefined; };
-  }
-
-  setWorkerSettlingChecker(checker: (sessionId: string) => boolean): () => void {
-    this.workerSettling = checker;
-    return () => { if (this.workerSettling === checker) this.workerSettling = undefined; };
   }
 
   setTurnInspector(inspector: TurnInspector): () => void {
@@ -219,7 +213,7 @@ export class WorkbenchService {
       ...(await this.listWorkItems(workspaceId)).map((entry) => ({ sessionId: entry.run.sessionId, turnId: entry.run.activeTurnId, cancelled: entry.status === "cancelled" }))
     ];
     for (const target of targets) {
-      if (!target.sessionId || !target.turnId || this.workerSettling?.(target.sessionId)) continue;
+      if (!target.sessionId || !target.turnId) continue;
       const result = await inspect(target.sessionId, target.turnId);
       if (target.cancelled && result.status === "active") await this.turnInterrupter?.(target.sessionId, target.turnId);
       const previous = this.turnInspections.get(target.sessionId);
