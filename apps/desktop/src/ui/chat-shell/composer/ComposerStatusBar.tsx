@@ -10,20 +10,21 @@ export const ComposerStatusBar = ({
 }: {
   status: ComposerStatusModel;
   notice?: ComposerStatusNotice;
-}): ReactElement | null => {
-  const showStatus = status.kind !== "idle" && status.kind !== "no_session";
-  if (!showStatus && !notice?.message) return null;
+}): ReactElement => {
   return (
     <div className="awb-composer-status">
-      {showStatus ? (
-        <span className={`awb-composer-status__pill is-${status.kind}`}>
-          {status.label}
-        </span>
-      ) : null}
+      <span className={`awb-composer-status__pill is-${status.kind}`} role="status">
+        {status.kind === "no_session" || status.kind === "idle" ? "就绪"
+          : status.kind === "running" ? "运行中"
+          : status.kind === "awaiting_approval" ? "等待审批"
+          : status.kind === "error" ? "需要处理" : status.label}
+      </span>
       {notice?.message ? (
         <span
           className={`awb-composer-status__notice is-${notice.severity ?? "info"}`}
           title={notice.message}
+          tabIndex={0}
+          role="status"
         >
           {notice.message}
         </span>

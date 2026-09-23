@@ -1212,11 +1212,13 @@ button:disabled {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  min-height: var(--awb-control-height-md);
   min-width: 0;
 }
 
 .awb-composer-status__pill {
+  white-space: nowrap;
+  flex-shrink: 0;
   padding: 4px 9px;
   border-radius: var(--awb-radius-tight);
   font-weight: 500;
@@ -1245,6 +1247,7 @@ button:disabled {
 }
 
 .awb-composer-status__notice {
+  flex: 1;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -1327,35 +1330,44 @@ button:disabled {
 
 .awb-composer__actions {
   display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: start;
   min-width: 0;
   gap: 8px;
 }
 
 .awb-composer__meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  flex-wrap: wrap;
+  display: contents;
 }
 
-.awb-composer__meta:empty {
-  display: none;
+.awb-composer__meta > .awb-composer-goal {
+  grid-column: 1 / -1;
 }
 
 .awb-composer__right-rail {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  position: relative;
+  padding-right: 30px;
+}
+
+.awb-composer__right-rail > .awb-composer-context {
+  position: absolute;
+  right: 0;
+  top: 6px;
 }
 
 .awb-composer-execution {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px 12px;
   min-width: 0;
   flex: 1;
