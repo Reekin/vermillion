@@ -332,6 +332,8 @@ describe("AgentRunner recovery", () => {
       listSessions: () => [{ sessionId: "worker", engineId: "codex" }],
       listEngines: () => [{ engineId: "codex", displayName: "Codex" }],
       runSessionAction: vi.fn().mockResolvedValue({ action: "resume", resumed: true }),
+      getSnapshot: vi.fn().mockReturnValue({ sessions: [{ sessionId: "worker", metadata: { providerSessionId: "provider-thread" } }], turns: [] }),
+      updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
       setSessionTitle: vi.fn().mockResolvedValue(undefined),
       getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
       openSession: vi.fn().mockRejectedValue(new Error("Open session cancelled."))
@@ -347,6 +349,17 @@ describe("AgentRunner recovery", () => {
     expect(shell.runSessionAction).toHaveBeenCalledWith({ sessionId: "worker", action: "resume", preserveExecution: true });
     expect(shell.openSession).not.toHaveBeenCalled();
     expect(shell.getSettings).not.toHaveBeenCalled();
+  });
+
+  it("prepares a local empty Worker without resuming a provider thread that does not exist yet", async () => {
+    const { shell, runner } = setup();
+    shell.getSnapshot.mockReturnValue({ sessions: [{ sessionId: "worker", metadata: {} }], turns: [] });
+    await expect(runner.resume("worker", { cwd: "I:/isolated", title: "Worker", metadata: { role: "worker" }, modelConfig: { modelId: "execution-model" } })).resolves.toBe(true);
+    expect(shell.runSessionAction).not.toHaveBeenCalled();
+    expect(shell.updateSessionMetadata).toHaveBeenCalledWith("worker", expect.objectContaining({
+      role: "worker", cwd: "I:/isolated", sessionProfile: expect.objectContaining({ modelId: "execution-model" })
+    }));
+    expect(shell.setSessionTitle).toHaveBeenCalledWith("worker", "Worker");
   });
 
   it("applies the execution role and model profile when resuming a prepared session", async () => {

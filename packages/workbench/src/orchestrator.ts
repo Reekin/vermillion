@@ -1,4 +1,4 @@
-import { effectiveNeeds, actionIsOpen, renderExecutionNotices, type Execution, type PatrolRun, type WorkMessage, type WorkRequest, type RoleExecutionOverrides } from "./contracts.js";
+import { renderExecutionNotices, type Execution, type PatrolRun, type WorkMessage, type WorkRequest, type RoleExecutionOverrides } from "./contracts.js";
 import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 import type { SessionReceipt, TurnInspector } from "./execution-runtime.js";
@@ -73,8 +73,8 @@ export class Orchestrator {
       this.service.setTurnInterrupter((id, turnId) => this.runner.interrupt(id, turnId)),
       this.service.setWorkerEnvironmentReleaser((id) => this.runner.release(id)),
       this.service.registerScheduler(),
-      this.service.setExecutionStarter((workspaceId, workItemId) =>
-        this.enqueue(workspaceId, () => this.dispatchItem(workspaceId, workItemId, true)))
+      this.service.setExecutionStarter((workspaceId, workItemId, automatic) =>
+        this.enqueue(workspaceId, () => this.dispatchItem(workspaceId, workItemId, !automatic)))
     );
     if (this.runner.inspectTurn) this.disposers.push(this.service.setTurnInspector(this.runner.inspectTurn));
     if (this.runner.resolveSourceTurn) this.disposers.push(this.service.setSourceTurnResolver(this.runner.resolveSourceTurn));
@@ -200,123 +200,68 @@ export class Orchestrator {
   }
 
   private async dispatchItem(workspaceId: string, workItemId: string, explicit = false): Promise<void> {
-    const item = await this.service.getWorkItem(workspaceId, workItemId);
-    const action = (await this.service.listActions(workspaceId)).find((entry): entry is Execution =>
-      entry.kind === "execute" && entry.workItemId === workItemId)!;
-    if (!action || !actionIsOpen(action) || item.run.paused || item.run.userStopped ||
-        ["preparing", "closed", "cancelled"].includes(item.status)) return;
-    if (action.pendingMessageId) {
-      if (action.sessionId && this.runner.confirmMessage) {
-        const receipt = await this.runner.confirmMessage(action.sessionId, action.pendingMessageId);
-        if (receipt.accepted) await this.service.acknowledgeWorkerDispatch(workspaceId, workItemId, action.pendingMessageId, receipt.turnId);
-      }
-      return;
-    }
-    if (action.status !== "pending" && !action.notices.length) return;
-    if (await this.service.isWorkItemBlocked(workspaceId, workItemId)) {
-      if (explicit) throw new Error("工作仍有未解决的依赖、资源或决策等待。");
-      return;
-    }
-    const occupancy = await this.service.getExecutionOccupancy(workspaceId);
-    const others = occupancy.workItems.filter((entry) => entry.workItemId !== workItemId);
-    const slots = occupancy.sessionIds.filter((id) => id !== action.sessionId);
-    if (slots.length >= (await this.service.getScheduler(workspaceId)).maxWorkers ||
-        others.some((entry) => effectiveNeeds(entry).some((need) => effectiveNeeds(item).includes(need)))) {
-      if (explicit) throw new Error("并发或共享资源尚未释放。");
-      return;
-    }
-    const root = await this.service.workspaceRoot(workspaceId);
-    const role = await this.service.resolveWorkerRole(workspaceId);
-    let sessionId = action.sessionId;
-    try {
-      if (!sessionId) {
-        const metadata = { role: "worker", workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId };
-        const opened = action.forkSessionId && action.forkTurnId
-          ? await this.runner.fork({ workspaceId, sourceSessionId: action.forkSessionId, sourceTurnId: action.forkTurnId, title: "Worker · " + item.title, modelConfig: role.modelConfig, metadata })
-          : await this.runner.open({ workspaceId, cwd: root, title: "Worker · " + item.title, modelConfig: role.modelConfig, metadata });
-        sessionId = opened.sessionId;
-        await this.service.updateAction(workspaceId, action, (current) => ({ ...current, sessionId, stage: "deliver" }));
-      }
-      if (!await this.runner.resume(sessionId, { cwd: root, modelConfig: role.modelConfig,
-        metadata: { role: "worker", workItemId, sourceSessionId: item.sourceSessionId, sourceTurnId: item.sourceTurnId } })) {
-        throw new Error("无法恢复固定 Worker 会话：" + sessionId);
-      }
-      const active = this.runner.isActive?.(sessionId) === true;
-      if (active && !action.notices.length) return;
-      const latest = await this.service.getWorkItem(workspaceId, workItemId);
-      if (latest.run.paused || latest.run.userStopped || ["closed", "cancelled"].includes(latest.status)) return;
-      if (latest.status === "queued") await this.service.startWorkItem(workspaceId, workItemId, { sessionId });
-      const content = [!action.deliveredAt ? workerOpeningMessage(workspaceId, { ...latest, run: { ...latest.run, sessionId } }, root) : undefined,
-        renderExecutionNotices(action.notices)].filter(Boolean).join("\n\n") || "继续当前工单，读取最新合同与已有成果后完成交接。";
-      const messageId = createId("dispatch");
-      await this.service.updateAction(workspaceId, action, (current) => ({ ...current,
-        pendingMessageId: messageId, pendingNoticeCount: action.notices.length }));
-      const receipt = active ? await this.runner.steer(sessionId, content, messageId)
-        : await this.runner.send(sessionId, content, { messageId });
-      if (receipt?.accepted === false) {
-        await this.service.updateAction(workspaceId, action, (current) => ({ ...current, pendingMessageId: undefined }));
-        throw new Error(receipt.error?.message ?? "引擎未受理派发。");
-      }
-      await this.service.acknowledgeWorkerDispatch(workspaceId, workItemId, messageId, receipt?.turnId);
-    } catch (error) {
-      await this.service.failAction(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
-      if (explicit) throw error;
-    }
+    const result = await this.service.dispatchBusiness(workspaceId, { workItemId }, {
+      automatic: !explicit,
+      confirm: this.runner.confirmMessage,
+      prepare: async ({ item, state, sessionId: existing }) => {
+        const action = state as Execution;
+        const root = await this.service.workspaceRoot(workspaceId);
+        const role = await this.service.resolveWorkerRole(workspaceId);
+        const metadata = { role: "worker", workItemId, sourceSessionId: item!.sourceSessionId, sourceTurnId: item!.sourceTurnId };
+        let sessionId = existing;
+        if (!sessionId) {
+          const opened = action.forkSessionId && action.forkTurnId
+            ? await this.runner.fork({ workspaceId, sourceSessionId: action.forkSessionId, sourceTurnId: action.forkTurnId,
+              title: "Worker · " + item!.title, modelConfig: role.modelConfig, metadata })
+            : await this.runner.open({ workspaceId, cwd: root, title: "Worker · " + item!.title, modelConfig: role.modelConfig, metadata });
+          sessionId = opened.sessionId;
+          await this.service.updateAction(workspaceId, action, current => ({ ...current, sessionId, stage: "deliver" }));
+        }
+        if (!await this.runner.resume(sessionId, { cwd: root, modelConfig: role.modelConfig, metadata }))
+          throw new Error("无法恢复固定 Worker 会话：" + sessionId);
+        const content = [!action.deliveredAt ? workerOpeningMessage(workspaceId, { ...item!, run: { ...item!.run, sessionId } }, root) : undefined,
+          renderExecutionNotices(action.notices)].filter(Boolean).join("\n\n") || "继续当前工单，读取最新合同与已有成果后完成交接。";
+        return { sessionId, content };
+      },
+      send: (sessionId, content, messageId) => this.runner.isActive?.(sessionId)
+        ? this.runner.steer(sessionId, content, messageId)
+        : this.runner.send(sessionId, content, { messageId })
+    });
+    if (explicit && !["delivered", "active"].includes(result.status))
+      throw new Error(result.reason ?? "当前业务请求不能派发。");
   }
 
   private async prepareRequest(workspaceId: string, request: WorkRequest): Promise<void> {
-    if (request.paused || request.userStopped || !["pending", "preparing"].includes(request.status)) return;
-    if (request.workerSessionId && this.runner.isActive?.(request.workerSessionId)) return;
-    if (request.activeTurnId) return;
-    if (request.pendingMessageId) {
-      if (request.workerSessionId && this.runner.confirmMessage) {
-        const receipt = await this.runner.confirmMessage(request.workerSessionId, request.pendingMessageId);
-        if (receipt.accepted) await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
-          ...current, pendingMessageId: undefined, activeTurnId: receipt.turnId, dispatchRequested: false
-        }));
-      }
-      return;
-    }
-    if (request.status !== "pending" && !request.dispatchRequested) return;
-    if ((await this.service.getExecutionOccupancy(workspaceId)).sessionIds.length >= (await this.service.getScheduler(workspaceId)).maxWorkers) return;
     if (!request.workerSessionId && this.runner.isActive?.(request.sourceSessionId)) return;
-    try {
-      const root = await this.service.workspaceRoot(workspaceId);
-      const role = await this.roles.resolve(root, "work-preparation");
-      let sessionId = request.workerSessionId;
-      if (!sessionId) {
-        const fork = request.sourceTurnId ? await this.runner.fork({
-          workspaceId, sourceSessionId: request.sourceSessionId, sourceTurnId: request.sourceTurnId,
-          title: "开工准备", modelConfig: role.modelConfig,
-          metadata: { role: "work-preparation", requestId: request.requestId, sourceSessionId: request.sourceSessionId }
-        }) : { sessionId: request.sourceSessionId, treeId: request.treeId };
-        sessionId = fork.sessionId;
-        await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
-          ...current, workerSessionId: sessionId, treeId: fork.treeId ?? current.treeId, status: "preparing"
-        }));
-      }
-      if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备会话。");
-      const latest = (await this.service.listWorkRequests(workspaceId)).find((entry) => entry.requestId === request.requestId)!;
-      if (latest.paused || latest.userStopped || latest.status === "cancelled") return;
-      const content = request.dispatchRequested
-        ? "继续本次准备，保留已有成果，完成完整交接。\nrequestId: " + request.requestId
-        : [request.message?.content, role.content, "workspaceId: " + workspaceId, "sessionId: " + sessionId,
-          "requestId: " + request.requestId, "sourceSessionId: " + request.sourceSessionId,
-          "开工范围: " + (request.scope ?? "根据讨论确定范围"),
-          "结束前必须通过 work.prepare.complete 登记完整工单清单、文档依据和目录。"].filter(Boolean).join("\n\n");
-      const messageId = createId("preparation");
-      await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({ ...current, pendingMessageId: messageId, dispatchRequested: false }));
-      const receipt = await this.runner.send(sessionId, content, { ...request.message, messageId });
-      if (receipt?.accepted === false) {
-        await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({ ...current, pendingMessageId: undefined }));
-        throw new Error(receipt.error?.message ?? "引擎未受理准备任务。");
-      }
-      await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
-        ...current, pendingMessageId: undefined, activeTurnId: receipt?.turnId, failure: undefined
-      }));
-    } catch (error) {
-      await this.service.failWorkRequest(workspaceId, request.requestId, error instanceof Error ? error.message : String(error));
-    }
+    await this.service.dispatchBusiness(workspaceId, { requestId: request.requestId }, {
+      automatic: true,
+      confirm: this.runner.confirmMessage,
+      prepare: async ({ request: current, sessionId: existing }) => {
+        const root = await this.service.workspaceRoot(workspaceId);
+        const role = await this.roles.resolve(root, "work-preparation");
+        let sessionId = existing;
+        if (!sessionId) {
+          const fork = current!.sourceTurnId ? await this.runner.fork({
+            workspaceId, sourceSessionId: current!.sourceSessionId, sourceTurnId: current!.sourceTurnId,
+            title: "开工准备", modelConfig: role.modelConfig,
+            metadata: { role: "work-preparation", requestId: current!.requestId, sourceSessionId: current!.sourceSessionId }
+          }) : { sessionId: current!.sourceSessionId, treeId: current!.treeId };
+          sessionId = fork.sessionId;
+          await this.service.updateWorkRequest(workspaceId, current!.requestId, latest => ({
+            ...latest, workerSessionId: sessionId, treeId: fork.treeId ?? latest.treeId
+          }));
+        }
+        if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备会话。");
+        const content = current!.dispatchRequested
+          ? "继续本次准备，保留已有成果，完成完整交接。\nrequestId: " + current!.requestId
+          : [current!.message?.content, role.content, "workspaceId: " + workspaceId, "sessionId: " + sessionId,
+            "requestId: " + current!.requestId, "sourceSessionId: " + current!.sourceSessionId,
+            "开工范围: " + (current!.scope ?? "根据讨论确定范围"),
+            "结束前必须通过 work.prepare.complete 登记完整工单清单、文档依据和目录。"].filter(Boolean).join("\n\n");
+        return { sessionId, content };
+      },
+      send: (sessionId, content, messageId) => this.runner.send(sessionId, content, { ...request.message, messageId })
+    });
   }
 
   private async finishSupervisor(workspaceId: string, request: WorkRequest, failure?: string): Promise<void> {
@@ -335,12 +280,13 @@ export class Orchestrator {
     if (!request.supervisor) return;
     const unfinished = (await this.service.listWorkItems(workspaceId)).some((item) =>
       item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
-    if (request.status !== "ready" || !unfinished || request.paused || !enabled) {
+    if (request.status !== "ready" || !unfinished || request.paused) {
       if (request.supervisor.nextCheckAt) await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
         ...current, supervisor: { ...current.supervisor, nextCheckAt: undefined }
       }));
       return;
     }
+    if (!enabled) return;
     const schedule = (at: string) => {
       const timeout = setTimeout(() => {
         this.supervisorTimers.delete(key);
