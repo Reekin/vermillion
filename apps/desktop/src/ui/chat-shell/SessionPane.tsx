@@ -1,4 +1,6 @@
 import { sessionContentCommitted } from "../../diagnostics/session-load-trace.js";
+import { SessionLoadingState } from "./SessionLoadingState.js";
+import type { SessionLoadingStage } from "./use-chat-tree-controller.js";
 import type {
   SessionExecutionProfileInput,
   TurnExecutionOptions
@@ -151,6 +153,9 @@ type TranscriptPaneProps = {
   activeSessionWindow?: Omit<SessionWindowRpc, "snapshot">;
   activeSessionId?: string;
   isOpeningSelectedSession: boolean;
+  openingStage?: SessionLoadingStage;
+  openingError?: string;
+  onRetryOpening?: () => void;
   /** A session switch is in flight; hold the empty state so it doesn't flash before content arrives. */
   isSwitchPending: boolean;
   loadingOlderTurns: boolean;
@@ -404,6 +409,9 @@ const TranscriptPane = memo(
     activeSessionWindow,
     activeSessionId,
     isOpeningSelectedSession,
+    openingStage,
+    openingError,
+    onRetryOpening,
     isSwitchPending,
     loadingOlderTurns,
     onLoadOlder,
@@ -418,28 +426,27 @@ const TranscriptPane = memo(
     renderTurnNavigation
   }: TranscriptPaneProps): ReactElement => (
     <section
-      className="awb-transcript"
+      className={`awb-transcript${isSwitchPending || openingError ? " awb-transcript--waiting" : ""}`}
       ref={transcriptRef}
       role="region"
       aria-label="Transcript"
+      aria-busy={isSwitchPending}
       tabIndex={0}
     >
       <div className="awb-transcript__content" ref={transcriptContentRef}>
-        {!pendingSend && renderedTranscriptRows.length === 0 && (isOpeningSelectedSession || !isSwitchPending) && (
+        {!pendingSend && renderedTranscriptRows.length === 0 && (isOpeningSelectedSession || openingError) && (
+          <SessionLoadingState stage={openingStage} failed={Boolean(openingError)} onRetry={onRetryOpening} />
+        )}
+        {!pendingSend && renderedTranscriptRows.length === 0 && !isSwitchPending && !openingError && (
           <div className="awb-transcript__empty">
-            {isOpeningSelectedSession && <div className="awb-loading-spinner" aria-hidden="true" />}
             <h3>
-              {isOpeningSelectedSession
-                ? "Loading thread"
-                : activeSessionId
-                  ? "Empty thread"
+              {activeSessionId
+                  ? "还没有消息"
                   : "新会话"}
             </h3>
             <p>
-              {isOpeningSelectedSession
-                ? "Loading conversation history for the selected session."
-                : activeSessionId
-                  ? "Send a message to start the next turn in this session."
+              {activeSessionId
+                  ? "发送一条消息，继续这段对话。"
                   : "发送第一条消息开始会话。"}
             </p>
           </div>
@@ -622,6 +629,9 @@ const TranscriptPane = memo(
     previous.activeSessionWindow === next.activeSessionWindow &&
     previous.activeSessionId === next.activeSessionId &&
     previous.isOpeningSelectedSession === next.isOpeningSelectedSession &&
+    previous.openingStage === next.openingStage &&
+    previous.openingError === next.openingError &&
+    previous.onRetryOpening === next.onRetryOpening &&
     previous.isSwitchPending === next.isSwitchPending &&
     previous.loadingOlderTurns === next.loadingOlderTurns &&
     previous.processVisibilityByTurnId === next.processVisibilityByTurnId &&
@@ -753,6 +763,7 @@ export const SessionPane = ({
     isChatTreeLoading,
     viewSessionId,
     isOpening: isOpeningSelectedSession,
+    openingStage,
     refreshChatTree,
     onJumpChatTree,
     prepareSend: prepareChatTreeSend,
@@ -772,6 +783,7 @@ export const SessionPane = ({
     onStatusNotice: setStatusNotice
   });
   const visibleTurnIds = activeChatTree?.visibleTurnIds ?? emptyTurnIds;
+  const retryOpening = useCallback(() => { void refreshChatTree().catch(() => undefined); }, [refreshChatTree]);
   useLayoutEffect(() => {
     if (activeChatTree && !isOpeningSelectedSession) sessionContentCommitted(sessionId, visibleTurnIds.length);
   });
@@ -1212,6 +1224,9 @@ export const SessionPane = ({
             activeSessionWindow={activeSessionWindow}
             activeSessionId={activeSessionId}
             isOpeningSelectedSession={showOpeningIndicator}
+            openingStage={isOpeningSelectedSession ? openingStage : undefined}
+            openingError={activeChatTree ? undefined : chatTreeError}
+            onRetryOpening={retryOpening}
             isSwitchPending={isOpeningSelectedSession}
             loadingOlderTurns={false}
             onLoadOlder={() => undefined}

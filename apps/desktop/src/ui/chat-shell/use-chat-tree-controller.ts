@@ -14,10 +14,12 @@ import {
 } from "./composer-status.js";
 
 const emptyOperations: ChatTreeSendOperation[] = [];
+export type SessionLoadingStage = "opening" | "history" | "preparing";
 /** Explicit navigation supplied by a work-item, search or session link. */
 export type ChatTreeNavigationEntry = { focusTree?: boolean; turnId?: string };
 type SessionRequest = { sessionId: string; promise: Promise<void>; signal?: AbortSignal };
 type ChatTreeEntry = {
+  loadingStage?: SessionLoadingStage;
   opened: { current: SessionRequest | undefined };
   activation: { current: SessionRequest | undefined };
   refresh: ReturnType<typeof createCoalescedRefresh>;
@@ -249,8 +251,16 @@ export const useChatTreeController = (input: {
       let outcome = "ok";
       let finishRead = () => {};
       const isCurrent = () => entryRef.current === entry && !signal.aborted;
+      const setStage = (stage: SessionLoadingStage) => {
+        if (!isCurrent()) return;
+        entry.loadingStage = stage;
+        setCacheRevision((revision) => revision + 1);
+      };
       const navigationForRequest = requestedNavigation ?? navigationEntry;
       try {
+        setFailedEntry(undefined);
+        setTreeFailure(undefined);
+        setStage("opening");
         await ensureSessionOpened(signal);
         sessionLoadMark(trace, "open.ready", { readId });
         if (!isCurrent()) return;
@@ -258,6 +268,7 @@ export const useChatTreeController = (input: {
         sessionLoadMark(trace, "navigation.ready", { readId });
         if (!isCurrent()) return;
         consumePending();
+        setStage("history");
         finishRead = store.beginSessionWindowRead(readId);
         signal.addEventListener("abort", finishRead, { once: true });
         const [initialPath, result] = await Promise.all([
@@ -267,6 +278,7 @@ export const useChatTreeController = (input: {
         if (!isCurrent()) return;
         sessionLoadMark(trace, "path.received", { readId, windows: initialPath.windows?.length ?? 0, nodes: initialPath.nodes.length });
         entry.operations = result.operations;
+        setStage("preparing");
         if (!await applyViewPath(entry, initialPath, navigationForRequest, isCurrent, readId)) return;
         sessionLoadMark(trace, "path.applied", { readId });
         setFailedEntry(undefined);
@@ -298,6 +310,8 @@ export const useChatTreeController = (input: {
       } catch (error) {
         outcome = "error";
         if (!isCurrent()) return;
+        setFailedEntry(entry);
+        setTreeFailure({ entry, message: `Chat tree refresh failed: ${(error as Error).message}` });
         throw error;
       } finally {
         sessionLoadMark(trace, "refresh.end", { readId, outcome: signal.aborted ? "cancelled" : outcome,
@@ -379,7 +393,7 @@ export const useChatTreeController = (input: {
   const hasCachedTargetTree = canDisplayCachedChatTree(displayedTree, sessionId, pendingNavigation);
   const isOpening = Boolean(
     sessionId && failedEntry !== entry && !hasCachedTargetTree &&
-    (hasExplicitChatTreeNavigation(navigationEntry) || !store.getDomainReadModel().getSession(sessionId))
+    (hasExplicitChatTreeNavigation(navigationEntry) || store.getDomainReadModel().listTurns({ sessionId }).length === 0)
   );
   const isChatTreeLoading = Boolean(sessionId && entry && failedEntry !== entry && !chatTreeGraph);
 
@@ -391,6 +405,7 @@ export const useChatTreeController = (input: {
     operations,
     pendingSend,
     isOpening,
+    openingStage: entry?.loadingStage ?? "opening",
     viewSessionId: chatTree?.currentSessionId ?? sessionId,
     refreshChatTree,
     onJumpChatTree: async (nodeId: string): Promise<void> => {

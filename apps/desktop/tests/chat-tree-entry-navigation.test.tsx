@@ -11,7 +11,7 @@ import {
   type ChatTreeNavigationEntry
 } from "../src/ui/chat-shell/use-chat-tree-controller.js";
 
-const setup = (navigationEntry?: ChatTreeNavigationEntry) => {
+const setup = (navigationEntry?: ChatTreeNavigationEntry, metadataOnly = false) => {
   const calls: string[] = [];
   const tree = { treeId: "root", currentSessionId: "worker", currentNodeId: "latest", nodes: [], windows: [], visibleTurnIds: [] } as unknown as ChatTreeSnapshotRpc;
   const open = vi.fn(async () => { calls.push("open:worker"); });
@@ -27,6 +27,9 @@ const setup = (navigationEntry?: ChatTreeNavigationEntry) => {
   } as unknown as DesktopTransport;
   let controller!: ReturnType<typeof useChatTreeController>;
   const store = createRendererStore();
+  if (metadataOnly) store.ingestEnvelope({ eventId: "metadata", cursor: "1", occurredAt: "2026-09-22T00:00:00Z", event: {
+    type: "session.created", sessionId: "worker", conversationId: "c", engineId: "e", status: "idle"
+  } });
   const Probe = () => {
     controller = useChatTreeController({ store, transport, sessionId: "worker", navigationEntry, refreshSignal: 0, onStatusNotice: vi.fn() });
     return null;
@@ -36,6 +39,12 @@ const setup = (navigationEntry?: ChatTreeNavigationEntry) => {
 };
 
 describe("chat tree entry navigation", () => {
+  it("keeps metadata-only sessions loading until their history is available", () => {
+    const test = setup(undefined, true);
+    expect(test.store.getDomainReadModel().getSession("worker")).toBeDefined();
+    expect(test.controller.isOpening).toBe(true);
+    expect(test.controller.openingStage).toBe("opening");
+  });
   it("applies a cold baseline with its in-flight tail without a second body read", async () => {
     const test = setup();
     test.store.ingestEnvelope({ eventId: "new", cursor: "1", occurredAt: "2026-09-22T00:00:00Z", event: { type: "session.created", sessionId: "worker", conversationId: "c", engineId: "e", status: "idle" } });
