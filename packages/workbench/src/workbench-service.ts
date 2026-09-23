@@ -304,9 +304,9 @@ export class WorkbenchService {
       const { item, request, state, sessionId } = owner;
       if (operation.decisionId) {
         const card = await (await this.context(workspaceId)).store.decisions.get(operation.decisionId);
-        if (card?.messageId) return { pending: card.messageId, sessionId };
+        if (card?.messageId) return { pending: card.messageId, sessionId, currentOperation: true };
       }
-      if (state.pendingMessageId) return { pending: state.pendingMessageId, sessionId };
+      if (state.pendingMessageId) return { pending: state.pendingMessageId, sessionId, currentOperation: !operation.decisionId };
       if (item && ["closed", "cancelled", "preparing"].includes(item.status) || request && ["ready", "cancelled"].includes(request.status))
         return { result: { status: "idle" } as BusinessDispatchResult };
       if (operation.automatic && state.failure) return { result: { status: "failed", reason: state.failure } as BusinessDispatchResult };
@@ -342,7 +342,7 @@ export class WorkbenchService {
       if (!receipt?.accepted) return { status: "unconfirmed", reason: "业务派发结果尚未确认。" };
       await this.acknowledgeBusinessDispatch(workspaceId, target, reserved.pending, receipt.turnId);
       await this.reconcileExecutionTurns(workspaceId);
-      return { status: "delivered" };
+      return reserved.currentOperation ? { status: "delivered" } : { status: "blocked", reason: "前一业务派发已确认，本次答复尚待交付。" };
     }
     const messageId = reserved.messageId!;
     let enteredEngine = false;

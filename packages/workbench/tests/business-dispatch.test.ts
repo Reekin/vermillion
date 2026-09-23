@@ -108,3 +108,22 @@ it("keeps an ambiguous receipt reserved across restart and confirms without repl
     expect((await restarted.getWorkItem(f.workspaceId, item.workItemId)).run).toMatchObject({ activeTurnId: "accepted-turn" });
   } finally { await restarted.dispose(); }
 });
+
+it("confirmation of an older dispatch cannot acknowledge a new decision answer", async () => {
+  const f = await fixture();
+  const send = vi.fn(async ({ sessionId }: { sessionId: string }) => ({ sessionId, accepted: true, turnId: "answer-turn" }));
+  const service = new WorkbenchService({ ...f.options, sessionSteerer: send,
+    deliveryConfirmer: async () => ({ accepted: true, turnId: "old-turn" }) });
+  try {
+    const item = await service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
+    const action = (await service.listActions(f.workspaceId))[0]!;
+    await service.updateAction(f.workspaceId, action, current => current.kind === "execute" ? { ...current, pendingMessageId: "old-dispatch" } : current);
+    const card = await service.createDecision(f.workspaceId, { workItemId: item.workItemId, sessionId: "worker", question: "Proceed?", context: "Choice", options: [] });
+    expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: true });
+    expect(send).not.toHaveBeenCalled();
+    await service.refreshActions(f.workspaceId);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ messageId: "decision-" + card.decisionId, content: expect.stringContaining("Proceed") }));
+    expect((await service.listDecisions(f.workspaceId))[0]?.deliveryPending).toBe(false);
+  } finally { await service.dispose(); }
+});
