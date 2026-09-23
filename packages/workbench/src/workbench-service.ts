@@ -2519,7 +2519,24 @@ export class WorkbenchService {
     const sessionId = item?.run.sessionId ?? request?.workerSessionId ?? card.sessionId;
     if (!sessionId || !this.sessionSteerer) throw new Error("尚无可交付的固定执行会话。");
     const target = item ? { workItemId: item.workItemId } : request ? { requestId: request.requestId } : undefined;
-    if (!target) throw new Error("决策没有关联的工作。");
+    if (!target) {
+      // A standalone conversation decision has no task or resource claim.
+      const { store } = await this.context(workspaceId);
+      const messageId = card.messageId ?? "decision-" + card.decisionId;
+      if (card.messageId) {
+        if (!(await this.deliveryConfirmer?.(sessionId, messageId))?.accepted)
+          throw new Error("答复交付结果尚未确认。");
+        return;
+      }
+      await store.decisions.put({ ...card, messageId });
+      const receipt = await this.sessionSteerer({ sessionId, messageId, content: message });
+      if (receipt.accepted === false || receipt.error) {
+        await store.decisions.put({ ...card, messageId: undefined });
+        throw new Error(receipt.error?.message ?? "会话未接收决策答复。");
+      }
+      if (!receipt.turnId && receipt.accepted !== true) throw new Error("答复交付结果尚未确认。");
+      return;
+    }
     const result = await this.dispatchBusiness(workspaceId, target, {
       automatic: !explicit, decisionId: card.decisionId,
       prepare: async () => ({ sessionId, content: message }),
