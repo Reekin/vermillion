@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 
 const usage = () => {
@@ -48,10 +49,22 @@ for (const key of Object.keys(env)) {
 delete env.npm_config_recursive;
 delete env.PNPM_SCRIPT_SRC_DIR;
 
-const command = process.platform === "win32" && process.env.APPDATA
-  ? resolve(process.env.APPDATA, "npm", "pnpm.cmd")
-  : "pnpm";
-const run = (args) => spawnSync(command, args, {
+let command = "pnpm";
+let commandArgs = [];
+if (process.platform === "win32") {
+  // Resolve the pnpm installation on PATH, then run its JS entry without a cmd shell.
+  const lookup = spawnSync("where.exe", ["pnpm.cmd"], { encoding: "utf8", env });
+  if (lookup.error || lookup.status !== 0) {
+    process.stderr.write(`Unable to locate pnpm on PATH: ${lookup.error?.message ?? lookup.stderr}\n`);
+    process.exit(1);
+  }
+  const shim = lookup.stdout.trim().split(/\r?\n/)[0];
+  const require = createRequire(import.meta.url);
+  const manifest = require.resolve("pnpm", { paths: [dirname(shim)] });
+  command = process.execPath;
+  commandArgs = [resolve(dirname(manifest), require(manifest).bin.pnpm)];
+}
+const run = (args) => spawnSync(command, [...commandArgs, ...args], {
   cwd: target,
   env,
   stdio: "inherit"
