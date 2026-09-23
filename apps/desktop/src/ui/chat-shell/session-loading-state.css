@@ -32,9 +32,9 @@
   position: absolute;
   width: 90px;
   height: 62px;
-  border: 1px solid var(--awb-rule);
+  border: 1px solid color-mix(in srgb, var(--awb-ink-muted) 42%, var(--awb-rule));
   border-radius: 14px;
-  background: var(--awb-panel);
+  background: color-mix(in srgb, var(--awb-ink) 5%, var(--awb-panel));
 }
 .awb-session-loading__card.is-back { left: 30px; top: 5px; transform: rotate(12deg); opacity: .4; }
 .awb-session-loading__card.is-middle { left: 10px; top: 17px; transform: rotate(-9deg); opacity: .65; }
