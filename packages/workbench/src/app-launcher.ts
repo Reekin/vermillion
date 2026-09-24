@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -15,8 +15,7 @@ export type AppStartInput = {
   targetPath: string;
   expectedRevision?: string;
   expectedBuildId?: string;
-  dataDir: string;
-  userDataDir?: string;
+  dataDir?: string;
   port: number;
   fixture?: "session-tree" | "real-session";
   codexConfigSource?: string;
@@ -41,7 +40,7 @@ export type AppStartResult = {
   codexHome?: string;
   piAgentDir?: string;
 };
-export type AppStopInput = { dataDir: string; pid: number; instanceId: string };
+export type AppStopInput = { dataDir: string; pid: number; instanceId: string; keepData?: boolean };
 export type AppStopResult = { dataDir: string; pid: number; stopped: true; portReleased: true; warnings?: string[] };
 export type AppWindowAction = "status" | "minimize" | "restore";
 export type AppWindowInput = { dataDir: string; pid: number; action: AppWindowAction };
@@ -185,12 +184,14 @@ export class AppLauncher {
     this.timeoutMs = options.timeoutMs ?? 30_000;
   }
   async start(input: AppStartInput): Promise<AppStartResult> {
-    const dataDir = resolve(input.dataDir);
-    const userDataDir = resolve(input.userDataDir ?? join(dataDir, "electron"));
-    await mkdir(dataDir, { recursive: true });
+    const root = await this.acceptanceRoot();
+    const dataDir = input.dataDir ? await this.existingDataDir(root, input.dataDir) : join(root, randomUUID());
+    const fresh = !input.dataDir;
+    if (fresh) await mkdir(dataDir);
+    const userDataDir = join(dataDir, "electron");
     await mkdir(userDataDir, { recursive: true });
     const logPath = join(dataDir, "acceptance-launch.jsonl");
-    await writeFile(logPath, "", "utf8");
+    if (fresh) await writeFile(logPath, "", "utf8");
     let stage = "target";
     let pid: number | undefined;
     let desktopOwnerPid: number | undefined;
@@ -261,12 +262,19 @@ export class AppLauncher {
       const cleanup = failedPid ? !processRunning(failedPid) : true;
       const exit = observedExit !== undefined ? `exited (code ${observedExit})`
         : failedPid && !running ? "exited (exit code unavailable)" : failedPid ? "running" : "not-created";
-      await logLine(logPath, "failed", { failedStage: stage, pid, processStatus: exit, cleanup, cleanupWarnings, error: error instanceof Error ? error.message : String(error) });
-      throw new Error(`app.start failed at ${stage}: ${error instanceof Error ? error.message : String(error)}; log=${logPath}; process=${failedPid ?? "not-created"}; status=${exit}; cleanup=${cleanup ? "complete" : "failed"}`);
+      const message = error instanceof Error ? error.message : String(error);
+      await logLine(logPath, "failed", { failedStage: stage, pid, processStatus: exit, cleanup, cleanupWarnings, error: message });
+      const details = (await readFile(logPath, "utf8")).trim().split("\n").slice(-3).join(" | ");
+      let directory = "retained";
+      if (fresh && cleanup) {
+        try { await rm(dataDir, { recursive: true, maxRetries: 5, retryDelay: 100 }); directory = "removed"; }
+        catch (removeError) { directory = "remove failed: " + String(removeError); }
+      }
+      throw new Error(`app.start failed at ${stage}: ${message}; target=${input.targetPath}; process=${failedPid ?? "not-created"}; status=${exit}; cleanup=${cleanup ? "complete" : "failed"}; dataDir=${dataDir} (${directory}); log=${details}`);
     }
   }
   async stop(input: AppStopInput): Promise<AppStopResult> {
-    const dataDir = resolve(input.dataDir);
+    const dataDir = await this.existingDataDir(await this.acceptanceRoot(), input.dataDir, true);
     let record: AcceptanceLaunchRecord;
     try { record = JSON.parse(await readFile(join(dataDir, launchRecordFile), "utf8")) as AcceptanceLaunchRecord; }
     catch { throw new Error("app.stop target has no acceptance launch record: " + dataDir); }
@@ -284,7 +292,27 @@ export class AppLauncher {
     if (processRunning(input.pid)) throw new Error("app.stop could not confirm process exit: " + input.pid);
     if (await tcpPortOpen(record.port)) throw new Error("app.stop could not confirm port release: " + record.port);
     await logLine(record.logPath, "stopped", { pid: input.pid, port: record.port });
+    if (!input.keepData) await rm(dataDir, { recursive: true, maxRetries: 5, retryDelay: 100 });
     return { dataDir, pid: input.pid, stopped: true, portReleased: true, ...(warnings.length ? { warnings } : {}) };
+  }
+  private async acceptanceRoot(): Promise<string> {
+    const base = resolve(process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion"));
+    await mkdir(base, { recursive: true });
+    const root = join(await realpath(base), "acceptance");
+    await mkdir(root, { recursive: true });
+    return realpath(root);
+  }
+  private async existingDataDir(root: string, requested: string, allowRunning = false): Promise<string> {
+    const path = resolve(requested);
+    if (dirname(path).toLowerCase() !== root.toLowerCase()) throw new Error("Acceptance dataDir must be an app.start-managed instance directory: " + path);
+    let actual: string;
+    try { actual = await realpath(path); } catch { throw new Error("Acceptance dataDir does not exist: " + path); }
+    if (dirname(actual).toLowerCase() !== root.toLowerCase()) throw new Error("Acceptance dataDir is outside the managed directory: " + path);
+    const record = await readJsonFile<AcceptanceLaunchRecord>(join(actual, launchRecordFile)).catch(() => undefined);
+    if (record?.kind !== "vermillion-acceptance" || record.logPath !== join(actual, "acceptance-launch.jsonl"))
+      throw new Error("Acceptance dataDir has no app.start launch record: " + path);
+    if (!allowRunning && processRunning(record.pid)) throw new Error("Acceptance dataDir is still running: " + path);
+    return actual;
   }
   private async terminate(pid: number, port?: number, ownerPid?: number): Promise<string[]> {
     const warnings: string[] = [];
