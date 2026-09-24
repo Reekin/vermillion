@@ -1767,8 +1767,9 @@ export class WorkbenchService {
 
   private async createWorkItemRecord(workspaceId: string, input: WorkItemCreateInput): Promise<WorkItem> {
     const now = this.now();
-    const { store } = await this.context(workspaceId);
+    const { store, rootPath } = await this.context(workspaceId);
     if (!!input.worktreePath !== !!input.branch) throw new Error("worktreePath 与 branch 必须同时提供。");
+    const worktreePath = input.worktreePath && !this.sameWorktreePath(input.worktreePath, rootPath) ? input.worktreePath : undefined;
     if (input.needs?.some((need) => ["browser", "desktop"].includes(need.trim()))) throw new Error("needs 必须指明具体共享实例，例如 browser:qa-profile。");
     const request = input.requestId ? await store.workRequests.get(input.requestId) : undefined;
     if (input.requestId && (!request || request.status !== "preparing" || (input.sessionId && request.workerSessionId !== input.sessionId))) throw new Error("requestId 必须属于当前准备分支。");
@@ -1798,7 +1799,7 @@ export class WorkbenchService {
     return this.transactRecord(workspaceId, item.workItemId, (current) => {
       if (current) throw new Error("Work item already exists: " + item.workItemId);
       const record: WorkItemRecord = { formatVersion: 2, workItemId: item.workItemId, item, integrations: [], cleanup: [], execution: {
-        sessionId: input.sessionId, worktreePath: input.worktreePath, branch: input.branch,
+        sessionId: input.sessionId, worktreePath, branch: worktreePath ? input.branch : undefined,
         kind: "execute", actionId: "execution-" + item.workItemId, workItemId: item.workItemId,
         status: "pending", stage: "open", notices: [], history: [], createdAt: now, updatedAt: now
       } };
@@ -2278,7 +2279,11 @@ export class WorkbenchService {
           candidate.sessionId && !candidate.detachedAt ? "subscribed" : undefined;
         if (!reason) {
           try {
-            await docs.dropWorktree(candidate.worktreePath, candidate.branch, candidate.discard);
+            const registered = await docs.registeredWorktree(candidate.worktreePath, candidate.branch);
+            if (registered && !candidate.removalStarted) await this.mutateRecord(workspaceId, candidate.workItemId, (record) => ({ ...record,
+              cleanup: record.cleanup.map((entry) => entry.worktreePath === candidate.worktreePath && entry.branch === candidate.branch
+                ? { ...entry, removalStarted: true } : entry) }));
+            await docs.dropWorktree(candidate.worktreePath, candidate.branch, candidate.discard, !!candidate.removalStarted || registered);
             await this.mutateRecord(workspaceId, candidate.workItemId, (record) => ({ ...record,
               cleanup: record.cleanup.filter((entry) => entry.worktreePath !== candidate.worktreePath || entry.branch !== candidate.branch) }));
             removed.push(candidate.worktreePath);
@@ -2334,6 +2339,8 @@ export class WorkbenchService {
 
   private async updateWorkItemRecord(workspaceId: string, workItemId: string, input: Parameters<WorkbenchService["updateWorkItem"]>[2]): Promise<WorkItem> {
     const { note, worktreePath, branch, sessionId, ...rawChanges } = input;
+    const rootPath = (await this.context(workspaceId)).rootPath;
+    const registeredPath = worktreePath && !this.sameWorktreePath(worktreePath, rootPath) ? worktreePath : undefined;
     const changes = rawChanges.refs === undefined ? rawChanges : { ...rawChanges, refs: await this.validateWorkItemRefs(workspaceId, rawChanges.refs) };
     if (!!worktreePath !== !!branch) throw new Error("worktreePath 与 branch 必须同时提供。");
     if (changes.needs?.some((need) => ["browser", "desktop"].includes(need.trim()))) throw new Error("needs 必须指明具体共享实例。");
@@ -2382,7 +2389,7 @@ export class WorkbenchService {
       return {
         ...record,
         item: { ...item, ...changes, verify, ...(deliverableChanged ? { contractRevision: item.contractRevision + 1 } : {}), status, decisions, updatedAt: this.now() },
-        execution: { ...execution, history, ...(worktreePath ? { worktreePath, branch } : {}),
+        execution: { ...execution, history, ...(worktreePath ? { worktreePath: registeredPath, branch: registeredPath ? branch : undefined } : {}),
           notices: awaitingDecision || selfOriginated ? execution.notices
             : [...execution.notices, pendingNotice("contract", note + "\n" + rereadContract, this.now())], updatedAt: this.now() }
 

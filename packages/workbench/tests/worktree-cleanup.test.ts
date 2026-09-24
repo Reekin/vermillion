@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { contract, git, setup, submission } from "./workflow-fixture.js";
@@ -163,4 +163,47 @@ it("requires unsubscribe ACK when an idle parent still owns an active native chi
   expect(await f.service.cleanupWorktrees(f.workspaceId)).toEqual({ removed: [f.worktreePath], retained: [] });
   expect((await f.service.getWorkItem(f.workspaceId, f.item.workItemId)).status).toBe("cancelled");
   expect(await f.service.listDecisions(f.workspaceId)).toEqual([]);
+});
+
+it("resumes a partially removed registered worktree after Git unregisters it", async () => {
+  const f = await fixture();
+  await f.service.cancelWorkItem(f.workspaceId, f.item.workItemId);
+  await detach(f);
+  const original = DocsService.prototype.dropWorktree;
+  vi.spyOn(DocsService.prototype, "dropWorktree").mockImplementationOnce(async function (path, branch, discard, started) {
+    await original.call(this, path, branch, discard, started);
+    await mkdir(path);
+    await writeFile(join(path, "locked.tmp"), "ignored build output");
+    throw new Error("EBUSY: locked build output");
+  });
+  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ retained: [{ reason: expect.stringContaining("EBUSY") }] });
+  expect((await f.service.listWorktreeCleanup(f.workspaceId))[0]?.removalStarted).toBe(true);
+  expect(await f.service.cleanupWorktrees(f.workspaceId)).toEqual({ removed: [f.worktreePath], retained: [] });
+  await expect(access(f.worktreePath)).rejects.toThrow();
+  expect(await git(f.root, "branch", "--list", f.branch)).toBe("");
+});
+
+it("keeps a nonempty unregistered directory without a cleanup claim", async () => {
+  const f = await fixture();
+  await f.service.cancelWorkItem(f.workspaceId, f.item.workItemId);
+  await detach(f);
+  await git(f.root, "worktree", "remove", f.worktreePath);
+  await mkdir(f.worktreePath);
+  await writeFile(join(f.worktreePath, "external.txt"), "keep");
+  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ removed: [], retained: [{ reason: expect.stringContaining("保留以待检查") }] });
+  expect((await f.service.listWorktreeCleanup(f.workspaceId))[0]?.removalStarted).toBeUndefined();
+  expect(await readFile(join(f.worktreePath, "external.txt"), "utf8")).toBe("keep");
+});
+
+it("treats a registered workspace root as root execution on create and update", async () => {
+  const f = await setup();
+  fixtures.push(f);
+  const created = await f.service.createWorkItem(f.workspaceId, { ...contract, worktreePath: f.root, branch: "master" });
+  expect(created.run.worktreePath).toBeUndefined();
+  await f.service.cancelWorkItem(f.workspaceId, created.workItemId);
+  expect(await f.service.listWorktreeCleanup(f.workspaceId)).toEqual([]);
+  const updated = await f.service.createWorkItem(f.workspaceId, contract);
+  await f.service.updateWorkItem(f.workspaceId, updated.workItemId, { note: "Root execution", worktreePath: f.root, branch: "master" });
+  await f.service.cancelWorkItem(f.workspaceId, updated.workItemId);
+  expect(await f.service.listWorktreeCleanup(f.workspaceId)).toEqual([]);
 });
