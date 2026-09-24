@@ -563,9 +563,9 @@ export class DocsService {
     if (branches.split("\n").includes(ref)) await git(this.rootPath, ["branch", discard ? "-D" : "-d", "--", branch]);
   }
 
-  async registeredWorktree(worktreePath: string, branch: string): Promise<boolean> {
+  async registeredWorktree(worktreePath: string, branch?: string): Promise<boolean> {
     const registered = await this.registration(worktreePath);
-    if (registered && registered.branch !== branch) throw new Error("Worktree branch ownership changed: " + worktreePath);
+    if (registered && branch && registered.branch !== branch) throw new Error("Worktree branch ownership changed: " + worktreePath);
     return !!registered;
   }
 

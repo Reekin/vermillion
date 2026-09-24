@@ -2287,7 +2287,12 @@ export class WorkbenchService {
             await this.mutateRecord(workspaceId, candidate.workItemId, (record) => ({ ...record,
               cleanup: record.cleanup.filter((entry) => entry.worktreePath !== candidate.worktreePath || entry.branch !== candidate.branch) }));
             removed.push(candidate.worktreePath);
-          } catch (error) { reason = error instanceof Error ? error.message : String(error); }
+          } catch (error) {
+            reason = error instanceof Error ? error.message : String(error);
+            if (await docs.registeredWorktree(candidate.worktreePath)) await this.mutateRecord(workspaceId, candidate.workItemId, (record) => ({ ...record,
+              cleanup: record.cleanup.map((entry) => entry.worktreePath === candidate.worktreePath && entry.branch === candidate.branch
+                ? { ...entry, removalStarted: undefined } : entry) }));
+          }
         }
         if (reason) retained.push({ workItemId: candidate.workItemId, worktreePath: candidate.worktreePath, reason });
       }

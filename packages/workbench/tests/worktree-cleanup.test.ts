@@ -169,18 +169,32 @@ it("resumes a partially removed registered worktree after Git unregisters it", a
   const f = await fixture();
   await f.service.cancelWorkItem(f.workspaceId, f.item.workItemId);
   await detach(f);
-  const original = DocsService.prototype.dropWorktree;
-  vi.spyOn(DocsService.prototype, "dropWorktree").mockImplementationOnce(async function (path, branch, discard, started) {
-    await original.call(this, path, branch, discard, started);
+  vi.spyOn(DocsService.prototype, "dropWorktree").mockImplementationOnce(async function (path) {
+    await git(f.root, "worktree", "remove", path);
     await mkdir(path);
     await writeFile(join(path, "locked.tmp"), "ignored build output");
     throw new Error("EBUSY: locked build output");
   });
   expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ retained: [{ reason: expect.stringContaining("EBUSY") }] });
   expect((await f.service.listWorktreeCleanup(f.workspaceId))[0]?.removalStarted).toBe(true);
+  expect(await git(f.root, "branch", "--list", f.branch)).toContain(f.branch);
   expect(await f.service.cleanupWorktrees(f.workspaceId)).toEqual({ removed: [f.worktreePath], retained: [] });
   await expect(access(f.worktreePath)).rejects.toThrow();
   expect(await git(f.root, "branch", "--list", f.branch)).toBe("");
+});
+
+it("revokes the partial deletion claim when Git refuses to remove a dirty worktree", async () => {
+  const f = await fixture();
+  await merge(f);
+  await detach(f);
+  await writeFile(join(f.worktreePath, "result.txt"), "external edits");
+  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ removed: [], retained: [{ reason: expect.any(String) }] });
+  expect((await f.service.listWorktreeCleanup(f.workspaceId))[0]?.removalStarted).toBeUndefined();
+  await git(f.root, "worktree", "remove", "--force", f.worktreePath);
+  await mkdir(f.worktreePath);
+  await writeFile(join(f.worktreePath, "external.txt"), "keep");
+  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ removed: [], retained: [{ reason: expect.stringContaining("保留以待检查") }] });
+  expect(await readFile(join(f.worktreePath, "external.txt"), "utf8")).toBe("keep");
 });
 
 it("keeps a nonempty unregistered directory without a cleanup claim", async () => {
