@@ -390,6 +390,7 @@ export class WorkbenchService {
             status: record.execution.status === "cancelled" ? "cancelled" : "decision", failure: reason
           } }));
         else await this.updateWorkRequest(workspaceId, target.requestId, (current) => current.pendingMessageId !== messageId ? current : ({ ...current,
+          status: !enteredEngine && !current.activeTurnId && ["pending", "preparing"].includes(current.status) ? "failed" : current.status,
           pendingMessageId: enteredEngine ? messageId : undefined, dispatchRequested: false, failure: reason }));
         if (operation.decisionId && !enteredEngine) {
           const { store } = await this.context(workspaceId);

@@ -64,6 +64,49 @@ it("reserves a cold preparation before a session exists and releases a definite 
   expect(await f.service.dispatchBusiness(f.workspaceId, { workItemId: b.workItemId }, delivery("b"))).toMatchObject({ status: "delivered" });
 });
 
+it.each(["open", "resume", "rejected"])("offers explicit preparation retry after a definite dispatch failure: %s", async mode => {
+  const f = await fixture();
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+  if (mode !== "open") await f.service.updateWorkRequest(f.workspaceId, request.requestId, current => ({
+    ...current, status: "preparing", workerSessionId: "prep", dispatchRequested: true
+  }));
+  const failed = await f.service.dispatchBusiness(f.workspaceId, { requestId: request.requestId }, {
+    automatic: true,
+    prepare: async () => {
+      if (mode !== "rejected") throw new Error(mode + " failed");
+      return { sessionId: "prep", content: "Prepare" };
+    },
+    send: async () => ({ accepted: false, error: { code: "denied", message: "rejected failed" } })
+  });
+  expect(failed).toMatchObject({ status: "failed" });
+  const diagnosis = await f.service.diagnoseWork(f.workspaceId, request.requestId);
+  expect(diagnosis.request).toMatchObject({ status: "failed", failure: mode + " failed" });
+  expect(diagnosis.request.pendingMessageId).toBeUndefined();
+  expect(diagnosis.availableActions).toContainEqual(expect.objectContaining({ method: "work.retry" }));
+  const port = delivery("prep");
+  expect(await f.service.dispatchBusiness(f.workspaceId, { requestId: request.requestId }, {
+    ...port, automatic: true
+  })).toMatchObject({ status: "failed" });
+  expect(port.prepare).not.toHaveBeenCalled();
+  await f.client.request("work.retry", { workspaceId: f.workspaceId, requestId: request.requestId });
+  expect(await f.service.dispatchBusiness(f.workspaceId, { requestId: request.requestId }, {
+    ...port, automatic: true
+  })).toMatchObject({ status: "delivered" });
+  expect(port.send).toHaveBeenCalledOnce();
+});
+
+it("does not label uncertain preparation delivery as a definite failure", async () => {
+  const f = await fixture();
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+  const result = await f.service.dispatchBusiness(f.workspaceId, { requestId: request.requestId }, {
+    ...delivery("prep"), send: async () => { throw new Error("connection lost"); }
+  });
+  expect(result.status).toBe("unconfirmed");
+  const diagnosis = await f.service.diagnoseWork(f.workspaceId, request.requestId);
+  expect(diagnosis.request.status).toBe("preparing");
+  expect(diagnosis.request.pendingMessageId).toEqual(expect.any(String));
+});
+
 it.each(["resume", "rejected"])("does not reinterpret failed notices as another automatic request: %s", async mode => {
   const f = await fixture();
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
