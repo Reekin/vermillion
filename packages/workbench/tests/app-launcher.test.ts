@@ -3,13 +3,31 @@ import { createServer } from "node:net";
 import { copyFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppLauncher, resolveAppTarget, type AcceptanceLaunchRecord } from "../src/app-launcher.js";
 import { startLocalEndpoint } from "../src/local-endpoint.js";
+import { prepareSessionTreeFixture } from "../src/session-tree-fixture.js";
 
 const dirs: string[] = [];
+const originalBase = process.env.VERMILLION_PERSISTENCE_BASE_DIR;
+let acceptanceRoot: string;
+beforeEach(async () => {
+  const base = await mkdtemp(join(tmpdir(), "verm-managed-"));
+  dirs.push(base);
+  process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
+  acceptanceRoot = join(base, "acceptance");
+  await mkdir(acceptanceRoot);
+});
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) =>
-  rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))); });
+  rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
+  if (originalBase === undefined) delete process.env.VERMILLION_PERSISTENCE_BASE_DIR;
+  else process.env.VERMILLION_PERSISTENCE_BASE_DIR = originalBase;
+});
+const managedDir = async (name: string) => {
+  const path = join(acceptanceRoot, name);
+  await mkdir(path);
+  return path;
+};
 
 describe("acceptance app target and lifecycle", () => {
   it.skipIf(process.platform !== "win32")("keeps the hidden desktop owner alive until its app exits", async () => {
@@ -88,9 +106,39 @@ describe("acceptance app target and lifecycle", () => {
     expect(target).toMatchObject({ kind: "release", rootPath: root, command: { exe: join(root, "Vermillion.exe") } });
   });
 
+  it("rejects caller-owned data directories before creating a launch", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "verm-caller-data-"));
+    dirs.push(outside);
+    await expect(new AppLauncher().start({ targetPath: outside, dataDir: outside, port: 14979 }))
+      .rejects.toThrow("app.start-managed instance directory");
+    expect(await stat(outside)).toBeDefined();
+  });
+
+  it("keeps an existing managed directory after a restart fails", async () => {
+    const dataDir = await managedDir("restart-target");
+    const record: AcceptanceLaunchRecord = { kind: "vermillion-acceptance", pid: 2147483646, port: 65429, desktop: "vermillion-qa",
+      token: "previous-instance", targetPath: dataDir, buildId: "sha256:test", logPath: join(dataDir, "acceptance-launch.jsonl") };
+    await writeFile(join(dataDir, "app-start.json"), JSON.stringify(record), "utf8");
+    await writeFile(record.logPath, "", "utf8");
+    await writeFile(join(dataDir, "saved-state.txt"), "unchanged", "utf8");
+    await expect(new AppLauncher().start({ targetPath: join(dataDir, "missing-target"), dataDir, port: 14979 }))
+      .rejects.toThrow(/app\.start failed at target:.*dataDir=.*retained.*log=/);
+    expect(await readFile(join(dataDir, "saved-state.txt"), "utf8")).toBe("unchanged");
+  });
+
+  it("reuses session-tree data without overwriting session changes", async () => {
+    const dataDir = await managedDir("session-tree-restart");
+    await prepareSessionTreeFixture(dataDir, join(import.meta.dirname, ".."));
+    const indexPath = join(dataDir, "session-index.json");
+    const index = JSON.parse(await readFile(indexPath, "utf8"));
+    index.entries[0].title = "Changed during acceptance";
+    await writeFile(indexPath, JSON.stringify(index), "utf8");
+    await prepareSessionTreeFixture(dataDir, join(import.meta.dirname, ".."));
+    expect(JSON.parse(await readFile(indexPath, "utf8")).entries[0].title).toBe("Changed during acceptance");
+  });
+
   it("stops only the recorded instance and confirms process exit", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "verm-stop-target-"));
-    dirs.push(dataDir);
+    const dataDir = await managedDir("stop-target");
     const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { windowsHide: true });
     if (!child.pid) throw new Error("test child did not start");
     const instanceId = "recorded-instance", logPath = join(dataDir, "acceptance-launch.jsonl");
@@ -104,14 +152,27 @@ describe("acceptance app target and lifecycle", () => {
     try {
       await expect(launcher.stop({ dataDir, pid: child.pid, instanceId: "wrong" })).rejects.toThrow("identity does not match");
       await expect(launcher.stop({ dataDir, pid: child.pid, instanceId })).resolves.toMatchObject({ stopped: true, portReleased: true });
+      await expect(stat(dataDir)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await endpoint.close();
     }
   });
 
+  it("keeps a stopped instance directory when requested", async () => {
+    const dataDir = await managedDir("keep-target");
+    const record: AcceptanceLaunchRecord = { kind: "vermillion-acceptance", pid: 2147483646, port: 65429, desktop: "vermillion-qa",
+      token: "kept-instance", targetPath: dataDir, buildId: "sha256:test", logPath: join(dataDir, "acceptance-launch.jsonl") };
+    await writeFile(join(dataDir, "app-start.json"), JSON.stringify(record), "utf8");
+    await writeFile(record.logPath, "", "utf8");
+    const launcher = new AppLauncher();
+    await launcher.stop({ dataDir, pid: record.pid, instanceId: record.token, keepData: true });
+    expect(await stat(dataDir)).toBeDefined();
+    await launcher.stop({ dataDir, pid: record.pid, instanceId: record.token });
+    await expect(stat(dataDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("refuses to stop a live process when runtime identity reports another PID", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "verm-stop-runtime-mismatch-"));
-    dirs.push(dataDir);
+    const dataDir = await managedDir("stop-runtime-mismatch");
     const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { windowsHide: true });
     if (!child.pid) throw new Error("test child did not start");
     const instanceId = "runtime-mismatch", logPath = join(dataDir, "acceptance-launch.jsonl");
@@ -131,8 +192,7 @@ describe("acceptance app target and lifecycle", () => {
   });
 
   it("does not report a port released while another listener still owns it", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "verm-stop-port-"));
-    dirs.push(dataDir);
+    const dataDir = await managedDir("stop-port");
     const server = createServer();
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
     const address = server.address();
@@ -150,24 +210,23 @@ describe("acceptance app target and lifecycle", () => {
 
   it.skipIf(process.platform !== "win32")("reports an early process exit with its stage and cleans it up", async () => {
     const release = await mkdtemp(join(tmpdir(), "verm-failing-release-"));
-    const dataDir = await mkdtemp(join(tmpdir(), "verm-failing-launch-"));
-    dirs.push(release, dataDir);
+    dirs.push(release);
     await copyFile(process.execPath, join(release, "Vermillion.exe"));
     const scripts = join(release, "resources", "app", "scripts");
     await mkdir(scripts, { recursive: true });
     await copyFile(join(import.meta.dirname, "..", "scripts", "start-on-hidden-desktop.ps1"), join(scripts, "start-on-hidden-desktop.ps1"));
     await copyFile(join(import.meta.dirname, "..", "scripts", "hidden-desktop-owner.ps1"), join(scripts, "hidden-desktop-owner.ps1"));
     const launcher = new AppLauncher({ timeoutMs: 2_000 });
-    await expect(launcher.start({ targetPath: release, expectedBuildId: "sha256:test", dataDir, port: 14979 }))
+    await expect(launcher.start({ targetPath: release, expectedBuildId: "sha256:test", port: 14979 }))
       .rejects.toThrow(/app\.start failed at (process|cdp): .*(exited|CreateProcess).*cleanup=complete/);
+    expect(await import("node:fs/promises").then((fs) => fs.readdir(acceptanceRoot))).toEqual([]);
   });
 
   it.skipIf(process.platform !== "win32")("terminates a starter that does not publish ownership before its deadline", async () => {
     const release = await mkdtemp(join(tmpdir(), "verm-stalled-release-"));
-    const dataDir = await mkdtemp(join(tmpdir(), "verm-stalled-launch-"));
-    dirs.push(release, dataDir);
+    dirs.push(release);
     await copyFile(process.execPath, join(release, "Vermillion.exe"));
-    const scripts = join(release, "resources", "app", "scripts"), marker = join(dataDir, "late-starter.txt");
+    const scripts = join(release, "resources", "app", "scripts"), marker = join(release, "late-starter.txt");
     await mkdir(scripts, { recursive: true });
     await writeFile(join(scripts, "hidden-desktop-owner.ps1"), "# fixture\n", "utf8");
     await writeFile(join(scripts, "start-on-hidden-desktop.ps1"), [
@@ -176,7 +235,7 @@ describe("acceptance app target and lifecycle", () => {
       `$PID | Set-Content -LiteralPath '${marker.replace(/'/g, "''")}'`
     ].join("\n"), "utf8");
     const launcher = new AppLauncher({ timeoutMs: 300 });
-    await expect(launcher.start({ targetPath: release, expectedBuildId: "sha256:test", dataDir, port: 14978 }))
+    await expect(launcher.start({ targetPath: release, expectedBuildId: "sha256:test", port: 14978 }))
       .rejects.toThrow(/app\.start failed at process: Hidden desktop starter did not publish an owner PID.*cleanup=complete/);
     await new Promise((done) => setTimeout(done, 2_100));
     await expect(stat(marker)).rejects.toMatchObject({ code: "ENOENT" });

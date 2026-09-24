@@ -32,8 +32,8 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "workItem.integration.retry": "合入失败且尚未交给 Agent 的工单；立即重试当前合入，由明确操作重新尝试。",
   "workItem.integration.takeover": "合入失败且尚未交给 Agent 的工单；附说明实际交付原 Worker 处理。",
   "workItem.integration.complete": "已接管合入的原 Worker；处理 worktree/rebase 后请求工作台在串行边界执行最终合入。",
-  "app.start": "本地构建并启动 targetPath 指定的源码 checkout 或发布产物；可用 fixture=session-tree 或 real-session，返回候选、构建、实例、定向 CLI 与隔离引擎身份。",
-  "app.stop": "按 dataDir、pid 与 instanceId 停止 app.start 登记的实例，确认进程退出和 CDP 端口释放。",
+  "app.start": "本地构建并启动隔离候选；自动分配实例目录，重启时传先前返回的 dataDir；可用 fixture=session-tree 或 real-session。",
+  "app.stop": "按 dataDir、pid 与 instanceId 停止实例，确认进程退出和端口释放后删除目录；keepData=true 保留目录供重启或取证。",
   "app.window": "本地控制 app.start 返回实例的窗口；status 查询，minimize 最小化，restore 恢复并激活。",
   "asksource": "当前执行中工单的 Worker；从工单记录的开单位置临时询问来源设计伙伴并等待答复。",
   "steer": "桌面在线；向任意可访问会话追加当前轮或启动该会话的新轮。sessionId 接受工作台会话 ID 或引擎会话标识（如子代理返回的 id）。",
@@ -103,10 +103,10 @@ export function methodHelp(method: string): string | undefined {
     "app.start",
     "适用状态：本地构建并启动明确身份的隔离验收候选。源码 checkout 必须传 expectedRevision，且工作树干净；发布目录必须传 expectedBuildId。成功返回实际 buildId、instanceId、日志、完整隔离环境与定向 CLI 命令。",
     "源码示例：",
-    "vermillion app.start '{\"targetPath\":\"X:/project-worktree\",\"expectedRevision\":\"<full-commit>\",\"dataDir\":\"X:/qa/data\",\"port\":14961,\"fixture\":\"session-tree\"}'",
+    "vermillion app.start '{\"targetPath\":\"X:/project-worktree\",\"expectedRevision\":\"<full-commit>\",\"port\":14961,\"fixture\":\"session-tree\"}'",
     "发布示例：",
-    "vermillion app.start '{\"targetPath\":\"X:/release/vermillion\",\"expectedBuildId\":\"sha256:<hash>\",\"dataDir\":\"X:/qa/data\",\"port\":14961}'",
-    "返回的 cli.executable 与 cli.args 是绑定本次实例的完整命令前缀；同一 dataDir 重启不会改写旧实例的 target descriptor。",
+    "vermillion app.start '{\"targetPath\":\"X:/release/vermillion\",\"expectedBuildId\":\"sha256:<hash>\",\"port\":14961}'",
+    "首次启动自动分配 dataDir；停止时传 keepData=true 保留目录，重启时把返回的 dataDir 传给 app.start。返回的 cli.executable 与 cli.args 绑定本次实例；重启不会改写旧实例的 target descriptor。",
     ""
   ].join("\n");
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
