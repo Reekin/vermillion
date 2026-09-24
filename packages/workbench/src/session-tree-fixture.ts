@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const fixtureWorkspaceId = "workspace-fixture-session-tree";
@@ -85,6 +85,19 @@ export const prepareSessionTreeFixture = async (
   const dataDir = resolve(dataDirInput);
   await assertFixtureDataDir(dataDir);
   const projectPath = join(dataDir, "fixtures", "session-tree", "project");
+  const registry = await readJsonIfPresent(join(dataDir, "workspace-registry.json"));
+  const index = await readJsonIfPresent(join(dataDir, "session-index.json"));
+  if (registry || index) {
+    const workspaces = Array.isArray(registry?.workspaces) ? registry.workspaces : [];
+    const entries = Array.isArray(index?.entries) ? index.entries : [];
+    if (workspaces.length !== 1 || (workspaces[0] as { workspaceId?: string; absolutePath?: string }).workspaceId !== fixtureWorkspaceId ||
+      resolve((workspaces[0] as { absolutePath?: string }).absolutePath ?? "") !== projectPath ||
+      ![fixtureParentSessionId, fixtureChildSessionId, fixturePlainSessionId].every((id) =>
+        entries.some((entry) => (entry as { sessionId?: string }).sessionId === id)) ||
+      !(await stat(projectPath).then((info) => info.isDirectory(), () => false)))
+      throw new Error("session-tree fixture data is incomplete; use a fresh dataDir");
+    return fixtureResult(dataDir, projectPath, packageRoot);
+  }
   await mkdir(projectPath, { recursive: true });
   const createdAt = new Date().toISOString();
   const conversationId = "conversation-fixture-session-tree";
@@ -151,7 +164,10 @@ export const prepareSessionTreeFixture = async (
     treeViews: {}
   });
 
-  return {
+  return fixtureResult(dataDir, projectPath, packageRoot);
+};
+
+const fixtureResult = (dataDir: string, projectPath: string, packageRoot: string): SessionTreeFixture => ({
     dataDir,
     projectPath,
     workspaceId: fixtureWorkspaceId,
@@ -159,5 +175,4 @@ export const prepareSessionTreeFixture = async (
       VERMILLION_CODEX_BIN: resolve(packageRoot, "scripts", "session-tree-fixture-codex.cmd"),
       VERMILLION_SESSION_TREE_FIXTURE_PROJECT: projectPath
     }
-  };
-};
+  });

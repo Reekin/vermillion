@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppLauncher, resolveAppTarget, type AcceptanceLaunchRecord } from "../src/app-launcher.js";
 import { startLocalEndpoint } from "../src/local-endpoint.js";
+import { prepareSessionTreeFixture } from "../src/session-tree-fixture.js";
 
 const dirs: string[] = [];
 const originalBase = process.env.VERMILLION_PERSISTENCE_BASE_DIR;
@@ -123,6 +124,17 @@ describe("acceptance app target and lifecycle", () => {
     await expect(new AppLauncher().start({ targetPath: join(dataDir, "missing-target"), dataDir, port: 14979 }))
       .rejects.toThrow(/app\.start failed at target:.*dataDir=.*retained.*log=/);
     expect(await readFile(join(dataDir, "saved-state.txt"), "utf8")).toBe("unchanged");
+  });
+
+  it("reuses session-tree data without overwriting session changes", async () => {
+    const dataDir = await managedDir("session-tree-restart");
+    await prepareSessionTreeFixture(dataDir, join(import.meta.dirname, ".."));
+    const indexPath = join(dataDir, "session-index.json");
+    const index = JSON.parse(await readFile(indexPath, "utf8"));
+    index.entries[0].title = "Changed during acceptance";
+    await writeFile(indexPath, JSON.stringify(index), "utf8");
+    await prepareSessionTreeFixture(dataDir, join(import.meta.dirname, ".."));
+    expect(JSON.parse(await readFile(indexPath, "utf8")).entries[0].title).toBe("Changed during acceptance");
   });
 
   it("stops only the recorded instance and confirms process exit", async () => {

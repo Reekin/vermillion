@@ -187,16 +187,17 @@ export class AppLauncher {
     const root = await this.acceptanceRoot();
     const dataDir = input.dataDir ? await this.existingDataDir(root, input.dataDir) : join(root, randomUUID());
     const fresh = !input.dataDir;
-    if (fresh) await mkdir(dataDir);
     const userDataDir = join(dataDir, "electron");
-    await mkdir(userDataDir, { recursive: true });
     const logPath = join(dataDir, "acceptance-launch.jsonl");
-    if (fresh) await writeFile(logPath, "", "utf8");
-    let stage = "target";
+    let stage = "directory";
     let pid: number | undefined;
     let desktopOwnerPid: number | undefined;
     let exitFile: string | undefined;
     try {
+      if (fresh) await mkdir(dataDir);
+      await mkdir(userDataDir, { recursive: true });
+      if (fresh) await writeFile(logPath, "", "utf8");
+      stage = "target";
       const target = await resolveAppTarget(input.targetPath, input.expectedRevision);
       await logLine(logPath, stage, { targetPath: target.rootPath, targetKind: target.kind, revision: target.revision });
       if (target.kind === "source" && !input.expectedRevision) throw new Error("A source acceptance target requires expectedRevision");
@@ -263,11 +264,11 @@ export class AppLauncher {
       const exit = observedExit !== undefined ? `exited (code ${observedExit})`
         : failedPid && !running ? "exited (exit code unavailable)" : failedPid ? "running" : "not-created";
       const message = error instanceof Error ? error.message : String(error);
-      await logLine(logPath, "failed", { failedStage: stage, pid, processStatus: exit, cleanup, cleanupWarnings, error: message });
-      const details = (await readFile(logPath, "utf8")).trim().split("\n").slice(-3).join(" | ");
+      await logLine(logPath, "failed", { failedStage: stage, pid, processStatus: exit, cleanup, cleanupWarnings, error: message }).catch(() => undefined);
+      const details = await readFile(logPath, "utf8").then((value) => value.trim().split("\n").slice(-3).join(" | "), () => "log unavailable");
       let directory = "retained";
       if (fresh && cleanup) {
-        try { await rm(dataDir, { recursive: true, maxRetries: 5, retryDelay: 100 }); directory = "removed"; }
+        try { await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); directory = "removed"; }
         catch (removeError) { directory = "remove failed: " + String(removeError); }
       }
       throw new Error(`app.start failed at ${stage}: ${message}; target=${input.targetPath}; process=${failedPid ?? "not-created"}; status=${exit}; cleanup=${cleanup ? "complete" : "failed"}; dataDir=${dataDir} (${directory}); log=${details}`);
