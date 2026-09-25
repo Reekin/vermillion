@@ -2,6 +2,8 @@ import type { ApprovalRequest, ChatSession } from "@vermillion/shared";
 
 export type ComposerStatusNotice = {
   message: string;
+  /** Engine that ran the operation; used to attribute engine configuration warnings. */
+  engineId?: string;
   severity?: "info" | "warning" | "error";
   persistent?: boolean;
   stack?: string;

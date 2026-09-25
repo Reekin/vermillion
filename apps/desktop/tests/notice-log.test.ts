@@ -59,7 +59,9 @@ describe("notice log", () => {
   it("attaches engine config warnings to failed sends only", () => {
     expect(withEngineConfigWarnings({ message: "Add failed", severity: "error", source: "workspace-add" }, [warning]).context)
       .toBeUndefined();
-    const error = withEngineConfigWarnings({ message: "Send failed", severity: "error", source: "send", context: { sessionId: "s" } }, [warning]);
+    expect(withEngineConfigWarnings({ message: "Send failed", severity: "error", source: "send", engineId: "pi" }, [warning]).context)
+      .toBeUndefined();
+    const error = withEngineConfigWarnings({ message: "Send failed", severity: "error", source: "send", engineId: "codex", context: { sessionId: "s" } }, [warning]);
     expect(error.context).toEqual({ sessionId: "s", engineConfigWarnings: [
       { engineId: "codex", summary: warning.summary, details: warning.details, path: warning.path }] });
     const info = { message: "Copied" };

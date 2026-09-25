@@ -433,6 +433,9 @@ export const useComposerController = (
   input: UseComposerControllerInput
 ): UseComposerControllerResult => {
   const isExplicitExecutionKey = input.draftKey !== undefined;
+  // Send notices carry the engine that ran the operation, not the one shown when they finish.
+  const reportSendNotice = (notice: ComposerStatusNotice | undefined): void =>
+    input.onStatusNotice(notice && { engineId: input.selectedEngineId, ...notice });
   const draftKey = input.draftKey ?? input.activeSessionId;
   const contentDraftKey = input.contentDraftKey ?? draftKey;
   const [draftBySessionId, setDraftBySessionId] = useState<Record<string, string>>({});
@@ -1026,7 +1029,7 @@ export const useComposerController = (
       });
     }
     onDraftChange("");
-    input.onStatusNotice({
+    reportSendNotice({
       message: "Queued follow-up.",
       source: "send"
     });
@@ -1049,7 +1052,7 @@ export const useComposerController = (
     }
     const attachments = payload.payloadAttachments.map((item) => item.attachment);
     setIsDispatching(true);
-    input.onStatusNotice({
+    reportSendNotice({
       message:
         payload.mode === "steer" ? "Steering active turn…" : "Sending…",
       persistent: true,
@@ -1060,7 +1063,7 @@ export const useComposerController = (
       if (payload.mode === "send" && input.submitBranch && await input.submitBranch({
         content, attachments, execution: payload.execution
       })) {
-        input.onStatusNotice(undefined);
+        reportSendNotice(undefined);
         if (input.activeSessionId) input.onRequestTranscriptBottom?.(input.activeSessionId);
         return true;
       }
@@ -1090,14 +1093,14 @@ export const useComposerController = (
           throw new Error("The current runtime rejected the send request.");
         }
       }
-      input.onStatusNotice({
+      reportSendNotice({
         message: payload.mode === "steer" ? "Steer sent." : "Message sent.",
         source: "send"
       });
       input.onRequestTranscriptBottom?.(sessionId);
       return true;
     } catch (error) {
-      input.onStatusNotice({
+      reportSendNotice({
         message: `Send failed: ${(error as Error).message}`,
         persistent: true,
         source: "send",
@@ -1128,7 +1131,7 @@ export const useComposerController = (
             ? "Resuming goal"
             : "Setting goal";
     setIsDispatching(true);
-    input.onStatusNotice({
+    reportSendNotice({
       message: `${actionLabel}…`,
       persistent: true,
       source: "send"
@@ -1152,7 +1155,7 @@ export const useComposerController = (
       if (!receipt.accepted) {
         throw new Error("The current runtime rejected the goal request.");
       }
-      input.onStatusNotice({
+      reportSendNotice({
         message:
           command.kind === "clear"
             ? "Goal cleared."
@@ -1165,7 +1168,7 @@ export const useComposerController = (
       });
       return true;
     } catch (error) {
-      input.onStatusNotice({
+      reportSendNotice({
         message: `Goal failed: ${(error as Error).message}`,
         persistent: true,
         source: "send",
@@ -1184,13 +1187,13 @@ export const useComposerController = (
     if (input.submitMessage) {
       try { await onSubmitUsing(input.submitMessage); }
       catch (error) {
-        input.onStatusNotice({ message: error instanceof Error ? error.message : String(error), severity: "error", persistent: true, source: "send" });
+        reportSendNotice({ message: error instanceof Error ? error.message : String(error), severity: "error", persistent: true, source: "send" });
       }
       return;
     }
     const goalCommand = parseGoalSlashCommand(draft);
     if (goalCommand?.kind === "empty") {
-      input.onStatusNotice({
+      reportSendNotice({
         message: "Add a goal after /goal.",
         source: "send"
       });
@@ -1198,7 +1201,7 @@ export const useComposerController = (
     }
     const goalBlockReason = goalCommandBlockedReason(goalCommand, input.threadGoal);
     if (goalBlockReason) {
-      input.onStatusNotice({
+      reportSendNotice({
         message: goalBlockReason,
         source: "send"
       });
@@ -1212,7 +1215,7 @@ export const useComposerController = (
         getSelectedSkills().length > 0 ||
         getAttachmentsForSession().length > 0
       ) {
-        input.onStatusNotice({
+        reportSendNotice({
           message: "Goal commands only use the text after /goal.",
           source: "send"
         });
@@ -1269,7 +1272,7 @@ export const useComposerController = (
     try {
       const sessionId = input.activeSessionId ?? await input.createSession!(payload);
       await handler({ sessionId, ...payload });
-      input.onStatusNotice(undefined);
+      reportSendNotice(undefined);
       if (submittedRevision === getContentRevision(submittedKey)) {
         setDraft("", submittedKey);
         replaceSelectedSkills([], submittedKey);
@@ -1292,7 +1295,7 @@ export const useComposerController = (
       try {
         await input.onCancelBranchSend?.(cancellableBranchSend.operationId);
       } catch (error) {
-        input.onStatusNotice({
+        reportSendNotice({
           message: `Cancel send failed: ${(error as Error).message}`,
           persistent: true,
           source: "send",
@@ -1310,12 +1313,12 @@ export const useComposerController = (
         sessionId: input.activeSessionId,
         turnId: interruptTurnId
       });
-      input.onStatusNotice({
+      reportSendNotice({
         message: "Interrupt requested.",
         source: "send"
       });
     } catch (error) {
-      input.onStatusNotice({
+      reportSendNotice({
         message: `Stop failed: ${(error as Error).message}`,
         persistent: true,
         source: "send",
@@ -1419,7 +1422,7 @@ export const useComposerController = (
       return;
     }
     if (!capabilities.supportsAttachments) {
-      input.onStatusNotice({
+      reportSendNotice({
         message: "Attachments are unavailable for this session.",
         source: "send"
       });
@@ -1464,7 +1467,7 @@ export const useComposerController = (
       event.preventDefault();
     }
     void appendComposerAttachments(files, "paste").catch((error) => {
-      input.onStatusNotice({
+      reportSendNotice({
         message: `Paste attachment failed: ${(error as Error).message}`,
         persistent: true,
         source: "send",
@@ -1514,7 +1517,7 @@ export const useComposerController = (
       return;
     }
     void appendComposerAttachments(files, "drop").catch((error) => {
-      input.onStatusNotice({
+      reportSendNotice({
         message: `Drop attachment failed: ${(error as Error).message}`,
         persistent: true,
         source: "send",

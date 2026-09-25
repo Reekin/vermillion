@@ -82,15 +82,13 @@ export const engineWarningDetails = (warning: EngineConfigWarningView): string |
 
 const engineOperationSources = new Set<ComposerStatusNotice["source"]>(["send", "create-session"]);
 
-/**
- * Attaches the configuration warnings of the engine that ran a failed send, so the log shows both causes together.
- * Callers pass only that engine's warnings; other failures are left untouched.
- */
+/** Attaches the configuration warnings of the engine that ran a failed send, so the log shows both causes together. */
 export const withEngineConfigWarnings = (
   notice: ComposerStatusNotice,
-  warnings: readonly EngineConfigWarningView[]
-): ComposerStatusNotice =>
-  notice.severity !== "error" || !engineOperationSources.has(notice.source) || !warnings.length
+  allWarnings: readonly EngineConfigWarningView[]
+): ComposerStatusNotice => {
+  const warnings = allWarnings.filter((warning) => warning.engineId === notice.engineId);
+  return notice.severity !== "error" || !engineOperationSources.has(notice.source) || !warnings.length
     ? notice
     : {
         ...notice,
@@ -104,3 +102,4 @@ export const withEngineConfigWarnings = (
           }))
         }
       };
+};

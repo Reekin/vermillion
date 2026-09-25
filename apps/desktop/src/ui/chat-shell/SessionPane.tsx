@@ -1072,10 +1072,7 @@ export const SessionPane = ({
       new Date().toISOString()
     ));
   }, [availableEngines, engineConfigWarningsByEngineId]);
-  // Send failures are attributed to the engine of the session being shown.
-  engineConfigWarningsRef.current = engineConfigWarnings.filter(
-    (warning) => warning.engineId === displayedEngineId
-  );
+  engineConfigWarningsRef.current = engineConfigWarnings;
   const noticeLogView = useMemo(
     (): NoticeLogView => ({
       entries: noticeLog,
