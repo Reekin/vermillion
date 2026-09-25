@@ -129,6 +129,48 @@ afterEach(async () => {
 });
 
 describe("identified history read cancellation", () => {
+  it("reads a newly created local session without provider history, then hydrates normally after binding", async () => {
+    const baseDir = await createTempDir();
+    const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
+    const sessionIndexStore = new SessionIndexStore({ baseDir });
+    const runtimeService = new SessionRuntimeService({ workspaceRegistry, sessionIndexStore,
+      engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }] });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: baseDir, label: "Test" });
+    const local = await runtimeService.createSession({ type: "createSession", workspaceId: "workspace-1", engineId: "codex" });
+    const isCurrent = vi.fn(async () => true);
+    const hydrateSession = vi.fn(async () => ({
+      ...buildHydratedWindow(local.sessionId),
+      conversation: runtimeService.getSnapshot().conversations[0]!,
+      session: { ...local, metadata: { providerKind: "codex-thread", providerSessionId: "thread-new" } },
+      runtimeBinding: { providerKind: "codex-thread", providerSessionId: "thread-new" }
+    }));
+    const reconciliation = new SessionReconciliationService({ workspaceRegistry, sessionIndexStore, runtimeService,
+      providers: [{ engineId: "codex", discoverWorkspaces: vi.fn(), hydrateSession }] as never });
+    const capabilities = { getActiveTurnId: () => undefined, getSessionRuntime: () => ({ historySource: { isCurrent } }) } as never;
+    let shell!: SessionShellService;
+    const tree = new WrapperChatTreeService({ sessionIndexStore, runtimeService, reconciliation, capabilities,
+      ensureHistoryCurrent: (id, signal) => shell.ensureHistoryCurrent(id, signal) });
+    shell = new SessionShellService({ runtimeService, sessionReconciliation: reconciliation, wrapperChatTree: tree, capabilities,
+      sessionCatalog: { markSessionRead: vi.fn(async () => {}) } as never });
+    try {
+      await expect(shell.openSession(local.sessionId, { includeWindow: false })).resolves.toEqual({});
+      await expect(shell.openSession(local.sessionId)).resolves.toHaveProperty("page.sessionId", local.sessionId);
+      await expect(shell.getChatTree(local.sessionId, "path")).resolves.toMatchObject({ currentSessionId: local.sessionId, nodes: [] });
+      await expect(reconciliation.ensureSessionLoaded(local.sessionId, { force: true, requireFull: true })).resolves.toBe(true);
+      expect(hydrateSession).not.toHaveBeenCalled();
+      expect(isCurrent).not.toHaveBeenCalled();
+      await sessionIndexStore.upsertSession({ workspaceId: "workspace-1", session: local,
+        providerKind: "codex-thread", providerSessionId: "thread-new" });
+      await expect(shell.ensureHistoryCurrent(local.sessionId)).resolves.toBe(false);
+      expect(hydrateSession).toHaveBeenCalledOnce();
+      expect(isCurrent).toHaveBeenCalledOnce();
+      hydrateSession.mockRejectedValueOnce(new Error("real history failure"));
+      await expect(reconciliation.ensureSessionLoaded(local.sessionId, { force: true, requireFull: true })).rejects.toThrow("real history failure");
+    } finally {
+      await shell.dispose();
+    }
+  });
+
   const setup = async () => {
     const baseDir = await createTempDir();
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });

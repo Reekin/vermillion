@@ -433,6 +433,9 @@ export class SessionReconciliationService {
 
     await this.sessionIndexStore.ready();
     const entry = this.sessionIndexStore.getEntry(sessionId);
+    // Local creation is already readable; do not certify a provider baseline here.
+    // Once binding arrives, requireFull must still perform the first provider read.
+    if (loaded && !entry?.providerSessionId) return true;
     if (!entry) {
       return false;
     }

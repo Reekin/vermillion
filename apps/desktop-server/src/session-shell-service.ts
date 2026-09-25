@@ -379,7 +379,10 @@ export class SessionShellService {
   /** Check one member without invalidating its ancestors or the published tree. */
   public async ensureHistoryCurrent(sessionId: string, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
-    const engineId = this.sessionIdentity.resolveContext(sessionId).engineId;
+    const context = this.sessionIdentity.resolveContext(sessionId);
+    // A locally created session has no provider history until its first send binds it.
+    if (context.session && !context.providerHandle) return false;
+    const engineId = context.engineId;
     const source = this.capabilities?.getSessionRuntime(engineId)?.historySource;
     if (!source || !this.sessionReconciliation) return false;
     const load = async (force: boolean) => {
