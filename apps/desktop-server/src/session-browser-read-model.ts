@@ -114,10 +114,12 @@ const collectForkTrees = (seeds: readonly SessionBrowserReadModelSeed[]): Sessio
   return [...membersByRoot].map(([root, members]) => {
     const visibleMembers = members.filter((member) => member.isVisible !== false && !member.archivedAt);
     const isActive = visibleMembers.some((member) => member.isActive);
-    const lastCompletedTurnAt = latest(visibleMembers.map((member) => member.lastCompletedTurnAt));
+    // Periodic supervisor checks stay out of the row's status light and ordering.
+    const signalMembers = visibleMembers.filter((member) => member.role !== "supervisor");
+    const lastCompletedTurnAt = latest(signalMembers.map((member) => member.lastCompletedTurnAt));
     const activityAt = latest([
       lastCompletedTurnAt,
-      ...visibleMembers.map((member) => member.activityAt ?? member.sortAt)
+      ...signalMembers.map((member) => member.activityAt ?? member.sortAt)
     ]);
     const parent = root.parentSessionId ? bySessionId.get(root.parentSessionId) : undefined;
     return {
@@ -126,9 +128,9 @@ const collectForkTrees = (seeds: readonly SessionBrowserReadModelSeed[]): Sessio
       parentSessionId: parent ? rootOf(parent).sessionId : root.parentSessionId,
       isVisible: visibleMembers.length > 0,
       isActive,
-      statusDot: visibleMembers.some((member) => member.statusDot === "running")
+      statusDot: signalMembers.some((member) => member.statusDot === "running")
         ? "running"
-        : visibleMembers.some((member) => member.statusDot === "unread_completed") ? "unread_completed" : "none",
+        : signalMembers.some((member) => member.statusDot === "unread_completed") ? "unread_completed" : "none",
       lastCompletedTurnAt,
       activityAt,
       sortAt: activityAt ?? root.sortAt

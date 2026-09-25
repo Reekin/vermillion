@@ -56,6 +56,19 @@ describe("SessionBrowserReadModel", () => {
     expect(model.get("reviewer")?.parentSessionId).toBe("worker");
   });
 
+  it("keeps supervisor activity out of the tree row status and ordering", () => {
+    const model = new SessionBrowserReadModel([
+      seed({ sessionId: "root", sortAt: "2026-07-19T01:00:00Z", activityAt: "2026-07-19T01:00:00Z" }),
+      seed({ sessionId: "other", sortAt: "2026-07-19T02:00:00Z", activityAt: "2026-07-19T02:00:00Z" }),
+      seed({ sessionId: "supervisor", role: "supervisor", sortAt: "2026-07-19T05:00:00Z", activityAt: "2026-07-19T05:00:00Z",
+        lastCompletedTurnAt: "2026-07-19T05:00:00Z", statusDot: "unread_completed", forkParentSessionId: "root" })
+    ]);
+    const snapshot = model.snapshot({ workspaceId: "workspace-1" });
+    expect(snapshot.items.map((item) => item.sessionId)).toEqual(["other", "root"]);
+    expect(snapshot.items[1]).toMatchObject({ statusDot: "none", activityAt: "2026-07-19T01:00:00Z" });
+    expect(model.get("supervisor")?.statusDot).toBe("none");
+  });
+
   it("uses the newest activity across members of a fork tree", () => {
     const model = new SessionBrowserReadModel([
       seed({
