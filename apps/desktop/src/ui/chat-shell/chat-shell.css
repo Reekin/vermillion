@@ -1324,10 +1324,10 @@ button.awb-composer-status__notice {
   max-height: 360px;
   border-radius: var(--awb-radius-soft);
   border: 1px solid var(--awb-rule-strong);
-  background: rgba(18, 20, 19, 0.96);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
   color: #f4f6fb;
   z-index: 3;
+  background: var(--awb-panel-elevated);
 }
 
 .awb-notice-log__header {
@@ -1390,6 +1390,11 @@ button.awb-composer-status__notice {
   font-size: var(--awb-text-micro);
   font-weight: 500;
   color: rgba(244, 246, 251, 0.7);
+}
+
+.awb-notice-log__time {
+  font-family: var(--awb-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .awb-notice-log__item-actions {
@@ -1489,7 +1494,8 @@ button.awb-composer-status__notice {
 
 .awb-composer__actions {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
+  /* The status column keeps a stable share so the latest notice stays readable and never shifts the rail. */
+  grid-template-columns: minmax(112px, 2fr) minmax(0, 3fr);
   align-items: start;
   min-width: 0;
   gap: 8px;

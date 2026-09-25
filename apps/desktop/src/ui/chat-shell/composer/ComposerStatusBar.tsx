@@ -41,10 +41,12 @@ const formatTime = (at: string): string =>
   new Date(at).toLocaleTimeString([], { hour12: false });
 
 const LogItem = ({
+  time,
   meta,
   message,
   details
 }: {
+  time: string;
   meta: string;
   message: string;
   details?: string;
@@ -62,7 +64,7 @@ const LogItem = ({
   return (
     <li className="awb-notice-log__item">
       <div className="awb-notice-log__meta">
-        <span>{meta}</span>
+        <span><span className="awb-notice-log__time">{time}</span>{` · ${meta}`}</span>
         <span className="awb-notice-log__item-actions">
           {details ? (
             <button type="button" onClick={() => setExpanded((value) => !value)}>
@@ -120,15 +122,16 @@ export const ComposerStatusBar = ({
         ...log.engineWarnings.map((warning, index) => ({
           key: `engine-${warning.engineId}-${index}`,
           at: warning.at,
-          meta: `${formatTime(warning.at)} · 警告 · 引擎配置 · ${warning.engineLabel}`,
+          time: formatTime(warning.at),
+          meta: `警告 · 引擎配置 · ${warning.engineLabel}`,
           message: warning.summary,
           details: engineWarningDetails(warning)
         })),
         ...log.entries.map((entry) => ({
           key: entry.id,
           at: entry.at,
+          time: formatTime(entry.at),
           meta: [
-            formatTime(entry.at),
             severityLabel[entry.severity ?? "info"],
             entry.source ? sourceLabels[entry.source] : undefined
           ].filter(Boolean).join(" · "),
@@ -178,7 +181,7 @@ export const ComposerStatusBar = ({
           {hasLog ? (
             <ul className="awb-notice-log__list">
               {items.map((item) => (
-                <LogItem key={item.key} meta={item.meta} message={item.message} details={item.details} />
+                <LogItem key={item.key} time={item.time} meta={item.meta} message={item.message} details={item.details} />
               ))}
             </ul>
           ) : (
