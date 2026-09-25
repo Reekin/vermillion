@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+  EventEnvelope,
   SessionClientApi,
   SessionEventPush,
   SessionRpcRequest,
-  SessionRpcResponse
+  SessionRpcResponse,
+  SessionSettingsRpc
 } from "@vermillion/shared";
 import {
   safeParseSessionRpcRequest,
@@ -27,6 +29,14 @@ type PreloadMock = {
   emitPush: (push: SessionEventPush) => void;
 };
 
+const defaultSettings: SessionSettingsRpc = {
+  engineProgramPathsByEngineId: {},
+  engineProgramResolutionsByEngineId: {},
+  allowedModelIdsByEngineId: {},
+  customModelReasoningOptionIdsByEngineId: {},
+  executionPreferencesByEngineId: {}
+};
+
 const createPreloadMock = (config?: {
   onRequest?: (request: SessionRpcRequest) => Promise<SessionRpcResponse>;
   onUnsubscribe?: (emitPush: (push: SessionEventPush) => void) => Promise<void> | void;
@@ -37,7 +47,7 @@ const createPreloadMock = (config?: {
       subscribedHandler?.(push);
     });
   });
-  const request = vi.fn(async (payload: SessionRpcRequest) => {
+  const request = vi.fn(async (payload: SessionRpcRequest): Promise<SessionRpcResponse> => {
     if (config?.onRequest) {
       return config.onRequest(payload);
     }
@@ -49,7 +59,7 @@ const createPreloadMock = (config?: {
         result: {
           engines: []
         }
-      } as const;
+      };
     }
     if (payload.method === "engine.getSurface") {
       return {
@@ -63,7 +73,7 @@ const createPreloadMock = (config?: {
             extensions: []
           }
         }
-      } as const;
+      };
     }
     if (payload.method === "engine.listModels") {
       return {
@@ -76,7 +86,7 @@ const createPreloadMock = (config?: {
             models: []
           }
         }
-      } as const;
+      };
     }
     if (payload.method === "engine.select") {
       return {
@@ -86,23 +96,24 @@ const createPreloadMock = (config?: {
         result: {
           selectedEngineId: payload.params.engineId
         }
-      } as const;
+      };
     }
     if (payload.method === "settings.get") {
       return {
         id: payload.id,
         method: "settings.get",
         ok: true,
-        result: {}
-      } as const;
+        result: defaultSettings
+      };
     }
     if (payload.method === "settings.update") {
+      const { titleGenerationModelId, ...update } = payload.params;
       return {
         id: payload.id,
         method: "settings.update",
         ok: true,
-        result: payload.params
-      } as const;
+        result: { ...defaultSettings, ...update, ...(titleGenerationModelId ? { titleGenerationModelId } : {}) }
+      };
     }
     if (payload.method === "session.list") {
       return {
@@ -112,7 +123,7 @@ const createPreloadMock = (config?: {
         result: {
           sessions: []
         }
-      } as const;
+      };
     }
     if (payload.method === "domain.snapshot") {
       return {
@@ -128,12 +139,14 @@ const createPreloadMock = (config?: {
             toolCalls: [],
             terminalStreams: [],
             approvalRequests: [],
+            runtimeInteractions: [],
             participants: [],
+            threadGoals: [],
             sessionRelations: []
           },
           cursor: "cursor-0"
         }
-      } as const;
+      };
     }
     if (payload.method === "events.replay") {
       return {
@@ -147,7 +160,7 @@ const createPreloadMock = (config?: {
           toCursor: payload.params.toCursor,
           envelopes: []
         }
-      } as const;
+      };
     }
     if (payload.method === "errorLog.write") {
       return {
@@ -159,7 +172,7 @@ const createPreloadMock = (config?: {
           entryId: "error-1",
           logPath: "I:\\logs\\errors-2026-04-26.jsonl"
         }
-      } as const;
+      };
     }
     if (payload.method === "diagnostics.write") {
       return {
@@ -171,7 +184,7 @@ const createPreloadMock = (config?: {
           entryId: "diagnostic-1",
           logPath: "I:\\logs\\perf-2026-04-26.jsonl"
         }
-      } as const;
+      };
     }
     if (payload.method === "codex.turnChanges.get") {
       return {
@@ -185,7 +198,7 @@ const createPreloadMock = (config?: {
           changedFiles: [],
           canUndo: false
         }
-      } as const;
+      };
     }
     if (payload.method === "codex.turnChanges.undo") {
       return {
@@ -199,7 +212,10 @@ const createPreloadMock = (config?: {
           undone: true,
           displayPath: "I:\\repo"
         }
-      } as const;
+      };
+    }
+    if (payload.method !== "runtime.command") {
+      throw new Error(`Unexpected method: ${payload.method}`);
     }
     return {
       id: payload.id,
@@ -210,7 +226,7 @@ const createPreloadMock = (config?: {
         commandType: payload.params.envelope.command.type,
         accepted: true
       }
-    } as const;
+    };
   });
 
   const subscribe = vi.fn(async (params, handler) => {
@@ -243,8 +259,8 @@ describe("Desktop transport facade", () => {
     });
 
     expect(parsedRequest.success).toBe(true);
-    if (!parsedRequest.success) {
-      return;
+    if (!parsedRequest.success || parsedRequest.data.method !== "session.list") {
+      throw new Error("Expected a parsed session.list request.");
     }
     expect(parsedRequest.data.params.includeArchived).toBe(false);
 
@@ -258,10 +274,9 @@ describe("Desktop transport facade", () => {
     });
 
     expect(parsedResponse.success).toBe(true);
-    if (!parsedResponse.success || !parsedResponse.data.ok) {
-      return;
+    if (!parsedResponse.success || !parsedResponse.data.ok || parsedResponse.data.method !== "session.list") {
+      throw new Error("Expected a parsed successful session.list response.");
     }
-    expect(parsedResponse.data.method).toBe("session.list");
     expect(Array.isArray(parsedResponse.data.result.sessions)).toBe(true);
   });
 
@@ -286,16 +301,19 @@ describe("Desktop transport facade", () => {
     if (request.method !== "runtime.command") {
       throw new Error("Expected runtime.command request.");
     }
-    expect(request.params.envelope.command.type).toBe("createSession");
-    expect(request.params.envelope.command.engineId).toBe("agent-1");
-    expect(request.params.envelope.command.sessionProfile).toEqual({
+    const command = request.params.envelope.command;
+    if (command.type !== "createSession") {
+      throw new Error(`Expected createSession command, got ${command.type}.`);
+    }
+    expect(command.engineId).toBe("agent-1");
+    expect(command.sessionProfile).toEqual({
       modeId: "danger-full-access"
     });
   });
 
   it("maps engine discovery RPCs to dedicated typed contracts", async () => {
     const preload = createPreloadMock({
-      onRequest: async (request) => {
+      onRequest: async (request): Promise<SessionRpcResponse> => {
         if (request.method === "engine.list") {
           return {
             id: request.id,
@@ -310,7 +328,7 @@ describe("Desktop transport facade", () => {
                 }
               ]
             }
-          } as const;
+          };
         }
         if (request.method === "engine.getSurface") {
           return {
@@ -324,7 +342,7 @@ describe("Desktop transport facade", () => {
                 extensions: []
               }
             }
-          } as const;
+          };
         }
         if (request.method === "engine.listModels") {
           return {
@@ -345,12 +363,13 @@ describe("Desktop transport facade", () => {
                       }
                     ],
                     defaultReasoningOptionId: "xhigh",
+                    serviceTiers: [],
                     isDefault: true
                   }
                 ]
               }
             }
-          } as const;
+          };
         }
         throw new Error(`Unexpected method: ${request.method}`);
       }
@@ -439,7 +458,7 @@ describe("Desktop transport facade", () => {
 
   it("maps Codex extension RPCs to explicit codex transport methods", async () => {
     const preload = createPreloadMock({
-      onRequest: async (request) => {
+      onRequest: async (request): Promise<SessionRpcResponse> => {
         if (request.method === "codex.hookActivity.get") {
           return {
             id: request.id,
@@ -473,7 +492,7 @@ describe("Desktop transport facade", () => {
                 }
               ]
             }
-          } as const;
+          };
         }
         if (request.method === "codex.turnChanges.get") {
           return {
@@ -505,7 +524,7 @@ describe("Desktop transport facade", () => {
               ],
               canUndo: true
             }
-          } as const;
+          };
         }
         if (request.method === "codex.turnChanges.undo") {
           return {
@@ -519,7 +538,7 @@ describe("Desktop transport facade", () => {
               undone: true,
               displayPath: "I:\\repo"
             }
-          } as const;
+          };
         }
         throw new Error(`Unexpected method: ${request.method}`);
       }
@@ -570,7 +589,7 @@ describe("Desktop transport facade", () => {
 
   it("maps session.list to dedicated session.list read path", async () => {
     const preload = createPreloadMock({
-      onRequest: async (request) => {
+      onRequest: async (request): Promise<SessionRpcResponse> => {
         if (request.method === "session.list") {
           return {
             id: request.id,
@@ -588,7 +607,7 @@ describe("Desktop transport facade", () => {
                 }
               ]
             }
-          } as const;
+          };
         }
         throw new Error(`Unexpected method: ${request.method}`);
       }
@@ -615,7 +634,7 @@ describe("Desktop transport facade", () => {
     const preload = createPreloadMock();
     const transport = createDesktopTransport(preload.api);
 
-    await expect(transport.settings.get()).resolves.toEqual({});
+    await expect(transport.settings.get()).resolves.toEqual(defaultSettings);
     await expect(
       transport.settings.update({
         defaultNewSessionEngineId: "codex",
@@ -635,6 +654,7 @@ describe("Desktop transport facade", () => {
         }
       })
     ).resolves.toEqual({
+      ...defaultSettings,
       defaultNewSessionEngineId: "codex",
       allowedModelIdsByEngineId: {
         codex: ["gpt-5.5-codex", "custom-model"]
@@ -671,7 +691,7 @@ describe("Desktop transport facade", () => {
 
   it("maps steer, chat capabilities, and skills list through the new composer contracts", async () => {
     const preload = createPreloadMock({
-      onRequest: async (request) => {
+      onRequest: async (request): Promise<SessionRpcResponse> => {
         if (request.method === "runtime.command") {
           return {
             id: request.id,
@@ -682,7 +702,7 @@ describe("Desktop transport facade", () => {
               commandType: request.params.envelope.command.type,
               accepted: true
             }
-          } as const;
+          };
         }
         if (request.method === "chat.getCapabilities") {
           return {
@@ -704,7 +724,7 @@ describe("Desktop transport facade", () => {
                 ]
               }
             }
-          } as const;
+          };
         }
         if (request.method === "skills.list") {
           return {
@@ -724,7 +744,7 @@ describe("Desktop transport facade", () => {
                 }
               ]
             }
-          } as const;
+          };
         }
         throw new Error(`Unexpected method: ${request.method}`);
       }
@@ -868,7 +888,7 @@ describe("Desktop transport facade", () => {
 
   it("throws DesktopTransportError when low-level request fails", async () => {
     const preload = createPreloadMock({
-      onRequest: async (request) => {
+      onRequest: async (request): Promise<SessionRpcResponse> => {
         if (request.method === "runtime.command") {
           return {
             id: request.id,
@@ -878,7 +898,7 @@ describe("Desktop transport facade", () => {
               code: "PERMISSION_DENIED",
               message: "not allowed"
             }
-          } as const;
+          };
         }
         return {
           id: request.id,
@@ -887,7 +907,7 @@ describe("Desktop transport facade", () => {
           result: {
             engines: []
           }
-        } as const;
+        };
       }
     });
     const transport = createDesktopTransport(preload.api);
@@ -990,7 +1010,7 @@ describe("Desktop transport facade", () => {
 
   it("maps file actions to the typed RPC contract", async () => {
     const preload = createPreloadMock({
-      onRequest: async (request) => {
+      onRequest: async (request): Promise<SessionRpcResponse> => {
         if (request.method === "file.runAction") {
           return {
             id: request.id,
@@ -1004,7 +1024,7 @@ describe("Desktop transport facade", () => {
                 fileUrl: "file:///I:/repo/docs/README.md"
               }
             }
-          } as const;
+          };
         }
         throw new Error(`Unexpected method: ${request.method}`);
       }
@@ -1093,7 +1113,7 @@ describe("Desktop transport facade", () => {
 
   it("hydrates a fresh snapshot and resumes from its cursor when replay reports a gap", async () => {
     const preload = createPreloadMock({
-      onRequest: async (request) => {
+      onRequest: async (request): Promise<SessionRpcResponse> => {
         if (request.method === "events.replay") {
           return {
             id: request.id,
@@ -1107,7 +1127,7 @@ describe("Desktop transport facade", () => {
               toCursor: request.params.toCursor,
               envelopes: []
             }
-          } as const;
+          };
         }
         if (request.method === "domain.snapshot") {
           return {
@@ -1142,12 +1162,14 @@ describe("Desktop transport facade", () => {
                 toolCalls: [],
                 terminalStreams: [],
                 approvalRequests: [],
+                runtimeInteractions: [],
                 participants: [],
+                threadGoals: [],
                 sessionRelations: []
               },
               cursor: "cursor-30"
             }
-          } as const;
+          };
         }
         throw new Error(`Unexpected request ${request.method}`);
       }
@@ -1378,15 +1400,16 @@ describe("Desktop transport facade", () => {
       isBackgroundStream: (envelope) => !("turnId" in envelope.event) || envelope.event.turnId !== "visible",
       onEnvelope: (envelope) => received.push(envelope)
     });
+    const occurredAt = "2026-09-10T00:00:00.000Z";
     const background: EventEnvelope = {
-      eventId: "background", cursor: "cursor-1", occurredAt: "2026-09-10T00:00:00.000Z",
+      eventId: "background", cursor: "cursor-1", occurredAt,
       event: { type: "terminal.output", sessionId: "session-1", turnId: "background", terminalId: "terminal-1", chunk: "first\n" }
     };
     const urgent: EventEnvelope = {
-      eventId: "urgent", cursor: "cursor-2", occurredAt: background.occurredAt,
+      eventId: "urgent", cursor: "cursor-2", occurredAt,
       event: trigger === "visible"
-        ? { ...background.event, turnId: "visible" }
-        : { type: "session.disposed", conversationId: "conversation-1", sessionId: "session-1", disposedAt: background.occurredAt }
+        ? { type: "terminal.output", sessionId: "session-1", turnId: "visible", terminalId: "terminal-1", chunk: "first\n" }
+        : { type: "session.disposed", conversationId: "conversation-1", sessionId: "session-1", disposedAt: occurredAt }
     };
     const emit = (envelope: EventEnvelope) => preload.emitPush({ channel: "session.events", subscriptionId: "sub-1", envelope });
     try {

@@ -44,11 +44,11 @@ describe("StreamEventAggregator", () => {
     }
     aggregator.flush();
 
-    const deltas = emitted.filter((envelope) => envelope.event.type === "message.delta");
+    const deltas = emitted.flatMap(({ event }) => event.type === "message.delta" ? [event] : []);
     expect(deltas).toHaveLength(51);
-    expect(deltas.filter((envelope) => envelope.event.sessionId === "session-0")).toHaveLength(2);
-    expect(deltas.filter((envelope) => envelope.event.sessionId !== "session-0").every(
-      (envelope) => envelope.event.type === "message.delta" && envelope.event.delta === "ab"
+    expect(deltas.filter((event) => event.sessionId === "session-0")).toHaveLength(2);
+    expect(deltas.filter((event) => event.sessionId !== "session-0").every(
+      (event) => event.delta === "ab"
     )).toBe(true);
   });
 

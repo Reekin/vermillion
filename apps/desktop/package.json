@@ -11,7 +11,7 @@
     "dev:web": "pnpm exec vite --host 127.0.0.1 --port 4193",
     "preview": "pnpm exec vite preview --host 127.0.0.1 --port 4193",
     "start": "pnpm exec electron ./dist-electron/main.js",
-    "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit && pnpm exec tsc -p tsconfig.test.json --pretty false",
     "test": "pnpm exec vitest run",
     "lint": "pnpm exec tsc -p tsconfig.json --noEmit && node ./scripts/lint-ui.mjs",
     "lint:ui": "node ./scripts/lint-ui.mjs"

@@ -14,6 +14,7 @@ describe("CodexSessionActionsProvider", () => {
     const provider = new CodexSessionActionsProvider({ codexRuntimePort: port as unknown as CodexAppServerRuntimePort });
     await provider.runAction({ sessionId: "worker", action: "resume", preserveExecution: true,
       providerHandle: codexProviderHandle(), session: { metadata: { developerInstructions: "WORKER" } } as never,
+      sessionIdentity: {} as never,
       sessionIndexStore: {} as never, runtimeService: { resolveSessionRoleInstructions: async () => "WORKER" } as never });
     expect(port.interruptThread).not.toHaveBeenCalled();
     expect(port.unsubscribeThread).not.toHaveBeenCalled();
@@ -31,6 +32,7 @@ describe("CodexSessionActionsProvider", () => {
     } as unknown as CodexAppServerRuntimePort });
     const input = { sessionId: "worker", action: "resume" as const,
       providerHandle: codexProviderHandle("thread-worker"), session: session as never,
+      sessionIdentity: {} as never,
       sessionIndexStore: {} as never, runtimeService: { updateSessionMetadata, resolveSessionRoleInstructions } as never };
     await provider.runAction({ ...input, metadata: { role: "worker" } });
     expect(resolveSessionRoleInstructions).toHaveBeenLastCalledWith("worker", { role: "worker" });
@@ -52,6 +54,7 @@ describe("CodexSessionActionsProvider", () => {
     await provider.runAction({ sessionId: "worker", action: "resume", cwd: "I:/worktree",
       metadata: { workItemId: "item" }, providerHandle: codexProviderHandle("thread-worker"),
       session: { metadata: { cwd: "I:/workspace", developerInstructions: "WORKER_ROLE" } } as never,
+      sessionIdentity: {} as never,
       sessionIndexStore: {} as never,
       runtimeService: { updateSessionMetadata, resolveSessionRoleInstructions: async () => "WORKER_ROLE" } as never });
     expect(resumeThread).toHaveBeenCalledWith("thread-worker", "I:/worktree", "WORKER_ROLE");
@@ -71,6 +74,7 @@ describe("CodexSessionActionsProvider", () => {
       sessionId: "root", engineId: "codex", action: "fork", fromTurnId: "turn-a", activateFork: false,
       providerHandle: codexProviderHandle(),
       indexEntry: { sessionId: "root", workspaceId: "workspace", conversationId: "conversation" } as never,
+      sessionIdentity: {} as never,
       sessionIndexStore: { upsertSession, upsertRelation } as never,
       runtimeService: { getWorkspaceRegistry: () => ({ setLastActiveSelection }) } as never
     });
@@ -91,6 +95,7 @@ describe("CodexSessionActionsProvider", () => {
         sessionId: "session-1",
         engineId: "codex",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle("thread-handle"),
         indexEntry: {
@@ -111,6 +116,7 @@ describe("CodexSessionActionsProvider", () => {
         sessionId: "session-1",
         engineId: "codex",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle("thread-handle")
       })
@@ -121,6 +127,7 @@ describe("CodexSessionActionsProvider", () => {
         sessionId: "session-1",
         engineId: "codex",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         indexEntry: {
           sessionId: "session-1",
@@ -140,6 +147,7 @@ describe("CodexSessionActionsProvider", () => {
         sessionId: "session-1",
         engineId: "codex",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never
       })
     ).resolves.toEqual([
@@ -170,6 +178,7 @@ describe("CodexSessionActionsProvider", () => {
       sessionId: "session-1",
       engineId: "codex",
       runtimeService: {} as never,
+      sessionIdentity: {} as never,
       sessionIndexStore: {} as never,
       providerHandle: codexProviderHandle()
     });
@@ -192,6 +201,7 @@ describe("CodexSessionActionsProvider", () => {
         sessionId: "session-1",
         engineId: "codex",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle()
       })
@@ -211,6 +221,7 @@ describe("CodexSessionActionsProvider", () => {
         sessionId: "session-1",
         engineId: "codex",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle()
       })
@@ -235,6 +246,7 @@ describe("CodexSessionActionsProvider", () => {
         engineId: "codex",
         action: "refresh",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never
       })
     ).resolves.toEqual({
@@ -272,6 +284,7 @@ describe("CodexSessionActionsProvider", () => {
         engineId: "codex",
         action: "resume",
         runtimeService: { resolveSessionRoleInstructions: async () => undefined } as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle()
       })
@@ -328,6 +341,7 @@ describe("CodexSessionActionsProvider", () => {
             setLastActiveSelection
           })
         } as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {
           upsertSession,
           upsertRelation,
@@ -416,6 +430,7 @@ describe("CodexSessionActionsProvider", () => {
       sessionId: "parent", engineId: "codex", action: "fork", fromTurnId: "source-turn", activateFork: false,
       metadata: scheduler ? explicit : undefined,
       runtimeService: {} as never,
+      sessionIdentity: {} as never,
       sessionIndexStore: { upsertSession, upsertRelation, listRelations: () => [] } as never,
       providerHandle: codexProviderHandle("thread-parent"),
       indexEntry: { sessionId: "parent", workspaceId: "workspace", conversationId: "conversation",
@@ -462,6 +477,7 @@ describe("CodexSessionActionsProvider", () => {
         runtimeService: {
           getWorkspaceRegistry: vi.fn().mockReturnValue(undefined)
         } as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {
           upsertSession,
           upsertRelation,
@@ -527,6 +543,7 @@ describe("CodexSessionActionsProvider", () => {
         }),
         getWorkspaceRegistry: vi.fn().mockReturnValue(undefined)
       } as never,
+      sessionIdentity: {} as never,
       sessionIndexStore: {
         upsertSession,
         upsertRelation: vi.fn().mockResolvedValue(undefined),
@@ -578,6 +595,7 @@ describe("CodexSessionActionsProvider", () => {
             conversations: []
           })
         } as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle(),
         session: {
@@ -612,6 +630,7 @@ describe("CodexSessionActionsProvider", () => {
         engineId: "codex",
         action: "open_rollout",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle()
       })
@@ -623,6 +642,7 @@ describe("CodexSessionActionsProvider", () => {
         engineId: "codex",
         action: "open_rollout",
         runtimeService: {} as never,
+        sessionIdentity: {} as never,
         sessionIndexStore: {} as never,
         providerHandle: codexProviderHandle()
       })

@@ -59,7 +59,7 @@ it("allows only the bound Worker to ask its work item's recorded source", async 
 it("routes generic steer through the session port and returns its delivery mode", async () => {
   const fixture = await setup();
   fixtures.push(fixture);
-  const sessionSteerer: SessionSteerer = vi.fn(async (input) => ({
+  const sessionSteerer = vi.fn<SessionSteerer>(async (input) => ({
     sessionId: input.sessionId,
     turnId: input.sessionId === "active" ? "active-turn" : "started-turn",
     delivery: input.sessionId === "active" ? "steered" : "started"

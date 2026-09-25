@@ -232,9 +232,9 @@ describe("JsonRpcLineClient", () => {
     const requests: JsonRpcLineRequestPayload[] = [];
     const notifications: string[] = [];
     const errors: string[] = [];
-    client.onRequest((payload) => requests.push(payload));
-    client.onNotification((payload) => notifications.push(payload.method));
-    client.onProtocolError((error) => errors.push(error.message));
+    client.onRequest((payload) => { requests.push(payload); });
+    client.onNotification((payload) => { notifications.push(payload.method); });
+    client.onProtocolError((error) => { errors.push(error.message); });
 
     input.write(
       JSON.stringify({ id: 7, method: "server/request", params: { a: 1 } }) +

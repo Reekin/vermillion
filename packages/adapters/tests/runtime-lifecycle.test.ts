@@ -129,7 +129,7 @@ describe("runtime lifecycle contract", () => {
       }
     );
     port.emit({ event: "test.event" });
-    await port.stop({ reason: "test" });
+    await port.stop();
 
     expect(port.getState()).toBe("stopped");
     expect(states).toEqual(["starting", "ready", "stopping", "stopped"]);

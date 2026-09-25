@@ -107,6 +107,7 @@ const readSessionSnapshot: DomainSnapshot = {
   terminalStreams: [],
   approvalRequests: [],
   runtimeInteractions: [],
+  threadGoals: [],
   participants: [],
   sessionRelations: []
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DomainSnapshot } from "@vermillion/shared";
-import { HostToolRegistry } from "../src/host-tools.js";
+import { HostToolRegistry, resolveHostToolDefinition } from "../src/host-tools.js";
 import { SessionShellService } from "../src/session-shell-service.js";
 import {
   createReadSessionHostTool,
@@ -73,6 +73,7 @@ const snapshot: DomainSnapshot = {
   terminalStreams: [],
   approvalRequests: [],
   runtimeInteractions: [],
+  threadGoals: [],
   participants: [],
   sessionRelations: []
 };
@@ -104,7 +105,7 @@ describe("createReadSessionHostTool", () => {
     });
     const input = { sessionId: "session-1", limit: 1, maxChars: 3 };
     const tool = createReadSessionHostTool((args) => shell.readSession(args));
-    const result = await tool.handle({ definition: tool, arguments: input, context: invocationContext });
+    const result = await tool.handle({ definition: await resolveHostToolDefinition(tool), arguments: input, context: invocationContext });
     expect(result.success).toBe(true);
     const text = result.contentItems[0]?.type === "inputText" ? result.contentItems[0].text : "";
     expect(JSON.parse(text)).toEqual(await shell.readSession(input));
@@ -152,7 +153,7 @@ describe("createReadSessionHostTool", () => {
     });
 
     const result = await tool.handle({
-      definition: tool,
+      definition: await resolveHostToolDefinition(tool),
       arguments: {
         sessionId: "session-1"
       },
@@ -186,7 +187,7 @@ describe("createReadSessionHostTool", () => {
     });
 
     const result = await tool.handle({
-      definition: tool,
+      definition: await resolveHostToolDefinition(tool),
       arguments: {
         sessionId: "session-1"
       },
@@ -230,7 +231,7 @@ describe("createReadSessionHostTool", () => {
     });
 
     const result = await tool.handle({
-      definition: tool,
+      definition: await resolveHostToolDefinition(tool),
       arguments: {
         sessionId: "session-1"
       },
@@ -313,7 +314,7 @@ describe("createReadSessionHostTool", () => {
     });
 
     const result = await tool.handle({
-      definition: tool,
+      definition: await resolveHostToolDefinition(tool),
       arguments: {
         sessionId: "session-1"
       },
@@ -340,7 +341,7 @@ describe("createReadSessionHostTool", () => {
     ]));
 
     const secondResult = await tool.handle({
-      definition: tool,
+      definition: await resolveHostToolDefinition(tool),
       arguments: {
         sessionId: "session-1"
       },
@@ -363,7 +364,7 @@ describe("createReadSessionHostTool", () => {
     });
 
     const result = await tool.handle({
-      definition: tool,
+      definition: await resolveHostToolDefinition(tool),
       arguments: {
         sessionId: "session-1"
       },
@@ -391,7 +392,7 @@ describe("createReadSessionHostTool", () => {
 
     await expect(
       tool.handle({
-        definition: tool,
+        definition: await resolveHostToolDefinition(tool),
         arguments: {
           limit: 10
         },
@@ -411,7 +412,7 @@ describe("createReadSessionHostTool", () => {
 
     await expect(
       tool.handle({
-        definition: tool,
+        definition: await resolveHostToolDefinition(tool),
         arguments: {
           sessionId: "missing-session"
         },
@@ -432,7 +433,7 @@ describe("createReadSessionHostTool", () => {
 
     await expect(
       tool.handle({
-        definition: tool,
+        definition: await resolveHostToolDefinition(tool),
         arguments: {
           sessionId: "session-1",
           maxChars: 200001
@@ -465,7 +466,7 @@ describe("createReadSessionHostTool", () => {
     });
 
     const result = await tool.handle({
-      definition: tool,
+      definition: await resolveHostToolDefinition(tool),
       arguments: {
         sessionId: "thread-subagent"
       },

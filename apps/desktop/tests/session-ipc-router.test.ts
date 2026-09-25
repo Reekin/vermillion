@@ -10,7 +10,7 @@ import { createSessionIpcRouter } from "../src/electron/session-ipc-router.js";
 
 const now = "2026-05-26T00:00:00.000Z";
 
-const createEnvelope = (sequence: number): EventEnvelope => ({
+const createEnvelope = (sequence: number, delta = String(sequence)): EventEnvelope => ({
   eventId: `evt-${sequence}`,
   cursor: `cursor-${sequence}`,
   occurredAt: now,
@@ -19,7 +19,7 @@ const createEnvelope = (sequence: number): EventEnvelope => ({
     sessionId: "session-1",
     turnId: "turn-1",
     messageId: "message-1",
-    delta: String(sequence)
+    delta
   }
 });
 
@@ -194,14 +194,7 @@ describe("Workbench IPC router", () => {
       params: {}
     } satisfies SessionRpcRequest);
     for (let index = 1; index <= 3; index += 1) {
-      const envelope = createEnvelope(index);
-      subscribed?.({
-        ...envelope,
-        event: {
-          ...envelope.event,
-          delta: "x".repeat(400)
-        }
-      });
+      subscribed?.(createEnvelope(index, "x".repeat(400)));
     }
 
     scheduled.shift()?.();

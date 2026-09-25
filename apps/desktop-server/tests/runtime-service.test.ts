@@ -6,7 +6,7 @@ import type { AgentAdapter } from "@vermillion/adapters";
 import { MAX_STREAM_EVENT_CHUNK_LENGTH } from "@vermillion/shared";
 import { parseSessionRpcResponse } from "@vermillion/shared";
 import { SessionIndexStore } from "../src/session-index.js";
-import { SessionRuntimeService } from "../src/runtime-service.js";
+import { SessionRuntimeService, type SessionRuntimeServiceOptions } from "../src/runtime-service.js";
 import { WorkspaceRegistryService } from "../src/workspace-registry.js";
 
 const tempDirs: string[] = [];
@@ -24,7 +24,7 @@ const flushAsyncEffects = async (): Promise<void> => {
 
 const createService = (options: {
   persistenceBaseDir?: string;
-  agentBindings?: ConstructorParameters<typeof SessionRuntimeService>[0]["agentBindings"];
+  agentBindings?: SessionRuntimeServiceOptions["agentBindings"];
 } = {}) => {
   const service = new SessionRuntimeService({
     now: (() => {
@@ -109,7 +109,9 @@ describe("SessionRuntimeService", () => {
               {
                 modelId: "gpt-5.5-codex",
                 displayName: "GPT-5.5 Codex",
-                reasoningOptions: []
+                reasoningOptions: [],
+                serviceTiers: [],
+                isDefault: false
               }
             ]
           })
@@ -217,7 +219,7 @@ describe("SessionRuntimeService", () => {
         adapter
       }]
     });
-    await service.createSession({ engineId: "codex", workspaceId: "workspace-1" });
+    await service.createSession({ type: "createSession", engineId: "codex", workspaceId: "workspace-1" });
     await service.executeCommand({
       commandId: "initialize-stream-service",
       command: { type: "initialize" }
@@ -276,7 +278,6 @@ describe("SessionRuntimeService", () => {
       sessionId: "session-1",
       turnId: "turn-stream",
       terminalId: "terminal-stream",
-      status: "completed",
       engineId: "codex"
     });
 
@@ -1017,6 +1018,7 @@ describe("SessionRuntimeService", () => {
       requestId: "approval-1",
       approvalKind: "tool",
       title: "Approve",
+      availableActions: [],
       engineId: "codex"
     });
     expect(service.getSessionBrowserRevision()).toBe(streamingRevision + 1);

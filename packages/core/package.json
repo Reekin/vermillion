@@ -11,7 +11,7 @@
   "files": ["src", "dist"],
   "scripts": {
     "build": "pnpm exec tsc -b tsconfig.json",
-    "typecheck": "pnpm exec tsc -b tsconfig.json --pretty false",
+    "typecheck": "pnpm exec tsc -b tsconfig.json --pretty false && pnpm exec tsc -p tsconfig.test.json --pretty false",
     "lint": "pnpm exec tsc -b tsconfig.json --pretty false",
     "test": "pnpm exec vitest run"
   },

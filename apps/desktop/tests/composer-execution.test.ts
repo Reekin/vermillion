@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { EngineModelCatalogRpc } from "@vermillion/shared";
 import {
   resolveComposerExecutionSelection,
   resolveComposerModels,
   snapshotComposerExecution
 } from "../src/ui/chat-shell/use-composer-controller.js";
 
-const catalog = {
+const catalog: EngineModelCatalogRpc = {
   engineId: "codex",
   models: [
     {
@@ -36,7 +37,7 @@ const catalog = {
       isDefault: false
     }
   ]
-} as const;
+};
 
 describe("composer execution configuration", () => {
   it("uses every catalog model when the configured allowlist is missing or empty", () => {
@@ -100,7 +101,7 @@ describe("composer execution configuration", () => {
   it("restores the persisted model and provider-native reasoning option", () => {
     expect(
       resolveComposerExecutionSelection({
-        models: [...catalog.models],
+        models: catalog.models,
         persistedProfile: {
           engineId: "codex",
           modelId: "gpt-5.5-codex",
@@ -118,7 +119,7 @@ describe("composer execution configuration", () => {
   it("uses the engine's last execution for a new session without a model profile", () => {
     expect(
       resolveComposerExecutionSelection({
-        models: [...catalog.models],
+        models: catalog.models,
         persistedProfile: { engineId: "codex" },
         lastExecution: {
           modelId: "gpt-5.4-mini"
@@ -133,7 +134,7 @@ describe("composer execution configuration", () => {
   it("keeps the session model while applying its saved parameters", () => {
     expect(
       resolveComposerExecutionSelection({
-        models: [...catalog.models],
+        models: catalog.models,
         persistedProfile: {
           engineId: "codex",
           modelId: "gpt-5.5-codex",
@@ -159,7 +160,7 @@ describe("composer execution configuration", () => {
   it("keeps the current model while applying its latest saved parameters", () => {
     expect(
       resolveComposerExecutionSelection({
-        models: [...catalog.models],
+        models: catalog.models,
         currentModelId: "gpt-5.5-codex",
         persistedProfile: {
           engineId: "codex",
@@ -183,7 +184,7 @@ describe("composer execution configuration", () => {
   it("drops stale reasoning options while preserving the selected model", () => {
     expect(
       resolveComposerExecutionSelection({
-        models: [...catalog.models],
+        models: catalog.models,
         currentModelId: "gpt-5.5-codex",
         modelExecutionPreferences: {
           "gpt-5.5-codex": {
@@ -201,7 +202,7 @@ describe("composer execution configuration", () => {
   it("drops stale speed tiers and resets the model to standard speed", () => {
     expect(
       resolveComposerExecutionSelection({
-        models: [...catalog.models],
+        models: catalog.models,
         currentModelId: "gpt-5.5-codex",
         modelExecutionPreferences: {
           "gpt-5.5-codex": {

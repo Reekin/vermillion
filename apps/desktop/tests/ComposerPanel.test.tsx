@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ComposerPanel } from "../src/ui/chat-shell/composer/ComposerPanel.js";
@@ -24,20 +25,58 @@ const imageAttachment = (
   sizeLabel: "4 B"
 });
 
+const baseProps: ComponentProps<typeof ComposerPanel> = {
+  isDropTarget: false,
+  textareaRef: { current: null },
+  draft: "",
+  selectedSkills: [],
+  attachments: [],
+  queue: [],
+  suggestions: undefined,
+  status: { kind: "idle", label: "Ready" },
+  intent: "send",
+  supportsSteer: true,
+  models: [],
+  reasoningOptions: [],
+  serviceTiers: [],
+  isExecutionLoading: false,
+  isExecutionDisabled: false,
+  hasComposedInput: false,
+  isTurnActive: false,
+  canSubmit: true,
+  canStop: false,
+  onTextareaChange: () => undefined,
+  onTextareaSelect: () => undefined,
+  onInputKeyDown: async () => undefined,
+  onPaste: () => undefined,
+  onDragEnter: () => undefined,
+  onDragOver: () => undefined,
+  onDragLeave: () => undefined,
+  onDrop: () => undefined,
+  onRemoveSkill: () => undefined,
+  onRemoveAttachment: () => undefined,
+  onPreviewAttachment: () => undefined,
+  onPrimaryAction: async () => undefined,
+  onStop: async () => undefined,
+  onModelChange: () => undefined,
+  onReasoningOptionChange: () => undefined,
+  onServiceTierChange: () => undefined,
+  onSuggestionHover: () => undefined,
+  onSuggestionSelect: async () => undefined,
+  onEditQueuedMessage: () => undefined,
+  onDeleteQueuedMessage: () => undefined,
+  onSendQueuedMessageNow: async () => undefined,
+  onSteerQueuedMessageNow: async () => undefined
+};
+
 describe("ComposerPanel", () => {
   it("renders provider-native model and reasoning options and locks them while steering", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
-        isDropTarget={false}
-        textareaRef={{ current: null }}
+        {...baseProps}
         draft="Refine the current turn"
-        selectedSkills={[]}
-        attachments={[]}
-        queue={[]}
-        suggestions={undefined}
         status={{ kind: "running", label: "Running" }}
         intent="steer"
-        supportsSteer={true}
         models={[
           {
             modelId: "gpt-5.5-codex",
@@ -64,33 +103,11 @@ describe("ComposerPanel", () => {
           { tierId: "priority", displayName: "Fast" },
           { tierId: "ultrafast", displayName: "Ultrafast" }
         ]}
-        isExecutionLoading={false}
         isExecutionDisabled={true}
         hasComposedInput={true}
         isTurnActive={true}
-        canSubmit={true}
         canStop={true}
-        onTextareaChange={() => undefined}
-        onTextareaSelect={() => undefined}
-        onInputKeyDown={async () => undefined}
-        onPaste={() => undefined}
-        onDragEnter={() => undefined}
-        onDragOver={() => undefined}
-        onDragLeave={() => undefined}
-        onDrop={() => undefined}
-        onRemoveSkill={() => undefined}
-        onRemoveAttachment={() => undefined}
-        onPrimaryAction={async () => undefined}
-        onStop={async () => undefined}
-        onModelChange={() => undefined}
-        onReasoningOptionChange={() => undefined}
-        onServiceTierChange={() => undefined}
-        onSuggestionHover={() => undefined}
-        onSuggestionSelect={async () => undefined}
-        onEditQueuedMessage={() => undefined}
-        onDeleteQueuedMessage={() => undefined}
-        onSendQueuedMessageNow={async () => undefined}
-        onSteerQueuedMessageNow={async () => undefined}
+        onPreviewAttachment={undefined}
       />
     );
 
@@ -117,42 +134,12 @@ describe("ComposerPanel", () => {
   it("renders multiple image attachments with preview actions", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
-        isDropTarget={false}
-        textareaRef={{ current: null }}
-        draft=""
-        selectedSkills={[]}
+        {...baseProps}
         attachments={[
           imageAttachment("image-1", "first.png", "data:image/png;base64,AAAA"),
           imageAttachment("image-2", "second.png", "data:image/png;base64,BBBB")
         ]}
-        queue={[]}
-        suggestions={undefined}
-        status={{ kind: "idle", label: "Ready" }}
-        intent="send"
-        supportsSteer={true}
         hasComposedInput={true}
-        isTurnActive={false}
-        canSubmit={true}
-        canStop={false}
-        onTextareaChange={() => undefined}
-        onTextareaSelect={() => undefined}
-        onInputKeyDown={async () => undefined}
-        onPaste={() => undefined}
-        onDragEnter={() => undefined}
-        onDragOver={() => undefined}
-        onDragLeave={() => undefined}
-        onDrop={() => undefined}
-        onRemoveSkill={() => undefined}
-        onRemoveAttachment={() => undefined}
-        onPreviewAttachment={() => undefined}
-        onPrimaryAction={async () => undefined}
-        onStop={async () => undefined}
-        onSuggestionHover={() => undefined}
-        onSuggestionSelect={async () => undefined}
-        onEditQueuedMessage={() => undefined}
-        onDeleteQueuedMessage={() => undefined}
-        onSendQueuedMessageNow={async () => undefined}
-        onSteerQueuedMessageNow={async () => undefined}
       />
     );
 
@@ -167,14 +154,7 @@ describe("ComposerPanel", () => {
   it("shows active session context usage when available", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
-        isDropTarget={false}
-        textareaRef={{ current: null }}
-        draft=""
-        selectedSkills={[]}
-        attachments={[]}
-        queue={[]}
-        suggestions={undefined}
-        status={{ kind: "idle", label: "Ready" }}
+        {...baseProps}
         contextUsage={{
           usedTokens: 42000,
           contextWindow: 128000,
@@ -184,31 +164,6 @@ describe("ComposerPanel", () => {
           reasoningOutputTokens: 800,
           lastUsedTokens: 2200
         }}
-        intent="send"
-        supportsSteer={true}
-        hasComposedInput={false}
-        isTurnActive={false}
-        canSubmit={true}
-        canStop={false}
-        onTextareaChange={() => undefined}
-        onTextareaSelect={() => undefined}
-        onInputKeyDown={async () => undefined}
-        onPaste={() => undefined}
-        onDragEnter={() => undefined}
-        onDragOver={() => undefined}
-        onDragLeave={() => undefined}
-        onDrop={() => undefined}
-        onRemoveSkill={() => undefined}
-        onRemoveAttachment={() => undefined}
-        onPreviewAttachment={() => undefined}
-        onPrimaryAction={async () => undefined}
-        onStop={async () => undefined}
-        onSuggestionHover={() => undefined}
-        onSuggestionSelect={async () => undefined}
-        onEditQueuedMessage={() => undefined}
-        onDeleteQueuedMessage={() => undefined}
-        onSendQueuedMessageNow={async () => undefined}
-        onSteerQueuedMessageNow={async () => undefined}
       />
     );
 
@@ -221,14 +176,7 @@ describe("ComposerPanel", () => {
   it("renders the goal badge as passive status text", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
-        isDropTarget={false}
-        textareaRef={{ current: null }}
-        draft=""
-        selectedSkills={[]}
-        attachments={[]}
-        queue={[]}
-        suggestions={undefined}
-        status={{ kind: "idle", label: "Ready" }}
+        {...baseProps}
         threadGoal={{
           sessionId: "session-1",
           threadId: "thread-1",
@@ -240,31 +188,6 @@ describe("ComposerPanel", () => {
           createdAt: 1700000000000,
           updatedAt: 1700000001000
         }}
-        intent="send"
-        supportsSteer={true}
-        hasComposedInput={false}
-        isTurnActive={false}
-        canSubmit={true}
-        canStop={false}
-        onTextareaChange={() => undefined}
-        onTextareaSelect={() => undefined}
-        onInputKeyDown={async () => undefined}
-        onPaste={() => undefined}
-        onDragEnter={() => undefined}
-        onDragOver={() => undefined}
-        onDragLeave={() => undefined}
-        onDrop={() => undefined}
-        onRemoveSkill={() => undefined}
-        onRemoveAttachment={() => undefined}
-        onPreviewAttachment={() => undefined}
-        onPrimaryAction={async () => undefined}
-        onStop={async () => undefined}
-        onSuggestionHover={() => undefined}
-        onSuggestionSelect={async () => undefined}
-        onEditQueuedMessage={() => undefined}
-        onDeleteQueuedMessage={() => undefined}
-        onSendQueuedMessageNow={async () => undefined}
-        onSteerQueuedMessageNow={async () => undefined}
       />
     );
 
@@ -277,13 +200,7 @@ describe("ComposerPanel", () => {
   it("renders pending approval controls above the editor", () => {
     const html = renderToStaticMarkup(
       <ComposerPanel
-        isDropTarget={false}
-        textareaRef={{ current: null }}
-        draft=""
-        selectedSkills={[]}
-        attachments={[]}
-        queue={[]}
-        suggestions={undefined}
+        {...baseProps}
         status={{ kind: "awaiting_approval", label: "Awaiting approval" }}
         pendingApprovals={[
           {
@@ -294,34 +211,12 @@ describe("ComposerPanel", () => {
             status: "pending",
             title: "Run shell command",
             details: "echo hello",
+            availableActions: [],
             requestedAt: "2026-04-26T00:00:00.000Z"
           }
         ]}
-        intent="send"
-        supportsSteer={true}
-        hasComposedInput={false}
         isTurnActive={true}
         canSubmit={false}
-        canStop={false}
-        onTextareaChange={() => undefined}
-        onTextareaSelect={() => undefined}
-        onInputKeyDown={async () => undefined}
-        onPaste={() => undefined}
-        onDragEnter={() => undefined}
-        onDragOver={() => undefined}
-        onDragLeave={() => undefined}
-        onDrop={() => undefined}
-        onRemoveSkill={() => undefined}
-        onRemoveAttachment={() => undefined}
-        onPreviewAttachment={() => undefined}
-        onPrimaryAction={async () => undefined}
-        onStop={async () => undefined}
-        onSuggestionHover={() => undefined}
-        onSuggestionSelect={async () => undefined}
-        onEditQueuedMessage={() => undefined}
-        onDeleteQueuedMessage={() => undefined}
-        onSendQueuedMessageNow={async () => undefined}
-        onSteerQueuedMessageNow={async () => undefined}
         onRespondApproval={async () => undefined}
       />
     );

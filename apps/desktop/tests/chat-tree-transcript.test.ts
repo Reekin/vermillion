@@ -9,8 +9,7 @@ const row = (
   turnId: string,
   messageRole: TurnTranscriptRow["messageRole"] = "assistant",
   status: TurnTranscriptRow["turn"]["status"] = "completed"
-): TurnTranscriptRow =>
-  ({
+): TurnTranscriptRow => ({
     rowId: `${turnId}:${messageRole}`,
     rowKind: "message",
     startedAt: "2026-04-18T00:00:00Z",
@@ -22,20 +21,26 @@ const row = (
       messageIds: [],
       toolCallIds: [],
       terminalIds: [],
-      approvalRequestIds: []
+      approvalRequestIds: [],
+      interactionRequestIds: []
     },
     turnIdentity: {
       label: turnId,
-      kind: "turn"
+      detail: "",
+      kind: "unknown",
+      capabilities: []
     },
     messageRole,
+    isFinalResponseRow: false,
+    canDisplayAsFinalResponse: false,
     blocks: [],
     toolCalls: [],
     terminalStreams: [],
     approvals: [],
+    interactions: [],
     hasProcessDetails: false,
     defaultProcessExpanded: false
-  }) as TurnTranscriptRow;
+  });
 
 describe("filterTranscriptRowsForChatTree", () => {
   it("falls back to the full transcript when the tree has no current branch", () => {

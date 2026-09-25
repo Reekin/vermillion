@@ -3,10 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionIndexStore } from "../src/session-index.js";
-import {
-  SessionIndexSyncService,
-  type SessionIndexSyncRecord
-} from "../src/session-index-sync-service.js";
+import { SessionIndexSyncService } from "../src/session-index-sync-service.js";
+import type { SessionIndexSyncRecord } from "../src/runtime-types.js";
 
 const tempDirs: string[] = [];
 

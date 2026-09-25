@@ -32,7 +32,7 @@ describe("session browser transport contracts", () => {
     let receive!: Parameters<NonNullable<SessionClientApi["subscribeReadProgress"]>>[0];
     let finish!: () => void;
     const stop = vi.fn();
-    const preload = createPreloadMock(async (request) => {
+    const preload = createPreloadMock(async (request): Promise<SessionRpcResponse> => {
       if (request.method !== "sessionBrowser.open") throw new Error(request.method);
       await new Promise<void>((resolve) => { finish = resolve; });
       return { id: request.id, method: request.method, ok: true, result: {} };
@@ -50,7 +50,7 @@ describe("session browser transport contracts", () => {
   });
   it("cancels the actual history request and removes the cancellation listener on settlement", async () => {
     let finish!: () => void;
-    const preload = createPreloadMock(async (request) => {
+    const preload = createPreloadMock(async (request): Promise<SessionRpcResponse> => {
       if (request.method === "sessionBrowser.open") {
         await new Promise<void>((resolve) => { finish = resolve; });
         return { id: request.id, method: request.method, ok: true, result: {} };
@@ -75,7 +75,7 @@ describe("session browser transport contracts", () => {
   });
 
   it("wires workspace + paged session browser operations through typed rpc methods", async () => {
-    const preload = createPreloadMock(async (request) => {
+    const preload = createPreloadMock(async (request): Promise<SessionRpcResponse> => {
       switch (request.method) {
         case "workspace.pickDirectory":
           return {
@@ -86,7 +86,7 @@ describe("session browser transport contracts", () => {
               canceled: false,
               rootPath: "I:\\repo-a"
             }
-          } as const;
+          };
         case "workspace.select":
           return {
             id: request.id,
@@ -96,7 +96,7 @@ describe("session browser transport contracts", () => {
               workspaceId: request.params.workspaceId,
               activeSessionId: "session-root"
             }
-          } as const;
+          };
         case "workspace.remove":
           return {
             id: request.id,
@@ -106,7 +106,7 @@ describe("session browser transport contracts", () => {
               workspaceId: request.params.workspaceId,
               removed: true
             }
-          } as const;
+          };
         case "sessionBrowser.list":
           return {
             id: request.id,
@@ -121,10 +121,11 @@ describe("session browser transport contracts", () => {
                 title: "Root Session",
                 statusDot: "running",
                 isActive: true,
-                isPinned: false
+                isPinned: false,
+                subagents: []
               }]
             }
-          } as const;
+          };
         case "sessionBrowser.changes":
           return {
             id: request.id,
@@ -137,7 +138,7 @@ describe("session browser transport contracts", () => {
               items: [],
               removedSessionIds: ["session-gone"]
             }
-          } as const;
+          };
         case "sessionBrowser.repair":
           expect(request.params.workspaceIds).toEqual(["workspace-1"]);
           return {
@@ -149,7 +150,7 @@ describe("session browser transport contracts", () => {
               sessions: 2,
               relations: 1
             }
-          } as const;
+          };
         case "sessionBrowser.open":
           if (request.params.sessionId === "session-force") {
             expect(request.params.forceProviderHydration).toBe(true);
@@ -169,7 +170,9 @@ describe("session browser transport contracts", () => {
                   toolCalls: [],
                   terminalStreams: [],
                   approvalRequests: [],
+                  runtimeInteractions: [],
                   participants: [],
+                  threadGoals: [],
                   sessionRelations: []
                 },
                 windowStartTurnId: "turn-2",
@@ -178,7 +181,7 @@ describe("session browser transport contracts", () => {
                 hasNewer: false
               }
             }
-          } as const;
+          };
         case "sessionBrowser.activate":
           return {
             id: request.id,
@@ -187,7 +190,7 @@ describe("session browser transport contracts", () => {
             result: {
               sessionId: request.params.sessionId
             }
-          } as const;
+          };
         case "sessionBrowser.loadOlder":
           return {
             id: request.id,
@@ -204,7 +207,9 @@ describe("session browser transport contracts", () => {
                   toolCalls: [],
                   terminalStreams: [],
                   approvalRequests: [],
+                  runtimeInteractions: [],
                   participants: [],
+                  threadGoals: [],
                   sessionRelations: []
                 },
                 windowStartTurnId: "turn-1",
@@ -213,7 +218,7 @@ describe("session browser transport contracts", () => {
                 hasNewer: true
               }
             }
-          } as const;
+          };
         case "sessionBrowser.create":
           return {
             id: request.id,
@@ -223,7 +228,7 @@ describe("session browser transport contracts", () => {
               sessionId: "session-new",
               conversationId: "conversation-new"
             }
-          } as const;
+          };
         default:
           throw new Error(`Unexpected method: ${request.method}`);
       }
@@ -335,7 +340,7 @@ describe("session browser transport contracts", () => {
   });
 
   it("routes right-click action discovery and execution via sessionBrowser actions APIs", async () => {
-    const preload = createPreloadMock(async (request) => {
+    const preload = createPreloadMock(async (request): Promise<SessionRpcResponse> => {
       if (request.method === "sessionBrowser.getActions") {
         return {
           id: request.id,
@@ -375,7 +380,7 @@ describe("session browser transport contracts", () => {
               }
             ]
           }
-        } as const;
+        };
       }
       if (request.method === "sessionBrowser.runAction") {
         switch (request.params.action) {
@@ -388,7 +393,7 @@ describe("session browser transport contracts", () => {
                 action: "archive",
                 archived: true
               }
-            } as const;
+            };
           case "copy_session_id":
             return {
               id: request.id,
@@ -398,7 +403,7 @@ describe("session browser transport contracts", () => {
                 action: "copy_session_id",
                 copiedText: "thread-1"
               }
-            } as const;
+            };
           case "copy_awb_session_id":
             return {
               id: request.id,
@@ -408,7 +413,7 @@ describe("session browser transport contracts", () => {
                 action: "copy_awb_session_id",
                 copiedText: request.params.sessionId
               }
-            } as const;
+            };
           case "open_rollout":
             return {
               id: request.id,
@@ -420,7 +425,7 @@ describe("session browser transport contracts", () => {
                 rolloutDisplayPath: "I:\\logs\\session-1.md",
                 rolloutFileUrl: "file:///I:/logs/session-1.md"
               }
-            } as const;
+            };
           case "refresh":
             return {
               id: request.id,
@@ -431,7 +436,7 @@ describe("session browser transport contracts", () => {
                 refreshed: true,
                 details: "Reloaded user config, refreshed skills, and queued MCP server reloads."
               }
-            } as const;
+            };
           case "resume":
             return {
               id: request.id,
@@ -441,7 +446,7 @@ describe("session browser transport contracts", () => {
                 action: "resume",
                 resumed: true
               }
-            } as const;
+            };
           case "fork":
             return {
               id: request.id,
@@ -453,7 +458,21 @@ describe("session browser transport contracts", () => {
                 forkedSessionId: "session-child",
                 providerSessionId: "thread-child"
               }
-            } as const;
+            };
+          case "pin":
+            return {
+              id: request.id,
+              method: "sessionBrowser.runAction",
+              ok: true,
+              result: { action: "pin", pinned: true }
+            };
+          case "unpin":
+            return {
+              id: request.id,
+              method: "sessionBrowser.runAction",
+              ok: true,
+              result: { action: "unpin", pinned: false }
+            };
           default:
             throw new Error(`Unexpected action: ${request.params.action satisfies never}`);
         }
@@ -556,7 +575,7 @@ describe("session browser transport contracts", () => {
   });
 
   it("routes session rename through the typed rename method", async () => {
-    const preload = createPreloadMock(async (request) => {
+    const preload = createPreloadMock(async (request): Promise<SessionRpcResponse> => {
       if (request.method !== "sessionBrowser.rename") {
         throw new Error(`Unexpected method: ${request.method}`);
       }
@@ -568,7 +587,7 @@ describe("session browser transport contracts", () => {
           sessionId: request.params.sessionId,
           title: request.params.title
         }
-      } as const;
+      };
     });
     const transport = createDesktopTransport(preload.api);
 
@@ -584,7 +603,7 @@ describe("session browser transport contracts", () => {
   });
 
   it("reads worktree, diagnostics, and background-run summaries through typed rpc methods", async () => {
-    const preload = createPreloadMock(async (request) => {
+    const preload = createPreloadMock(async (request): Promise<SessionRpcResponse> => {
       switch (request.method) {
         case "worktree.get":
           return {
@@ -602,7 +621,7 @@ describe("session browser transport contracts", () => {
                 fetchedAt: "2026-04-20T00:00:00.000Z"
               }
             }
-          } as const;
+          };
         case "diagnostics.get":
           return {
             id: request.id,
@@ -619,7 +638,7 @@ describe("session browser transport contracts", () => {
                 fetchedAt: "2026-04-20T00:00:00.000Z"
               }
             }
-          } as const;
+          };
         case "backgroundRun.get":
           return {
             id: request.id,
@@ -634,7 +653,7 @@ describe("session browser transport contracts", () => {
                 fetchedAt: "2026-04-20T00:00:00.000Z"
               }
             }
-          } as const;
+          };
         default:
           throw new Error(`Unexpected method: ${request.method}`);
       }

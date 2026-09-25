@@ -23,7 +23,7 @@ async function fixture() {
   const createTree = (store: SessionIndexStore) => new WrapperChatTreeService({
     runtimeService: runtime, sessionIndexStore: store,
     reconciliation: { ensureSessionLoaded: async () => true } as never,
-    fork: async () => { throw new Error("Unexpected fork"); }
+    capabilities: { forkSessionFromTurn: async () => { throw new Error("Unexpected fork"); } } as never
   });
   const tree = createTree(index);
   cleanups.push(async () => { tree.dispose(); await runtime.dispose(); await rm(baseDir, { recursive: true, force: true }); });

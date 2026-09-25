@@ -45,6 +45,7 @@ describe("resolveComposerStatus", () => {
           approvalKind: "command",
           status: "pending",
           title: "Approve command execution",
+          availableActions: [],
           requestedAt: "2026-04-18T00:00:00.000Z"
         }
       ]
@@ -73,6 +74,7 @@ describe("resolveComposerStatus", () => {
           approvalKind: "command",
           status: "pending",
           title: "Approve command execution",
+          availableActions: [],
           requestedAt: "2026-04-18T00:00:00.000Z"
         }
       ]
@@ -99,6 +101,7 @@ describe("resolveComposerStatus", () => {
             approvalKind: "command",
             status: "approved",
             title: "Approve command execution",
+            availableActions: [],
             requestedAt: "2026-04-18T00:00:00.000Z",
             resolvedAt: "2026-04-18T00:00:05.000Z"
           }

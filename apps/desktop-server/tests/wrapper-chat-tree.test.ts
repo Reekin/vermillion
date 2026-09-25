@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseDomainSnapshot, type EventEnvelope } from "@vermillion/shared";
+import { parseDomainSnapshot, zTurnSchema, type EventEnvelope } from "@vermillion/shared";
 import { SessionIndexStore } from "../src/session-index.js";
 import { WrapperChatTreeService } from "../src/wrapper-chat-tree.js";
 
@@ -118,14 +118,14 @@ describe("wrapper session trees", () => {
     const f = await fixture();
     expect((await f.service.get("root")).currentNodeId).toBe("b");
     for (const [i, turnId] of ["d", "e"].entries()) {
-      f.snapshot.turns.push({ turnId, sessionId: "root", status: "streaming", startedAt: `2026-09-07T00:01:0${i}Z` });
+      f.snapshot.turns.push(zTurnSchema.parse({ turnId, sessionId: "root", status: "streaming", startedAt: `2026-09-07T00:01:0${i}Z` }));
       f.started("root", turnId);
       const tree = await f.service.get("root");
       expect(tree.currentNodeId).toBe(turnId);
       expect(tree.visibleTurnIds).toEqual(["a", "b", ...["d", "e"].slice(0, i + 1)]);
       f.snapshot.turns.at(-1)!.status = "completed";
     }
-    f.snapshot.turns.push({ turnId: "f", sessionId: "branch", status: "streaming", startedAt: "2026-09-07T00:02:00Z" });
+    f.snapshot.turns.push(zTurnSchema.parse({ turnId: "f", sessionId: "branch", status: "streaming", startedAt: "2026-09-07T00:02:00Z" }));
     f.started("branch", "f");
     expect((await f.service.get("root")).currentNodeId).toBe("e");
     expect(f.fork).not.toHaveBeenCalled();
@@ -137,7 +137,7 @@ describe("wrapper session trees", () => {
     const f = await fixture();
     await f.index.setTreeView("root", { sessionId: "root", nodeId: "a" });
     expect((await f.service.get("root")).currentNodeId).toBe("b");
-    f.snapshot.turns.push({ turnId: "d", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:01:00Z" });
+    f.snapshot.turns.push(zTurnSchema.parse({ turnId: "d", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:01:00Z" }));
     expect((await f.service.get("root")).visibleTurnIds).toEqual(["a", "b", "d"]);
     f.service.dispose();
   });
@@ -149,7 +149,7 @@ describe("wrapper session trees", () => {
     await f.service.jump("root", "a");
     for (const [i, sessionId] of ["root", "branch"].entries()) {
       const turnId = `auto-${i}`;
-      f.snapshot.turns.push({ turnId, sessionId, status: "streaming", startedAt: `2026-09-07T00:01:0${i}Z` });
+      f.snapshot.turns.push(zTurnSchema.parse({ turnId, sessionId, status: "streaming", startedAt: `2026-09-07T00:01:0${i}Z` }));
       f.started(sessionId, turnId);
       const tree = await f.service.get("root");
       expect(tree.currentNodeId).toBe("a");
@@ -318,9 +318,9 @@ describe("wrapper session trees", () => {
 
     f.service.invalidate("root");
     // A member commits new history while the refresh is still in flight.
-    f.snapshot.turns.push({
+    f.snapshot.turns.push(zTurnSchema.parse({
       turnId: "d", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:02:00Z"
-    });
+    }));
     const duringReload = await f.service.get("root");
     expect(duringReload.nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);
 
@@ -338,7 +338,7 @@ describe("wrapper session trees", () => {
     await f.service.get("root");
     const newcomer = {
       sessionId: "newcomer", conversationId: "conversation", engineId: "codex",
-      status: "idle", createdAt: "2026-09-07T00:00:00Z", updatedAt: "2026-09-07T00:00:00Z"
+      status: "idle" as const, createdAt: "2026-09-07T00:00:00Z", updatedAt: "2026-09-07T00:00:00Z"
     };
     f.snapshot.sessions.push(newcomer);
     await f.index.upsertSession({ workspaceId: "workspace", session: newcomer });
@@ -360,9 +360,9 @@ describe("wrapper session trees", () => {
     ));
     // The refresh and the new turn both land while this read is still waiting for the new member.
     f.service.invalidate("root");
-    f.snapshot.turns.push({
+    f.snapshot.turns.push(zTurnSchema.parse({
       turnId: "mixed", sessionId: "root", status: "completed", startedAt: "2026-09-07T00:03:00Z"
-    });
+    }));
     releaseMember();
 
     expect((await pending).nodes.map((node) => node.nodeId)).toEqual(["a", "b", "c"]);

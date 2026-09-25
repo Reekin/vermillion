@@ -259,7 +259,7 @@ describe("SessionShellService", () => {
       signals.push(signal);
       return new Promise((resolve) => { finishes.push(() => resolve({})); });
     });
-    const service = new SessionShellService({ runtimeService: {} as never, wrapperChatTree: { get } as never });
+    const service = new SessionShellService({ runtimeService: {} as never, sessionCatalog: {} as never, wrapperChatTree: { get } as never });
     const first = service.getChatTree("session-1", "path", undefined, "read");
     const firstRejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
     expect(service.cancelRead("read")).toEqual({ cancelled: true });
@@ -284,6 +284,7 @@ describe("SessionShellService", () => {
     });
     const service = new SessionShellService({
       runtimeService: {} as never,
+      sessionCatalog: {} as never,
       wrapperChatTree: { getNodeTarget } as never,
       sessionActions: { runAction } as never
     });

@@ -453,7 +453,7 @@ describe("CapabilityRegistry", () => {
     ]);
     expect(archiveSessions).toHaveBeenCalledWith(["session-root"]);
     expect(
-      vi.mocked(runtimeService.executeCommand).mock.calls.map(([input]) => input.command.sessionId)
+      vi.mocked(runtimeService.executeCommand).mock.calls.map(([input]) => "sessionId" in input.command ? input.command.sessionId : undefined)
     ).toEqual(["session-root", "session-child"]);
   });
 });

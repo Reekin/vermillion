@@ -238,7 +238,7 @@ describe("workbench search", () => {
         const hits = events.flatMap((event) =>
           event.type === "search.hits" && event.queryId === active.queryId ? event.hits : []);
         expect(hits.map((hit) => hit.path)).toContain(".vermillion/docs/stream.md");
-        expect(events.some((event) => event.queryId === replaced.queryId)).toBe(false);
+        expect(events.some((event) => "queryId" in event && event.queryId === replaced.queryId)).toBe(false);
       } finally {
         unsubscribe();
       }

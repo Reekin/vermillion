@@ -24,8 +24,10 @@ const emptySnapshot = (): DomainSnapshot => ({
   toolCalls: [],
   terminalStreams: [],
   approvalRequests: [],
+  runtimeInteractions: [],
   participants: [],
-  sessionRelations: []
+  sessionRelations: [],
+  threadGoals: []
 });
 
 afterEach(async () => {
@@ -171,7 +173,8 @@ describe("SessionCatalogService", () => {
           messageIds: [],
           toolCallIds: [],
           terminalIds: [],
-          approvalRequestIds: []
+          approvalRequestIds: [],
+          interactionRequestIds: []
         }
       ],
       sessionRelations: [
@@ -662,10 +665,7 @@ describe("SessionCatalogService", () => {
       sessionIndexStore: indexStore
     });
 
-    const page = await service.list({
-      workspaceId: "workspace-1",
-      limit: 10
-    });
+    const page = await service.list({ workspaceId: "workspace-1" });
 
     expect(page.items.map((item) => item.sessionId)).toEqual([
       "session-yesterday",

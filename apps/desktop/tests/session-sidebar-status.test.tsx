@@ -35,9 +35,7 @@ const render = (sessions: SidebarSession[]): string =>
   renderToStaticMarkup(
     <SessionSidebar
       sessions={sessions}
-      hasMore={false}
       loading={false}
-      loadMore={async () => {}}
       selectedSessionId={undefined}
       isDraft={false}
       workspaceLabelById={new Map()}

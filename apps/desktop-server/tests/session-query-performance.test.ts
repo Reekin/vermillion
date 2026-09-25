@@ -19,11 +19,11 @@ const history = (sessionId: string, count = 3): HydratedSessionSnapshot => ({
   },
   turns: Array.from({ length: count }, (_, i) => ({
     turnId: `${sessionId}-${i}`, sessionId,
-    status: i === count - 1 ? "streaming" : "completed",
+    status: i === count - 1 ? "streaming" as const : "completed" as const,
     startedAt: timestamp(i * 10),
     completedAt: i === count - 1 ? undefined : timestamp(i * 10 + 5),
     messageIds: [`${sessionId}-${i}-user`, `${sessionId}-${i}-assistant`],
-    toolCallIds: [], terminalIds: [], approvalRequestIds: []
+    toolCallIds: [], terminalIds: [], approvalRequestIds: [], interactionRequestIds: []
   })),
   messageBlocks: Array.from({ length: count }, (_, i) =>
     (["user", "assistant"] as const).map((role) => ({

@@ -53,14 +53,25 @@ vi.mock("../src/ui/chat-shell/composer-attachments.js", async (importOriginal) =
 }));
 
 type Input = Parameters<typeof useComposerController>[0];
+type Controller = ReturnType<typeof useComposerController>;
+
+const commandReceipt = (accepted: boolean): RuntimeCommandReceiptRpc => ({
+  commandId: "command", commandType: "sendUserMessage", accepted
+});
+
+/** Only the file-drop fields the composer reads; a full React DragEvent is irrelevant here. */
+const fileDrop = () => ({
+  preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] }
+}) as unknown as Parameters<Controller["onComposerDrop"]>[0];
+
 const session = (sessionId: string, status: ChatSession["status"] = "idle"): ChatSession => ({
   sessionId, status, engineId: "test", conversationId: sessionId,
   createdAt: "2026-01-01", updatedAt: "2026-01-01"
 });
 
 const setup = (overrides: Partial<Input> = {}) => {
-  const send = vi.fn(async (): Promise<RuntimeCommandReceiptRpc> => ({ accepted: true }));
-  const steer = vi.fn(async (): Promise<RuntimeCommandReceiptRpc> => ({ accepted: true }));
+  const send = vi.fn(async (): Promise<RuntimeCommandReceiptRpc> => commandReceipt(true));
+  const steer = vi.fn(async (): Promise<RuntimeCommandReceiptRpc> => commandReceipt(true));
   let input: Input = {
     transport: {
       chat: { send, steer, getCapabilities: async () => ({ supportsSteer: false, supportsAttachments: true, slashSuggestions: [] }) },
@@ -76,7 +87,7 @@ const setup = (overrides: Partial<Input> = {}) => {
     turns: [], interruptTurns: [], approvals: [], isOpeningSelectedSession: false,
     autoSendQueuedMessages: false, onStatusNotice: vi.fn(), ...overrides
   };
-  let controller: ReturnType<typeof useComposerController>;
+  let controller: Controller;
   const render = (patch: Partial<Input> = {}) => {
     input = { ...input, ...patch };
     do {
@@ -132,7 +143,7 @@ describe("composer content lifetime", () => {
     await c.onSuggestionSelect(c.suggestions!.items[0]!);
     c = h.render();
     c.onDraftChange("/goal actual requirement");
-    c.onComposerDrop({ preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] } } as Parameters<typeof c.onComposerDrop>[0]);
+    c.onComposerDrop(fileDrop());
     c = await h.flush();
     handler.mockRejectedValueOnce(new Error("registration failed"));
     await expect(c.onSubmitUsing(handler)).rejects.toThrow("registration failed");
@@ -215,7 +226,7 @@ describe("composer content lifetime", () => {
     await c.onSuggestionSelect(c.suggestions!.items[0]!);
     c = h.render();
     c.onDraftChange("unfinished");
-    c.onComposerDrop({ preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] } } as Parameters<typeof c.onComposerDrop>[0]);
+    c.onComposerDrop(fileDrop());
     c = await h.flush();
     expect(c.attachments).toHaveLength(1);
     expect(c.selectedSkills).toHaveLength(1);
@@ -238,7 +249,7 @@ describe("composer content lifetime", () => {
     expect(c.draft).toBe("unfinished");
     expect(c.selectedSkills).toHaveLength(1);
     expect(c.attachments).toHaveLength(1);
-    h.send.mockResolvedValueOnce({ accepted: false });
+    h.send.mockResolvedValueOnce(commandReceipt(false));
     await c.onPrimaryAction();
     c = h.render();
     expect(c.draft).toBe("unfinished");
@@ -263,9 +274,9 @@ describe("composer content lifetime", () => {
     const h = setup({ onStatusNotice: notice });
     let c = await h.flush();
     c.onDraftChange("ordinary message");
-    c.onComposerDrop({ preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] } } as Parameters<typeof c.onComposerDrop>[0]);
+    c.onComposerDrop(fileDrop());
     c = await h.flush();
-    h.send.mockResolvedValueOnce({ accepted: false });
+    h.send.mockResolvedValueOnce(commandReceipt(false));
     await c.onPrimaryAction();
     expect(h.render().draft).toBe("ordinary message");
     expect(h.render().attachments).toEqual([attachment]);
@@ -279,12 +290,12 @@ describe("composer content lifetime", () => {
     let c = await h.flush();
     c.onDraftChange("tree a");
     c = h.render();
-    let accept!: (receipt: { accepted: boolean }) => void;
+    let accept!: (receipt: RuntimeCommandReceiptRpc) => void;
     h.send.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
     const pending = c.onPrimaryAction();
     c = h.render({ contentDraftKey: "tree-b", activeSessionId: "b", activeSession: session("b") });
     c.onDraftChange("tree b");
-    accept({ accepted: true });
+    accept(commandReceipt(true));
     await pending;
     expect(h.render().draft).toBe("tree b");
     expect(h.render({ contentDraftKey: "tree-a", activeSessionId: "a", activeSession: session("a") }).draft).toBe("");
@@ -334,9 +345,9 @@ describe("composer content lifetime", () => {
     await c.onSuggestionSelect(c.suggestions!.items[0]!);
     c = h.render();
     c.onDraftChange("submitted");
-    c.onComposerDrop({ preventDefault() {}, dataTransfer: { types: ["Files"], files: [{}] } } as Parameters<typeof c.onComposerDrop>[0]);
+    c.onComposerDrop(fileDrop());
     c = await h.flush();
-    let accept!: (receipt: { accepted: boolean }) => void;
+    let accept!: (receipt: RuntimeCommandReceiptRpc) => void;
     h.send.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
     const pending = c.onPrimaryAction();
     c = h.render({ activeSessionId: "b", activeSession: session("b"), draftKey: "b:node" });
@@ -345,7 +356,7 @@ describe("composer content lifetime", () => {
     if (edit === "attachment") c.onRemoveAttachment("image");
     c = h.render();
     const expected = { draft: c.draft, skills: c.selectedSkills, attachments: c.attachments };
-    accept({ accepted: true });
+    accept(commandReceipt(true));
     await pending;
     c = h.render();
     expect({ draft: c.draft, skills: c.selectedSkills, attachments: c.attachments }).toEqual(expected);

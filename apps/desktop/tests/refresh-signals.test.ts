@@ -69,8 +69,9 @@ describe("renderer refresh signals", () => {
         sessionId: "session-1",
         turnId: "turn-1",
         requestId: "approval-1",
-        approvalKind: "command_execution",
-        title: "Approve command"
+        approvalKind: "command",
+        title: "Approve command",
+        availableActions: []
       },
       {
         type: "interaction.requested",

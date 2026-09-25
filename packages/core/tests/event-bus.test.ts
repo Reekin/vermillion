@@ -64,8 +64,7 @@ describe("RuntimeEventBus", () => {
     });
 
     expect(targeted).toHaveLength(1);
-    expect(targeted[0].event.sessionId).toBe("session-a");
-    expect(targeted[0].event.type).toBe("turn.started");
+    expect(targeted[0].event).toMatchObject({ type: "turn.started", sessionId: "session-a" });
   });
 
   it("supports conversationId filter for events that include conversationId", () => {

@@ -182,7 +182,7 @@ describe("acceptance app target and lifecycle", () => {
       token: instanceId, targetPath: dataDir, buildId: "sha256:test", logPath };
     await writeFile(join(dataDir, "app-start.json"), JSON.stringify(record), "utf8");
     await writeFile(logPath, "", "utf8");
-    const endpoint = await startLocalEndpoint(dataDir, async () => ({ ok: true, result: { pid: child.pid + 1, buildId: "sha256:test" } }), { pid: child.pid, instanceId });
+    const endpoint = await startLocalEndpoint(dataDir, async () => ({ ok: true, result: { pid: child.pid! + 1, buildId: "sha256:test" } }), { pid: child.pid!, instanceId });
     try {
       await expect(new AppLauncher().stop({ dataDir, pid: child.pid, instanceId })).rejects.toThrow("live instance identity cannot be confirmed");
       expect(() => process.kill(child.pid!, 0)).not.toThrow();

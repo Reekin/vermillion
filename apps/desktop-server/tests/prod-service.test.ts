@@ -135,7 +135,7 @@ describe("prod runtime service", () => {
       service.getSnapshot().messageBlocks.some((block) =>
         block.sessionId === sessionId &&
         block.role === "assistant" &&
-        block.text.includes("Real Codex says: hello real codex")
+        block.text?.includes("Real Codex says: hello real codex")
       )
     );
 
@@ -146,11 +146,11 @@ describe("prod runtime service", () => {
     expect(joinedText).not.toContain("Codex response");
     expect(
       snapshot.messageBlocks.some((block) =>
-        block.messageId === `${sessionId}:msg-1` && block.role === "user" && block.text.includes("hello real codex")
+        block.messageId === `${sessionId}:msg-1` && block.role === "user" && block.text?.includes("hello real codex")
       )
     ).toBe(true);
     expect(snapshot.messageBlocks.some((block) =>
-      block.text.includes("Real Codex says: hello real codex")
+      block.text?.includes("Real Codex says: hello real codex")
     )).toBe(true);
     expect(snapshot.toolCalls.some((toolCall) =>
       toolCall.toolName === "commandExecution"
@@ -183,11 +183,10 @@ describe("prod runtime service", () => {
         }
       }
     });
-    const runner = createAgentRunner(service, "codex");
+    const runner = createAgentRunner(service);
     const { sessionId } = await runner.open({
       workspaceId,
       cwd: baseDir,
-      developerInstructions: "Answer briefly.",
       title: "Profile regression",
       metadata: { role }
     });

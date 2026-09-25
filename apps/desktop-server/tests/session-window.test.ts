@@ -59,6 +59,7 @@ describe("buildSessionWindowSnapshot", () => {
       terminalStreams: [],
       approvalRequests: [],
       runtimeInteractions: [],
+      threadGoals: [],
       participants,
       sessionRelations: [],
       limit: 2,
@@ -117,7 +118,7 @@ describe("buildSessionWindowSnapshot", () => {
           requestId: "interaction-resolved-session",
           sessionId: "session-1",
           interactionKind: "mcp_elicitation",
-          status: "resolved",
+          status: "submitted",
           title: "Resolved session interaction",
           payload: {},
           requestedAt: "2026-04-19T00:02:08.000Z",
@@ -143,6 +144,7 @@ describe("buildSessionWindowSnapshot", () => {
           requestedAt: "2026-04-19T00:02:10.000Z"
         }
       ],
+      threadGoals: [],
       participants,
       sessionRelations: [],
       limit: 2,
@@ -177,6 +179,7 @@ describe("buildSessionWindowSnapshot", () => {
           requestedAt: "2026-04-19T00:00:05.000Z"
         }
       ],
+      threadGoals: [],
       participants,
       sessionRelations: [],
       limit: 2

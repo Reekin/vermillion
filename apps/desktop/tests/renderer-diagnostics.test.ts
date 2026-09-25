@@ -27,12 +27,12 @@ describe("renderer diagnostics writer", () => {
     });
 
     writer.write(
-      { kind: "renderer-stall", context: { huge: "x".repeat(5_000) } },
+      { kind: "renderer-stall", severity: "warning", context: { huge: "x".repeat(5_000) } },
       { cooldownKey: "stall", cooldownMs: 60_000 }
     );
-    writer.write({ kind: "renderer-stall" }, { cooldownKey: "stall" });
-    writer.write({ kind: "renderer-heartbeat", message: "first pending" });
-    writer.write({ kind: "renderer-heartbeat", message: "latest pending" });
+    writer.write({ kind: "renderer-stall", severity: "warning" }, { cooldownKey: "stall" });
+    writer.write({ kind: "renderer-heartbeat", severity: "info", message: "first pending" });
+    writer.write({ kind: "renderer-heartbeat", severity: "info", message: "latest pending" });
 
     expect(write).toHaveBeenCalledTimes(1);
     expect(new TextEncoder().encode(JSON.stringify(writes[0])).byteLength).toBeLessThanOrEqual(
@@ -56,7 +56,7 @@ describe("renderer diagnostics writer", () => {
     nowMs += 60_000;
     resolvers.shift()?.();
     await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2));
-    writer.write({ kind: "renderer-stall" }, { cooldownKey: "stall" });
+    writer.write({ kind: "renderer-stall", severity: "warning" }, { cooldownKey: "stall" });
     await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(3));
     writer.dispose();
   });

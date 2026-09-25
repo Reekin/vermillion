@@ -12,11 +12,12 @@ import {
   clearCodexTurnChangesStore,
   getRecordedCodexTurnChanges
 } from "../src/engines/codex/extensions/turn-changes-store.js";
-import { SessionIndexStore } from "../src/session-index.js";
+import { SessionIndexStore, type SessionIndexEntry } from "../src/session-index.js";
 import { SessionRuntimeService } from "../src/runtime-service.js";
 import { WrapperChatTreeService } from "../src/wrapper-chat-tree.js";
 import { SessionShellService } from "../src/session-shell-service.js";
-import { WorkspaceRegistryService } from "../src/workspace-registry.js";
+import { SessionCatalogService } from "../src/session-catalog.js";
+import { WorkspaceRegistryService, type WorkspaceRecord } from "../src/workspace-registry.js";
 import {
   consumeCodexRolloutTimestampForItem,
   readCodexRolloutTimestampGroups
@@ -39,6 +40,18 @@ const createTempDir = async (): Promise<string> => {
   tempDirs.push(dir);
   return dir;
 };
+
+const workspace = (workspaceId: string, absolutePath: string, label: string): WorkspaceRecord => ({
+  workspaceId,
+  absolutePath,
+  label,
+  createdAt: "2026-04-19T00:00:00.000Z",
+  updatedAt: "2026-04-19T00:00:00.000Z"
+});
+
+const indexEntry = (
+  entry: Omit<SessionIndexEntry, "unreadState" | "source"> & Partial<Pick<SessionIndexEntry, "unreadState" | "source">>
+): SessionIndexEntry => ({ unreadState: "read", source: "registry", ...entry });
 
 const createThread = (input: {
   id: string;
@@ -194,7 +207,10 @@ describe("identified history read cancellation", () => {
     const tree = new WrapperChatTreeService({
       sessionIndexStore, runtimeService, reconciliation, capabilities: {} as never
     });
-    const shell = new SessionShellService({ runtimeService, sessionReconciliation: reconciliation, wrapperChatTree: tree });
+    const sessionCatalog = new SessionCatalogService({ runtimeService, workspaceRegistry, sessionIndexStore });
+    const shell = new SessionShellService({
+      runtimeService, sessionReconciliation: reconciliation, wrapperChatTree: tree, sessionCatalog
+    });
     return { shell, reads, hydrateSession, runtimeService };
   };
 
@@ -259,12 +275,12 @@ describe("cold history hydration", () => {
       startedAt: null, completedAt: null, durationMs: null,
       items: [{ type: "agentMessage", id: "answer", text: "Saved worker answer", phase: "final_answer", memoryCitation: null }]
     }];
-    const entry = {
+    const entry = indexEntry({
       workspaceId: "workspace-history", sessionId: "worker-history", conversationId: "conversation-history",
       engineId: "codex", providerKind: "codex-thread", providerSessionId: thread.id,
       createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z",
       ...(options.metadata ? { metadata: options.metadata } : {})
-    };
+    });
     const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [] });
     vi.spyOn(port, "start").mockResolvedValue();
     let finishResume!: () => void;
@@ -484,11 +500,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const discovered = await provider.discoverWorkspaces([{
-        workspaceId: "workspace-1",
-        absolutePath: "I:/workspace-alpha",
-        label: "Alpha"
-      }]);
+    const discovered = await provider.discoverWorkspaces([workspace("workspace-1", "I:/workspace-alpha", "Alpha")]);
     expect(discovered.get("workspace-1")).toEqual({
       sessions: [
         expect.objectContaining({ sessionId: "codex-thread:thread-root" }),
@@ -517,11 +529,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const discovered = await provider.discoverWorkspaces([{
-        workspaceId: "workspace-1",
-        absolutePath: "I:/workspace-alpha",
-        label: "Alpha"
-      }]);
+    const discovered = await provider.discoverWorkspaces([workspace("workspace-1", "I:/workspace-alpha", "Alpha")]);
     expect(discovered.get("workspace-1")).toEqual({
       sessions: [
         expect.objectContaining({ sessionId: "codex-thread:thread-root" }),
@@ -554,6 +562,7 @@ describe("Session discovery and reconciliation", () => {
                   thread_spawn: {
                     parent_thread_id: "thread-root",
                     depth: 1,
+                    agent_path: null,
                     agent_nickname: "child",
                     agent_role: "worker"
                   }
@@ -566,11 +575,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const discovered = await provider.discoverWorkspaces([{
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    }]);
+    const discovered = await provider.discoverWorkspaces([workspace("workspace-1", "I:/workspace-alpha", "Alpha")]);
 
     expect(discovered.get("workspace-1")?.relations).toEqual([
       expect.objectContaining({
@@ -601,11 +606,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const discoveredByWorkspaceId = await provider.discoverWorkspaces([{
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    }]);
+    const discoveredByWorkspaceId = await provider.discoverWorkspaces([workspace("workspace-1", "I:/workspace-alpha", "Alpha")]);
 
     expect(readThread).not.toHaveBeenCalled();
     expect(readRollout).not.toHaveBeenCalled();
@@ -643,11 +644,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const discoveredByWorkspaceId = await provider.discoverWorkspaces([{
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    }]);
+    const discoveredByWorkspaceId = await provider.discoverWorkspaces([workspace("workspace-1", "I:/workspace-alpha", "Alpha")]);
 
     expect(discoveredByWorkspaceId.get("workspace-1")?.sessions[0]?.updatedAt).toBe(
       "2026-07-03T18:44:14.486Z"
@@ -672,8 +669,8 @@ describe("Session discovery and reconciliation", () => {
     });
 
     const discovered = await provider.discoverWorkspaces([
-      { workspaceId: "root", absolutePath: "I:/workspace/root", label: "Root" },
-      { workspaceId: "nested", absolutePath: "I:/workspace/root/nested", label: "Nested" }
+      workspace("root", "I:/workspace/root", "Root"),
+      workspace("nested", "I:/workspace/root/nested", "Nested")
     ]);
 
     expect(listThreads).toHaveBeenCalledTimes(2);
@@ -709,7 +706,7 @@ describe("Session discovery and reconciliation", () => {
     });
 
     const discovered = await provider.discoverWorkspaces([
-      { workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" }
+      workspace("workspace-1", "I:/workspace-alpha", "Alpha")
     ]);
 
     expect(readThread).not.toHaveBeenCalled();
@@ -1160,11 +1157,7 @@ describe("Session discovery and reconciliation", () => {
         }
       ]
     });
-    await workspaceRegistry.registerWorkspace({
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" });
     await sessionIndexStore.upsertSession({
       workspaceId: "workspace-1",
       session: {
@@ -1244,9 +1237,7 @@ describe("Session discovery and reconciliation", () => {
     const runtimeService = new SessionRuntimeService({
       engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
     });
-    await workspaceRegistry.registerWorkspace({
-      workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha"
-    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" });
     await sessionIndexStore.upsertSession({
       workspaceId: "workspace-1",
       session: {
@@ -1287,9 +1278,7 @@ describe("Session discovery and reconciliation", () => {
     const runtimeService = new SessionRuntimeService({
       engines: [{ engineId: "codex", displayName: "Codex", capabilities: ["chat"] }]
     });
-    await workspaceRegistry.registerWorkspace({
-      workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha"
-    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" });
     await sessionIndexStore.upsertSession({
       workspaceId: "workspace-1",
       session: {
@@ -1345,11 +1334,7 @@ describe("Session discovery and reconciliation", () => {
     const sessionIndexStore = new SessionIndexStore({
       baseDir
     });
-    await workspaceRegistry.registerWorkspace({
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" });
 
     const rootThread = createThread({
       id: "thread-root",
@@ -1365,6 +1350,7 @@ describe("Session discovery and reconciliation", () => {
           thread_spawn: {
             parent_thread_id: "thread-root",
             depth: 1,
+            agent_path: null,
             agent_nickname: "child",
             agent_role: "reviewer"
           }
@@ -1670,11 +1656,7 @@ describe("Session discovery and reconciliation", () => {
       ]
     });
 
-    await workspaceRegistry.registerWorkspace({
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" });
     await sessionIndexStore.upsertSession({
       workspaceId: "workspace-1",
       session: {
@@ -1706,6 +1688,7 @@ describe("Session discovery and reconciliation", () => {
                   thread_spawn: {
                     parent_thread_id: "thread-root",
                     depth: 1,
+                    agent_path: null,
                     agent_nickname: "child",
                     agent_role: "reviewer"
                   }
@@ -1765,7 +1748,7 @@ describe("Session discovery and reconciliation", () => {
     }
     const forkRelations: [string, string, string][] = [
       ["root", "A", "r"], ["A", "B", earlierRefork ? "a2" : "a1"],
-      ["B", "C", earlierRefork ? "a1" : "b1"], ...(!earlierRefork ? [["A", "D", "a2"]] : [])
+      ["B", "C", earlierRefork ? "a1" : "b1"], ...(earlierRefork ? [] : [["A", "D", "a2"]] satisfies [string, string, string][])
     ];
     for (const [parentSessionId, childSessionId, sourceTurnId] of forkRelations) {
       await index.upsertRelation({ workspaceId: "workspace-1", parentSessionId,
@@ -1787,7 +1770,7 @@ describe("Session discovery and reconciliation", () => {
         }),
         createdAt: fork ? startedAt(fork[2]) + 1 : startedAt(history[0]!),
         turns: history.map((id) => ({
-          id, status: "completed" as const, error: null,
+          id, status: "completed" as const, error: null, itemsView: "full" as const, durationMs: null,
           startedAt: startedAt(id), completedAt: startedAt(id) + 1,
           items: [{ id: `question-${id}`, type: "userMessage", content: [{ type: "text", text: id, text_elements: [] }] }]
         }))
@@ -1806,7 +1789,7 @@ describe("Session discovery and reconciliation", () => {
     const reconciliation = new SessionReconciliationService({ workspaceRegistry, sessionIndexStore: index,
       runtimeService, providers: [provider] });
     const treeService = new WrapperChatTreeService({ runtimeService, sessionIndexStore: index,
-      reconciliation, fork: vi.fn() });
+      reconciliation, capabilities: {} as never });
     try {
       const tree = await treeService.get("C");
       expect(tree.visibleTurnIds).toEqual(earlierRefork ? ["r", "a1", "c"] : ["r", "a1", "b1", "c"]);
@@ -1867,7 +1850,8 @@ describe("Session discovery and reconciliation", () => {
       messageIds: [],
       toolCallIds: [],
       terminalIds: [],
-      approvalRequestIds: []
+      approvalRequestIds: [],
+      interactionRequestIds: []
     });
     const makeHydrated = (
       sessionId: string,
@@ -1945,7 +1929,7 @@ describe("Session discovery and reconciliation", () => {
       runtimeService,
       sessionIndexStore: index,
       reconciliation,
-      fork: vi.fn()
+      capabilities: {} as never
     });
 
     try {
@@ -2007,11 +1991,7 @@ describe("Session discovery and reconciliation", () => {
       ]
     });
 
-    await workspaceRegistry.registerWorkspace({
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" });
     await sessionIndexStore.upsertSession({
       workspaceId: "workspace-1",
       session: {
@@ -2097,11 +2077,11 @@ describe("Session discovery and reconciliation", () => {
       isThreadExecutionReleased: () => true,
       readThread, resumeThread, attachThreadToSession: vi.fn()
     } as never });
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1", sessionId: "worker", conversationId: "conversation-1",
       engineId: "codex", providerKind: "codex-thread", providerSessionId: "thread-released",
       createdAt: "2026-04-19T00:00:00.000Z", updatedAt: "2026-04-19T00:00:01.000Z"
-    });
+    }));
     expect(hydrated?.session.sessionId).toBe("worker");
     expect(readThread.mock.calls).toEqual([
       ["thread-released", false, { signal: undefined }],
@@ -2154,7 +2134,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const first = await provider.hydrateSession({
+    const first = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-a",
       conversationId: "conversation-a",
@@ -2163,8 +2143,8 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-a",
       createdAt: "2026-04-19T00:00:00.000Z",
       updatedAt: "2026-04-19T00:00:01.000Z"
-    });
-    const second = await provider.hydrateSession({
+    }));
+    const second = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-b",
       conversationId: "conversation-b",
@@ -2173,7 +2153,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-b",
       createdAt: "2026-04-19T00:00:00.000Z",
       updatedAt: "2026-04-19T00:00:01.000Z"
-    });
+    }));
 
     expect(first?.turns[0]?.messageIds).toEqual([
       "codex-thread:thread-a:item-1",
@@ -2290,7 +2270,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-rollout-time",
       conversationId: "conversation-rollout-time",
@@ -2299,7 +2279,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-rollout-time",
       createdAt: "2026-05-01T01:20:36.847Z",
       updatedAt: "2026-05-02T02:48:53.187Z"
-    });
+    }));
 
     expect(hydrated?.turns[0]).toMatchObject({
       startedAt: "2026-05-02T02:48:39.123Z",
@@ -2376,7 +2356,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: `codex-thread:${threadId}`,
       conversationId: "conversation-1",
@@ -2385,7 +2365,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: threadId,
       createdAt: "2025-05-13T04:26:40.000Z",
       updatedAt: "2025-05-13T04:26:42.000Z"
-    });
+    }));
 
     expect(hydrated?.turns).toEqual([
       expect.objectContaining({
@@ -2464,7 +2444,7 @@ describe("Session discovery and reconciliation", () => {
       runtimeService,
       sessionIndexStore: index,
       reconciliation,
-      fork: vi.fn()
+      capabilities: {} as never
     });
 
     try {
@@ -2718,7 +2698,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-repeated-prompt",
       conversationId: "conversation-repeated-prompt",
@@ -2727,7 +2707,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-repeated-prompt",
       createdAt: "2026-05-01T01:20:36.847Z",
       updatedAt: "2026-05-03T17:53:21.097Z"
-    });
+    }));
 
     expect(hydrated?.turns[0]).toMatchObject({
       startedAt: "2026-05-03T17:50:32.031Z",
@@ -2856,7 +2836,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-injected-context",
       conversationId: "conversation-injected-context",
@@ -2865,7 +2845,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-injected-context",
       createdAt: "2026-05-02T04:40:11.866Z",
       updatedAt: "2026-05-02T04:40:18.672Z"
-    });
+    }));
 
     const userMessages = hydrated?.messageBlocks.filter((block) => block.role === "user");
     expect(userMessages).toHaveLength(1);
@@ -2996,7 +2976,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-compacted",
       conversationId: "conversation-compacted",
@@ -3005,7 +2985,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-compacted",
       createdAt: "2026-05-01T01:20:36.847Z",
       updatedAt: "2026-05-04T04:01:02.174Z"
-    });
+    }));
 
     expect(hydrated?.turns[0]?.messageIds).toEqual([
       "codex-thread:thread-compacted:user-compacted"
@@ -3081,7 +3061,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-process",
       conversationId: "conversation-process",
@@ -3090,7 +3070,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-process",
       createdAt: "2026-04-19T00:00:00.000Z",
       updatedAt: "2026-04-19T00:00:01.000Z"
-    });
+    }));
 
     expect(hydrated?.turns[0]?.toolCallIds).toEqual([
       "codex-thread:thread-process:reason-1",
@@ -3268,7 +3248,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-final-answer",
       conversationId: "conversation-final-answer",
@@ -3277,7 +3257,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-final-answer",
       createdAt: "2026-04-19T00:00:00.000Z",
       updatedAt: "2026-04-19T00:00:01.000Z"
-    });
+    }));
 
     expect(hydrated?.turns[0]).toMatchObject({
       turnId: "turn-final",
@@ -3342,7 +3322,7 @@ describe("Session discovery and reconciliation", () => {
       } as never
     });
 
-    const hydrated = await provider.hydrateSession({
+    const hydrated = await provider.hydrateSession(indexEntry({
       workspaceId: "workspace-1",
       sessionId: "codex-thread:thread-images",
       conversationId: "conversation-images",
@@ -3351,7 +3331,7 @@ describe("Session discovery and reconciliation", () => {
       providerSessionId: "thread-images",
       createdAt: "2026-04-19T00:00:00.000Z",
       updatedAt: "2026-04-19T00:00:01.000Z"
-    });
+    }));
 
     expect(hydrated?.messageBlocks).toEqual(
       expect.arrayContaining([
@@ -3369,9 +3349,9 @@ describe("Session discovery and reconciliation", () => {
     const workspaceRegistry = new WorkspaceRegistryService({ baseDir });
     const sessionIndexStore = new SessionIndexStore({ baseDir });
     const workspaces = [
-      { workspaceId: "workspace-a", absolutePath: "I:/workspace/a", label: "A" },
-      { workspaceId: "workspace-b", absolutePath: "I:/workspace/b", label: "B" },
-      { workspaceId: "workspace-c", absolutePath: "I:/workspace/c", label: "C" }
+      workspace("workspace-a", "I:/workspace/a", "A"),
+      workspace("workspace-b", "I:/workspace/b", "B"),
+      workspace("workspace-c", "I:/workspace/c", "C")
     ];
     for (const workspace of workspaces) {
       await workspaceRegistry.registerWorkspace(workspace);
@@ -3447,11 +3427,7 @@ describe("Session discovery and reconciliation", () => {
     const sessionIndexStore = new SessionIndexStore({
       baseDir
     });
-    await workspaceRegistry.registerWorkspace({
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    });
+    await workspaceRegistry.registerWorkspace({ workspaceId: "workspace-1", absolutePath: "I:/workspace-alpha", label: "Alpha" });
     await sessionIndexStore.upsertSession({
       workspaceId: "workspace-1",
       session: {
@@ -3517,11 +3493,7 @@ describe("Session discovery and reconciliation", () => {
         isThreadExecutionReleased: () => false, listThreads } as never
     });
 
-    const discovered = await provider.discoverWorkspaces([{
-      workspaceId: "workspace-1",
-      absolutePath: "I:/workspace-alpha",
-      label: "Alpha"
-    }]);
+    const discovered = await provider.discoverWorkspaces([workspace("workspace-1", "I:/workspace-alpha", "Alpha")]);
 
     expect(listThreads).toHaveBeenCalledTimes(1);
     expect(discovered.get("workspace-1")?.sessions.map((session) => session.sessionId))

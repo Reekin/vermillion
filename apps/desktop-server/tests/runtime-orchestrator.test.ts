@@ -1530,13 +1530,13 @@ describe("RuntimeOrchestrator", () => {
       const sendEnvelope = {
         commandId: `send-${ordering}`,
         command: {
-          type: "sendUserMessage",
+          type: "sendUserMessage" as const,
           sessionId: "session-canonical",
           messageId: "message-canonical",
           content: "hello",
           attachments: []
         }
-      } as const;
+      };
       const receipt =
         ordering === "event-first"
           ? await (async () => {
@@ -1811,7 +1811,7 @@ describe("RuntimeOrchestrator", () => {
       }
     })).resolves.toMatchObject({ accepted: false });
     expect(mismatchHarness.domainService.getSnapshot().turns).toEqual([]);
-    expect(mismatchHarness.domainService.getSnapshot().messages ?? []).toEqual([]);
+    expect(mismatchHarness.domainService.getSnapshot().messageBlocks).toEqual([]);
     expect(mismatchHarness.domainService.getSession("session-send-protocol")?.status).toBe("idle");
 
     const rejectedHarness = createHarness(async (envelope) => {
@@ -1877,7 +1877,7 @@ describe("RuntimeOrchestrator", () => {
         attachments: []
       }
     })).rejects.toThrow("adapter failed");
-    expect(failureHarness.domainService.getSnapshot().messages ?? []).toEqual([]);
+    expect(failureHarness.domainService.getSnapshot().messageBlocks).toEqual([]);
     expect(failureHarness.domainService.getSession("session-send-protocol")?.status).toBe("idle");
   });
 

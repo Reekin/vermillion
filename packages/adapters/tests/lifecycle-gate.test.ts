@@ -49,7 +49,7 @@ describe("LifecycleGate", () => {
     const gate = new LifecycleGate();
     const startError = new Error("spawn failed");
     const start = vi
-      .fn<[], Promise<void>>()
+      .fn<() => Promise<void>>()
       .mockRejectedValueOnce(startError)
       .mockResolvedValueOnce(undefined);
 

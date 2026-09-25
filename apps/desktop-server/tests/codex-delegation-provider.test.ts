@@ -17,6 +17,7 @@ describe("CodexDelegationProvider", () => {
           title: "Root session",
           createdAt: "2026-04-20T00:00:00.000Z",
           updatedAt: "2026-04-20T00:00:00.000Z",
+          unreadState: "read",
           source: "registry"
         },
         runtimeService: {

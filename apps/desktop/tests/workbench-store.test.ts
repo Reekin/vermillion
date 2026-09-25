@@ -1,21 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxItem, WorkbenchClient, WorkbenchEvent, WorkItem } from "@vermillion/workbench/client";
 import { createWorkbenchStore } from "../src/ui/app/workbench-store.js";
+import { workItem } from "./workbench-fixtures.js";
 
-const item = (workItemId: string, status: WorkItem["status"], treeId?: string) => ({ workItemId, title: workItemId, status, treeId }) as WorkItem;
+const item = (workItemId: string, status: WorkItem["status"], treeId?: string) => workItem({ workItemId, status, treeId });
+
+/** Method-routed stand-in for the generic RPC client; each test answers only the methods it exercises. */
+type RequestStub = (method: string, params?: { workspaceId?: string }) => Promise<unknown>;
+
+const stubClient = (
+  request: RequestStub,
+  subscribe: WorkbenchClient["subscribe"] = () => () => undefined
+): WorkbenchClient => ({ request: request as unknown as WorkbenchClient["request"], subscribe });
 
 const setup = (data: Record<string, { items: WorkItem[] }>) => {
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
   let listener: ((event: WorkbenchEvent) => void) | undefined;
-  const request = vi.fn(async (method: string, params: { workspaceId?: string }) => {
+  const request = vi.fn<RequestStub>(async (method, params) => {
     if (method === "workspace.list") return Object.keys(data).map((workspaceId) => ({ workspaceId, label: workspaceId }));
-    if (method === "workItem.list") return data[params.workspaceId!]!.items;
+    if (method === "workItem.list") return data[params!.workspaceId!]!.items;
     return [];
   });
-  const store = createWorkbenchStore({ request, subscribe: (fn) => {
+  const store = createWorkbenchStore(stubClient(request, (fn) => {
     listener = fn;
     return () => { if (listener === fn) listener = undefined; };
-  } } as WorkbenchClient);
+  }));
   const disconnect = store.getState().connect();
   return { store, request, disconnect, emit: (event: WorkbenchEvent) => listener?.(event) };
 };
@@ -29,8 +38,8 @@ it("refreshes pending counts and durable Inbox history together after processing
     { kind: "decision", workspaceId: "a", card: { decisionId: "d" } },
     { kind: "merged", workspaceId: "a", workItem: { workItemId: "m", merge: {} } }
   ] as InboxItem[];
-  const request = vi.fn(async (method: string) => method === "inbox.list" ? inbox : []);
-  const store = createWorkbenchStore({ request, subscribe: (fn) => { listener = fn; return () => {}; } } as WorkbenchClient);
+  const request = vi.fn<RequestStub>(async (method) => method === "inbox.list" ? inbox : []);
+  const store = createWorkbenchStore(stubClient(request, (fn) => { listener = fn; return () => {}; }));
   const disconnect = store.getState().connect();
   await vi.waitFor(() => expect(store.getState().inbox).toHaveLength(2));
   inbox = inbox.map((entry) => entry.kind === "decision"
@@ -50,10 +59,10 @@ describe("global task summary", () => {
   it("counts every unfinished work item across source trees and workspaces", async () => {
     const { store, request } = setup({
       a: { items: [item("p", "preparing", "tree-a"), item("q", "queued", "tree-a"), item("r", "running", "tree-a"), item("closed", "closed")] },
-      b: { items: [item("m", "merging"), item("d", "decision"), item("cancel", "cancelled")] }
+      b: { items: [item("m", "merging"), item("cancel", "cancelled")] }
     });
-    await vi.waitFor(() => expect(store.getState().tasks).toHaveLength(5));
-    expect(store.getState().tasks.map((task) => task.id)).toEqual(["p", "q", "r", "m", "d"]);
+    await vi.waitFor(() => expect(store.getState().tasks).toHaveLength(4));
+    expect(store.getState().tasks.map((task) => task.id)).toEqual(["p", "q", "r", "m"]);
     expect(request.mock.calls.some(([method]) => method.startsWith("mission."))).toBe(false);
   });
 
@@ -263,7 +272,7 @@ describe("workspace view invalidation", () => {
   it("does not start view or task queries from a late workspace response after disconnect", async () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
     let release!: (value: Array<{ workspaceId: string; label: string }>) => void;
-    const request = vi.fn((method: string) => {
+    const request = vi.fn<RequestStub>((method) => {
       if (method === "workspace.list") {
         return new Promise<Array<{ workspaceId: string; label: string }>>((resolve) => {
           release = resolve;
@@ -271,10 +280,7 @@ describe("workspace view invalidation", () => {
       }
       return Promise.resolve([]);
     });
-    const store = createWorkbenchStore({
-      request,
-      subscribe: () => () => undefined
-    } as unknown as WorkbenchClient);
+    const store = createWorkbenchStore(stubClient(request));
     const disconnect = store.getState().connect();
     await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     disconnect();
@@ -292,7 +298,7 @@ describe("workspace view invalidation", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
     let releaseOld!: (value: InboxItem[]) => void;
     let inboxCalls = 0;
-    const request = vi.fn((method: string) => {
+    const request = vi.fn<RequestStub>((method) => {
       if (method === "workspace.list") return Promise.resolve([]);
       if (method === "inbox.list") {
         inboxCalls += 1;
@@ -302,10 +308,7 @@ describe("workspace view invalidation", () => {
       }
       return Promise.resolve([]);
     });
-    const store = createWorkbenchStore({
-      request,
-      subscribe: () => () => undefined
-    } as unknown as WorkbenchClient);
+    const store = createWorkbenchStore(stubClient(request));
 
     const disconnectOld = store.getState().connect();
     await vi.waitFor(() => expect(releaseOld).toBeTypeOf("function"));

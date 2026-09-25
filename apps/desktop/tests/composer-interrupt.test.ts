@@ -19,6 +19,8 @@ const turn = (turnId: string, status: Turn["status"]): Turn => ({
   messageIds: [],
   toolCallIds: [],
   terminalIds: [],
+  approvalRequestIds: [],
+  interactionRequestIds: [],
   startedAt: "2026-08-08T00:00:00.000Z"
 });
 
