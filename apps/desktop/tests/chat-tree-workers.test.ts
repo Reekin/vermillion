@@ -236,4 +236,16 @@ describe("Worker branch presentation", () => {
     expect(all.tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "other-tip"]);
     expect(all.activeWorkers).toEqual(result.activeWorkers);
   });
+
+  it("hides supervisor branches with worker branches and marks them M", () => {
+    const source = tree();
+    const requests = [{ formatVersion: 2, requestId: "ready", sourceSessionId: "design", workerSessionId: "worker", status: "ready",
+      supervisor: { sessionId: "other-worker" } }] as WorkRequest[];
+    const result = projectChatTreeWorkers(source, [], requests);
+    expect(result.tree?.nodes.map((node) => node.nodeId)).toEqual(["source"]);
+    expect(result.nodeMarkers).toEqual({ "worker-tip": "W", "other-tip": "M" });
+    expect(result.activeWorkers).toEqual([]);
+    expect(projectChatTreeWorkers(source, [], requests, true).tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "worker-tip", "other-tip"]);
+    expect(projectChatTreeWorkers({ ...source, currentNodeId: "other-tip" }, [], requests).tree?.nodes.map((node) => node.nodeId)).toEqual(["source", "other-tip"]);
+  });
 });

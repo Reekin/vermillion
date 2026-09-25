@@ -87,8 +87,8 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
     return () => { active = false; unsubscribe(); };
   }, [client, workspaceId]);
   const current = records.workspaceId === workspaceId ? records : undefined;
-  const { tree, workers, activeWorkers } = useMemo(() => projectChatTreeWorkers(props.chatTree, current?.items ?? [], current?.requests ?? [], showAll), [props.chatTree, current, showAll]);
-  return <><ChatTreePanel {...props} chatTree={tree} nodeMarkers={Object.fromEntries(workers.flatMap((worker) => worker.nodeIds.map((id) => [id, "W"])))}
+  const { tree, activeWorkers, hasWorkSessions, nodeMarkers } = useMemo(() => projectChatTreeWorkers(props.chatTree, current?.items ?? [], current?.requests ?? [], showAll), [props.chatTree, current, showAll]);
+  return <><ChatTreePanel {...props} chatTree={tree} nodeMarkers={nodeMarkers}
     onNodeContextMenu={(event, nodeId) => {
       event.preventDefault();
       const node = props.chatTree?.nodes.find((item) => item.nodeId === nodeId);
@@ -108,7 +108,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
       setOperationMenu({ operationId, action: operation.status === "failed" ? "remove" : "cancel",
         x: event.clientX, y: event.clientY });
     }}
-    header={workers.length > 0 && <div className="border-b border-border px-3 py-2"><Toggle label="显示全部 Worker" checked={showAll} onChange={(checked) => setExpandedTree(checked ? treeId : undefined)} /></div>}
+    header={hasWorkSessions && <div className="border-b border-border px-3 py-2"><Toggle label="显示工单会话" checked={showAll} onChange={(checked) => setExpandedTree(checked ? treeId : undefined)} /></div>}
     renderNodeStatus={(status) => <Badge>{status}</Badge>}
     footer={(activeWorkers.length > 0 || current?.error) && <div className="max-h-60 shrink-0 overflow-auto border-t border-border">
       <SectionLabel>Worker</SectionLabel>
