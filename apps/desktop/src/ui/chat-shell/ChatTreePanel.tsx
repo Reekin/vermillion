@@ -56,15 +56,6 @@ export const ChatTreePanel = ({
     return <p className="awb-detail__empty">Select a session to inspect its chat tree.</p>;
   }
 
-  if (!chatTree.supportsJump) {
-    return (
-      <div className="awb-detail-card">
-        <strong>Chat tree unavailable</strong>
-        <p>This agent or session does not currently expose chat-tree data.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="awb-chat-tree">
       {header}

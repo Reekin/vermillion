@@ -48,7 +48,6 @@ const piEventTypeByMethod: Record<string, RuntimeEvent["type"]> = {
   "terminal.started": "terminal.started",
   "terminal.output": "terminal.output",
   "terminal.completed": "terminal.completed",
-  "conversationGraph.updated": "conversationGraph.updated",
   "runtime.error": "runtime.error"
 };
 

@@ -583,7 +583,7 @@ describe("session browser transport contracts", () => {
     );
   });
 
-  it("reads worktree, checkpoint, diagnostics, and background-run summaries through typed rpc methods", async () => {
+  it("reads worktree, diagnostics, and background-run summaries through typed rpc methods", async () => {
     const preload = createPreloadMock(async (request) => {
       switch (request.method) {
         case "worktree.get":
@@ -599,30 +599,6 @@ describe("session browser transport contracts", () => {
                 workspaceRoot: "I:\\repo-a",
                 gitBranch: "main",
                 gitSha: "abc123",
-                fetchedAt: "2026-04-20T00:00:00.000Z"
-              }
-            }
-          } as const;
-        case "checkpoint.get":
-          return {
-            id: request.id,
-            method: "checkpoint.get",
-            ok: true,
-            result: {
-              checkpoint: {
-                sessionId: request.params.sessionId,
-                engineId: "codex",
-                supported: true,
-                supportsRestore: true,
-                currentCheckpointId: "node-1",
-                checkpoints: [
-                  {
-                    checkpointId: "node-1",
-                    label: "Checkpoint 1",
-                    order: 0,
-                    isCurrent: true
-                  }
-                ],
                 fetchedAt: "2026-04-20T00:00:00.000Z"
               }
             }
@@ -666,7 +642,6 @@ describe("session browser transport contracts", () => {
     const transport = createDesktopTransport(preload.api);
 
     const worktree = await transport.worktree.get("session-1");
-    const checkpoint = await transport.checkpoint.get("session-1");
     const diagnostics = await transport.diagnostics.get("session-1");
     const backgroundRun = await transport.backgroundRun.get("session-1");
 
@@ -674,7 +649,6 @@ describe("session browser transport contracts", () => {
       workspaceRoot: "I:\\repo-a",
       gitBranch: "main"
     });
-    expect(checkpoint.currentCheckpointId).toBe("node-1");
     expect(diagnostics.authenticated).toBe(true);
     expect(backgroundRun.status).toBe("unsupported");
   });

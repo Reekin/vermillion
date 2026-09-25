@@ -1,12 +1,40 @@
 import { randomUUID } from "node:crypto";
 import { beginSessionStage, reportSessionReadCounts } from "./session-load-trace.js";
 import type { Turn, ChatTreeSendInput, ChatTreeSendOperation, CommandEnvelope } from "@vermillion/shared";
-import type { ChatTreeSnapshot, ChatTreeNodeSnapshot } from "./chat-tree-provider.js";
 import type { SessionIndexStore } from "./session-index.js";
 import type { SessionRuntimeService } from "./runtime-service.js";
 import type { SessionReconciliationService } from "./session-discovery.js";
 import type { CapabilityRegistry } from "./capability-registry.js";
-import { buildSessionWindowSnapshotFromPage } from "./session-window.js";
+import { buildSessionWindowSnapshotFromPage, type SessionWindowSnapshot } from "./session-window.js";
+
+export type ChatTreeNodeSnapshot = {
+  nodeId: string;
+  sessionId?: string;
+  canHide?: boolean;
+  parentNodeId?: string;
+  label: string;
+  summary?: string;
+  turnId?: string;
+  order: number;
+  isCurrent: boolean;
+  unread?: boolean;
+  status?: "pending" | "completed" | "interrupted" | "replaced" | "reviewEnded";
+};
+
+export type ChatTreeSnapshot = {
+  sessionId: string;
+  treeId?: string;
+  workspaceId?: string;
+  currentSessionId?: string;
+  memberSessionIds?: string[];
+  windows?: SessionWindowSnapshot[];
+  engineId: string;
+  currentNodeId?: string;
+  visibleNodeIds?: string[];
+  visibleTurnIds?: string[];
+  nodes: ChatTreeNodeSnapshot[];
+  fetchedAt: string;
+};
 
 type SendOperationState = {
   operation: ChatTreeSendOperation;
@@ -342,7 +370,7 @@ export class WrapperChatTreeService {
       sessionId, treeId, currentSessionId, memberSessionIds: treeMembers,
       workspaceId: index.getEntry(treeId)?.workspaceId ?? index.getEntry(sessionId)?.workspaceId,
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
-      supportsJump: true, currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
+      currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
       nodes: visibleNodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
       windows, fetchedAt: new Date().toISOString()
     };

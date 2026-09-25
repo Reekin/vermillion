@@ -4,7 +4,6 @@ import { sessionLoadMark, sessionLoadTrace } from "../diagnostics/session-load-t
 import type {
   Attachment,
   BackgroundRunSnapshotRpc,
-  CheckpointSnapshotRpc,
   ChatTreeSnapshotRpc,
   ChatSession,
   ChatInteractionCapabilitiesRpc,
@@ -343,7 +342,6 @@ export type DesktopTransport = {
     jump: (input: {
       sessionId: string;
       nodeId: string;
-      expectedRevision?: number;
     }) => Promise<{ jumped: boolean }>;
     prepareSend: (input: {
       sessionId: string;
@@ -355,9 +353,6 @@ export type DesktopTransport = {
   };
   worktree: {
     get: (sessionId: string) => Promise<WorktreeSnapshotRpc>;
-  };
-  checkpoint: {
-    get: (sessionId: string) => Promise<CheckpointSnapshotRpc>;
   };
   diagnostics: {
     get: (sessionId: string) => Promise<DiagnosticsSnapshotRpc>;
@@ -936,7 +931,7 @@ export const createDesktopTransport = (
         }));
         return result.chatTree;
       },
-      jump: (input: { sessionId: string; nodeId: string; expectedRevision?: number }) =>
+      jump: (input: { sessionId: string; nodeId: string }) =>
         rpc.request("chatTree.jump", input),
       prepareSend: (input) => rpc.request("chatTree.prepareSend", input)
     },
@@ -954,14 +949,6 @@ export const createDesktopTransport = (
           sessionId
         });
         return result.worktree;
-      }
-    },
-    checkpoint: {
-      get: async (sessionId: string) => {
-        const result = await rpc.request("checkpoint.get", {
-          sessionId
-        });
-        return result.checkpoint;
       }
     },
     diagnostics: {

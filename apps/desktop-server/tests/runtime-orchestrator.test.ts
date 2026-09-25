@@ -107,7 +107,6 @@ describe("RuntimeOrchestrator", () => {
           sharedCapabilities: [
             "chat",
             "attachments",
-            "conversationGraph",
             "goal"
           ],
           extensions: [extension]
@@ -118,7 +117,6 @@ describe("RuntimeOrchestrator", () => {
     expect(orchestrator.getEngineCapabilities("codex")).toEqual([
       "chat",
       "attachments",
-      "conversationGraph",
       "goal"
     ]);
 
@@ -131,7 +129,6 @@ describe("RuntimeOrchestrator", () => {
     expect(orchestrator.getEngineCapabilities("codex")).toEqual([
       "chat",
       "attachments",
-      "conversationGraph",
       "goal"
     ]);
     const binding = (

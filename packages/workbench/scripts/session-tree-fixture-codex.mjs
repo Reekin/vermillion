@@ -111,25 +111,6 @@ const threadForResponse = (item, includeTurns) => ({
   turns: includeTurns ? clone(item.turns) : [],
   status: { type: includeTurns ? "idle" : "notLoaded" }
 });
-const chatTree = (item) => {
-  const turn = item.turns[0];
-  return {
-    version: 1,
-    revision: 1,
-    currentNodeId: turn?.id ?? null,
-    visibleNodeIds: turn ? [turn.id] : [],
-    visibleTurnIds: turn ? [turn.id] : [],
-    nodes: turn ? [{
-      nodeId: turn.id,
-      parentNodeId: null,
-      turnId: turn.id,
-      order: 0,
-      status: "completed",
-      summary: turn.items.find((entry) => entry.type === "userMessage")?.content?.[0]?.text ?? null
-    }] : []
-  };
-};
-
 const send = (payload) => process.stdout.write(JSON.stringify(payload) + "\n");
 
 const handle = (request) => {
@@ -196,19 +177,6 @@ const handle = (request) => {
     case "thread/unsubscribe":
       send({ id: request.id, result: { status: "unsubscribed" } });
       return;
-    case "chatTree/read": {
-      const item = thread(String(params.threadId));
-      send({ id: request.id, result: {
-        threadId: String(params.threadId),
-        chatTree: item ? chatTree(item) : { version: 1, revision: 1, currentNodeId: null, visibleNodeIds: [], visibleTurnIds: [], nodes: [] }
-      } });
-      return;
-    }
-    case "chatTree/setCurrent": {
-      const item = thread(String(params.threadId));
-      send({ id: request.id, result: { threadId: String(params.threadId), chatTree: item ? chatTree(item) : { version: 1, revision: 1, currentNodeId: null, visibleNodeIds: [], visibleTurnIds: [], nodes: [] } } });
-      return;
-    }
     case "getAuthStatus":
       send({ id: request.id, result: { authMethod: "apikey", authToken: null, requiresOpenaiAuth: false } });
       return;

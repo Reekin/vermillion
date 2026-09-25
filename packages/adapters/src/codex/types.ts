@@ -43,7 +43,6 @@ export const codexRuntimeEventMethods = [
   "thread.goal.updated",
   "thread.goal.cleared",
   "engineExtension.updated",
-  "conversationGraph.updated",
   "participant.updated",
   "runtime.error"
 ] as const;

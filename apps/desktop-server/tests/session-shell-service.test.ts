@@ -131,12 +131,6 @@ const buildProjectedProviderOpenHarness = (
       markSessionRead
     } as never,
     sessionActions: {} as never,
-    chatTreeProvider: {
-      get: vi.fn().mockResolvedValue({
-        currentNodeId: "node-2",
-        nodes: [{ nodeId: "node-2", turnId: "turn-2" }]
-      })
-    } as never,
     sessionReconciliation: {
       ensureSessionExecutable
     } as never
@@ -198,12 +192,6 @@ const buildHistoryRefreshOpenHarness = (input: {
     wrapperChatTree: { invalidate } as never,
     sessionCatalog: { markSessionRead } as never,
     sessionActions: {} as never,
-    chatTreeProvider: {
-      get: vi.fn().mockResolvedValue({
-        currentNodeId: "node-2",
-        nodes: [{ nodeId: "node-2", turnId: "turn-2" }]
-      })
-    } as never,
     sessionReconciliation: {
       ensureSessionLoaded,
       ensureSessionExecutable
@@ -385,7 +373,6 @@ describe("SessionShellService", () => {
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       engineRegistry: {
         list: () => [
           {
@@ -443,7 +430,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     await expect(service.getSettings()).resolves.toEqual({
@@ -515,7 +501,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       engineCapabilitySurface: {
         get: (engineId: string) => ({
           engineId,
@@ -523,7 +508,6 @@ describe("SessionShellService", () => {
             "chat",
             "steer",
             "attachments",
-            "checkpoint",
             "diagnostics"
           ],
           extensions: []
@@ -544,14 +528,6 @@ describe("SessionShellService", () => {
           detail: "Summarize the current session state",
           replacement:
             "Summarize the current session status and the next best action."
-        },
-        {
-          id: "checkpoint",
-          label: "/checkpoint",
-          detail: "Ask for a checkpoint summary",
-          replacement:
-            "Summarize the available checkpoints and explain what changed since the latest one.",
-          sourceCapability: "checkpoint"
         },
         {
           id: "diagnostics",
@@ -601,7 +577,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -651,7 +626,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -698,7 +672,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -735,7 +708,6 @@ describe("SessionShellService", () => {
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -765,7 +737,6 @@ describe("SessionShellService", () => {
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       pickWorkspaceDirectory
     });
 
@@ -792,7 +763,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: { repairWorkspaces } as never
     });
 
@@ -820,7 +790,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     await expect(service.removeWorkspace("workspace-1")).resolves.toEqual({
@@ -848,7 +817,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     await expect(service.selectWorkspace("workspace-1")).resolves.toEqual({
@@ -865,29 +833,6 @@ describe("SessionShellService", () => {
     const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
     const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
-    const getChatTree = vi.fn().mockResolvedValue({
-      sessionId: "session-1",
-      engineId: "codex",
-      supportsJump: true,
-      currentNodeId: "node-2",
-      nodes: [
-        {
-          nodeId: "node-1",
-          label: "turn-1",
-          turnId: "turn-1",
-          order: 0,
-          isCurrent: false
-        },
-        {
-          nodeId: "node-2",
-          label: "turn-2",
-          turnId: "turn-2",
-          order: 1,
-          isCurrent: true
-        }
-      ],
-      fetchedAt: "2026-04-19T00:00:00.000Z"
-    });
     const service = new SessionShellService({
       runtimeService: {
         listSessions: () => [
@@ -910,9 +855,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {
-        get: getChatTree
-      } as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -933,7 +875,6 @@ describe("SessionShellService", () => {
       sessionId: "session-1"
     });
     expect(markSessionRead).toHaveBeenCalledWith("session-1");
-    expect(getChatTree).toHaveBeenCalledWith("session-1");
   });
 
   it("adds a shell-owned pin action and persists pin state", async () => {
@@ -963,7 +904,6 @@ describe("SessionShellService", () => {
       sessionActions: {
         listActions
       } as never,
-      chatTreeProvider: {} as never
     });
 
     await expect(service.getSessionActions("session-1")).resolves.toEqual({
@@ -1074,7 +1014,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     await expect(service.activateSession("session-1")).resolves.toEqual({
@@ -1128,7 +1067,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     const staleActivation = service.activateSession("session-1");
@@ -1157,13 +1095,6 @@ describe("SessionShellService", () => {
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
     const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
     const ensureSessionExecutable = vi.fn().mockResolvedValue(true);
-    const getChatTree = vi.fn().mockResolvedValue({
-      sessionId: "session-1",
-      engineId: "codex",
-      supportsJump: true,
-      visibleTurnIds: ["turn-2"],
-      nodes: []
-    });
     const hydrateSessionWindow = vi.fn().mockResolvedValue({
       workspaceId: "workspace-1",
       conversation: buildSessionSnapshot().conversations[0],
@@ -1206,9 +1137,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {
-        get: getChatTree
-      } as never,
       sessionReconciliation: {
         ensureSessionLoaded,
         ensureSessionExecutable,
@@ -1231,11 +1159,9 @@ describe("SessionShellService", () => {
       "session-1",
       expect.objectContaining({
         limit: expect.any(Number),
-        anchorTurnId: "turn-2",
         signal: expect.any(AbortSignal)
       })
     );
-    expect(getChatTree).toHaveBeenCalledWith("session-1");
     expect(ensureSessionLoaded).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(ensureSessionExecutable).toHaveBeenCalledWith("session-1"));
     expect(hydrateSessionWindow.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1254,13 +1180,6 @@ describe("SessionShellService", () => {
   it("force-opens loaded sessions through full provider hydration", async () => {
     const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
     const markSessionRead = vi.fn().mockResolvedValue(undefined);
-    const getChatTree = vi.fn().mockResolvedValue({
-      sessionId: "session-1",
-      engineId: "codex",
-      supportsJump: true,
-      visibleTurnIds: ["turn-branch"],
-      nodes: []
-    });
     const snapshot = buildSessionSnapshot();
     const branchTurn = {
       ...snapshot.turns[0],
@@ -1292,9 +1211,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {
-        get: getChatTree
-      } as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -1321,7 +1237,6 @@ describe("SessionShellService", () => {
         signal: expect.any(AbortSignal)
       })
     );
-    expect(getChatTree).toHaveBeenCalledWith("session-1");
     expect(setLastActiveSelection).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       sessionId: "session-1"
@@ -1374,9 +1289,6 @@ describe("SessionShellService", () => {
         markSessionRead: vi.fn().mockResolvedValue(undefined)
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {
-        get: vi.fn().mockResolvedValue(undefined)
-      } as never,
       sessionReconciliation: {
         ensureSessionExecutable: vi.fn().mockResolvedValue(true),
         hydrateSessionWindow
@@ -1390,167 +1302,6 @@ describe("SessionShellService", () => {
       })
     });
     expect(hydrateSessionWindow).toHaveBeenCalledTimes(1);
-  });
-
-  it("hydrates a loaded provider session when the current chat-tree anchor is uncovered", async () => {
-    const snapshot = buildSessionSnapshot();
-    const providerSession = {
-      ...snapshot.sessions[0],
-      lastTurnId: "turn-stale",
-      metadata: {
-        providerKind: "codex-thread",
-        providerSessionId: "sub-thread-1"
-      }
-    };
-    const currentTurn = {
-      ...snapshot.turns[0],
-      turnId: "turn-current",
-      sessionId: providerSession.sessionId
-    };
-    const hydrateSessionWindow = vi.fn().mockResolvedValue({
-      workspaceId: "workspace-1",
-      conversation: snapshot.conversations[0],
-      session: providerSession,
-      turns: [currentTurn],
-      messageBlocks: [],
-      toolCalls: [],
-      terminalStreams: [],
-      sessionRelations: [],
-      hasOlder: false,
-      hasNewer: false
-    });
-    const service = new SessionShellService({
-      runtimeService: {
-        listSessions: () => [providerSession],
-        updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
-        getSnapshot: () => ({
-          ...snapshot,
-          sessions: [providerSession],
-          turns: [
-            {
-              ...snapshot.turns[0],
-              turnId: "turn-stale",
-              sessionId: providerSession.sessionId
-            }
-          ]
-        }),
-        getWorkspaceRegistry: () => ({
-          setLastActiveSelection: vi.fn().mockResolvedValue(undefined)
-        }),
-        getSessionIndexStore: () => ({
-          getEntry: () => ({
-            sessionId: providerSession.sessionId,
-            workspaceId: "workspace-1"
-          })
-        })
-      } as never,
-      sessionCatalog: {
-        markSessionRead: vi.fn().mockResolvedValue(undefined)
-      } as never,
-      sessionActions: {} as never,
-      chatTreeProvider: {
-        get: vi.fn().mockResolvedValue({
-          currentNodeId: "node-current",
-          visibleTurnIds: ["turn-current"],
-          nodes: [
-            {
-              nodeId: "node-current",
-              turnId: "turn-current"
-            }
-          ]
-        })
-      } as never,
-      sessionReconciliation: {
-        ensureSessionExecutable: vi.fn().mockResolvedValue(true),
-        hydrateSessionWindow
-      } as never
-    });
-
-    await expect(service.openSession(providerSession.sessionId)).resolves.toEqual({
-      page: expect.objectContaining({
-        sessionId: providerSession.sessionId,
-        windowStartTurnId: "turn-current"
-      })
-    });
-    expect(hydrateSessionWindow).toHaveBeenCalledWith(
-      providerSession.sessionId,
-      expect.objectContaining({
-        anchorTurnId: "turn-current"
-      })
-    );
-  });
-
-  it("applies capability operation guards before jumping a lightweight chat tree", async () => {
-    const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
-    const markSessionRead = vi.fn().mockResolvedValue(undefined);
-    const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
-    const jumpConversationGraph = vi.fn().mockResolvedValue({
-      jumped: true
-    });
-    const hydrateSessionWindow = vi.fn().mockResolvedValue({
-      workspaceId: "workspace-1",
-      conversation: buildSessionSnapshot().conversations[0],
-      session: buildSessionSnapshot().sessions[0],
-      turns: [buildSessionSnapshot().turns[1]],
-      messageBlocks: [],
-      toolCalls: [],
-      terminalStreams: [],
-      sessionRelations: [],
-      hasOlder: true,
-      hasNewer: false
-    });
-    const service = new SessionShellService({
-      runtimeService: {
-        listSessions: () => [],
-        getSession: (sessionId: string) =>
-          buildSessionSnapshot().sessions.find((session) => session.sessionId === sessionId),
-        getSnapshot: () => buildSessionSnapshot(),
-        getWorkspaceRegistry: () => ({
-          setLastActiveSelection
-        }),
-        getSessionIndexStore: () => ({
-          getEntry: () => ({
-            sessionId: "session-1",
-            workspaceId: "workspace-1"
-          })
-        })
-      } as never,
-      sessionCatalog: {
-        markSessionRead
-      } as never,
-      capabilities: {
-        getOperationGuards: vi.fn().mockReturnValue(["interactive-session"]),
-        jumpConversationGraph,
-        getActiveTurnId: () => undefined,
-        getSessionRuntime: () => undefined,
-        clearSessionHistory: async () => false
-      } as never,
-      sessionActions: {} as never,
-      chatTreeProvider: {} as never,
-      sessionReconciliation: {
-        ensureSessionLoaded,
-        hydrateSessionWindow
-      } as never
-    });
-
-    await service.openSession("session-1");
-    await expect(
-      service.jumpChatTree({
-        sessionId: "session-1",
-        nodeId: "node-2",
-        expectedRevision: 4
-      })
-    ).resolves.toEqual({
-      jumped: true
-    });
-
-    expect(ensureSessionLoaded).toHaveBeenCalledWith("session-1", {
-      force: true
-    });
-    expect(jumpConversationGraph).toHaveBeenCalledWith("session-1", "node-2", 4);
-    expect(ensureSessionLoaded.mock.invocationCallOrder[0]).toBeLessThan(
-      jumpConversationGraph.mock.invocationCallOrder[0]
-    );
   });
 
   it("does not activate a stale lightweight open after a newer open cancels it", async () => {
@@ -1597,7 +1348,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         hydrateSessionWindow
       } as never
@@ -1662,7 +1412,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     await expect(
@@ -1730,7 +1479,6 @@ describe("SessionShellService", () => {
         markSessionRead: vi.fn().mockResolvedValue(undefined)
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     await service.createBrowserSession({
@@ -1748,81 +1496,6 @@ describe("SessionShellService", () => {
         }
       })
     );
-  });
-
-  it("anchors session opening from provider chat tree truth instead of persisted view state", async () => {
-    const setLastActiveSelection = vi.fn().mockResolvedValue(undefined);
-    const markSessionRead = vi.fn().mockResolvedValue(undefined);
-    const ensureSessionLoaded = vi.fn().mockResolvedValue(true);
-    const getChatTree = vi.fn().mockResolvedValue({
-      sessionId: "session-1",
-      engineId: "codex",
-      supportsJump: true,
-      currentNodeId: "node-4",
-      nodes: Array.from({ length: 10 }, (_value, index) => ({
-        nodeId: `node-${index + 1}`,
-        label: `turn-${index + 1}`,
-        turnId: `turn-${index + 1}`,
-        order: index,
-        isCurrent: index === 3
-      })),
-      fetchedAt: "2026-04-19T00:00:00.000Z"
-    });
-    const service = new SessionShellService({
-      runtimeService: {
-        listSessions: () => [
-          {
-            sessionId: "session-1"
-          }
-        ],
-        getSnapshot: () => ({
-          ...buildSessionSnapshot(),
-          turns: Array.from({ length: 10 }, (_value, index) => ({
-            turnId: `turn-${index + 1}`,
-            sessionId: "session-1",
-            status: "completed" as const,
-            finishReason: "completed" as const,
-            startedAt: `2026-04-19T00:${String(index).padStart(2, "0")}:00.000Z`,
-            completedAt: `2026-04-19T00:${String(index).padStart(2, "0")}:10.000Z`,
-            messageIds: [],
-            toolCallIds: [],
-            terminalIds: [],
-            approvalRequestIds: []
-          }))
-        }),
-        getWorkspaceRegistry: () => ({
-          setLastActiveSelection
-        }),
-        getSessionIndexStore: () => ({
-          getEntry: () => ({
-            sessionId: "session-1",
-            workspaceId: "workspace-1"
-          })
-        })
-      } as never,
-      sessionCatalog: {
-        markSessionRead
-      } as never,
-      sessionActions: {} as never,
-      chatTreeProvider: {
-        get: getChatTree
-      } as never,
-      sessionReconciliation: {
-        ensureSessionLoaded
-      } as never
-    });
-
-    await expect(service.openSession("session-1")).resolves.toEqual({
-      page: expect.objectContaining({
-        sessionId: "session-1",
-        windowStartTurnId: "turn-1",
-        windowEndTurnId: "turn-4",
-        hasOlder: false,
-        hasNewer: true
-      })
-    });
-    expect(markSessionRead).toHaveBeenCalledWith("session-1");
-    expect(getChatTree).toHaveBeenCalledWith("session-1");
   });
 
   it("loads older turns using the paged window contract", async () => {
@@ -1877,7 +1550,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -1932,7 +1604,6 @@ describe("SessionShellService", () => {
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         ensureSessionLoaded,
         hydrateSessionWindow
@@ -1977,7 +1648,6 @@ describe("SessionShellService", () => {
         markSessionRead
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never
     });
 
     await expect(
@@ -2020,7 +1690,6 @@ describe("SessionShellService", () => {
         markSessionRead: vi.fn()
       } as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         ensureSessionLoaded
       } as never
@@ -2041,7 +1710,6 @@ describe("SessionShellService", () => {
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       sessionReconciliation: {
         repairWorkspaces
       } as never
@@ -2068,7 +1736,6 @@ describe("SessionShellService", () => {
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       fileActionService: {
         runAction
       } as never
@@ -2133,7 +1800,6 @@ describe("SessionShellService", () => {
       runtimeService: {} as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
-      chatTreeProvider: {} as never,
       engineMethods: [
         { method: "codex.turnChanges.get", handle: getTurnChanges },
         { method: "codex.turnChanges.undo", handle: undoTurnChanges }

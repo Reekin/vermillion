@@ -80,7 +80,6 @@ export class PiSessionDiscoveryProvider implements SessionDiscoveryProvider {
     input: {
       limit: number;
       cursor?: string;
-      anchorTurnId?: string;
     }
   ): Promise<HydratedSessionWindowSnapshot | undefined> {
     const { snapshot } = await this.read(entry);
@@ -90,11 +89,6 @@ export class PiSessionDiscoveryProvider implements SessionDiscoveryProvider {
     if (input.cursor) {
       const beforeIndex = turns.findIndex((turn) => turn.turnId === input.cursor);
       end = beforeIndex >= 0 ? beforeIndex : turns.length;
-    } else if (input.anchorTurnId) {
-      const anchorIndex = turns.findIndex(
-        (turn) => turn.turnId === input.anchorTurnId
-      );
-      end = anchorIndex >= 0 ? anchorIndex + 1 : turns.length;
     }
     const start = Math.max(0, end - limit);
     const pageTurns = turns.slice(start, end);

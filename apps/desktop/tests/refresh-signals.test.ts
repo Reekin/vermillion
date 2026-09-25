@@ -154,7 +154,6 @@ describe("renderer refresh signals", () => {
         type: "conversationGraph.updated",
         sessionId: "session-1",
         currentNodeId: "node-1",
-        revision: 1,
         visibleNodeIds: ["node-1"],
         visibleTurnIds: ["turn-1"]
       }

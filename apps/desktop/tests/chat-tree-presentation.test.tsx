@@ -6,7 +6,7 @@ import { ChatTreePanel } from "../src/ui/chat-shell/ChatTreePanel.js";
 describe("chat tree presentation slots", () => {
   it("renders supplied nodes and a footer without workbench context", () => {
     const chatTree: ChatTreeSnapshotRpc = {
-      sessionId: "source", currentNodeId: "tip", engineId: "codex", supportsJump: true, fetchedAt: "now",
+      sessionId: "source", currentNodeId: "tip", engineId: "codex", fetchedAt: "now",
       nodes: [{ nodeId: "tip", label: "Selected branch", order: 0, isCurrent: true }]
     };
     const html = renderToStaticMarkup(<ChatTreePanel chatTree={chatTree} nodeMarkers={{ tip: "R" }}
@@ -24,7 +24,7 @@ describe("chat tree presentation slots", () => {
     { status: "pending" as const, unread: false, expectedClass: "is-running", absentClass: "is-unread", label: "running" }
   ])("renders $status/unread=$unread with only the $label state", ({ status, unread, expectedClass, absentClass, label }) => {
     const chatTree: ChatTreeSnapshotRpc = {
-      sessionId: "source", engineId: "codex", supportsJump: true, fetchedAt: "now",
+      sessionId: "source", engineId: "codex", fetchedAt: "now",
       nodes: [{ nodeId: "tip", label: "Branch", order: 0, isCurrent: false, status, unread }]
     };
     const html = renderToStaticMarkup(<ChatTreePanel chatTree={chatTree} />);
@@ -36,7 +36,7 @@ describe("chat tree presentation slots", () => {
 
   it("removes unread presentation once the completed node is read", () => {
     const chatTree: ChatTreeSnapshotRpc = {
-      sessionId: "source", engineId: "codex", supportsJump: true, fetchedAt: "now",
+      sessionId: "source", engineId: "codex", fetchedAt: "now",
       nodes: [{ nodeId: "tip", label: "Read branch", order: 0, isCurrent: false, status: "completed", unread: false }]
     };
     const html = renderToStaticMarkup(<ChatTreePanel chatTree={chatTree} />);
@@ -47,7 +47,7 @@ describe("chat tree presentation slots", () => {
 
   it("keeps the visibility toggle and branch list when filtering leaves no graph nodes", () => {
     const chatTree: ChatTreeSnapshotRpc = {
-      sessionId: "source", engineId: "codex", supportsJump: true, fetchedAt: "now", nodes: []
+      sessionId: "source", engineId: "codex", fetchedAt: "now", nodes: []
     };
     const html = renderToStaticMarkup(<ChatTreePanel chatTree={chatTree}
       header={<button type="button" aria-pressed="false">Show all workers</button>}

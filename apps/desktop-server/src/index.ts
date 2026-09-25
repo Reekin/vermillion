@@ -19,7 +19,6 @@ export { sessionItemId } from "./session-item-id.js";
 export * from "./session-catalog.js";
 export * from "./session-discovery.js";
 export * from "./session-actions.js";
-export * from "./chat-tree-provider.js";
 export * from "./session-shell-service.js";
 export * from "./read-session-transcript.js";
 export * from "./read-session-host-tool.js";

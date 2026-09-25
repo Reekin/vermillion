@@ -535,22 +535,6 @@ export const createWorkbenchRpcHandler = (
                 worktree: await shellService.getWorktree(request.params.sessionId)
               }
             });
-          case "checkpoint.get":
-            if (!shellService) {
-              return toErrorResponse(
-                request,
-                "CHECKPOINT_UNAVAILABLE",
-                "Checkpoint APIs are unavailable for this runtime service."
-              );
-            }
-            return parseSessionRpcResponse({
-              id: request.id,
-              method: request.method,
-              ok: true,
-              result: {
-                checkpoint: await shellService.getCheckpoint(request.params.sessionId)
-              }
-            });
           case "diagnostics.get":
             if (!shellService) {
               return toErrorResponse(

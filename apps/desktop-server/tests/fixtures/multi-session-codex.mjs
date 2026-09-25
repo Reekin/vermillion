@@ -80,21 +80,6 @@ const threadResponse = (thread, includeTurns) => ({
   turns: includeTurns ? clone(thread.turns) : [],
   status: { type: includeTurns ? "idle" : "notLoaded" }
 });
-const treeResponse = (thread) => ({
-  version: 1,
-  revision: 1,
-  currentNodeId: thread.turns.at(-1)?.id ?? null,
-  visibleNodeIds: thread.turns.map((turn) => turn.id),
-  visibleTurnIds: thread.turns.map((turn) => turn.id),
-  nodes: thread.turns.map((turn, index) => ({
-    nodeId: turn.id,
-    parentNodeId: index === 0 ? null : thread.turns[index - 1].id,
-    turnId: turn.id,
-    order: index,
-    status: "completed",
-    summary: turn.items[0].content[0].text
-  }))
-});
 const send = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
 
 // Optional finite live load through the same protocol as ordinary engine output.
@@ -196,20 +181,6 @@ const handle = (request) => {
       return;
     case "thread/unsubscribe":
       send({ id: request.id, result: { status: "unsubscribed" } });
-      return;
-    case "chatTree/read":
-    case "chatTree/setCurrent":
-      send({ id: request.id, result: {
-        threadId: String(params.threadId),
-        chatTree: thread ? treeResponse(thread) : {
-          version: 1,
-          revision: 1,
-          currentNodeId: null,
-          visibleNodeIds: [],
-          visibleTurnIds: [],
-          nodes: []
-        }
-      } });
       return;
     case "getAuthStatus":
       send({ id: request.id, result: { authMethod: "apikey", authToken: null, requiresOpenaiAuth: false } });

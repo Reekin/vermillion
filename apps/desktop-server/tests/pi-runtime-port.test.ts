@@ -63,7 +63,6 @@ describe("pi engine integration", () => {
     for (const unsupported of [
       "approval",
       "delegation",
-      "checkpoint",
       "worktree",
       "goal"
     ]) {
@@ -74,7 +73,6 @@ describe("pi engine integration", () => {
     );
     expect(integration.capabilities.delegation).toBeUndefined();
     expect(integration.capabilities.worktree).toBeUndefined();
-    expect(integration.capabilities.checkpoint).toBeUndefined();
   });
 
   it("applies the scheduler metadata when a pi session is resumed", async () => {

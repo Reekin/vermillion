@@ -43,13 +43,12 @@ type BuildSessionWindowInput = {
   limit: number;
   cursor?: string;
   beforeTurnId?: string;
-  anchorTurnId?: string;
   replaceSessionHistory?: boolean;
 };
 
 type BuildSessionWindowPageInput = Omit<
   BuildSessionWindowInput,
-  "limit" | "beforeTurnId" | "anchorTurnId"
+  "limit" | "beforeTurnId"
 > & {
   hasOlder: boolean;
   hasNewer: boolean;
@@ -141,16 +140,7 @@ export const buildSessionWindowSnapshot = (
 
   let startIndex = 0;
   let endIndex = sortedTurns.length - 1;
-  const anchorIndex = input.anchorTurnId
-    ? sortedTurns.findIndex((turn) => turn.turnId === input.anchorTurnId)
-    : -1;
-
-  if (input.anchorTurnId) {
-    const resolvedEndIndex =
-      anchorIndex >= 0 ? anchorIndex : sortedTurns.length - 1;
-    endIndex = clamp(resolvedEndIndex, 0, sortedTurns.length - 1);
-    startIndex = clamp(endIndex - input.limit + 1, 0, endIndex);
-  } else if (input.beforeTurnId) {
+  if (input.beforeTurnId) {
     const beforeIndex = sortedTurns.findIndex(
       (turn) => turn.turnId === input.beforeTurnId
     );

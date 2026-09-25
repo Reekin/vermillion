@@ -27,7 +27,6 @@ const piSurface: EngineSurfaceDefinition = {
     "tool",
     "terminal",
     "attachments",
-    "conversationGraph",
     "diagnostics"
   ]
 };

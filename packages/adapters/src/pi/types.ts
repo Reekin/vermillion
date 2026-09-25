@@ -41,7 +41,6 @@ export const piRuntimeEventMethods = [
   "terminal.started",
   "terminal.output",
   "terminal.completed",
-  "conversationGraph.updated",
   "runtime.error"
 ] as const;
 

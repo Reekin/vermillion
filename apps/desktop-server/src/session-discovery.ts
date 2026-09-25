@@ -113,7 +113,6 @@ export type SessionDiscoveryProvider = {
     input: {
       limit: number;
       cursor?: string;
-      anchorTurnId?: string;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
@@ -493,7 +492,6 @@ export class SessionReconciliationService {
     input: {
       limit: number;
       cursor?: string;
-      anchorTurnId?: string;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
@@ -507,10 +505,7 @@ export class SessionReconciliationService {
     if (!provider?.hydrateSessionWindow) {
       return undefined;
     }
-    const anchorTurnId = input.cursor ? undefined : input.anchorTurnId;
-    const hydrationKey = `${sessionId}\u0000${input.cursor ?? ""}\u0000${
-      anchorTurnId ?? ""
-    }\u0000${input.limit}`;
+    const hydrationKey = `${sessionId}\u0000${input.cursor ?? ""}\u0000${input.limit}`;
     const reusable = this.windowHydrationByKey.get(hydrationKey);
     const existingHydration = reusable && !reusable.signal.aborted ? reusable : undefined;
     if (existingHydration) {
@@ -524,7 +519,6 @@ export class SessionReconciliationService {
         .hydrateSessionWindow!(entry, {
           limit: input.limit,
           cursor: input.cursor,
-          anchorTurnId,
           signal,
           retainExecution: input.retainExecution
         })

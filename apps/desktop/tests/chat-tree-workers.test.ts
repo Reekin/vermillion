@@ -10,7 +10,7 @@ const boundItems = ["worker", "other-worker"].map((sessionId) => ({
 
 const tree = (currentSessionId = "design"): ChatTreeSnapshotRpc => ({
   sessionId: "design", treeId: "design", currentSessionId, currentNodeId: currentSessionId === "design" ? "source" : "worker-tip",
-  memberSessionIds: ["design", "worker", "other-worker"], supportsJump: true, engineId: "codex", fetchedAt: "now",
+  memberSessionIds: ["design", "worker", "other-worker"], engineId: "codex", fetchedAt: "now",
   nodes: [
     { nodeId: "source", turnId: "source", sessionId: "design", order: 0, isCurrent: currentSessionId === "design", label: "设计讨论" },
     { nodeId: "worker-tip", turnId: "worker-tip", sessionId: "worker", parentNodeId: "source", order: 1, isCurrent: currentSessionId === "worker", label: "执行详情" },

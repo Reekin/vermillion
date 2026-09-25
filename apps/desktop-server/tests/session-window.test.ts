@@ -48,7 +48,7 @@ const buildTurns = () =>
   }));
 
 describe("buildSessionWindowSnapshot", () => {
-  it("anchors the window around the requested turn", () => {
+  it("pages the window before the requested turn", () => {
     const page = buildSessionWindowSnapshot({
       sessionId: "session-1",
       conversation,
@@ -62,7 +62,7 @@ describe("buildSessionWindowSnapshot", () => {
       participants,
       sessionRelations: [],
       limit: 2,
-      anchorTurnId: "turn-2"
+      beforeTurnId: "turn-3"
     });
 
     expect(page.windowStartTurnId).toBe("turn-1");
@@ -146,7 +146,7 @@ describe("buildSessionWindowSnapshot", () => {
       participants,
       sessionRelations: [],
       limit: 2,
-      anchorTurnId: "turn-2"
+      beforeTurnId: "turn-3"
     });
 
     expect(

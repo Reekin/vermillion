@@ -862,7 +862,6 @@ describe("createWorkbenchRpcHandler", () => {
       getChatTree: vi.fn().mockResolvedValue({
         sessionId: "session-1",
         engineId: "codex",
-        supportsJump: true,
         currentNodeId: "node-1",
         nodes: [],
         fetchedAt: "2026-04-18T00:00:00Z"
@@ -875,15 +874,6 @@ describe("createWorkbenchRpcHandler", () => {
         engineId: "codex",
         supported: true,
         workspaceRoot: "I:/repo",
-        fetchedAt: "2026-04-18T00:00:00Z"
-      }),
-      getCheckpoint: vi.fn().mockResolvedValue({
-        sessionId: "session-1",
-        engineId: "codex",
-        supported: true,
-        supportsRestore: true,
-        currentCheckpointId: "node-1",
-        checkpoints: [],
         fetchedAt: "2026-04-18T00:00:00Z"
       }),
       getDiagnostics: vi.fn().mockResolvedValue({
@@ -982,13 +972,6 @@ describe("createWorkbenchRpcHandler", () => {
     const worktreeResponse = await handler.handleRequest({
       id: "req-worktree",
       method: "worktree.get",
-      params: {
-        sessionId: "session-1"
-      }
-    });
-    const checkpointResponse = await handler.handleRequest({
-      id: "req-checkpoint",
-      method: "checkpoint.get",
       params: {
         sessionId: "session-1"
       }
@@ -1103,16 +1086,6 @@ describe("createWorkbenchRpcHandler", () => {
         }
       }
     });
-    expect(checkpointResponse).toMatchObject({
-      id: "req-checkpoint",
-      method: "checkpoint.get",
-      ok: true,
-      result: {
-        checkpoint: {
-          currentCheckpointId: "node-1"
-        }
-      }
-    });
     expect(diagnosticsResponse).toMatchObject({
       id: "req-diagnostics",
       method: "diagnostics.get",
@@ -1149,7 +1122,6 @@ describe("createWorkbenchRpcHandler", () => {
     expect((shellService as any).removeWorkspace).toHaveBeenCalledWith("workspace-1");
     expect((shellService as any).getChatTree).toHaveBeenCalledWith("session-1", undefined, undefined, undefined);
     expect((shellService as any).getWorktree).toHaveBeenCalledWith("session-1");
-    expect((shellService as any).getCheckpoint).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getDiagnostics).toHaveBeenCalledWith("session-1");
     expect((shellService as any).getBackgroundRun).toHaveBeenCalledWith("session-1");
   });

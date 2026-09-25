@@ -4,7 +4,7 @@ import { projectChatTreeSends } from "../src/ui/chat-shell/chat-tree-send-projec
 import { buildChatTreeGraphLayout } from "../src/ui/chat-shell/chat-tree-layout.js";
 
 const tree: ChatTreeSnapshotRpc = {
-  sessionId: "tree", engineId: "codex", supportsJump: true, fetchedAt: "now",
+  sessionId: "tree", engineId: "codex", fetchedAt: "now",
   currentNodeId: "root", currentSessionId: "tree", visibleTurnIds: ["root"],
   nodes: [
     { nodeId: "root", turnId: "root", label: "root", order: 0, isCurrent: true },

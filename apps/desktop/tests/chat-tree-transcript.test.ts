@@ -38,7 +38,7 @@ const row = (
   }) as TurnTranscriptRow;
 
 describe("filterTranscriptRowsForChatTree", () => {
-  it("falls back to the full transcript when no jumpable tree is available", () => {
+  it("falls back to the full transcript when the tree has no current branch", () => {
     const rows = [row("turn-1"), row("turn-2")];
 
     expect(filterTranscriptRowsForChatTree(rows, undefined)).toEqual(rows);
@@ -46,7 +46,6 @@ describe("filterTranscriptRowsForChatTree", () => {
       filterTranscriptRowsForChatTree(rows, {
         sessionId: "session-1",
         engineId: "pi-acp",
-        supportsJump: false,
         nodes: [],
         fetchedAt: "2026-04-18T00:00:00Z"
       })
@@ -59,7 +58,6 @@ describe("filterTranscriptRowsForChatTree", () => {
     const filtered = filterTranscriptRowsForChatTree(rows, {
       sessionId: "session-1",
       engineId: "codex",
-      supportsJump: true,
       currentNodeId: "node-2",
       nodes: [
         {
@@ -98,7 +96,6 @@ describe("filterTranscriptRowsForChatTree", () => {
     const filtered = filterTranscriptRowsForChatTree(rows, {
       sessionId: "session-1",
       engineId: "codex",
-      supportsJump: true,
       currentNodeId: "node-current",
       visibleTurnIds: ["turn-current"],
       nodes: [
@@ -123,7 +120,6 @@ describe("filterTranscriptRowsForChatTree", () => {
       filterTranscriptRowsForChatTree([row("turn-stale"), liveRow], {
         sessionId: "session-1",
         engineId: "codex",
-        supportsJump: true,
         currentNodeId: "node-current",
         visibleTurnIds: ["turn-current"],
         nodes: [],
@@ -143,7 +139,6 @@ describe("filterTranscriptRowsForChatTree", () => {
     const filtered = filterTranscriptRowsForChatTree(rows, {
       sessionId: "session-1",
       engineId: "codex",
-      supportsJump: true,
       currentNodeId: "node-assistant",
       nodes: [
         {
@@ -179,7 +174,6 @@ describe("filterTranscriptRowsForChatTree", () => {
       {
         sessionId: "session-1",
         engineId: "codex",
-        supportsJump: true,
         currentNodeId: "node-current",
         visibleTurnIds: ["turn-current"],
         nodes: [
@@ -218,7 +212,6 @@ describe("filterTranscriptRowsForChatTree", () => {
     const chatTree = {
       sessionId: "session-1",
       engineId: "codex",
-      supportsJump: true,
       currentNodeId: "node-current",
       visibleTurnIds: ["turn-current"],
       nodes: [

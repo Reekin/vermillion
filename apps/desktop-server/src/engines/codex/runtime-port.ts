@@ -37,10 +37,6 @@ import type { ReasoningEffort } from "../../codex-app-server-generated/Reasoning
 import type { ThreadStartResponse } from "../../codex-app-server-generated/v2/ThreadStartResponse.js";
 import type { Thread } from "../../codex-app-server-generated/v2/Thread.js";
 import type { ThreadArchiveParams } from "../../codex-app-server-generated/v2/ThreadArchiveParams.js";
-import type { ChatTreeReadParams } from "../../codex-app-server-generated/v2/ChatTreeReadParams.js";
-import type { ChatTreeReadResponse } from "../../codex-app-server-generated/v2/ChatTreeReadResponse.js";
-import type { ChatTreeSetCurrentParams } from "../../codex-app-server-generated/v2/ChatTreeSetCurrentParams.js";
-import type { ChatTreeSetCurrentResponse } from "../../codex-app-server-generated/v2/ChatTreeSetCurrentResponse.js";
 import type { ThreadListParams } from "../../codex-app-server-generated/v2/ThreadListParams.js";
 import type { ThreadListResponse } from "../../codex-app-server-generated/v2/ThreadListResponse.js";
 import type { ThreadLoadedListParams } from "../../codex-app-server-generated/v2/ThreadLoadedListParams.js";
@@ -234,8 +230,6 @@ type ThreadTurnsListResponse = {
   nextCursor: string | null;
   backwardsCursor: string | null;
 };
-
-type CodexRevisionInput = number | string | bigint | null | undefined;
 
 export type CodexOpenAiCompatibleAuth = {
   apiKey?: string;
@@ -483,25 +477,6 @@ const approvalDecisionLabel = (decision: unknown): string | undefined => {
     return key;
   }
   return undefined;
-};
-
-const normalizeCodexRevision = (
-  value: CodexRevisionInput
-): number | null | undefined => {
-  if (value === null) {
-    return null;
-  }
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value === "bigint") {
-    return Number(value);
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return Number.isFinite(value) ? value : undefined;
 };
 
 const resolveCodexConfigBaseUrl = (config: Config): string | undefined => {
@@ -1622,53 +1597,6 @@ export class CodexAppServerRuntimePort
         }
       });
     }
-  }
-
-  public async readChatTree(threadId: string): Promise<ChatTreeReadResponse> {
-    await this.start(this.startConfig);
-    return (await this.rpc("chatTree/read", {
-      threadId
-    } satisfies ChatTreeReadParams)) as ChatTreeReadResponse;
-  }
-
-  public async readChatTreeForSession(
-    sessionId: string
-  ): Promise<ChatTreeReadResponse | undefined> {
-    const threadId = this.threadIdBySessionId.get(sessionId);
-    if (!threadId) {
-      return undefined;
-    }
-    return this.readChatTree(threadId);
-  }
-
-  public async setCurrentChatTreeNode(
-    threadId: string,
-    nodeId: string,
-    expectedRevision?: CodexRevisionInput
-  ): Promise<ChatTreeSetCurrentResponse> {
-    await this.start(this.startConfig);
-    const payload = {
-      threadId,
-      nodeId,
-      expectedRevision: normalizeCodexRevision(expectedRevision) ?? null
-    };
-    return (await this.rpc(
-      "chatTree/setCurrent",
-      payload as unknown as ChatTreeSetCurrentParams
-    )) as ChatTreeSetCurrentResponse;
-  }
-
-  public async setCurrentChatTreeNodeForSession(
-    sessionId: string,
-    nodeId: string,
-    expectedRevision?: CodexRevisionInput
-  ): Promise<boolean> {
-    const threadId = this.threadIdBySessionId.get(sessionId);
-    if (!threadId) {
-      return false;
-    }
-    await this.setCurrentChatTreeNode(threadId, nodeId, expectedRevision);
-    return true;
   }
 
   public async archiveThreadForSession(sessionId: string): Promise<boolean> {
@@ -2931,38 +2859,6 @@ export class CodexAppServerRuntimePort
         });
         return;
       }
-      case "chatTree/updated": {
-        const sessionId = this.resolveSessionIdFromThreadId(params.threadId);
-        const chatTree = isRecord(params.chatTree) ? params.chatTree : undefined;
-        if (!sessionId || !chatTree) {
-          return;
-        }
-        this.emitEvent("conversationGraph.updated", {
-          sessionId,
-          engineId: this.engineId,
-          currentNodeId:
-            typeof chatTree.currentNodeId === "string"
-              ? chatTree.currentNodeId
-              : undefined,
-          revision:
-            typeof chatTree.revision === "number" || typeof chatTree.revision === "string"
-              ? chatTree.revision
-              : typeof chatTree.revision === "bigint"
-                ? chatTree.revision.toString()
-                : undefined,
-          visibleNodeIds: Array.isArray(chatTree.visibleNodeIds)
-            ? chatTree.visibleNodeIds.filter(
-                (value): value is string => typeof value === "string"
-              )
-            : [],
-          visibleTurnIds: Array.isArray(chatTree.visibleTurnIds)
-            ? chatTree.visibleTurnIds.filter(
-                (value): value is string => typeof value === "string"
-              )
-            : []
-        });
-        return;
-      }
       case "turn/started": {
         const threadId =
           typeof params.threadId === "string" ? params.threadId : undefined;
@@ -4094,7 +3990,7 @@ export class CodexAppServerRuntimePort
     });
   }
 
-  private emitEvent(method: EventType, params: Record<string, unknown>): void {
+  private emitEvent(method: CodexRuntimeEvent["method"], params: Record<string, unknown>): void {
     this.sequence += 1;
     const scopedParams = scopeSessionItemIds(method, params);
     const event: CodexRuntimeEvent = {

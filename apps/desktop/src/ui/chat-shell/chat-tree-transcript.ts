@@ -4,7 +4,7 @@ import type { TurnTranscriptRow } from "./transcript-view-model.js";
 const resolveVisibleTurnIds = (
   chatTree: ChatTreeSnapshotRpc | undefined
 ): Set<string> | undefined => {
-  if (!chatTree?.supportsJump) {
+  if (!chatTree) {
     return undefined;
   }
 

@@ -6,7 +6,6 @@ import {
 } from "./session-identity-registry.js";
 import type { SessionDiscoveryProvider } from "./session-discovery.js";
 import type { SessionRuntimeService } from "./runtime-service.js";
-import type { SessionWindowSnapshot } from "./session-window.js";
 
 export type SessionActionKind =
   | "archive"
@@ -53,39 +52,6 @@ export type SessionActionResult =
   | { action: "hide_branch"; hidden: true }
   | { action: "unpin"; pinned: false };
 
-export type ConversationGraphNodeSnapshot = {
-  nodeId: string;
-  sessionId?: string;
-  canHide?: boolean;
-  providerNodeId?: string;
-  parentNodeId?: string;
-  label: string;
-  summary?: string;
-  turnId?: string;
-  order: number;
-  isCurrent: boolean;
-  unread?: boolean;
-  status?: "pending" | "completed" | "interrupted" | "replaced" | "reviewEnded";
-};
-
-export type ConversationGraphSnapshot = {
-  sessionId: string;
-  treeId?: string;
-  workspaceId?: string;
-  currentSessionId?: string;
-  memberSessionIds?: string[];
-  windows?: SessionWindowSnapshot[];
-  engineId: string;
-  supportsJump: boolean;
-  version?: number;
-  revision?: number;
-  currentNodeId?: string;
-  visibleNodeIds?: string[];
-  visibleTurnIds?: string[];
-  nodes: ConversationGraphNodeSnapshot[];
-  fetchedAt: string;
-};
-
 export type DelegationNodeSnapshot = {
   nodeId: string;
   providerNodeId?: string;
@@ -131,26 +97,6 @@ export type WorktreeSnapshot = {
   fetchedAt: string;
 };
 
-export type CheckpointEntrySnapshot = {
-  checkpointId: string;
-  providerCheckpointId?: string;
-  label: string;
-  summary?: string;
-  turnId?: string;
-  order: number;
-  isCurrent: boolean;
-};
-
-export type CheckpointSnapshot = {
-  sessionId: string;
-  engineId: string;
-  supported: boolean;
-  supportsRestore: boolean;
-  currentCheckpointId?: string;
-  checkpoints: CheckpointEntrySnapshot[];
-  fetchedAt: string;
-};
-
 export type DiagnosticsSnapshot = {
   sessionId: string;
   engineId: string;
@@ -174,14 +120,6 @@ export type BackgroundRunSnapshot = {
   resumeToken?: string;
   fetchedAt: string;
 };
-
-export type CapabilityOperation = "conversationGraph.jump";
-
-export type CapabilityOperationGuard = "interactive-session";
-
-export type CapabilityOperationGuards = Partial<
-  Record<CapabilityOperation, readonly CapabilityOperationGuard[]>
->;
 
 export type SessionCapabilityContext = ResolvedSessionContext & {
   runtimeService: SessionRuntimeService;
@@ -208,25 +146,12 @@ export type SessionActionsCapability = {
   ) => Promise<SessionActionResult | undefined>;
 };
 
-export type ConversationGraphCapability = {
-  get: (input: SessionCapabilityContext) => Promise<ConversationGraphSnapshot>;
-  jump?: (
-    input: SessionCapabilityContext,
-    nodeId: string,
-    expectedRevision?: number
-  ) => Promise<boolean>;
-};
-
 export type DelegationCapability = {
   get: (input: SessionCapabilityContext) => Promise<DelegationSnapshot>;
 };
 
 export type WorktreeCapability = {
   get: (input: SessionCapabilityContext) => Promise<WorktreeSnapshot>;
-};
-
-export type CheckpointCapability = {
-  get: (input: SessionCapabilityContext) => Promise<CheckpointSnapshot>;
 };
 
 export type DiagnosticsCapability = {
@@ -257,12 +182,9 @@ export type SessionRuntimeCapability = {
 
 export type AgentWorkbenchCapabilities = {
   readonly engineId: string;
-  readonly operationGuards?: CapabilityOperationGuards;
   readonly sessionActions?: SessionActionsCapability;
-  readonly conversationGraph?: ConversationGraphCapability;
   readonly delegation?: DelegationCapability;
   readonly worktree?: WorktreeCapability;
-  readonly checkpoint?: CheckpointCapability;
   readonly diagnostics?: DiagnosticsCapability;
   readonly backgroundRun?: BackgroundRunCapability;
   readonly sessionDiscovery?: SessionDiscoveryProvider;
@@ -276,18 +198,6 @@ type CapabilityRegistryOptions = {
   capabilities?: AgentWorkbenchCapabilities[];
   now?: () => string;
 };
-
-const unsupportedConversationGraph = (
-  sessionId: string,
-  engineId: string,
-  fetchedAt: string
-): ConversationGraphSnapshot => ({
-  sessionId,
-  engineId,
-  supportsJump: false,
-  nodes: [],
-  fetchedAt
-});
 
 const unsupportedDelegation = (
   sessionId: string,
@@ -311,19 +221,6 @@ const unsupportedWorktree = (
   sessionId,
   engineId,
   supported: false,
-  fetchedAt
-});
-
-const unsupportedCheckpoint = (
-  sessionId: string,
-  engineId: string,
-  fetchedAt: string
-): CheckpointSnapshot => ({
-  sessionId,
-  engineId,
-  supported: false,
-  supportsRestore: false,
-  checkpoints: [],
   fetchedAt
 });
 
@@ -452,17 +349,6 @@ export class CapabilityRegistry {
       throw new Error("Unable to fork this turn.");
     }
     return result.forkedSessionId;
-  }
-
-  public getOperationGuards(
-    sessionId: string,
-    operation: CapabilityOperation
-  ): readonly CapabilityOperationGuard[] {
-    const context = this.resolveContext(sessionId);
-    if (!context.engineId) {
-      throw new Error(`Unknown session: ${sessionId}`);
-    }
-    return this.getEngineCapabilities(context.engineId)?.operationGuards?.[operation] ?? [];
   }
 
   public listSessionDiscoveryProviders(): SessionDiscoveryProvider[] {
@@ -632,40 +518,6 @@ export class CapabilityRegistry {
     }
   }
 
-  public async getConversationGraph(
-    sessionId: string
-  ): Promise<ConversationGraphSnapshot> {
-    const context = this.resolveContext(sessionId);
-    if (!context.engineId) {
-      throw new Error(`Unknown session: ${sessionId}`);
-    }
-    const capability = this.getEngineCapabilities(context.engineId)?.conversationGraph;
-    if (!capability) {
-      return unsupportedConversationGraph(sessionId, context.engineId, this.now());
-    }
-    return capability.get(context);
-  }
-
-  public async jumpConversationGraph(
-    sessionId: string,
-    nodeId: string,
-    expectedRevision?: number
-  ): Promise<{ jumped: boolean }> {
-    const context = this.resolveContext(sessionId);
-    if (!context.engineId) {
-      throw new Error(`Unknown session: ${sessionId}`);
-    }
-    const capability = this.getEngineCapabilities(context.engineId)?.conversationGraph;
-    if (!capability?.jump) {
-      return {
-        jumped: false
-      };
-    }
-    return {
-      jumped: await capability.jump(context, nodeId, expectedRevision)
-    };
-  }
-
   public async getDelegation(sessionId: string): Promise<DelegationSnapshot> {
     const context = this.resolveContext(sessionId);
     if (!context.engineId) {
@@ -686,18 +538,6 @@ export class CapabilityRegistry {
     const capability = this.getEngineCapabilities(context.engineId)?.worktree;
     if (!capability) {
       return unsupportedWorktree(sessionId, context.engineId, this.now());
-    }
-    return capability.get(context);
-  }
-
-  public async getCheckpoint(sessionId: string): Promise<CheckpointSnapshot> {
-    const context = this.resolveContext(sessionId);
-    if (!context.engineId) {
-      throw new Error(`Unknown session: ${sessionId}`);
-    }
-    const capability = this.getEngineCapabilities(context.engineId)?.checkpoint;
-    if (!capability) {
-      return unsupportedCheckpoint(sessionId, context.engineId, this.now());
     }
     return capability.get(context);
   }

@@ -175,13 +175,6 @@ describe("CapabilityRegistry", () => {
       now: () => "2026-04-20T00:10:00.000Z"
     });
 
-    await expect(registry.getConversationGraph("session-pi")).resolves.toEqual({
-      sessionId: "session-pi",
-      engineId: "pi-acp",
-      supportsJump: false,
-      nodes: [],
-      fetchedAt: "2026-04-20T00:10:00.000Z"
-    });
     await expect(registry.getDelegation("session-pi")).resolves.toEqual({
       sessionId: "session-pi",
       engineId: "pi-acp",
@@ -195,14 +188,6 @@ describe("CapabilityRegistry", () => {
       sessionId: "session-pi",
       engineId: "pi-acp",
       supported: false,
-      fetchedAt: "2026-04-20T00:10:00.000Z"
-    });
-    await expect(registry.getCheckpoint("session-pi")).resolves.toEqual({
-      sessionId: "session-pi",
-      engineId: "pi-acp",
-      supported: false,
-      supportsRestore: false,
-      checkpoints: [],
       fetchedAt: "2026-04-20T00:10:00.000Z"
     });
     await expect(registry.getDiagnostics("session-pi")).resolves.toEqual({
@@ -221,7 +206,7 @@ describe("CapabilityRegistry", () => {
     });
   });
 
-  it("routes actions and graph requests through the matching agent capability set", async () => {
+  it("routes actions and snapshot requests through the matching agent capability set", async () => {
     const runtimeService = createRuntimeService();
     const sessionIndexStore = {
       getEntry: vi.fn().mockImplementation((sessionId: string) => ({
@@ -257,9 +242,6 @@ describe("CapabilityRegistry", () => {
       capabilities: [
         {
           engineId: "codex",
-          operationGuards: {
-            "conversationGraph.jump": ["interactive-session"]
-          },
           sessionActions: {
             resolveDisplayedSessionId: () => "thread-1",
             listAdditionalActions: async () => [
@@ -269,24 +251,6 @@ describe("CapabilityRegistry", () => {
               }
             ]
           },
-          conversationGraph: {
-            get: async () => ({
-              sessionId: "session-codex",
-              engineId: "codex",
-              supportsJump: true,
-              currentNodeId: "node-1",
-              nodes: [
-                {
-                  nodeId: "node-1",
-                  label: "Node 1",
-                  order: 0,
-                  isCurrent: true
-                }
-              ],
-              fetchedAt: "2026-04-20T00:10:00.000Z"
-            }),
-            jump: async () => true
-          },
           worktree: {
             get: async () => ({
               sessionId: "session-codex",
@@ -294,24 +258,6 @@ describe("CapabilityRegistry", () => {
               supported: true,
               workspaceRoot: "I:\\repo-a",
               gitBranch: "main",
-              fetchedAt: "2026-04-20T00:10:00.000Z"
-            })
-          },
-          checkpoint: {
-            get: async () => ({
-              sessionId: "session-codex",
-              engineId: "codex",
-              supported: true,
-              supportsRestore: true,
-              currentCheckpointId: "node-1",
-              checkpoints: [
-                {
-                  checkpointId: "node-1",
-                  label: "Node 1",
-                  order: 0,
-                  isCurrent: true
-                }
-              ],
               fetchedAt: "2026-04-20T00:10:00.000Z"
             })
           },
@@ -354,35 +300,9 @@ describe("CapabilityRegistry", () => {
       action: "copy_awb_session_id",
       copiedText: "session-codex"
     });
-    await expect(registry.getConversationGraph("session-codex")).resolves.toEqual({
-      sessionId: "session-codex",
-      engineId: "codex",
-      supportsJump: true,
-      currentNodeId: "node-1",
-      nodes: [
-        {
-          nodeId: "node-1",
-          label: "Node 1",
-          order: 0,
-          isCurrent: true
-        }
-      ],
-      fetchedAt: "2026-04-20T00:10:00.000Z"
-    });
-    expect(
-      registry.getOperationGuards("session-codex", "conversationGraph.jump")
-    ).toEqual(["interactive-session"]);
-    await expect(
-      registry.jumpConversationGraph("session-codex", "node-2")
-    ).resolves.toEqual({
-      jumped: true
-    });
     await expect(registry.getWorktree("session-codex")).resolves.toMatchObject({
       workspaceRoot: "I:\\repo-a",
       gitBranch: "main"
-    });
-    await expect(registry.getCheckpoint("session-codex")).resolves.toMatchObject({
-      currentCheckpointId: "node-1"
     });
     await expect(registry.getDiagnostics("session-codex")).resolves.toMatchObject({
       authenticated: true,

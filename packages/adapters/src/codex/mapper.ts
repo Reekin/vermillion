@@ -58,7 +58,6 @@ const codexEventTypeByMethod: Record<string, RuntimeEvent["type"]> = {
   "thread.goal.updated": "thread.goal.updated",
   "thread.goal.cleared": "thread.goal.cleared",
   "engineExtension.updated": "engineExtension.updated",
-  "conversationGraph.updated": "conversationGraph.updated",
   "participant.updated": "participant.updated",
   "runtime.error": "runtime.error"
 };

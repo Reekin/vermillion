@@ -7,7 +7,6 @@ const snapshot = (
 ): ChatTreeSnapshotRpc => ({
   sessionId: "session-tree-layout",
   engineId: "codex",
-  supportsJump: true,
   nodes,
   fetchedAt: "2026-09-01T00:00:00Z"
 });

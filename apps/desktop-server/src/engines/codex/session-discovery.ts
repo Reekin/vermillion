@@ -1093,7 +1093,6 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     input: {
       limit: number;
       cursor?: string;
-      anchorTurnId?: string;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
@@ -1102,15 +1101,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
     if (!threadId) {
       return undefined;
     }
-    const anchorTurnId = input.cursor ? undefined : input.anchorTurnId;
-    const cursor =
-      input.cursor ??
-      (anchorTurnId
-        ? JSON.stringify({
-            turnId: anchorTurnId,
-            includeAnchor: true
-          })
-        : null);
+    const cursor = input.cursor ?? null;
     return this.withHistory(entry, async (thread) => {
       const turnsInput = {
           threadId,

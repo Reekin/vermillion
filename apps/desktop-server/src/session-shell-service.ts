@@ -5,7 +5,7 @@ import type { SessionReadProgress } from "@vermillion/shared";
 import { readSession, type ReadSessionArgs } from "./read-session-host-tool.js";
 import { buildReadSessionActivity, type ReadSessionTranscriptResult } from "./read-session-transcript.js";
 import type { HostToolRegistry } from "./host-tools.js";
-import type { ChatTreeScope, WrapperChatTreeService } from "./wrapper-chat-tree.js";
+import type { ChatTreeScope, ChatTreeSnapshot, WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import type {
   ChatInteractionCapabilitiesRpc,
   ChatSession,
@@ -36,9 +36,6 @@ import type { RuntimeEventFilter, RuntimeEventReplayInput } from "@vermillion/co
 import {
   type BackgroundRunSnapshot,
   CapabilityRegistry,
-  type CapabilityOperationGuard,
-  type CheckpointSnapshot,
-  type ConversationGraphSnapshot as ChatTreeSnapshot,
   type DelegationSnapshot,
   type DiagnosticsSnapshot,
   type SessionActionDescriptor,
@@ -46,7 +43,6 @@ import {
   type SessionActionResult,
   type WorktreeSnapshot
 } from "./capability-registry.js";
-import { ChatTreeProvider } from "./chat-tree-provider.js";
 import { cloneModelSettings } from "./model-settings.js";
 import { SessionCatalogService } from "./session-catalog.js";
 import { SessionReconciliationService } from "./session-discovery.js";
@@ -93,14 +89,6 @@ const baseComposerSlashSuggestions: readonly ComposerSlashSuggestionRpc[] = [
 const composerSlashSuggestionsByCapability: Partial<
   Record<EngineSharedCapabilityRpc, ComposerSlashSuggestionRpc>
 > = {
-  checkpoint: {
-    id: "checkpoint",
-    label: "/checkpoint",
-    detail: "Ask for a checkpoint summary",
-    replacement:
-      "Summarize the available checkpoints and explain what changed since the latest one.",
-    sourceCapability: "checkpoint"
-  },
   goal: {
     id: "goal",
     label: "/goal",
@@ -163,7 +151,6 @@ export type SessionShellServiceOptions = {
   engineMethods?: readonly EngineMethodHandler[];
   sessionIdentity?: SessionIdentityRegistry;
   sessionActions?: SessionActionsProvider;
-  chatTreeProvider?: ChatTreeProvider;
   sessionReconciliation?: SessionReconciliationService;
   engineRegistry?: EngineRegistryService;
   engineCapabilitySurface?: EngineCapabilitySurfaceService;
@@ -203,7 +190,6 @@ export class SessionShellService {
   private readonly capabilities: CapabilityRegistry | undefined;
   private readonly engineMethods: Map<string, EngineMethodHandler["handle"]>;
   private readonly sessionActions: SessionActionsProvider | undefined;
-  private readonly chatTreeProvider: ChatTreeProvider | undefined;
   private readonly sessionIdentity: SessionIdentityRegistry;
   private readonly sessionReconciliation: SessionReconciliationService | undefined;
   private readonly engineRegistry: EngineRegistryService | undefined;
@@ -243,7 +229,6 @@ export class SessionShellService {
       (options.engineMethods ?? []).map((handler) => [handler.method, handler.handle])
     );
     this.sessionActions = options.sessionActions;
-    this.chatTreeProvider = options.chatTreeProvider;
     const sessionIndexStore = options.runtimeService.getSessionIndexStore?.();
     this.sessionIdentity =
       options.sessionIdentity ??
@@ -782,16 +767,9 @@ export class SessionShellService {
       loadedSession?.metadata?.providerKind &&
         loadedSession.metadata.providerSessionId
     );
-    const anchorTurnId = await this.resolveProviderAnchorTurnId(sessionId);
-    const projectedTurns = alreadyLoaded
-      ? this.runtimeService
-          .getSnapshot()
-          .turns.filter((turn) => turn.sessionId === sessionId)
-      : [];
-    const hasProjectedAnchor = anchorTurnId
-      ? projectedTurns.some((turn) => turn.turnId === anchorTurnId)
-      : projectedTurns.length > 0;
-    const isUncoveredProviderSession = isProviderSession && !hasProjectedAnchor;
+    const hasProjectedTurns = alreadyLoaded &&
+      this.runtimeService.getSnapshot().turns.some((turn) => turn.sessionId === sessionId);
+    const isUncoveredProviderSession = isProviderSession && !hasProjectedTurns;
     const alreadyFullyLoaded =
       alreadyLoaded &&
       !refreshedHistory &&
@@ -833,7 +811,6 @@ export class SessionShellService {
     } else if (!alreadyFullyLoaded) {
       const hydratedPage = await this.hydrateSessionWindow(sessionId, {
         limit: defaultSessionWindowLimit,
-        anchorTurnId,
         signal,
         retainExecution: true
       });
@@ -872,8 +849,7 @@ export class SessionShellService {
     this.startSessionExecutionRecovery(sessionId);
     return {
       page: this.buildSessionWindow(sessionId, {
-        limit: defaultSessionWindowLimit,
-        anchorTurnId
+        limit: defaultSessionWindowLimit
       })
     };
   }
@@ -1027,35 +1003,12 @@ export class SessionShellService {
   public async getChatTree(sessionId: string, scope?: ChatTreeScope,
     knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string): Promise<ChatTreeSnapshot> {
     return this.withRead(readId, sessionId, async (signal) => {
-      if (this.wrapperChatTree) return this.wrapperChatTree.get(sessionId, scope, knownWindows, signal);
-      return this.capabilities
-        ? this.capabilities.getConversationGraph(sessionId)
-        : this.requireChatTreeProvider().get(sessionId);
+      return this.requireWrapperChatTree().get(sessionId, scope, knownWindows, signal);
     });
   }
 
-  public async jumpChatTree(input: {
-    sessionId: string;
-    nodeId: string;
-    expectedRevision?: number;
-  }): Promise<{ jumped: boolean }> {
-    if (this.wrapperChatTree) return this.wrapperChatTree.jump(input.sessionId, input.nodeId);
-    await this.applyCapabilityOperationGuards(
-      input.sessionId,
-      this.capabilities?.getOperationGuards(input.sessionId, "conversationGraph.jump") ??
-        []
-    );
-    return this.capabilities
-      ? this.capabilities.jumpConversationGraph(
-          input.sessionId,
-          input.nodeId,
-          input.expectedRevision
-        )
-      : this.requireChatTreeProvider().jump(
-          input.sessionId,
-          input.nodeId,
-          input.expectedRevision
-        );
+  public async jumpChatTree(input: { sessionId: string; nodeId: string }): Promise<{ jumped: boolean }> {
+    return this.requireWrapperChatTree().jump(input.sessionId, input.nodeId);
   }
 
   public async prepareChatTreeSend(input: { sessionId: string; nodeId?: string }): Promise<{ sessionId: string }> {
@@ -1146,24 +1099,6 @@ export class SessionShellService {
     return this.capabilities.getWorktree(sessionId);
   }
 
-  public async getCheckpoint(sessionId: string): Promise<CheckpointSnapshot> {
-    if (!this.capabilities) {
-      const context = this.sessionIdentity.resolveContext(sessionId);
-      if (!context.engineId) {
-        throw new Error(`Unknown session: ${sessionId}`);
-      }
-      return {
-        sessionId,
-        engineId: context.engineId,
-        supported: false,
-        supportsRestore: false,
-        checkpoints: [],
-        fetchedAt: new Date().toISOString()
-      };
-    }
-    return this.capabilities.getCheckpoint(sessionId);
-  }
-
   public async getDiagnostics(sessionId: string): Promise<DiagnosticsSnapshot> {
     if (!this.capabilities) {
       const context = this.sessionIdentity.resolveContext(sessionId);
@@ -1249,11 +1184,11 @@ export class SessionShellService {
     return this.sessionActions;
   }
 
-  private requireChatTreeProvider(): ChatTreeProvider {
-    if (!this.chatTreeProvider) {
-      throw new Error("Conversation graph is unavailable.");
+  private requireWrapperChatTree(): WrapperChatTreeService {
+    if (!this.wrapperChatTree) {
+      throw new Error("Chat tree is unavailable.");
     }
-    return this.chatTreeProvider;
+    return this.wrapperChatTree;
   }
 
   private async activateOpenedSession(
@@ -1291,15 +1226,6 @@ export class SessionShellService {
     await this.ensureInteractiveSessionLoaded(command.sessionId, {
       requiresFullHydration
     });
-  }
-
-  private async applyCapabilityOperationGuards(
-    sessionId: string,
-    guards: readonly CapabilityOperationGuard[]
-  ): Promise<void> {
-    if (guards.includes("interactive-session")) {
-      await this.ensureInteractiveSessionLoaded(sessionId);
-    }
   }
 
   private async ensureInteractiveSessionLoaded(
@@ -1393,7 +1319,6 @@ export class SessionShellService {
     input: {
       limit: number;
       cursor?: string;
-      anchorTurnId?: string;
       signal?: AbortSignal;
       retainExecution?: boolean;
     }
@@ -1443,32 +1368,11 @@ export class SessionShellService {
     });
   }
 
-  private async resolveProviderAnchorTurnId(
-    sessionId: string
-  ): Promise<string | undefined> {
-    try {
-      const chatTree = this.capabilities
-        ? await this.capabilities.getConversationGraph(sessionId)
-        : await this.requireChatTreeProvider().get(sessionId);
-      const visibleAnchorTurnId = chatTree.visibleTurnIds?.at(-1);
-      if (visibleAnchorTurnId) {
-        return visibleAnchorTurnId;
-      }
-      if (!chatTree.currentNodeId) {
-        return undefined;
-      }
-      return chatTree.nodes.find((node) => node.nodeId === chatTree.currentNodeId)?.turnId;
-    } catch {
-      return undefined;
-    }
-  }
-
   private buildSessionWindow(
     sessionId: string,
     input: {
       limit: number;
       beforeTurnId?: string;
-      anchorTurnId?: string;
       replaceSessionHistory?: boolean;
     }
   ): SessionWindowSnapshot {
@@ -1513,7 +1417,6 @@ export class SessionShellService {
       ),
       limit: input.limit,
       beforeTurnId: input.beforeTurnId,
-      anchorTurnId: input.anchorTurnId,
       replaceSessionHistory: input.replaceSessionHistory
     });
   }

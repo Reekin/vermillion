@@ -64,7 +64,6 @@ export const sessionRpcMethods = [
   "chatTree.operations",
   "delegation.get",
   "worktree.get",
-  "checkpoint.get",
   "diagnostics.get",
   "diagnostics.write",
   "backgroundRun.get",
@@ -322,24 +321,6 @@ const zChatTreeNodeSchema = z.object({
   status: z.enum(["pending", "completed", "interrupted", "replaced", "reviewEnded"]).optional()
 });
 
-const zConversationGraphNodeSchema = zChatTreeNodeSchema.extend({
-  providerNodeId: z.string().min(1).optional(),
-  summary: z.string().min(1).optional()
-});
-
-const zConversationGraphSnapshotSchema = z.object({
-  sessionId: zSessionId,
-  engineId: zEngineId,
-  supportsJump: z.boolean(),
-  version: z.number().int().nonnegative().optional(),
-  revision: z.number().int().nonnegative().optional(),
-  currentNodeId: z.string().min(1).optional(),
-  visibleNodeIds: z.array(z.string().min(1)).optional(),
-  visibleTurnIds: z.array(zTurnId).optional(),
-  nodes: z.array(zConversationGraphNodeSchema).default([]),
-  fetchedAt: z.string().min(1)
-});
-
 const zChatTreeSnapshotSchema = z.object({
   sessionId: zSessionId,
   treeId: zSessionId.optional(),
@@ -348,9 +329,6 @@ const zChatTreeSnapshotSchema = z.object({
   memberSessionIds: z.array(zSessionId).optional(),
   windows: z.array(z.lazy(() => zSessionWindowSchema)).optional(),
   engineId: zEngineId,
-  supportsJump: z.boolean(),
-  version: z.number().int().nonnegative().optional(),
-  revision: z.number().int().nonnegative().optional(),
   currentNodeId: z.string().min(1).optional(),
   visibleNodeIds: z.array(z.string().min(1)).optional(),
   visibleTurnIds: z.array(zTurnId).optional(),
@@ -400,26 +378,6 @@ const zWorktreeSnapshotSchema = z.object({
   gitOriginUrl: z.string().min(1).optional(),
   diffToRemoteSha: z.string().min(1).optional(),
   diffToRemote: z.string().optional(),
-  fetchedAt: z.string().min(1)
-});
-
-const zCheckpointEntrySchema = z.object({
-  checkpointId: z.string().min(1),
-  providerCheckpointId: z.string().min(1).optional(),
-  label: z.string().min(1),
-  summary: z.string().min(1).optional(),
-  turnId: zTurnId.optional(),
-  order: z.number().int(),
-  isCurrent: z.boolean()
-});
-
-const zCheckpointSnapshotSchema = z.object({
-  sessionId: zSessionId,
-  engineId: zEngineId,
-  supported: z.boolean(),
-  supportsRestore: z.boolean(),
-  currentCheckpointId: z.string().min(1).optional(),
-  checkpoints: z.array(zCheckpointEntrySchema).default([]),
   fetchedAt: z.string().min(1)
 });
 
@@ -793,8 +751,7 @@ const zChatTreeJumpRequestSchema = z.object({
   method: z.literal("chatTree.jump"),
   params: z.object({
     sessionId: zSessionId,
-    nodeId: z.string().min(1),
-    expectedRevision: z.number().int().nonnegative().optional()
+    nodeId: z.string().min(1)
   })
 });
 
@@ -833,14 +790,6 @@ const zDelegationGetRequestSchema = z.object({
 const zWorktreeGetRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("worktree.get"),
-  params: z.object({
-    sessionId: zSessionId
-  })
-});
-
-const zCheckpointGetRequestSchema = z.object({
-  id: zRequestId,
-  method: z.literal("checkpoint.get"),
   params: z.object({
     sessionId: zSessionId
   })
@@ -1020,7 +969,6 @@ export const zSessionRpcRequestSchema = z.discriminatedUnion("method", [
   zChatTreeOperationsRequestSchema,
   zDelegationGetRequestSchema,
   zWorktreeGetRequestSchema,
-  zCheckpointGetRequestSchema,
   zDiagnosticsGetRequestSchema,
   zDiagnosticsWriteRequestSchema,
   zBackgroundRunGetRequestSchema,
@@ -1331,15 +1279,6 @@ const zWorktreeGetResponseSchema = z.object({
   })
 });
 
-const zCheckpointGetResponseSchema = z.object({
-  id: zRequestId,
-  method: z.literal("checkpoint.get"),
-  ok: z.literal(true),
-  result: z.object({
-    checkpoint: zCheckpointSnapshotSchema
-  })
-});
-
 const zDiagnosticsGetResponseSchema = z.object({
   id: zRequestId,
   method: z.literal("diagnostics.get"),
@@ -1532,7 +1471,6 @@ export const zSessionRpcResponseSchema = z.union([
   zChatTreeOperationsResponseSchema,
   zDelegationGetResponseSchema,
   zWorktreeGetResponseSchema,
-  zCheckpointGetResponseSchema,
   zDiagnosticsGetResponseSchema,
   zDiagnosticsWriteResponseSchema,
   zBackgroundRunGetResponseSchema,
@@ -1590,14 +1528,10 @@ export type ComposerSlashSuggestionRpc = z.infer<
   typeof zComposerSlashSuggestionRpcSchema
 >;
 export type SkillDescriptorRpc = z.infer<typeof zSkillDescriptorRpcSchema>;
-export type ConversationGraphSnapshotRpc = z.infer<
-  typeof zConversationGraphSnapshotSchema
->;
 export type ChatTreeSnapshotRpc = z.infer<typeof zChatTreeSnapshotSchema>;
 export type ChatTreeNodeActionInput = z.infer<typeof zChatTreeNodeActionRequestSchema>["params"];
 export type DelegationSnapshotRpc = z.infer<typeof zDelegationSnapshotSchema>;
 export type WorktreeSnapshotRpc = z.infer<typeof zWorktreeSnapshotSchema>;
-export type CheckpointSnapshotRpc = z.infer<typeof zCheckpointSnapshotSchema>;
 export type DiagnosticsSnapshotRpc = z.infer<typeof zDiagnosticsSnapshotSchema>;
 export type DiagnosticLogKindRpc = z.infer<typeof zDiagnosticLogKindSchema>;
 export type DiagnosticsWriteInputRpc = z.infer<

@@ -5,7 +5,6 @@ import type {
   EngineIntegrationHost
 } from "../../engine-control/engine-integration.js";
 import type { EngineSurfaceDefinition } from "../../engine-control/capability-surface.js";
-import { CodexCheckpointProvider } from "./checkpoint-provider.js";
 import { CodexDelegationProvider } from "./delegation-provider.js";
 import { CodexDiagnosticsProvider } from "./diagnostics-provider.js";
 import { CodexHookActivityService } from "./extensions/hook-activity-service.js";
@@ -31,10 +30,8 @@ const codexSurface: EngineSurfaceDefinition = {
     "terminal",
     "approval",
     "attachments",
-    "conversationGraph",
     "goal",
     "delegation",
-    "checkpoint",
     "worktree",
     "diagnostics"
   ],
@@ -175,7 +172,6 @@ export const createCodexEngineIntegration = (
       sessionActions,
       delegation: new CodexDelegationProvider(),
       worktree: new CodexWorktreeProvider({ codexRuntimePort: runtimePort, now }),
-      checkpoint: new CodexCheckpointProvider({ codexRuntimePort: runtimePort, now }),
       diagnostics: new CodexDiagnosticsProvider({ codexRuntimePort: runtimePort, now }),
       sessionDiscovery: new CodexSessionDiscoveryProvider({
         historySource,
