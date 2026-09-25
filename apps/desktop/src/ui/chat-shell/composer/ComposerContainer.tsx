@@ -16,6 +16,7 @@ import type {
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { ImageLightboxState } from "../ImageLightbox.js";
 import type { ComposerStatusNotice } from "../composer-status.js";
+import type { NoticeLogView } from "./ComposerStatusBar.js";
 import type { ApprovalResponseInput } from "../ApprovalFlowView.js";
 import type { InteractionResponseInput } from "../InteractionFlowView.js";
 import { useComposerController } from "../use-composer-controller.js";
@@ -58,6 +59,7 @@ export type ComposerContainerProps = {
   interactions: RuntimeInteraction[];
   isOpeningSelectedSession: boolean;
   statusNotice?: ComposerStatusNotice;
+  noticeLog?: NoticeLogView;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   onPreviewImage?: (input: ImageLightboxState) => void;
   createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
@@ -106,6 +108,7 @@ export const ComposerContainer = memo(({
   interactions,
   isOpeningSelectedSession,
   statusNotice,
+  noticeLog,
   onStatusNotice,
   onPreviewImage,
   createSession,
@@ -183,6 +186,7 @@ export const ComposerContainer = memo(({
       suggestions={composer.suggestions}
       status={composer.status}
       statusNotice={statusNotice}
+      noticeLog={noticeLog}
       pendingApprovals={approvals.filter((approval) => approval.status === "pending")}
       pendingInteractions={interactions.filter(
         (interaction) => interaction.status === "pending"

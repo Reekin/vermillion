@@ -229,6 +229,10 @@ export const createCodexEngineIntegration = (
         handle: (params) => turnChangesService.undoTurnChanges(params)
       }
     ],
-    resolveTitleAuth: () => runtimePort.readOpenAiCompatibleAuth()
+    resolveTitleAuth: () => runtimePort.readOpenAiCompatibleAuth(),
+    configWarnings: {
+      list: () => runtimePort.getConfigWarnings(),
+      subscribe: (listener) => runtimePort.subscribeConfigWarnings(listener)
+    }
   };
 };

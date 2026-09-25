@@ -317,6 +317,10 @@ export class SessionRuntimeService {
     });
   }
 
+  public notifyEngineConfigWarningsChanged(engineId: string): void {
+    this.publishRuntimeEvent({ type: "engine.configWarnings.updated", engineId });
+  }
+
   public subscribe(
     listener: (envelope: EventEnvelope) => void,
     filter: RuntimeEventFilter = {}

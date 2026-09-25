@@ -8,7 +8,7 @@ import type {
 } from "@vermillion/shared";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
-import { Button, Field, InlineNotice } from "./ui.js";
+import { Button, CollapsibleDetails, Field, InlineNotice } from "./ui.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
@@ -20,6 +20,7 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [modelCatalogError, setModelCatalogError] = useState<string | undefined>(undefined);
+  const [openWarning, setOpenWarning] = useState<string | undefined>(undefined);
 
   const reload = useCallback(async () => {
     const [nextSettings, nextEngines] = await Promise.all([
@@ -199,6 +200,27 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
                   {`未找到 ${resolution.path}，新建会话时该引擎无法启动。`}
                 </InlineNotice>
               )}
+              {(settings?.engineConfigWarningsByEngineId?.[engine.engineId] ?? []).map((warning, index) => {
+                const key = `${engine.engineId}:${index}`;
+                const details = [warning.details, warning.path ? `配置文件：${warning.path}` : undefined]
+                  .filter(Boolean).join("\n\n");
+                return (
+                  <div key={key}>
+                    <InlineNotice tone="error" className="px-0 pb-0">
+                      {`配置警告：${warning.summary}`}
+                    </InlineNotice>
+                    {details && (
+                      <CollapsibleDetails
+                        title="警告详情"
+                        open={openWarning === key}
+                        onToggle={() => setOpenWarning((current) => (current === key ? undefined : key))}
+                      >
+                        {details}
+                      </CollapsibleDetails>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}

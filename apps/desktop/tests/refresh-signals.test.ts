@@ -15,6 +15,15 @@ const advance = (events: RuntimeEvent[]) =>
   );
 
 describe("renderer refresh signals", () => {
+  it("refreshes engine config warnings only for their own event", () => {
+    expect(advance([{ type: "engine.configWarnings.updated", engineId: "codex" }])).toEqual({
+      sessionBrowser: 0,
+      chatTree: 0,
+      engineExtensions: 0,
+      engineConfigWarnings: 1
+    });
+  });
+
   it("refreshes the session browser for turn lifecycle status changes", () => {
     const signals = advance([
       {
@@ -124,7 +133,8 @@ describe("renderer refresh signals", () => {
     expect(signals).toEqual({
       sessionBrowser: 0,
       chatTree: 0,
-      engineExtensions: 0
+      engineExtensions: 0,
+      engineConfigWarnings: 0
     });
   });
 
@@ -163,7 +173,8 @@ describe("renderer refresh signals", () => {
     expect(signals).toEqual({
       sessionBrowser: 3,
       chatTree: 2,
-      engineExtensions: 0
+      engineExtensions: 0,
+      engineConfigWarnings: 0
     });
   });
 
@@ -199,7 +210,8 @@ describe("renderer refresh signals", () => {
     expect(signals).toEqual({
       sessionBrowser: 0,
       chatTree: 0,
-      engineExtensions: 1
+      engineExtensions: 1,
+      engineConfigWarnings: 0
     });
   });
 

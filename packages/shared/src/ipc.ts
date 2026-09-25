@@ -109,6 +109,19 @@ const zSessionSettingsSchema = z.object({
       })
     )
     .default({}),
+  /** Configuration problems each engine reported for its running process, e.g. Codex falling back to defaults. */
+  engineConfigWarningsByEngineId: z
+    .record(
+      z.string(),
+      z.array(
+        z.object({
+          summary: z.string().min(1),
+          details: z.string().optional(),
+          path: z.string().optional()
+        })
+      )
+    )
+    .default({}),
   allowedModelIdsByEngineId: z.record(z.string(), z.array(z.string().min(1))).default({}),
   customModelReasoningOptionIdsByEngineId: z
     .record(z.string(), z.record(z.string(), z.array(z.string().min(1))))
@@ -1507,6 +1520,8 @@ export type SessionSettingsUpdateRpc = Omit<
 };
 export type EngineProgramResolutionRpc =
   SessionSettingsRpc["engineProgramResolutionsByEngineId"][string];
+export type EngineConfigWarningRpc =
+  SessionSettingsRpc["engineConfigWarningsByEngineId"][string][number];
 export type SessionEventSubscriptionFilter = z.infer<
   typeof zWorkbenchEventSubscriptionFilterSchema
 >;

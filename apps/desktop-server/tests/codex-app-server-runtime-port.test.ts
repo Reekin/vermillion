@@ -168,7 +168,49 @@ describe("Codex app-server runtime port", () => {
       .mockResolvedValue({ config: { sqlite_home: "file:///I:/isolated/codex-state" } });
 
     await expect(port.getCodexSqliteHome()).resolves.toBe(normalize("I:/isolated/codex-state"));
-    expect(rpc).toHaveBeenCalledWith("config/read", { includeLayers: false, cwd: null });
+    expect(rpc).toHaveBeenCalledWith("config/read", { includeLayers: false, cwd: null }, {});
+  });
+
+  type NotificationTarget = { handleNotification: (method: string, params: Record<string, unknown>) => void };
+  const configWarning = {
+    summary: "Invalid configuration; using defaults.",
+    details: "No such file or directory (os error 2)",
+    path: "/Users/test/.codex/config.toml"
+  };
+
+  it("keeps reported config warnings until a config read succeeds", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
+    const changed = vi.fn();
+    port.subscribeConfigWarnings(changed);
+    const notify = (params: Record<string, unknown>) =>
+      (port as unknown as NotificationTarget).handleNotification("configWarning", params);
+    notify(configWarning);
+    notify(configWarning);
+    notify({ summary: "" });
+    expect(port.getConfigWarnings()).toEqual([configWarning]);
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(port, "start").mockResolvedValue();
+    vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockRejectedValueOnce(new Error("failed to resolve feature override precedence"))
+      .mockResolvedValue({ config: { developer_instructions: "User configuration" } });
+    await expect(port.readConfig("I:/workspace")).rejects.toThrow("feature override precedence");
+    expect(port.getConfigWarnings()).toEqual([configWarning]);
+
+    await port.readConfig("I:/workspace");
+    expect(port.getConfigWarnings()).toEqual([]);
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops the previous process's config warnings when the app server starts again", async () => {
+    const port = createCodexAppServerRuntimePort({ commandPath: process.execPath, commandArgs: [fixturePath] });
+    disposers.push(() => port.stop());
+    const changed = vi.fn();
+    port.subscribeConfigWarnings(changed);
+    (port as unknown as NotificationTarget).handleNotification("configWarning", configWarning);
+    await port.start();
+    expect(port.getConfigWarnings()).toEqual([]);
+    expect(changed).toHaveBeenCalledTimes(2);
   });
 
   it("only confirms attached execution while its engine connection remains ready", async () => {

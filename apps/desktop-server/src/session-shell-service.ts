@@ -16,6 +16,7 @@ import type {
   DiagnosticsWriteInputRpc,
   DiagnosticsWriteResultRpc,
   EngineDefinitionRpc,
+  EngineConfigWarningRpc,
   EngineModelCatalogRpc,
   EngineProgramResolutionRpc,
   EngineSharedCapabilityRpc,
@@ -159,6 +160,7 @@ export type SessionShellServiceOptions = {
     rootPath?: string;
   }>;
   resolveEngineProgram?: (engineId: string) => EngineProgramResolutionRpc;
+  listEngineConfigWarnings?: (engineId: string) => EngineConfigWarningRpc[];
   fileActionService?: FileActionService;
   errorLogService?: ErrorLogService;
   diagnosticLogService?: DiagnosticLogService;
@@ -199,6 +201,9 @@ export class SessionShellService {
     | undefined;
   private readonly resolveEngineProgram: NonNullable<
     SessionShellServiceOptions["resolveEngineProgram"]
+  >;
+  private readonly listEngineConfigWarnings: NonNullable<
+    SessionShellServiceOptions["listEngineConfigWarnings"]
   >;
   private readonly fileActionService: FileActionService;
   private readonly errorLogService: ErrorLogService;
@@ -251,6 +256,7 @@ export class SessionShellService {
         const { args: _args, ...resolution } = resolveEngineProgramCommand(engineId);
         return resolution;
       });
+    this.listEngineConfigWarnings = options.listEngineConfigWarnings ?? (() => []);
     this.fileActionService =
       options.fileActionService ?? new FileActionService();
     this.errorLogService =
@@ -299,6 +305,11 @@ export class SessionShellService {
           engine.engineId,
           this.resolveEngineProgram(engine.engineId)
         ])
+      ),
+      engineConfigWarningsByEngineId: Object.fromEntries(
+        this.listEngines()
+          .map((engine) => [engine.engineId, this.listEngineConfigWarnings(engine.engineId)] as const)
+          .filter(([, warnings]) => warnings.length > 0)
       ),
       ...cloneModelSettings(state)
     };

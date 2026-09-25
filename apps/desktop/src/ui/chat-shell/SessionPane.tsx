@@ -59,6 +59,16 @@ import {
 import { TurnProcessPanel } from "./TurnProcessPanel.js";
 import { buildParticipantDirectory } from "./participant-directory.js";
 import {
+  appendNoticeLogEntry,
+  autoDismissesNotice,
+  dismissedByOpeningLog,
+  markNoticeLogSeen,
+  withEngineConfigWarnings,
+  type EngineConfigWarningView,
+  type NoticeLogEntry
+} from "./notice-log.js";
+import type { NoticeLogView } from "./composer/ComposerStatusBar.js";
+import {
   resolveRecoveryNotice,
   statusNoticeErrorDetails,
   type ComposerStatusNotice
@@ -690,6 +700,12 @@ export const SessionPane = ({
     SessionSettingsRpc["executionPreferencesByEngineId"]
   >({});
   const [statusNotice, setStatusNoticeState] = useState<ComposerStatusNotice | undefined>();
+  const [noticeLog, setNoticeLog] = useState<NoticeLogEntry[]>([]);
+  const [engineConfigWarningsByEngineId, setEngineConfigWarningsByEngineId] = useState<
+    SessionSettingsRpc["engineConfigWarningsByEngineId"]
+  >({});
+  const engineConfigWarningsRef = useRef<EngineConfigWarningView[]>([]);
+  const noticeSequenceRef = useRef(0);
   const [processVisibilityByTurnId, setProcessVisibilityByTurnId] = useState<
     Record<string, ProcessVisibilityOverride>
   >({});
@@ -720,25 +736,38 @@ export const SessionPane = ({
     [transport]
   );
 
-  const setStatusNotice = useCallback(
-    (action: SetStateAction<ComposerStatusNotice | undefined>): void => {
-      if (typeof action === "function") {
-        setStatusNoticeState((current) => {
-          const next = action(current);
-          if (next && next !== current) {
-            writeStatusNoticeLog(next);
-          }
-          return next;
-        });
-        return;
-      }
-      if (action) {
-        writeStatusNoticeLog(action);
-      }
-      setStatusNoticeState(action);
+  /** Every new notice enters the log; errors carry the active engine configuration warnings. */
+  const recordStatusNotice = useCallback(
+    (reported: ComposerStatusNotice): ComposerStatusNotice => {
+      const notice = withEngineConfigWarnings(reported, engineConfigWarningsRef.current);
+      noticeSequenceRef.current += 1;
+      const id = `notice-${noticeSequenceRef.current}`;
+      setNoticeLog((log) => appendNoticeLogEntry(log, notice, new Date().toISOString(), id));
+      writeStatusNoticeLog(notice);
+      return notice;
     },
     [writeStatusNoticeLog]
   );
+
+  const statusNoticeRef = useRef<ComposerStatusNotice | undefined>(undefined);
+  const setStatusNotice = useCallback(
+    (action: SetStateAction<ComposerStatusNotice | undefined>): void => {
+      const current = statusNoticeRef.current;
+      let next = typeof action === "function" ? action(current) : action;
+      if (next && next !== current) {
+        next = recordStatusNotice(next);
+      }
+      statusNoticeRef.current = next;
+      setStatusNoticeState(next);
+    },
+    [recordStatusNotice]
+  );
+
+  const openNoticeLog = useCallback((): void => {
+    setNoticeLog(markNoticeLogSeen);
+    setStatusNotice((current) => (current && dismissedByOpeningLog(current) ? undefined : current));
+  }, [setStatusNotice]);
+  const clearNoticeLog = useCallback((): void => setNoticeLog([]), []);
 
   const onExecutionPreferenceChange = useCallback(
     (engineId: string, execution: ComposerExecutionSelection): void => {
@@ -1018,8 +1047,43 @@ export const SessionPane = ({
     })
   );
 
+  const engineConfigWarningsSignal = state.refreshSignals.engineConfigWarnings;
   useEffect(() => {
-    if (!statusNotice || statusNotice.persistent) {
+    if (!engineConfigWarningsSignal) return;
+    let disposed = false;
+    void transport.settings
+      .get()
+      .then((settings) => {
+        if (!disposed) setEngineConfigWarningsByEngineId(settings.engineConfigWarningsByEngineId ?? {});
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [engineConfigWarningsSignal, transport]);
+
+  const engineConfigWarnings = useMemo(
+    (): EngineConfigWarningView[] =>
+      Object.entries(engineConfigWarningsByEngineId).flatMap(([engineId, warnings]) => {
+        const engineLabel =
+          availableEngines.find((engine) => engine.engineId === engineId)?.displayName ?? engineId;
+        return warnings.map((warning) => ({ engineId, engineLabel, ...warning }));
+      }),
+    [availableEngines, engineConfigWarningsByEngineId]
+  );
+  engineConfigWarningsRef.current = engineConfigWarnings;
+  const noticeLogView = useMemo(
+    (): NoticeLogView => ({
+      entries: noticeLog,
+      engineWarnings: engineConfigWarnings,
+      onOpen: openNoticeLog,
+      onClear: clearNoticeLog
+    }),
+    [clearNoticeLog, engineConfigWarnings, noticeLog, openNoticeLog]
+  );
+
+  useEffect(() => {
+    if (!statusNotice || !autoDismissesNotice(statusNotice)) {
       return;
     }
     const timeoutId = setTimeout(() => {
@@ -1076,6 +1140,7 @@ export const SessionPane = ({
         const executionPreferences = settings.executionPreferencesByEngineId ?? {};
         executionPreferencesByEngineIdRef.current = executionPreferences;
         setExecutionPreferencesByEngineId(executionPreferences);
+        setEngineConfigWarningsByEngineId(settings.engineConfigWarningsByEngineId ?? {});
         setSettingsHydrated(true);
       })
       .catch((error) => {
@@ -1308,6 +1373,7 @@ export const SessionPane = ({
           interactions={activeSessionInteractions}
           isOpeningSelectedSession={isOpeningSelectedSession}
           statusNotice={statusNotice}
+          noticeLog={noticeLogView}
           onStatusNotice={setStatusNotice}
           onPreviewImage={onPreviewImage}
           createSession={sessionId ? undefined : createSession}

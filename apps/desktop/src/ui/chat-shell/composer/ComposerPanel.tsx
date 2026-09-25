@@ -30,7 +30,7 @@ import {
 } from "../InteractionFlowView.js";
 import { ConfigurationSelect } from "./ConfigurationControl.js";
 import { ComposerQueue } from "./ComposerQueue.js";
-import { ComposerStatusBar } from "./ComposerStatusBar.js";
+import { ComposerStatusBar, type NoticeLogView } from "./ComposerStatusBar.js";
 import { ComposerSuggestions } from "./ComposerSuggestions.js";
 import type {
   ComposerStatusModel,
@@ -104,6 +104,7 @@ export const ComposerPanel = ({
   suggestions,
   status,
   statusNotice,
+  noticeLog,
   pendingApprovals = [],
   pendingInteractions = [],
   contextUsage,
@@ -158,6 +159,7 @@ export const ComposerPanel = ({
   suggestions: ComposerSuggestionState | undefined;
   status: ComposerStatusModel;
   statusNotice?: ComposerStatusNotice;
+  noticeLog?: NoticeLogView;
   pendingApprovals?: ApprovalRequest[];
   pendingInteractions?: RuntimeInteraction[];
   contextUsage?: ContextUsage;
@@ -421,7 +423,7 @@ export const ComposerPanel = ({
     </div>
     <div className="awb-composer__actions awb-composer-panel__actions">
       <div className="awb-composer__meta">
-        <ComposerStatusBar status={status} notice={statusNotice} />
+        <ComposerStatusBar status={status} notice={statusNotice} log={noticeLog} />
         {threadGoal ? (
           <div
             className={`awb-composer-goal awb-composer-goal--${threadGoal.status}`}

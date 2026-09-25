@@ -110,6 +110,7 @@ export function methodHelp(method: string): string | undefined {
     ""
   ].join("\n");
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
+    "settings.get": { params: "无", state: "桌面在线；返回全局设置、各引擎程序解析结果，以及 engineConfigWarningsByEngineId：引擎当前进程报告的配置警告（summary、details、path），没有警告的引擎不出现。", example: {} },
     "sessionBrowser.list": { params: "workspaceId: string; kind?: user | agent", state: "桌面在线；一次返回该 workspace 会话列表的全部行与当前 revision。", example: { workspaceId: "<workspaceId>" } },
     "sessionBrowser.changes": { params: "workspaceId: string; revision: string; kind?: user | agent", state: "桌面在线；返回自该 revision 以来变化的行与被移除的行标识；revision 不可用时返回 full-required。", example: { workspaceId: "<workspaceId>", revision: "<revision>" } },
     "sessionBrowser.open": { params: "sessionId: string; forceProviderHydration?: boolean; includeWindow?: boolean; readId?: string", state: "桌面在线；进入会话并核对当前历史。includeWindow=false 仅打开，不返回正文窗口；正文可通过 chatTree.get 按版本获取。readId 标识本次读取，可用 chatTree.cancelRead 取消。", example: { sessionId: "<sessionId>" } },

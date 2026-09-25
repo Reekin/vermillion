@@ -50,7 +50,8 @@ export const eventTypes = [
   "engineExtension.updated",
   "conversationGraph.updated",
   "participant.updated",
-  "runtime.error"
+  "runtime.error",
+  "engine.configWarnings.updated"
 ] as const;
 
 export type EventType = (typeof eventTypes)[number];
@@ -324,6 +325,12 @@ const zRuntimeErrorEvent = z.object({
   details: zJsonRecord.optional()
 });
 
+/** The engine's current configuration warnings changed; read them through settings.get. */
+const zEngineConfigWarningsUpdatedEvent = z.object({
+  type: z.literal("engine.configWarnings.updated"),
+  engineId: zEngineId
+});
+
 const actorScopedEventTypes = new Set<EventType>([
   "tool.started",
   "tool.delta",
@@ -366,7 +373,8 @@ export const zEventSchema = z
     zEngineExtensionUpdatedEvent,
     zConversationGraphUpdatedEvent,
     zParticipantUpdatedEvent,
-    zRuntimeErrorEvent
+    zRuntimeErrorEvent,
+    zEngineConfigWarningsUpdatedEvent
   ])
   .superRefine((event, ctx) => {
     if (

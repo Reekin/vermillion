@@ -151,6 +151,10 @@ export const createSessionRuntimeService = (
   });
 
   service = runtimeService;
+  for (const integration of integrations) {
+    integration.configWarnings?.subscribe(() =>
+      runtimeService.notifyEngineConfigWarningsChanged(integration.engineId));
+  }
   sessionIdentity = new SessionIdentityRegistry({
     runtimeService,
     sessionIndexStore
@@ -211,6 +215,8 @@ export const createSessionRuntimeService = (
       const { args: _args, ...resolution } = resolveProgram(engineId, integration.program);
       return resolution;
     },
+    listEngineConfigWarnings: (engineId) =>
+      integrations.find((entry) => entry.engineId === engineId)?.configWarnings?.list() ?? [],
     fileActionService: new FileActionService({
       openPath: options.openFilePath,
       revealPath: options.revealFilePath
