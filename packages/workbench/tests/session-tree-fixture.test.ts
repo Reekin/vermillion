@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { prepareSessionTreeFixture } from "../src/session-tree-fixture.js";
 
@@ -20,8 +20,9 @@ describe("session-tree fixture preparation", () => {
     const index = JSON.parse(await readFile(join(dataDir, "session-index.json"), "utf8"));
 
     expect(result.workspaceId).toBe("workspace-fixture-session-tree");
-    expect(result.projectPath).toContain("fixtures\\session-tree\\project");
-    expect(result.env.VERMILLION_CODEX_BIN).toBe("I:\\fixture-package\\scripts\\session-tree-fixture-codex.cmd");
+    expect(result.projectPath).toBe(join(dataDir, "fixtures", "session-tree", "project"));
+    expect(result.env.VERMILLION_CODEX_BIN).toBe(resolve("I:/fixture-package", "scripts",
+      "session-tree-fixture-codex" + (process.platform === "win32" ? ".cmd" : ".sh")));
     expect(registry.workspaces).toHaveLength(1);
     expect(registry.workspaces[0].absolutePath).toBe(result.projectPath);
     expect(index.entries.map((entry: { sessionId: string }) => entry.sessionId)).toEqual([

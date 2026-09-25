@@ -38,8 +38,9 @@ Inbox：决策卡 / 合入结果 ◄── Worker 在 worktree 中执行 ◄─�
 需要 Node >= 22、pnpm 10，以及 PATH 中的 `git` 和 `codex`（可用 `VERMILLION_CODEX_BIN` 指定路径）。
 
 ```
-start.bat   # 构建并启动桌面应用
-dev.bat     # 开发模式（Vite HMR + Electron）
+start.bat       # Windows：构建并启动桌面应用
+start.command   # macOS：构建并启动桌面应用（Finder 中双击）
+dev.bat         # Windows 开发模式（Vite HMR + Electron）；macOS 用 pnpm dev
 ```
 
 1. 在会话页底部 Composer 的 workspace 选择器里选「新建 workspace…」，指向一个项目目录。Vermillion 会按需初始化 git 并创建 `.vermillion/docs/`。
@@ -80,7 +81,7 @@ node packages/workbench/bin/vermillion.mjs workspace.list
 
 数据分两处：全局 `~/.vermillion/` 存 workspace 注册表、会话索引和角色 prompt；每个 workspace 的 `<root>/.vermillion/` 中只有 `docs/` 走 git，工单、决策、运行记录等排除在 git 之外。
 
-`pnpm package` 产出 `release/vermillion-<version>-<stamp>/`，目录可整体拷走运行，不需要 node_modules。开发检查、隔离验收实例和打包细节见 [docs/development.md](docs/development.md)。
+`pnpm package` 在当前平台产出 `release/vermillion-<version>-<stamp>/`：Windows 为 `Vermillion.exe`，macOS 为 `Vermillion.app`。目录可整体拷走运行，不需要 node_modules。开发检查、隔离验收实例和打包细节见 [docs/development.md](docs/development.md)。
 
 ## Roadmap
 

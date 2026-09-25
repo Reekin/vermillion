@@ -67,7 +67,11 @@ type EngineModelCatalogResult = { catalog?: { engineId?: unknown; models?: unkno
 type LocalRpcResponse = { ok?: boolean; result?: unknown; error?: string };
 
 const launchRecordFile = "app-start.json";
-const hiddenDesktopChromiumArgs = ["--disable-features=CalculateNativeWinOcclusion", "--disable-backgrounding-occluded-windows"];
+/** Keeps a hidden (Windows) or covered background (macOS) acceptance window rendering and handling events. */
+const isolationChromiumArgs: Partial<Record<NodeJS.Platform, string[]>> = {
+  win32: ["--disable-features=CalculateNativeWinOcclusion", "--disable-backgrounding-occluded-windows"],
+  darwin: ["--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"]
+};
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const processRunning = (pid: number): boolean => {
   try {
@@ -76,6 +80,11 @@ const processRunning = (pid: number): boolean => {
   } catch {
     return false;
   }
+};
+/** app.start spawns POSIX instances detached, so the app leads a process group that includes its engines. */
+const signalProcessGroup = (pid: number, signal: NodeJS.Signals): void => {
+  try { process.kill(-pid, signal); }
+  catch { try { process.kill(pid, signal); } catch {} }
 };
 const cdpReady = async (port: number): Promise<boolean> => {
   try { return (await fetch("http://127.0.0.1:" + port + "/json/version", { signal: AbortSignal.timeout(500) })).ok; } catch { return false; }
@@ -167,14 +176,23 @@ const prepareTargetBuild = async (target: AppTarget): Promise<void> => {
 export const resolveAppTarget = async (targetPath: string, expectedRevision?: string): Promise<AppTarget> => {
   const requested = resolve(targetPath);
   let info; try { info = await stat(requested); } catch { throw new Error("Acceptance target does not exist: " + requested); }
-  const executable = info.isFile() ? requested : join(requested, "Vermillion.exe");
-  if (existsSync(executable) && basename(executable).toLowerCase() === "vermillion.exe") {
+  // A release is addressed by its directory, or by Vermillion.exe (Windows) / Vermillion.app (macOS).
+  const addressedDirectly = process.platform === "darwin" ? basename(requested) === "Vermillion.app"
+    : info.isFile() && basename(requested).toLowerCase() === "vermillion.exe";
+  const release = releaseLayout(addressedDirectly ? dirname(requested) : requested);
+  if ((addressedDirectly || info.isDirectory()) && existsSync(release.exe)) {
     if (expectedRevision) throw new Error("expectedRevision is only valid for a source checkout");
-    return { kind: "release", rootPath: dirname(executable), packageRoot: join(dirname(executable), "resources", "app"), command: { exe: executable, args: [], cwd: dirname(executable) } };
+    return { kind: "release", rootPath: release.rootPath, packageRoot: release.packageRoot, command: { exe: release.exe, args: [], cwd: release.rootPath } };
   }
   if (!info.isDirectory()) throw new Error("Acceptance target must be a source checkout or Vermillion release: " + requested);
   return sourceTarget(requested, expectedRevision);
 };
+
+/** Unpacked release layout written by scripts/package-unpack.mjs on this platform. */
+export const releaseLayout = (rootPath: string) => process.platform === "darwin"
+  ? { rootPath, exe: join(rootPath, "Vermillion.app", "Contents", "MacOS", "Electron"),
+    packageRoot: join(rootPath, "Vermillion.app", "Contents", "Resources", "app"), cli: join(rootPath, "vermillion-cli") }
+  : { rootPath, exe: join(rootPath, "Vermillion.exe"), packageRoot: join(rootPath, "resources", "app"), cli: join(rootPath, "vermillion-cli.cmd") };
 
 export class AppLauncher {
   private readonly desktop: string;
@@ -215,7 +233,7 @@ export class AppLauncher {
         VERMILLION_USER_DATA_DIR: userDataDir, VERMILLION_REMOTE_DEBUGGING_PORT: String(input.port),
         VERMILLION_ACCEPTANCE_LAUNCH_TOKEN: instanceId, VERMILLION_ACCEPTANCE_DESKTOP: desktop };
       if (!env.VERMILLION_CODEX_BIN && !env.CODEX_BIN && !env.CODEX_PATH && configuredCodexPath) env.VERMILLION_CODEX_BIN = configuredCodexPath;
-      const args = process.platform === "win32" ? [...target.command.args, ...hiddenDesktopChromiumArgs] : target.command.args;
+      const args = [...target.command.args, ...(isolationChromiumArgs[process.platform] ?? [])];
       stage = "process";
       if (process.platform === "win32") {
         const launched = await this.startHidden(target.command, target.packageRoot, dataDir, instanceId, desktop, env, args);
@@ -249,7 +267,7 @@ export class AppLauncher {
       await writeFile(targetDescriptor, JSON.stringify({ dataDir, pid, instanceId }) + "\n", "utf8");
       await logLine(logPath, "ready", { pid, buildId: runtime.buildId });
       const real = fixture && "codexHome" in fixture ? fixture as RealSessionFixture : undefined;
-      const cliExecutable = target.kind === "source" ? process.execPath : join(target.rootPath, "vermillion-cli.cmd");
+      const cliExecutable = target.kind === "source" ? process.execPath : releaseLayout(target.rootPath).cli;
       const cliArgs = target.kind === "source" ? [join(target.rootPath, "packages", "workbench", "bin", "vermillion.mjs"), "--target", targetDescriptor] : ["--target", targetDescriptor];
       return { pid, instanceId, cdpUrl: "http://127.0.0.1:" + input.port, desktop: record.desktop, dataDir, targetPath: target.rootPath,
         targetKind: target.kind, ...(target.revision ? { targetRevision: target.revision } : {}), buildId: runtime.buildId, logPath,
@@ -322,11 +340,19 @@ export class AppLauncher {
         try { await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"]); }
         catch (error) { warnings.push(error instanceof Error ? error.message : String(error)); }
       } else {
-        process.kill(pid, "SIGTERM");
+        signalProcessGroup(pid, "SIGTERM");
       }
     }
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline && (processRunning(pid) || (port !== undefined && await tcpPortOpen(port)))) await sleep(100);
+    const settled = async (timeoutMs: number) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline && (processRunning(pid) || (port !== undefined && await tcpPortOpen(port)))) await sleep(100);
+    };
+    await settled(10_000);
+    if (process.platform !== "win32" && processRunning(pid)) {
+      warnings.push("Process " + pid + " ignored SIGTERM; sent SIGKILL");
+      signalProcessGroup(pid, "SIGKILL");
+      await settled(5_000);
+    }
     if (ownerPid) {
       const ownerDeadline = Date.now() + 2_000;
       while (Date.now() < ownerDeadline && processRunning(ownerPid)) await sleep(50);

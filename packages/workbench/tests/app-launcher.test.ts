@@ -2,9 +2,9 @@ import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { copyFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AppLauncher, resolveAppTarget, type AcceptanceLaunchRecord } from "../src/app-launcher.js";
+import { AppLauncher, releaseLayout, resolveAppTarget, type AcceptanceLaunchRecord } from "../src/app-launcher.js";
 import { startLocalEndpoint } from "../src/local-endpoint.js";
 import { prepareSessionTreeFixture } from "../src/session-tree-fixture.js";
 
@@ -101,9 +101,11 @@ describe("acceptance app target and lifecycle", () => {
   it("recognizes an unpacked release without treating it as a source checkout", async () => {
     const root = await mkdtemp(join(tmpdir(), "verm-release-target-"));
     dirs.push(root);
-    await writeFile(join(root, "Vermillion.exe"), "fixture", "utf8");
+    const release = releaseLayout(root);
+    await mkdir(dirname(release.exe), { recursive: true });
+    await writeFile(release.exe, "fixture", "utf8");
     const target = await resolveAppTarget(root);
-    expect(target).toMatchObject({ kind: "release", rootPath: root, command: { exe: join(root, "Vermillion.exe") } });
+    expect(target).toMatchObject({ kind: "release", rootPath: root, packageRoot: release.packageRoot, command: { exe: release.exe } });
   });
 
   it("rejects caller-owned data directories before creating a launch", async () => {

@@ -1,8 +1,9 @@
 // Exits 1 when any source file is newer than the desktop bundle, 0 otherwise.
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const root = fileURLToPath(new URL("..", import.meta.url));
 const bundle = join(root, "apps/desktop/dist-web/index.html");
 const mainJs = join(root, "apps/desktop/dist-electron/main.js");
 

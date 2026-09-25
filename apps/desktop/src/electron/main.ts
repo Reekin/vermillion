@@ -6,6 +6,7 @@ import {
   dialog,
   ipcMain,
   Notification,
+  powerSaveBlocker,
   shell,
   Tray
 } from "electron";
@@ -48,8 +49,29 @@ import {
 import { writeVerifiedClipboardText } from "./clipboard-writer.js";
 import { writeVerifiedClipboardImage } from "./clipboard-image-writer.js";
 import { createAgentCompletionNotifier } from "./agent-completion-notification.js";
+import { mergeLoginShellPath } from "./login-shell-path.js";
 
 app.setName("Vermillion");
+if (process.platform === "darwin") mergeLoginShellPath();
+
+/**
+ * macOS has no hidden desktop, so an app.start acceptance instance runs as a background app: no Dock
+ * or Cmd+Tab entry, no activation, and its window stays behind every other window.
+ */
+const backgroundAcceptance = process.platform === "darwin" && Boolean(process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN?.trim());
+if (backgroundAcceptance) app.setActivationPolicy("accessory");
+
+/** Shows the window; background acceptance instances order it behind all windows without activating or flashing in front. */
+const presentWindow = (window: BrowserWindow): void => {
+  if (!backgroundAcceptance) {
+    window.show();
+    return;
+  }
+  window.setOpacity(0);
+  window.showInactive();
+  window.blur();
+  window.setOpacity(1);
+};
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDir = dirname(currentFilePath);
@@ -509,7 +531,7 @@ const createMainWindow = (): BrowserWindow => {
   });
 
   window.once("ready-to-show", () => {
-    window.show();
+    presentWindow(window);
   });
   installExternalNavigationHandlers(window);
   installWindowDiagnostics(window, diagnostics);
@@ -624,7 +646,10 @@ const boot = async (): Promise<void> => {
   await app.whenReady();
   app.setAppUserModelId("com.vermillion.desktop");
   const appIconPath = resolveAppIconPath();
-  if (process.platform === "darwin" && appIconPath) {
+  if (backgroundAcceptance) {
+    // A fully covered background app would otherwise be throttled by App Nap.
+    powerSaveBlocker.start("prevent-app-suspension");
+  } else if (process.platform === "darwin" && appIconPath) {
     app.dock?.setIcon(appIconPath);
   }
 
@@ -670,6 +695,10 @@ const boot = async (): Promise<void> => {
   /** Desktop notifications only matter when the user is elsewhere; a focused window already shows the change. */
   const isInBackground = (): boolean => window.isDestroyed() || !window.isFocused();
   const showDesktopNotification = (body: string): void => {
+    // A background acceptance instance runs in the user's session; its notifications would reach the user.
+    if (backgroundAcceptance) {
+      return;
+    }
     const title = "Vermillion";
     if (process.platform === "win32" && appIconPath) {
       if (!completionTray || completionTray.isDestroyed()) {
@@ -808,8 +837,13 @@ const boot = async (): Promise<void> => {
         throw new Error("app.window is only available for an app.start acceptance instance");
       }
       if (window.isDestroyed()) throw new Error("The main window is no longer available");
-      if (input.action === "minimize") window.minimize();
-      if (input.action === "restore") {
+      if (backgroundAcceptance) {
+        // Minimizing would animate into the Dock and restoring would raise the window; hide and re-order behind instead.
+        if (input.action === "minimize") window.hide();
+        if (input.action === "restore") presentWindow(window);
+      } else if (input.action === "minimize") {
+        window.minimize();
+      } else if (input.action === "restore") {
         if (window.isMinimized()) window.restore();
         window.show();
         window.focus();

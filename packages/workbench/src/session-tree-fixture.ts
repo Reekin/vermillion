@@ -172,7 +172,7 @@ const fixtureResult = (dataDir: string, projectPath: string, packageRoot: string
     projectPath,
     workspaceId: fixtureWorkspaceId,
     env: {
-      VERMILLION_CODEX_BIN: resolve(packageRoot, "scripts", "session-tree-fixture-codex.cmd"),
+      VERMILLION_CODEX_BIN: resolve(packageRoot, "scripts", "session-tree-fixture-codex" + (process.platform === "win32" ? ".cmd" : ".sh")),
       VERMILLION_SESSION_TREE_FIXTURE_PROJECT: projectPath
     }
   });
