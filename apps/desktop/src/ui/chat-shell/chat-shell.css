@@ -1326,7 +1326,7 @@ button.awb-composer-status__notice {
   border: 1px solid var(--awb-rule-strong);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
   color: #f4f6fb;
-  z-index: 3;
+  z-index: 5; /* above the composer resize handle */
   background: var(--awb-panel-elevated);
 }
 
