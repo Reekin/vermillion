@@ -103,12 +103,8 @@ const exposeCliOnPath = (baseDir: string): void => {
   process.env.VERMILLION_PERSISTENCE_BASE_DIR = baseDir;
 };
 const defaultDevServerUrl = "http://127.0.0.1:4173/";
-const iconFileNames =
-  process.platform === "win32"
-    ? ["icon.ico", "icon.png"]
-    : process.platform === "darwin"
-      ? ["icon.icns", "icon.png"]
-      : ["icon.png"];
+// nativeImage cannot decode .icns; macOS uses PNG at runtime and icon.icns only as the packaged bundle icon.
+const iconFileNames = process.platform === "win32" ? ["icon.ico", "icon.png"] : ["icon.png"];
 
 type WindowRecoveryState = {
   isQuitting: boolean;
