@@ -368,7 +368,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
         </Modal>
         <Modal contained presentation={overlay === "settings" ? "modal" : "hidden"}
           title="设置" width={640} onClose={closeOverlay}>
-          <SettingsPage transport={transport} />
+          <SettingsPage transport={transport} sessionStore={sessionStore} />
         </Modal>
       </div>
       </div>

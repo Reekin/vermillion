@@ -7,14 +7,18 @@ import type {
   SessionSettingsUpdateRpc
 } from "@vermillion/shared";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
+import type { RendererStore } from "../../../store/store.js";
+import { useRendererStoreState } from "../../chat-shell/use-renderer-store-state.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
 import { Button, CollapsibleDetails, Field, InlineNotice } from "./ui.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
+  sessionStore: RendererStore;
 };
 
-export const SettingsPage = ({ transport }: SettingsPageProps) => {
+export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => {
+  const configWarningsSignal = useRendererStoreState(sessionStore).refreshSignals.engineConfigWarnings;
   const [settings, setSettings] = useState<SessionSettingsRpc | undefined>(undefined);
   const [engines, setEngines] = useState<EngineDefinitionRpc[]>([]);
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
@@ -40,6 +44,11 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
       disposed = true;
     };
   }, [reload]);
+
+  useEffect(() => {
+    if (!configWarningsSignal) return;
+    void transport.settings.get().then(setSettings, () => undefined);
+  }, [configWarningsSignal, transport]);
 
   // 标题模型的可选值与输入器一致，取当前新会话引擎的模型目录。
   const titleEngineId =

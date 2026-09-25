@@ -8,12 +8,13 @@ import {
   engineWarningDetails,
   markNoticeLogSeen,
   noticeEntryDetails,
+  stampEngineConfigWarnings,
   withEngineConfigWarnings,
   type NoticeLogEntry
 } from "../src/ui/chat-shell/notice-log.js";
 
 const at = "2026-09-26T08:00:00.000Z";
-const warning = { engineId: "codex", engineLabel: "Codex", summary: "Invalid configuration; using defaults.",
+const warning = { engineId: "codex", engineLabel: "Codex", at, summary: "Invalid configuration; using defaults.",
   details: "No such file", path: "/Users/test/.codex/config.toml" };
 
 describe("notice log", () => {
@@ -47,8 +48,18 @@ describe("notice log", () => {
     expect(dismissedByOpeningLog({ message: "Copied" })).toBe(false);
   });
 
-  it("attaches active engine config warnings to errors only", () => {
-    const error = withEngineConfigWarnings({ message: "Send failed", severity: "error", context: { sessionId: "s" } }, [warning]);
+  it("stamps warnings once and keeps the first receipt time while they persist", () => {
+    const first = stampEngineConfigWarnings([], { codex: [{ summary: "a" }] }, () => "Codex", "t1");
+    expect(first).toEqual([{ engineId: "codex", engineLabel: "Codex", summary: "a", at: "t1" }]);
+    const second = stampEngineConfigWarnings(first, { codex: [{ summary: "a" }, { summary: "b" }] }, () => "Codex", "t2");
+    expect(second.map((entry) => entry.at)).toEqual(["t1", "t2"]);
+    expect(stampEngineConfigWarnings(second, {}, () => "Codex", "t3")).toEqual([]);
+  });
+
+  it("attaches engine config warnings to failed sends only", () => {
+    expect(withEngineConfigWarnings({ message: "Add failed", severity: "error", source: "workspace-add" }, [warning]).context)
+      .toBeUndefined();
+    const error = withEngineConfigWarnings({ message: "Send failed", severity: "error", source: "send", context: { sessionId: "s" } }, [warning]);
     expect(error.context).toEqual({ sessionId: "s", engineConfigWarnings: [
       { engineId: "codex", summary: warning.summary, details: warning.details, path: warning.path }] });
     const info = { message: "Copied" };

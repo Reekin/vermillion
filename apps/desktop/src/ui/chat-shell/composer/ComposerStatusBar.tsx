@@ -110,6 +110,29 @@ export const ComposerStatusBar = ({
   const unseen = log ? countUnseenNotices(log.entries) : 0;
   const warned = Boolean(log?.engineWarnings.length);
   const toggle = (): void => setOpen((value) => !value);
+  // Engine warnings and notices form one list, newest first.
+  const items = log
+    ? [
+        ...log.engineWarnings.map((warning, index) => ({
+          key: `engine-${warning.engineId}-${index}`,
+          at: warning.at,
+          meta: `${formatTime(warning.at)} · 警告 · 引擎配置 · ${warning.engineLabel}`,
+          message: warning.summary,
+          details: engineWarningDetails(warning)
+        })),
+        ...log.entries.map((entry) => ({
+          key: entry.id,
+          at: entry.at,
+          meta: [
+            formatTime(entry.at),
+            severityLabel[entry.severity ?? "info"],
+            entry.source ? sourceLabels[entry.source] : undefined
+          ].filter(Boolean).join(" · "),
+          message: entry.message,
+          details: noticeEntryDetails(entry)
+        }))
+      ].sort((left, right) => right.at.localeCompare(left.at))
+    : [];
 
   return (
     <div className="awb-composer-status" ref={rootRef}>
@@ -150,25 +173,8 @@ export const ComposerStatusBar = ({
           </div>
           {hasLog ? (
             <ul className="awb-notice-log__list">
-              {log.engineWarnings.map((warning, index) => (
-                <LogItem
-                  key={`engine-${warning.engineId}-${index}`}
-                  meta={`警告 · 引擎配置 · ${warning.engineLabel}`}
-                  message={warning.summary}
-                  details={engineWarningDetails(warning)}
-                />
-              ))}
-              {log.entries.map((entry) => (
-                <LogItem
-                  key={entry.id}
-                  meta={[
-                    formatTime(entry.at),
-                    severityLabel[entry.severity ?? "info"],
-                    entry.source ? sourceLabels[entry.source] : undefined
-                  ].filter(Boolean).join(" · ")}
-                  message={entry.message}
-                  details={noticeEntryDetails(entry)}
-                />
+              {items.map((item) => (
+                <LogItem key={item.key} meta={item.meta} message={item.message} details={item.details} />
               ))}
             </ul>
           ) : (

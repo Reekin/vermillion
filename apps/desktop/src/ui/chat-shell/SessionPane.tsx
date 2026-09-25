@@ -63,6 +63,7 @@ import {
   autoDismissesNotice,
   dismissedByOpeningLog,
   markNoticeLogSeen,
+  stampEngineConfigWarnings,
   withEngineConfigWarnings,
   type EngineConfigWarningView,
   type NoticeLogEntry
@@ -1062,16 +1063,19 @@ export const SessionPane = ({
     };
   }, [engineConfigWarningsSignal, transport]);
 
-  const engineConfigWarnings = useMemo(
-    (): EngineConfigWarningView[] =>
-      Object.entries(engineConfigWarningsByEngineId).flatMap(([engineId, warnings]) => {
-        const engineLabel =
-          availableEngines.find((engine) => engine.engineId === engineId)?.displayName ?? engineId;
-        return warnings.map((warning) => ({ engineId, engineLabel, ...warning }));
-      }),
-    [availableEngines, engineConfigWarningsByEngineId]
+  const [engineConfigWarnings, setEngineConfigWarnings] = useState<EngineConfigWarningView[]>([]);
+  useEffect(() => {
+    setEngineConfigWarnings((previous) => stampEngineConfigWarnings(
+      previous,
+      engineConfigWarningsByEngineId,
+      (engineId) => availableEngines.find((engine) => engine.engineId === engineId)?.displayName ?? engineId,
+      new Date().toISOString()
+    ));
+  }, [availableEngines, engineConfigWarningsByEngineId]);
+  // Send failures are attributed to the engine of the session being shown.
+  engineConfigWarningsRef.current = engineConfigWarnings.filter(
+    (warning) => warning.engineId === displayedEngineId
   );
-  engineConfigWarningsRef.current = engineConfigWarnings;
   const noticeLogView = useMemo(
     (): NoticeLogView => ({
       entries: noticeLog,
