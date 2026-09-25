@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AdapterRuntimePort,
@@ -1634,7 +1635,12 @@ export class CodexAppServerRuntimePort
   }
 
   public getConfigWarnings(): EngineConfigWarningRpc[] {
-    return this.configWarnings.map((warning) => ({ ...warning }));
+    // Codex reports an unloadable user config without a path; that config is CODEX_HOME/config.toml.
+    const userConfig = this.codexHome ? join(this.codexHome, "config.toml") : undefined;
+    return this.configWarnings.map((warning) => ({
+      ...warning,
+      ...(!warning.path && userConfig ? { path: userConfig } : {})
+    }));
   }
 
   public subscribeConfigWarnings(listener: () => void): () => void {

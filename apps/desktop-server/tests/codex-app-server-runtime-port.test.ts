@@ -189,17 +189,21 @@ describe("Codex app-server runtime port", () => {
     notify({ summary: "" });
     expect(port.getConfigWarnings()).toEqual([configWarning]);
     expect(changed).toHaveBeenCalledTimes(1);
+    (port as unknown as { codexHome: string }).codexHome = "/Users/test/.codex";
+    notify({ summary: "Invalid configuration; using defaults.", details: "os error 2" });
+    expect(port.getConfigWarnings()[1]?.path).toBe(join("/Users/test/.codex", "config.toml"));
+    expect(changed).toHaveBeenCalledTimes(2);
 
     vi.spyOn(port, "start").mockResolvedValue();
     vi.spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
       .mockRejectedValueOnce(new Error("failed to resolve feature override precedence"))
       .mockResolvedValue({ config: { developer_instructions: "User configuration" } });
     await expect(port.readConfig("I:/workspace")).rejects.toThrow("feature override precedence");
-    expect(port.getConfigWarnings()).toEqual([configWarning]);
+    expect(port.getConfigWarnings()).toHaveLength(2);
 
     await port.readConfig("I:/workspace");
     expect(port.getConfigWarnings()).toEqual([]);
-    expect(changed).toHaveBeenCalledTimes(2);
+    expect(changed).toHaveBeenCalledTimes(3);
   });
 
   it("drops the previous process's config warnings when the app server starts again", async () => {
