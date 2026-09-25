@@ -50,12 +50,14 @@ const LogItem = ({
   details?: string;
 }): ReactElement => {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const copy = (): void => {
-    void writeClipboardText(details ? `${message}\n\n${details}` : message).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1_500);
-    }, () => undefined);
+    const settle = (state: "copied" | "failed"): void => {
+      setCopyState(state);
+      setTimeout(() => setCopyState("idle"), 1_500);
+    };
+    void writeClipboardText(details ? `${message}\n\n${details}` : message)
+      .then(() => settle("copied"), () => settle("failed"));
   };
   return (
     <li className="awb-notice-log__item">
@@ -67,7 +69,9 @@ const LogItem = ({
               {expanded ? "收起详情" : "详情"}
             </button>
           ) : null}
-          <button type="button" onClick={copy}>{copied ? "已复制" : "复制"}</button>
+          <button type="button" onClick={copy}>
+            {copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : "复制"}
+          </button>
         </span>
       </div>
       <p className="awb-notice-log__message">{message}</p>

@@ -41,9 +41,9 @@ export const countUnseenNotices = (log: readonly NoticeLogEntry[]): number =>
 export const autoDismissesNotice = (notice: ComposerStatusNotice): boolean =>
   !notice.persistent && !needsAttention(notice);
 
-/** A notice that stays only until the user has seen it in the log. */
+/** Warnings and errors leave the status line once the user has opened the log; the log keeps them. */
 export const dismissedByOpeningLog = (notice: ComposerStatusNotice): boolean =>
-  !notice.persistent && needsAttention(notice);
+  needsAttention(notice);
 
 export const noticeEntryDetails = (entry: ComposerStatusNotice): string | undefined => {
   const parts = [

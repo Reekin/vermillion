@@ -44,7 +44,7 @@ describe("notice log", () => {
     expect(autoDismissesNotice({ message: "Failed", severity: "error" })).toBe(false);
     expect(autoDismissesNotice({ message: "Reconnecting", persistent: true })).toBe(false);
     expect(dismissedByOpeningLog({ message: "Failed", severity: "error" })).toBe(true);
-    expect(dismissedByOpeningLog({ message: "Reconnect failed", severity: "error", persistent: true })).toBe(false);
+    expect(dismissedByOpeningLog({ message: "Send failed", severity: "error", persistent: true })).toBe(true);
     expect(dismissedByOpeningLog({ message: "Copied" })).toBe(false);
   });
 
