@@ -10,10 +10,10 @@
 
 ## 运行与验证
 
-- 开发：`pnpm dev`；正常启动及最终冷启动验收：`start.bat`。
+- 开发：`pnpm dev`；正常启动及最终冷启动验收：`start.bat`（macOS 为 `start.command`）。
 - 主工作区开发者提交代码前运行 `pnpm -r --workspace-concurrency=1 typecheck` 与 `pnpm -r --workspace-concurrency=1 test`；界面改动另跑 `pnpm --filter @vermillion/desktop lint:ui`。Worker 按工单实际影响运行相关检查，复用未受影响的有效证据，跨包影响时才扩大检查范围；产品验收和真实用户路径仍按工单要求执行。
 - 执行链路改动须真实跑通 工作台 → 会话 → New Chat → 发消息 → Docs 树变化 → 开工 → Worker 建单续跑；其他改动按受影响路径验收，纯文档改动检查内容、引用和链接。
-- 验收使用隔离实例。Worker / Verifier 的所有验收（包括 rebase 后验证和最终冷启动）只能通过 `app.start / app.stop` 启停；开发者最终冷启动用 `start.bat`。端口与隐藏桌面操作见[开发与验收](docs/development.md)。
+- Worker / Verifier 的所有验收使用隔离实例，（包括 rebase 后验证和最终冷启动）只能通过 `app.start / app.stop` 启停；开发者最终冷启动用 `start.bat` / `start.command`。端口与窗口隔离见[开发与验收](docs/development.md)。
 - CLI：先 `pnpm --filter @vermillion/workbench build`，再 `node packages/workbench/bin/vermillion.mjs <method> [json]`；参数使用 `<method> --help` 查询。
 - 打包：`pnpm package`，产物位于 `release/vermillion-<version>-<stamp>/`。
 - 如果要测试真实会话相关功能，必须在隔离环境中进行，并要将所有角色的模型信息都修改为`gpt-5.6-luna`/`max`/`standard`
@@ -32,8 +32,12 @@
 
 ## 经验积累
 
+- 加载与状态文案只陈述当前动作及必要信息，不添加拟人化、抒情或口号式副标题；没有信息增量就省略。
+
 - 用户要求处理当前数据或状态时，先通过已有服务与 CLI 完成操作；不要擅自把一次性处理扩展为产品开发或开单。只有用户明确要求开单才进入工单流程。
 
 - 统一编辑界面不等于统一存储边界；先区分用户操作模型与后端文件所有权，编辑目标携带归属并由对应服务读写，避免把某个存储服务的路径限制扩展成产品设计约束。
 
 - 排查交互引起的布局跳动时，验收覆盖该动作触发的全部异步展示状态（成功提示、错误、统计等），不能只切换主状态标签；动态辅助内容应复用稳定布局空间。
+
+- Vermillion 中 Issues 与执行工单是不同对象；查询执行工单用 `workItem.list`，`issue.list` 为空不能据此推断没有工单。
