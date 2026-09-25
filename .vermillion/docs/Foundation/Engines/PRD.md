@@ -23,7 +23,7 @@ Vermillion 通过引擎运行会话。当前支持 Codex（`codex`，Codex app-s
 引擎启动时报告的配置问题由 Vermillion 显示给用户，不静默吞掉。Codex 在用户配置无法加载时会改用默认配置继续运行，此时模型列表是 Codex 的默认列表，发送也可能因配置读取失败而报错；Vermillion 收到这类警告后：
 
 - 设置页对应引擎一行显示警告摘要，可展开查看引擎给出的详情和出问题的配置文件路径。
-- 输入器状态行常驻警告标记，提示记录里列出同样的内容，见[输入器](../../Workbench/Think/PRD.md#输入器)。
+- 输入器状态行的提示记录入口显示警告状态，记录里列出同样的内容，见[输入器](../../Workbench/Think/PRD.md#输入器)。
 - 发送等操作失败时，如果该引擎有未处理的配置警告，错误详情同时附上警告内容，用户能看出两者是同一个原因。
 
 用户修正配置后，引擎下一次成功读取配置时警告自动消失，不需要重启应用；引擎进程重启后以新进程报告的警告为准。警告同样可以通过 CLI 查询。
@@ -43,12 +43,12 @@ Vermillion 通过引擎运行会话。当前支持 Codex（`codex`，Codex app-s
 | 速度（service tier） | 支持 | 不支持 |
 | 工具调用与终端输出 | 支持 | 支持 |
 | 审批 | 支持 | 不支持（工具直接执行） |
-| 会话树、fork | 支持 | 支持（`fork` / `clone`） |
+| fork（会话树由 Vermillion 维护，见[会话树](../Architecture.md#会话树)） | 支持 | 支持（`fork` / `clone`） |
 | 附件（图片） | 支持 | 支持 |
 | 技能列表 | 支持 | 支持 |
 | 子代理（Reviewer / Verifier） | `spawn_agent` | `pi-subagents` 扩展的 `subagent` 工具 |
 | Changed Files、Hook Activity 扩展 | 支持 | 不支持 |
-| delegation / worktree / checkpoint 快照 | 支持 | 不支持 |
+| delegation / worktree 快照 | 支持 | 不支持 |
 | diagnostics | 支持 | 进程与认证状态 |
 | 会话发现 | 列出 Codex 目录下全部线程 | 只列出 Vermillion 创建的会话 |
 
