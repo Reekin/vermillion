@@ -32,6 +32,7 @@ type PreloadMock = {
 const defaultSettings: SessionSettingsRpc = {
   engineProgramPathsByEngineId: {},
   engineProgramResolutionsByEngineId: {},
+  engineConfigWarningsByEngineId: {},
   allowedModelIdsByEngineId: {},
   customModelReasoningOptionIdsByEngineId: {},
   executionPreferencesByEngineId: {}
