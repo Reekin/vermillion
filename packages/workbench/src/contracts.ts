@@ -476,7 +476,8 @@ export const zWorktreeCleanup = z.object({
   worktreePath: z.string(),
   branch: z.string(),
   discard: z.boolean(),
-  detachedAt: z.string().optional()
+  detachedAt: z.string().optional(),
+  removalStarted: z.boolean().optional()
 });
 export type WorktreeCleanup = z.infer<typeof zWorktreeCleanup>;
 

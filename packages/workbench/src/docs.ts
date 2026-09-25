@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { watch, type FSWatcher } from "node:fs";
-import { lstat, mkdir, readFile, readdir, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { DocChange, DocFile, WorkItem } from "./contracts.js";
@@ -547,18 +547,26 @@ export class DocsService {
     return this.resolveCommit("HEAD");
   }
 
-  async dropWorktree(worktreePath: string, branch: string, discard = false): Promise<void> {
+  async dropWorktree(worktreePath: string, branch: string, discard = false, removalStarted = false): Promise<void> {
     if (samePath(worktreePath, this.rootPath)) throw new Error("Cannot remove the workspace root");
     const registered = await this.registration(worktreePath);
     if (registered && registered.branch !== branch) throw new Error("Worktree branch ownership changed: " + worktreePath);
     if (registered) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
     else if (await exists(worktreePath)) {
-      if ((await readdir(worktreePath)).length) throw new Error("已注销的 worktree 目录仍有内容，保留以待检查：" + worktreePath);
-      await rmdir(worktreePath);
+      if ((await readdir(worktreePath)).length) {
+        if (!removalStarted) throw new Error("已注销的 worktree 目录仍有内容，保留以待检查：" + worktreePath);
+        await rm(worktreePath, { recursive: true });
+      } else await rmdir(worktreePath);
     }
     const ref = "refs/heads/" + branch;
     const branches = await git(this.rootPath, ["for-each-ref", "--format=%(refname)", ref]);
     if (branches.split("\n").includes(ref)) await git(this.rootPath, ["branch", discard ? "-D" : "-d", "--", branch]);
+  }
+
+  async registeredWorktree(worktreePath: string, branch?: string): Promise<boolean> {
+    const registered = await this.registration(worktreePath);
+    if (registered && branch && registered.branch !== branch) throw new Error("Worktree branch ownership changed: " + worktreePath);
+    return !!registered;
   }
 
   /** Worktrees Git currently registers for this repository, with their checked-out branch. */
