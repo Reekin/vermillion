@@ -2,6 +2,34 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it("recognizes only live user waits and subscribes to their resolution", () => {
+    const activity = { confirmation: "live", status: "active", pendingApprovals: [{}], pendingInputs: [] as object[] };
+    let notify!: (envelope: { event: { type: string; sessionId: string } }) => void;
+    const unsubscribe = vi.fn();
+    const shell = {
+      getSessionActivity: vi.fn(() => activity),
+      subscribe: vi.fn(callback => { notify = callback; return unsubscribe; })
+    };
+    const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);
+    expect(runner.isWaitingForUser!("worker")).toBe(true);
+    activity.confirmation = "unknown";
+    expect(runner.isWaitingForUser!("worker")).toBe(false);
+    activity.confirmation = "live";
+    activity.pendingApprovals = [];
+    activity.pendingInputs = [{}];
+    expect(runner.isWaitingForUser!("worker")).toBe(true);
+    activity.status = "idle";
+    expect(runner.isWaitingForUser!("worker")).toBe(false);
+    const changed = vi.fn();
+    const dispose = runner.onUserWaitChanged!(changed);
+    notify({ event: { type: "interaction.resolved", sessionId: "worker" } });
+    expect(changed).toHaveBeenCalledWith("worker");
+    expect(shell.subscribe).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({
+      eventTypes: expect.arrayContaining(["approval.resolved", "interaction.resolved", "runtime.error"])
+    }));
+    dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
   it("interrupts the acknowledged cancelled turn without targeting a later discussion", async () => {
     const shell = {
       getSnapshot: () => ({ turns: [{ sessionId: "worker", turnId: "later-discussion", status: "streaming" }] }),

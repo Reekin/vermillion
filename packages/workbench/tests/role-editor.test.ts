@@ -8,6 +8,44 @@ import { RoleService } from "../src/roles.js";
 import { WorkbenchService } from "../src/workbench-service.js";
 import { parseRoleDocument, serializeRoleDocument } from "../src/role-document.js";
 
+it("round-trips a numeric check interval and rejects invalid intervals", () => {
+  const parsed = parseRoleDocument("---\ncheckIntervalMinutes: 12 # minutes\nnote: keep\n---\n# Supervisor\n");
+  expect(parsed.checkIntervalMinutes).toBe(12);
+  expect(parseRoleDocument(serializeRoleDocument(parsed))).toEqual(parsed);
+  for (const value of ["0", "-1", "1.5", "nope"]) {
+    expect(() => parseRoleDocument(`---\ncheckIntervalMinutes: ${value}\n---\nBody`)).toThrow();
+  }
+});
+
+it("resolves supervisor intervals through editor RPC with global and project inheritance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "verm-interval-"));
+  const globalDir = join(root, "global");
+  await mkdir(globalDir);
+  const raw = "---\ncheckIntervalMinutes: 9\n---\n# Supervisor\n";
+  await writeFile(join(globalDir, "supervisor.md"), raw);
+  const roles = new RoleService({ globalDir });
+  const service = new WorkbenchService({ workspaces: createMemoryWorkspaceSource(), roles });
+  try {
+    const { workspaceId } = await service.addWorkspace({ rootPath: root });
+    const rpc = createWorkbenchRpcHandler(service);
+    const params = { workspaceId, roleId: "supervisor" };
+    const save = (mode: "append" | "override" | "global", checkIntervalMinutes?: number) => rpc({
+      method: "role.editor.write", params: { ...params, document: { mode, body: "", checkIntervalMinutes, extraHeader: "" } }
+    });
+    expect((await roles.resolve(root, "supervisor")).checkIntervalMinutes).toBe(9);
+    expect((await save("append")).ok).toBe(true);
+    expect((await roles.resolve(root, "supervisor")).checkIntervalMinutes).toBe(9);
+    expect((await save("append", 2)).ok).toBe(true);
+    expect(await rpc({ method: "role.editor.read", params })).toMatchObject({ result: { document: { checkIntervalMinutes: 2 } } });
+    expect((await roles.resolve(root, "supervisor")).checkIntervalMinutes).toBe(2);
+    expect((await save("override")).ok).toBe(true);
+    expect((await roles.resolve(root, "supervisor")).checkIntervalMinutes).toBe(5);
+    expect((await save("global")).ok).toBe(true);
+    expect((await roles.resolve(root, "supervisor")).checkIntervalMinutes).toBe(9);
+    expect(await readFile(join(globalDir, "supervisor.md"), "utf8")).toBe(raw);
+  } finally { await service.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
 it("edits scalar settings without trimming the prompt or losing unrelated frontmatter", () => {
   const body = "\r\n# 中文角色\r\n  缩进与末尾空格  \r\n\r\n";
   const parsed = parseRoleDocument("---\r\nmode: 'append' # mode\r\nmodel: \"model#1\"\r\nreasoningOptionId: high\r\nserviceTierId: priority\r\nnote: keep\r\n---\r\n" + body);

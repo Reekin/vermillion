@@ -339,7 +339,8 @@ export type RoleExecutionOverrides = z.infer<typeof zRoleExecutionOverrides>;
 
 export const zResolvedRole = z.object({
   content: z.string(),
-  modelConfig: zRoleExecutionOverrides.optional()
+  modelConfig: zRoleExecutionOverrides.optional(),
+  checkIntervalMinutes: z.number().int().positive().optional()
 });
 export type ResolvedRole = z.infer<typeof zResolvedRole>;
 

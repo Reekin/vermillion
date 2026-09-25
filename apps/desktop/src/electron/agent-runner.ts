@@ -295,6 +295,14 @@ export const createAgentRunner = (shell: SessionShell): AgentRunner => ({
     return true;
   },
   isActive: (sessionId) => !!shell.getActiveTurnId(sessionId),
+  isWaitingForUser: (sessionId) => {
+    const activity = shell.getSessionActivity(sessionId);
+    return activity.confirmation === "live" && activity.status === "active" &&
+      (activity.pendingApprovals.length > 0 || activity.pendingInputs.length > 0);
+  },
+  onUserWaitChanged: (listener) => shell.subscribe(({ event }) => {
+    if ("sessionId" in event && event.sessionId) listener(event.sessionId);
+  }, { eventTypes: ["approval.requested", "approval.resolved", "interaction.requested", "interaction.resolved", "session.updated", "runtime.error"] }),
   getActiveTurnId: (sessionId) => shell.getActiveTurnId(sessionId),
   inspectTurn: async (sessionId, turnId) => {
     if (shell.getActiveTurnId(sessionId) === turnId) return { status: "active" };

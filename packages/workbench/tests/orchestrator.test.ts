@@ -268,8 +268,13 @@ it("forks one configured supervisor from completed preparation and waits five mi
   await reconcile(f.orchestrator, f.workspaceId);
   expect(count()).toBe(2);
   expect(vi.mocked(f.runner.fork).mock.calls.filter(([input]) => input.metadata.role === "supervisor")).toHaveLength(1);
+  await f.service.writeRoleOverride(f.workspaceId, "supervisor", "---\ncheckIntervalMinutes: 7\n---\n# 监工");
+  await reconcile(f.orchestrator, f.workspaceId);
+  expect(count()).toBe(2);
   f.complete(supervisor);
-  await vi.waitFor(async () => expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBeDefined());
+  await vi.waitFor(async () => expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBe("2026-09-23T01:22:00.000Z"));
+  await f.service.writeRoleOverride(f.workspaceId, "supervisor", "---\ncheckIntervalMinutes: 10\n---\n# 监工");
+  await vi.waitFor(async () => expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBe("2026-09-23T01:25:00.000Z"));
   await f.service.pauseWork(f.workspaceId, request.requestId);
   f.complete(prep.workerSessionId!, undefined, "interrupted");
   await reconcile(f.orchestrator, f.workspaceId);
@@ -324,3 +329,81 @@ async function reconcile(orchestrator: Orchestrator, workspaceId: string) {
   const runtime = orchestrator as unknown as { enqueue(id: string, task: () => Promise<void>): Promise<void>; reconcile(id: string): Promise<void> };
   await runtime.enqueue(workspaceId, () => runtime.reconcile(workspaceId));
 }
+
+it.each([4, 10])("retains a waiting work's deadline when a decision is answered at minute %i", async minute => {
+  let at = "2026-09-23T01:00:00.000Z";
+  const f = await fixture(() => at);
+  const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+  await f.service.updateWorkRequest(f.workspaceId, request.requestId, current => ({ ...current, status: "preparing", workerSessionId: "worker",
+    handoff: { sessionId: "prep", turnId: "end", workItemIds: [], refs: [], at },
+    supervisor: { sessionId: "supervisor", lastCheckedAt: at, nextCheckAt: "2026-09-23T01:05:00.000Z" }
+  }));
+  const item = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "worker" });
+  await f.service.completePreparation(f.workspaceId, { requestId: request.requestId, sessionId: "worker", workItemIds: [item.workItemId] });
+  await f.service.finishPreparation(f.workspaceId, "worker", "prep-end");
+  const card = await f.service.createDecision(f.workspaceId, { workItemId: item.workItemId, sessionId: "worker",
+    question: "Which scope?", context: "User choice required", options: [] });
+  const count = () => vi.mocked(f.runner.send).mock.calls.filter(([id]) => id === "supervisor").length;
+  f.orchestrator.start();
+  await reconcile(f.orchestrator, f.workspaceId);
+  at = `2026-09-23T01:${String(minute).padStart(2, "0")}:00.000Z`;
+  await reconcile(f.orchestrator, f.workspaceId);
+  await reconcile(f.orchestrator, f.workspaceId);
+  expect(count()).toBe(0);
+  expect((await f.service.listWorkRequests(f.workspaceId))[0]?.supervisor?.nextCheckAt).toBe("2026-09-23T01:05:00.000Z");
+  await f.service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" });
+  if (minute < 5) {
+    await reconcile(f.orchestrator, f.workspaceId);
+    expect(count()).toBe(0);
+    at = "2026-09-23T01:05:00.000Z";
+    await reconcile(f.orchestrator, f.workspaceId);
+  }
+  await vi.waitFor(() => expect(count()).toBe(1));
+  await reconcile(f.orchestrator, f.workspaceId);
+  expect(count()).toBe(1);
+});
+
+it.each(["paused", "stopped", "approval", "input", "unknown", "failure", "no-handoff", "dependency", "mixed"])(
+  "only suppresses checks for confirmed user waits: %s", async kind => {
+    const at = "2026-09-23T01:10:00.000Z";
+    const f = await fixture(() => at);
+    const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
+    await f.service.updateWorkRequest(f.workspaceId, request.requestId, current => ({ ...current, status: "preparing", workerSessionId: "worker",
+      handoff: { sessionId: "prep", turnId: "end", workItemIds: [], refs: [], at },
+      supervisor: { sessionId: "supervisor", nextCheckAt: "2026-09-23T01:05:00.000Z" }
+    }));
+    const item = await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId, sessionId: "worker" });
+    const other = kind === "mixed" ? await f.service.createWorkItem(f.workspaceId, { ...contract, requestId: request.requestId }) : undefined;
+    await f.service.completePreparation(f.workspaceId, { requestId: request.requestId, sessionId: "worker", workItemIds: [item.workItemId, ...(other ? [other.workItemId] : [])] });
+    await f.service.finishPreparation(f.workspaceId, "worker", "prep-end");
+    const action = (await f.service.listActions(f.workspaceId)).find(entry => entry.workItemId === item.workItemId)!;
+    await f.service.updateAction(f.workspaceId, action, current => ({ ...current, status: "decision",
+      ...(kind === "paused" ? { paused: true } : {}), ...(kind === "stopped" ? { userStopped: true } : {}),
+      ...(kind === "failure" ? { failure: "Engine unavailable" } : {})
+    }));
+    let waiting = kind === "approval" || kind === "input";
+    f.runner.isWaitingForUser = () => waiting;
+    let changed!: (sessionId: string) => void;
+    f.runner.onUserWaitChanged = listener => { changed = listener; return () => {}; };
+    if (kind === "unknown") {
+      f.service.setTurnInspector(async () => ({ status: "unknown" }));
+      await f.service.observeSessionTurn("worker", "uncertain");
+    }
+    if (kind === "dependency") {
+      const dependency = await f.service.createWorkItem(f.workspaceId, contract);
+      await f.service.updateWorkItem(f.workspaceId, item.workItemId, { dependsOn: [dependency.workItemId], note: "Wait for dependency" });
+    }
+    if (kind === "mixed") {
+      await f.service.pauseWorkItem(f.workspaceId, { workItemId: item.workItemId });
+    }
+    f.orchestrator.start();
+    await reconcile(f.orchestrator, f.workspaceId);
+    const count = () => vi.mocked(f.runner.send).mock.calls.filter(([id]) => id === "supervisor").length;
+    expect(count()).toBe(["paused", "stopped", "approval", "input"].includes(kind) ? 0 : 1);
+    if (waiting) {
+      waiting = false;
+      changed("worker");
+      await vi.waitFor(() => expect(count()).toBe(1));
+    }
+  }
+);

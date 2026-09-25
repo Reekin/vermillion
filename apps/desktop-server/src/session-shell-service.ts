@@ -3,7 +3,7 @@ import { traceSessionRead, sessionStage } from "./session-load-trace.js";
 import { SessionReadProgressTracker } from "./session-read-progress.js";
 import type { SessionReadProgress } from "@vermillion/shared";
 import { readSession, type ReadSessionArgs } from "./read-session-host-tool.js";
-import type { ReadSessionTranscriptResult } from "./read-session-transcript.js";
+import { buildReadSessionActivity, type ReadSessionTranscriptResult } from "./read-session-transcript.js";
 import type { HostToolRegistry } from "./host-tools.js";
 import type { ChatTreeScope, WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import type {
@@ -178,6 +178,12 @@ export type SessionShellServiceOptions = {
 };
 
 export class SessionShellService {
+  public getSessionActivity(sessionId: string) {
+    return buildReadSessionActivity({ snapshot: this.getSnapshot(), sessionId,
+      runtimeState: { confirmed: this.capabilities?.isSessionLive(sessionId) === true,
+        activeTurnId: this.getActiveTurnId(sessionId) } });
+  }
+
   public readSession(input: ReadSessionArgs): Promise<ReadSessionTranscriptResult> {
     return readSession({
       getSnapshot: () => this.getSnapshot(),

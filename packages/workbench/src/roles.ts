@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { zRoleExecutionOverrides, type ResolvedRole, type RoleExecutionOverrides, type RoleFile } from "./contracts.js";
 import { STATE_DIR } from "./docs.js";
+import { parseRoleDocument, DEFAULT_SUPERVISOR_CHECK_INTERVAL_MINUTES } from "./role-document.js";
 import { assertDomainId } from "./domains.js";
 
 export const ROLES_DIR = STATE_DIR + "/roles";
@@ -34,23 +35,12 @@ const exists = async (path: string): Promise<boolean> => {
 const titleOf = (content: string): string => content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? "";
 
 /** The header configures prompt composition and execution; it is never prompt text. */
-const parsePrompt = (content: string): { body: string; mode: "override" | "append"; modelConfig?: ResolvedRole["modelConfig"] } => {
-  const header = content.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/m);
-  if (!header || header.index !== 0) return { body: content, mode: "override" };
-  const value = header[1]!.match(/^mode:[ \t]*(.*)$/m)?.[1]?.replace(/[ \t]+#.*$/, "").trim();
-  const mode = value?.replace(/^(["'])(.*)\1$/, "$2") ?? "override";
-  if (mode !== "override" && mode !== "append") throw new Error("角色 frontmatter 的 mode 必须为 override 或 append。");
-  const fields: Record<string, unknown> = {};
-  for (const [field, key] of [["model", "modelId"], ["reasoningOptionId", "reasoningOptionId"], ["serviceTierId", "serviceTierId"]]) {
-    const raw = header[1]!.match(new RegExp("^" + field + ":[ \\t]*(.*)$", "m"))?.[1]?.trim();
-    if (raw === undefined) continue;
-    const scalar = raw.match(/^("(?:\\.|[^"\\])*"|'(?:''|[^'])*'|[^#]*)(?:\s+#.*)?$/)?.[1]?.trim() ?? raw;
-    fields[key!] = scalar.startsWith('"') ? JSON.parse(scalar)
-      : scalar.startsWith("'") ? scalar.slice(1, -1).replace(/''/g, "'")
-      : scalar === "null" || scalar === "~" || scalar === "" ? null : scalar;
-  }
-  const modelConfig = Object.keys(fields).length ? zRoleExecutionOverrides.parse(fields) : undefined;
-  return { body: content.slice(header[0].length), mode, ...(modelConfig ? { modelConfig } : {}) };
+const parsePrompt = (content: string): { body: string; mode: "override" | "append"; modelConfig?: ResolvedRole["modelConfig"]; checkIntervalMinutes?: number } => {
+  const { body, mode, model, reasoningOptionId, serviceTierId, checkIntervalMinutes } = parseRoleDocument(content);
+  if (mode === "global") throw new Error("角色 frontmatter 的 mode 必须为 override 或 append。");
+  const modelConfig = model !== undefined || reasoningOptionId !== undefined || serviceTierId !== undefined
+    ? zRoleExecutionOverrides.parse({ modelId: model, reasoningOptionId, serviceTierId }) : undefined;
+  return { body, mode, ...(modelConfig ? { modelConfig } : {}), ...(checkIntervalMinutes !== undefined ? { checkIntervalMinutes } : {}) };
 };
 
 const executionConfigKeys = ["modelId", "reasoningOptionId", "serviceTierId"] as const;
@@ -130,14 +120,17 @@ export class RoleService {
   /** Resolve runtime instructions separately from the editable Markdown returned by read(). */
   async resolve(workspaceRoot: string, roleId: string): Promise<ResolvedRole> {
     const raw = await this.read(workspaceRoot, roleId);
-    const { body, mode, modelConfig } = parsePrompt(raw.content);
+    const { body, mode, modelConfig, checkIntervalMinutes } = parsePrompt(raw.content);
     const config = modelConfig ? { modelConfig } : {};
-    if (raw.source === "global" || mode === "override") return { content: body, ...config };
+    const interval = (value?: number) => roleId === "supervisor"
+      ? { checkIntervalMinutes: value ?? DEFAULT_SUPERVISOR_CHECK_INTERVAL_MINUTES } : {};
+    if (raw.source === "global" || mode === "override") return { content: body, ...config, ...interval(checkIntervalMinutes) };
     const globalContent = await this.readGlobal(roleId);
     const globalPrompt = globalContent === undefined ? undefined : parsePrompt(globalContent);
     const mergedModelConfig = mergeExecutionConfig(globalPrompt?.modelConfig, modelConfig);
     return {
       content: [globalPrompt?.body.trim(), body.trim()].filter(Boolean).join("\n\n"),
+      ...interval(checkIntervalMinutes ?? globalPrompt?.checkIntervalMinutes),
       ...(mergedModelConfig ? { modelConfig: mergedModelConfig } : {})
     };
   }

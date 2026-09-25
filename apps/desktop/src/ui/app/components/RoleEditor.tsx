@@ -85,7 +85,7 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
       if (mode === "global") return globalDocument ? { ...globalDocument, mode: "global" } : { ...current, mode };
       if (mode === "append") {
         return current.mode === "global"
-          ? { ...current, mode, body: "", model: undefined, reasoningOptionId: undefined, serviceTierId: undefined }
+          ? { ...current, mode, body: "", model: undefined, reasoningOptionId: undefined, serviceTierId: undefined, checkIntervalMinutes: undefined }
           : { ...current, mode, body: "" };
       }
       if (current.mode === "global") return globalDocument ? { ...globalDocument, mode: "override" } : { ...current, mode };
@@ -96,7 +96,8 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
           body: globalDocument?.body ?? current.body,
           model: current.model ?? globalDocument?.model,
           reasoningOptionId: current.reasoningOptionId !== undefined ? current.reasoningOptionId : globalDocument?.reasoningOptionId,
-          serviceTierId: current.serviceTierId !== undefined ? current.serviceTierId : globalDocument?.serviceTierId
+          serviceTierId: current.serviceTierId !== undefined ? current.serviceTierId : globalDocument?.serviceTierId,
+          checkIntervalMinutes: current.checkIntervalMinutes ?? globalDocument?.checkIntervalMinutes
         };
       }
       return { ...current, mode };
@@ -174,6 +175,10 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
                   {serviceTiers.map((tier) => <option key={tier.tierId} value={tier.tierId} title={tier.description}>{tier.displayName}</option>)}
                 </Field>
               </div>
+              {roleId === "supervisor" && <Field kind="input" type="number" label="检查间隔（分钟）" min={1} step={1}
+                value={document.checkIntervalMinutes ?? (isGlobal ? 5 : "")} disabled={fieldDisabled}
+                placeholder={isAppend ? `沿用全局（${globalDocument?.checkIntervalMinutes ?? 5} 分钟）` : "默认 5 分钟"}
+                onChange={(event) => update({ checkIntervalMinutes: event.target.value === "" ? undefined : Number(event.target.value) })} />}
               {catalogError && <InlineNotice tone="error">{catalogError}</InlineNotice>}
               <Field kind="textarea" label="Prompt 正文" rows={14} value={document.body} disabled={fieldDisabled} onChange={(event) => update({ body: event.target.value })} />
             </div>

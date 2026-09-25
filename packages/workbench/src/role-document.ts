@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const DEFAULT_SUPERVISOR_CHECK_INTERVAL_MINUTES = 5;
+export const zCheckIntervalMinutes = z.number().int().positive();
+
 export const zRoleDocument = z.object({
   body: z.string(),
   /** `global` is an editor-only state; it is never serialized into a workspace file. */
@@ -7,12 +10,13 @@ export const zRoleDocument = z.object({
   model: z.string().min(1).optional(),
   reasoningOptionId: z.string().min(1).nullable().optional(),
   serviceTierId: z.string().min(1).nullable().optional(),
+  checkIntervalMinutes: zCheckIntervalMinutes.optional(),
   /** Unedited frontmatter entries are kept when saving the role. */
   extraHeader: z.string().default("")
 });
 export type RoleDocument = z.infer<typeof zRoleDocument>;
 
-const settingLine = /^(mode|model|reasoningOptionId|serviceTierId):[ \t]*(.*)$/;
+const settingLine = /^(mode|model|reasoningOptionId|serviceTierId|checkIntervalMinutes):[ \t]*(.*)$/;
 
 /** Role settings are top-level scalar frontmatter fields; the body is never trimmed. */
 export const parseRoleDocument = (content: string): RoleDocument => {
@@ -28,7 +32,9 @@ export const parseRoleDocument = (content: string): RoleDocument => {
     const value = quoted
       ? quoted[1]!.startsWith('"') ? JSON.parse(quoted[1]!) : quoted[1]!.slice(1, -1).replace(/''/g, "'")
       : scalar.replace(/[ \t]+#.*$/, "").trim();
-    if (!quoted && (value === "null" || value === "~" || value === "")) {
+    if (match[1] === "checkIntervalMinutes") {
+      settings.checkIntervalMinutes = !quoted && (value === "null" || value === "~" || value === "") ? undefined : Number(value);
+    } else if (!quoted && (value === "null" || value === "~" || value === "")) {
       settings[match[1]!] = match[1] === "mode" || match[1] === "model" ? undefined : null;
     } else {
       settings[match[1]!] = value;

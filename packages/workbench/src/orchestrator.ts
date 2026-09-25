@@ -22,6 +22,9 @@ export type AgentRunner = {
   release: (sessionId: string) => Promise<void>;
   /** True while the runtime is executing a turn, including tool/model waits. */
   isActive?: (sessionId: string) => boolean;
+  /** True only for a live turn explicitly waiting for approval or user input. */
+  isWaitingForUser?: (sessionId: string) => boolean;
+  onUserWaitChanged?: (listener: (sessionId: string) => void) => () => void;
   getActiveTurnId?: (sessionId: string) => string | undefined;
   confirmMessage?: (sessionId: string, messageId: string) => Promise<{ accepted: boolean; turnId?: string }>;
   onTurnStarted?: (listener: (event: { sessionId: string; turnId: string; messageId?: string }) => void) => () => void;
@@ -52,6 +55,7 @@ export class Orchestrator {
   private readonly patrolIntervalMs: number;
   private readonly disposers: Array<() => void> = [];
   private readonly supervisorTimers = new Map<string, NodeJS.Timeout>();
+  private readonly supervisorIntervals = new Map<string, number>();
   private readonly patrolsBySession = new Map<string, PatrolBinding>();
   private readonly patrolQueues = new Map<string, Promise<void>>();
   private readonly patrolRequested = new Set<string>();
@@ -104,9 +108,31 @@ export class Orchestrator {
           if (cancelled.sessionId && cancelled.turnId) await this.runner.interrupt(cancelled.sessionId, cancelled.turnId);
           await this.reconcile(event.workspaceId);
         });
+      } else if (event.type === "roles.changed") {
+        void this.enqueue(event.workspaceId, async () => {
+          const previousInterval = this.supervisorIntervals.get(event.workspaceId);
+          const interval = await this.supervisorIntervalMs(event.workspaceId);
+          for (const request of previousInterval === interval ? [] : await this.service.listWorkRequests(event.workspaceId)) {
+            const supervisor = request.supervisor;
+            if (!supervisor?.nextCheckAt || !supervisor.lastCheckedAt || supervisor.activeTurnId) continue;
+            await this.service.updateWorkRequest(event.workspaceId, request.requestId, current => ({
+              ...current, supervisor: { ...current.supervisor,
+                nextCheckAt: new Date(Date.parse(supervisor.lastCheckedAt!) + interval).toISOString() }
+            }));
+          }
+          await this.reconcile(event.workspaceId);
+        });
       } else if (["workItem.updated", "workItems.changed", "workRequests.changed", "actions.changed", "decisions.changed", "scheduler.changed"].includes(event.type)) {
         void this.enqueue(event.workspaceId, () => this.reconcile(event.workspaceId));
       }
+    }));
+    if (this.runner.onUserWaitChanged) this.disposers.push(this.runner.onUserWaitChanged((sessionId) => {
+      void this.service.listWorkspaces().then(async (workspaces) => {
+        for (const { workspaceId } of workspaces) {
+          if ((await this.service.listWorkItems(workspaceId)).some(item => item.requestId && item.run.sessionId === sessionId))
+            void this.enqueue(workspaceId, () => this.reconcile(workspaceId));
+        }
+      });
     }));
     if (this.runner.onTurnStarted) this.disposers.push(this.runner.onTurnStarted((event) => {
       void this.service.listWorkspaces().then((workspaces) => {
@@ -264,11 +290,19 @@ export class Orchestrator {
     });
   }
 
+  private async supervisorIntervalMs(workspaceId: string): Promise<number> {
+    const role = await this.roles.resolve(await this.service.workspaceRoot(workspaceId), "supervisor");
+    const interval = (role.checkIntervalMinutes ?? SUPERVISOR_INTERVAL_MS / 60_000) * 60_000;
+    this.supervisorIntervals.set(workspaceId, interval);
+    return interval;
+  }
+
   private async finishSupervisor(workspaceId: string, request: WorkRequest, failure?: string): Promise<void> {
     const at = this.now();
+    const interval = await this.supervisorIntervalMs(workspaceId);
     await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
       ...current, supervisor: { ...current.supervisor, activeTurnId: undefined, pendingMessageId: undefined,
-        lastCheckedAt: at, nextCheckAt: new Date(Date.parse(at) + SUPERVISOR_INTERVAL_MS).toISOString(), failure }
+        lastCheckedAt: at, nextCheckAt: new Date(Date.parse(at) + interval).toISOString(), failure }
     }));
   }
 
@@ -278,9 +312,9 @@ export class Orchestrator {
     if (timer) clearTimeout(timer);
     this.supervisorTimers.delete(key);
     if (!request.supervisor) return;
-    const unfinished = (await this.service.listWorkItems(workspaceId)).some((item) =>
+    const unfinished = (await this.service.listWorkItems(workspaceId)).filter((item) =>
       item.requestId === request.requestId && !["closed", "cancelled"].includes(item.status));
-    if (request.status !== "ready" || !unfinished || request.paused) {
+    if (request.status !== "ready" || !unfinished.length || request.paused) {
       if (request.supervisor.nextCheckAt) await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
         ...current, supervisor: { ...current.supervisor, nextCheckAt: undefined }
       }));
@@ -302,6 +336,19 @@ export class Orchestrator {
       if (fact?.status === "completed") await this.finishSupervisor(workspaceId, request, fact.failure);
       return;
     }
+    const decisions = (await this.service.listDecisions(workspaceId)).filter(card => !card.answer && !card.withdrawn);
+    const actions = await this.service.listActions(workspaceId);
+    const allWaitingForUser = unfinished.every(item => {
+      if (item.run.paused || item.run.userStopped) return true;
+      if (item.run.lastFailure || item.run.pendingMessageId || item.run.turnStatus === "unknown") return false;
+      if (item.run.sessionId && this.runner.isWaitingForUser?.(item.run.sessionId)) return true;
+      if (item.run.activeTurnId || item.run.sessionId && this.runner.isActive?.(item.run.sessionId)) return false;
+      return decisions.some(card => card.workItemId === item.workItemId ||
+        card.actionId && actions.some(action => action.actionId === card.actionId && action.workItemId === item.workItemId) ||
+        !card.workItemId && !card.actionId && card.requestId === request.requestId);
+    });
+    // Retain the deadline. Decision and runtime events recheck eligibility without calling the model.
+    if (allWaitingForUser) return;
     if (supervisor.nextCheckAt && supervisor.nextCheckAt > this.now()) {
       schedule(supervisor.nextCheckAt);
       return;
@@ -350,9 +397,10 @@ export class Orchestrator {
         ...latest, supervisor: { ...latest.supervisor, activeTurnId: receipt?.turnId, pendingMessageId: undefined }
       }));
     } catch (error) {
-      const nextCheckAt = new Date(Date.parse(this.now()) + SUPERVISOR_INTERVAL_MS).toISOString();
+      const lastCheckedAt = this.now();
+      const nextCheckAt = new Date(Date.parse(lastCheckedAt) + await this.supervisorIntervalMs(workspaceId)).toISOString();
       await this.service.updateWorkRequest(workspaceId, request.requestId, (latest) => ({
-        ...latest, supervisor: { ...latest.supervisor, failure: error instanceof Error ? error.message : String(error), nextCheckAt }
+        ...latest, supervisor: { ...latest.supervisor, failure: error instanceof Error ? error.message : String(error), lastCheckedAt, nextCheckAt }
       }));
       schedule(nextCheckAt);
     }

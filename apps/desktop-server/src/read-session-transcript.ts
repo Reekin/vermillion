@@ -270,7 +270,7 @@ const activeTurnId = (turns: Turn[]): string | undefined => {
   return undefined;
 };
 
-const buildActivity = (input: ReadSessionTranscriptInput): ReadSessionActivity => {
+export const buildReadSessionActivity = (input: ReadSessionTranscriptInput): ReadSessionActivity => {
   const { snapshot, sessionId, runtimeState } = input;
   const ownTurns = snapshot.turns.filter((turn) => turn.sessionId === sessionId)
     .sort((left, right) => compareIsoAsc(left.startedAt, right.startedAt));
@@ -369,7 +369,7 @@ export const buildReadSessionTranscript = (
       ...(turn.completedAt ? { completedAt: turn.completedAt } : {})
     })),
     messages: budgeted.messages,
-    activity: buildActivity(input)
+    activity: buildReadSessionActivity(input)
   };
 };
 
