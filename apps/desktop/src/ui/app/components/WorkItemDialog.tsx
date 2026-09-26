@@ -4,10 +4,10 @@ import type { AgentRun, DecisionCard, WorkbenchClient, WorkItem, WorkflowAction 
 import { writeClipboardText } from "../../chat-shell/clipboard.js";
 import { Modal } from "./Modal.js";
 import { MarkdownPreview } from "./MarkdownPreview.js";
-import { Badge, Button, CollapsibleDetails, DetailSection, EmptyState, IconButton, InlineNotice, StatusPill, Steps, type StatusTone } from "./ui.js";
+import { Badge, Button, CollapsibleDetails, DetailSection, EmptyState, IconButton, InlineNotice, StatusIcon, StatusPill, Steps, TabList, type StatusTone } from "./ui.js";
 import { WorkflowDetails } from "./WorkflowDetails.js";
 import { IntegrationControls } from "./IntegrationControls.js";
-import { executionDuration, formatDuration, pendingItemDecisions, workItemAttention, workItemEvents, workItemProgress, workItemSteps, type Attention } from "./workflow-display.js";
+import { executionDuration, formatDuration, pendingItemDecisions, readableActionError, workItemAttention, workItemEvents, workItemProgress, workItemSteps, type Attention } from "./workflow-display.js";
 import { workItemBoardLabel } from "./task-labels.js";
 
 type WorkItemDialogProps = {
@@ -40,9 +40,20 @@ const headerState = (item: WorkItem, progressLabel: string, attention?: Attentio
   return { tone: "waiting", label };
 };
 
-const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming, onAnswer, answeringDecisionId }: {
+/** A question waiting for the user, with its options as buttons; the recommended one is primary. */
+export const PendingDecision = ({ card, disabled, onAnswer }: { card: DecisionCard; disabled: boolean; onAnswer: (key: string) => void }) => (
+  <div className="vm-detail-decision">
+    <p className="text-label font-medium text-strong">等待你答复：{card.question}</p>
+    <div className="mt-2 flex flex-wrap gap-2">
+      {card.options.map((option) => <Button key={option.key} size="sm" variant={option.key === card.recommended ? "primary" : "secondary"} disabled={disabled} title={option.detail} onClick={() => onAnswer(option.key)}>{option.label}</Button>)}
+    </div>
+  </div>
+);
+
+const ProgressPanel = ({ item, progress, attention, pendingDecisions, onResume, resuming, onAnswer, answeringDecisionId }: {
   item: WorkItem;
   progress: ReturnType<typeof workItemProgress>;
+  attention?: Attention;
   pendingDecisions: DecisionCard[];
   onResume: () => void;
   resuming: boolean;
@@ -54,12 +65,7 @@ const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming, o
     {item.evidence?.summary ? <Markdown>{item.evidence.summary}</Markdown> : <p className="text-label text-muted-foreground">没有成果摘要。</p>}
   </section>;
   return <section aria-live="polite">
-    {pendingDecisions.map((card) => <div key={card.decisionId} className="vm-detail-decision">
-      <p className="text-label font-medium text-strong">等待你答复：{card.question}</p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {card.options.map((option) => <Button key={option.key} size="sm" variant={option.key === card.recommended ? "primary" : "secondary"} disabled={!!answeringDecisionId} title={option.detail} onClick={() => onAnswer(card.decisionId, option.key)}>{option.label}</Button>)}
-      </div>
-    </div>)}
+    {pendingDecisions.map((card) => <PendingDecision key={card.decisionId} card={card} disabled={!!answeringDecisionId} onAnswer={(key) => onAnswer(card.decisionId, key)} />)}
     <div className="flex flex-wrap items-baseline justify-between gap-2">
       <h3 className="vm-detail-heading">{progress.title}</h3>
       {progress.at && <time className="font-mono text-micro text-muted-foreground">{time(progress.at)}</time>}
@@ -71,7 +77,13 @@ const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming, o
       {progress.userAction && <><dt className="text-muted-foreground">你需要做什么</dt><dd>{progress.userAction}</dd></>}
     </dl>
     {(item.run.paused || item.run.userStopped) && <Button className="mt-3" variant="primary" size="sm" disabled={resuming} onClick={onResume}>恢复执行</Button>}
+    {attention?.raw && <RawCause text={attention.raw} />}
   </section>;
+};
+
+const RawCause = ({ text }: { text: string }) => {
+  const [open, setOpen] = useState(false);
+  return <CollapsibleDetails title="原始原因" open={open} onToggle={() => setOpen((value) => !value)}>{text}</CollapsibleDetails>;
 };
 
 const ProgressTimeline = ({ events }: { events: ReturnType<typeof workItemEvents> }) => {
@@ -121,10 +133,9 @@ const Verification = ({ item }: { item: WorkItem }) => {
       {item.acceptance.map((acceptance, index) => {
         const entry = item.verify?.items.find((candidate) => candidate.index === index);
         const state = entry ? checkState[entry.status] ?? checkState.defect! : { tone: "waiting" as StatusTone, icon: CircleDashed, label: "尚未验收" };
-        const Icon = state.icon;
         const expanded = open.includes(index);
         return <li key={index} className="vm-check">
-          <span className="vm-state-icon" data-tone={state.tone} role="img" aria-label={state.label} title={state.label}><Icon size={12} aria-hidden="true" /></span>
+          <StatusIcon tone={state.tone} icon={state.icon} label={state.label} />
           <div className="min-w-0">
             <p className="text-label font-normal text-foreground">{acceptance.text}</p>
             {expanded && entry?.evidence && <div className="mt-1.5 text-caption text-muted-foreground"><Markdown>{entry.evidence}</Markdown></div>}
@@ -176,23 +187,6 @@ const Decisions = ({ cards }: { cards: DecisionCard[] }) => <section>
     </div>)}
   </div>
 </section>;
-
-/** Tab bar for one object's material groups; the counts tell what is inside without opening it. */
-const DetailTabs = ({ tabs, selected, onSelect }: { tabs: Array<{ id: TabId; label: string; count?: string }>; selected: TabId; onSelect: (id: TabId) => void }) => (
-  <div role="tablist" aria-label="工单材料" className="vm-detail-tabs">
-    {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={tab.id === selected} tabIndex={tab.id === selected ? 0 : -1} onClick={() => onSelect(tab.id)}
-      onKeyDown={(event) => {
-        if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-        const index = tabs.findIndex((candidate) => candidate.id === selected);
-        const next = tabs[(index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length]!;
-        event.preventDefault();
-        onSelect(next.id);
-        (event.currentTarget.parentElement?.querySelector(`[data-tab="${next.id}"]`) as HTMLElement | null)?.focus();
-      }} data-tab={tab.id}>
-      {tab.label}{tab.count && <span className="vm-detail-tabs__count">{tab.count}</span>}
-    </button>)}
-  </div>
-);
 
 const MetaItem = ({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) => <span className="vm-detail-meta__item">{Icon && <Icon size={12} aria-hidden="true" />}{children}</span>;
 
@@ -252,14 +246,14 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     setResuming(true);
     setError(undefined);
     try { await client.request("workItem.resume", { workspaceId, workItemId }); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    catch (caught) { setError(readableActionError(caught)); }
     finally { setResuming(false); }
   };
   const answerDecision = async (decisionId: string, key: string) => {
     setAnsweringDecisionId(decisionId);
     setError(undefined);
     try { await client.request("decision.answer", { workspaceId, decisionId, key }); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    catch (caught) { setError(readableActionError(caught)); }
     finally { setAnsweringDecisionId(undefined); }
   };
   const openSession = (id: string, turnId?: string) => { onClose(); onOpenSession(id, turnId); };
@@ -276,13 +270,13 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
         </MetaItem>}
       </div>
       <Steps label="工单进度" steps={workItemSteps(item, itemActions, itemRuns, attention, item.status === "queued" && unresolvedDependencies.length ? "等待前置工单" : progress.shortLabel)} />
-      <DetailTabs tabs={tabs} selected={shown} onSelect={setTab} />
+      <TabList label="工单材料" items={tabs} selected={shown} onSelect={setTab} />
     </div>
     <div className="min-h-0 flex-1 overflow-auto" role="tabpanel">
       <div className="space-y-5 px-6 py-5">
         {error && <InlineNotice tone="error" className="whitespace-pre-wrap break-words px-0">{error}</InlineNotice>}
         {shown === "progress" && <>
-          <ProgressPanel item={item} progress={progress} pendingDecisions={pendingDecisions} onResume={() => void resume()} resuming={resuming} onAnswer={(decisionId, key) => void answerDecision(decisionId, key)} answeringDecisionId={answeringDecisionId} />
+          <ProgressPanel item={item} progress={progress} attention={attention} pendingDecisions={pendingDecisions} onResume={() => void resume()} resuming={resuming} onAnswer={(decisionId, key) => void answerDecision(decisionId, key)} answeringDecisionId={answeringDecisionId} />
           {integration && <IntegrationControls client={client} workspaceId={workspaceId} workItemId={workItemId} action={integration} item={item} />}
           <ProgressTimeline events={events} />
           {resolvedDecisions.length > 0 && <Decisions cards={resolvedDecisions} />}

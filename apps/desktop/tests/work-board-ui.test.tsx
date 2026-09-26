@@ -2,7 +2,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Scheduler, WorkbenchClient, WorkItem, WorkRequest } from "@vermillion/workbench/client";
+import type { DecisionCard, Scheduler, WorkbenchClient, WorkItem, WorkRequest } from "@vermillion/workbench/client";
 import { WorkItemsSection } from "../src/ui/app/components/WorkItemsSection.js";
 import { workItem } from "./workbench-fixtures.js";
 afterEach(cleanup);
@@ -26,12 +26,12 @@ const items: WorkItem[] = [
   ...Array.from({ length: 6 }, (_, index) => workItem({ workItemId: "old-" + index, title: "历史工单 " + index, status: "closed", updatedAt: day(1 + index) }))
 ];
 
-const setup = () => {
-  const request = vi.fn(async (method: string) => method === "decision.list" ? [] : {});
+const setup = (data: { workItems?: WorkItem[]; workRequests?: WorkRequest[]; decisions?: DecisionCard[] } = {}) => {
+  const request = vi.fn(async (method: string) => method === "decision.list" ? data.decisions ?? [] : {});
   const client = { request, subscribe: () => () => undefined } as unknown as WorkbenchClient;
   const onOpenSession = vi.fn();
-  render(<WorkItemsSection client={client} workspaceId="ws" scheduler={{ enabled: true, maxWorkers: 2 } as Scheduler} workItems={items} workRequests={requests}
-    runs={[]} actions={[]} decisions={[]} sourceTitles={{ "tree-1": "Worker 规范讨论", "tree-2": "通知整理" }} onOpenSession={onOpenSession}
+  render(<WorkItemsSection client={client} workspaceId="ws" scheduler={{ enabled: true, maxWorkers: 2 } as Scheduler} workItems={data.workItems ?? items} workRequests={data.workRequests ?? requests}
+    runs={[]} actions={[]} decisions={data.decisions ?? []} sourceTitles={{ "tree-1": "Worker 规范讨论", "tree-2": "通知整理" }} onOpenSession={onOpenSession}
     expandedWorkGroups={{}} setWorkGroupExpanded={vi.fn()} />);
   return { request, onOpenSession, user: userEvent.setup() };
 };
@@ -57,11 +57,11 @@ describe("work board", () => {
     expect(screen.getByRole("button", { name: "7 已结束" })).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "进行中" })).getByText("0 / 1 已合入")).toBeTruthy();
     const ended = screen.getByRole("region", { name: "已结束" });
-    expect(ended.querySelectorAll(".vm-board-row")).toHaveLength(5);
+    expect(ended.querySelectorAll(".vm-row-cells")).toHaveLength(5);
     expect(within(ended).getByText("5cb9327")).toBeTruthy();
     await test.user.click(within(ended).getByRole("button", { name: "查看全部" }));
     expect(screen.queryByRole("region", { name: "需要你处理" })).toBeNull();
-    expect(screen.getByRole("region", { name: "已结束" }).querySelectorAll(".vm-board-row")).toHaveLength(7);
+    expect(screen.getByRole("region", { name: "已结束" }).querySelectorAll(".vm-row-cells")).toHaveLength(7);
     await test.user.click(screen.getByRole("button", { name: "1 需要处理" }));
     expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["需要你处理"]);
     await test.user.type(screen.getByRole("textbox", { name: "筛选标题" }), "没有这个");
@@ -85,5 +85,42 @@ describe("work board", () => {
     expect(within(dialog).queryByText("真实 CLI 单次返回 pid")).toBeNull();
     await test.user.click(within(dialog).getAllByRole("button", { name: "证据" })[0]!);
     expect(within(dialog).getByText("真实 CLI 单次返回 pid")).toBeTruthy();
+  });
+
+  it("answers a preparation decision from work detail instead of looping back to the board", async () => {
+    const card = { decisionId: "d1", requestId: "prep", question: "拆成两张工单吗？", context: "", options: [{ key: "split", label: "拆开" }, { key: "one", label: "合并" }], recommended: "split", createdAt: day(20) } as DecisionCard;
+    const test = setup({ workItems: [], decisions: [card], workRequests: [{ formatVersion: 2, requestId: "prep", sourceSessionId: "src", scope: "拆单准备", status: "preparing", createdAt: day(20), updatedAt: day(20) }] });
+    const attention = screen.getByRole("region", { name: "需要你处理" });
+    expect(within(attention).getByText("等待你答复：拆成两张工单吗？")).toBeTruthy();
+    await test.user.click(within(attention).getByRole("button", { name: "回复决策" }));
+    const dialog = screen.getByRole("dialog", { name: "拆单准备" });
+    expect(within(dialog).queryByRole("button", { name: "回复决策" })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "取消剩余工作" })).toBeTruthy();
+    await test.user.click(within(dialog).getByRole("button", { name: "拆开" }));
+    expect(test.request).toHaveBeenCalledWith("decision.answer", { workspaceId: "ws", decisionId: "d1", key: "split" });
+  });
+
+  it("keeps the row stage short, tells the cause once, and keeps the raw failure in the item's technical detail", async () => {
+    const failed = workItem({ workItemId: "failed", title: "失败的工单", status: "running", updatedAt: day(21), run: { lastFailure: "turn interrupted: stream closed" } });
+    const test = setup({ workItems: [failed], workRequests: [] });
+    const attention = screen.getByRole("region", { name: "需要你处理" });
+    expect(within(attention).getAllByText("本轮执行被中断")).toHaveLength(1);
+    expect(attention.querySelector(".vm-row-cells__stage")?.textContent).toBe("已中断");
+    await test.user.click(within(attention).getByRole("button", { name: "失败的工单" }));
+    const dialog = screen.getByRole("dialog", { name: "失败的工单" });
+    expect(dialog.textContent).not.toContain("stream closed");
+    await test.user.click(within(dialog).getByRole("button", { name: "原始原因" }));
+    expect(within(dialog).getByText("turn interrupted: stream closed")).toBeTruthy();
+  });
+
+  it("shows a rejected action as one readable sentence without the CLI hint", async () => {
+    const test = setup();
+    test.request.mockImplementation(async (method: string) => {
+      if (method === "work.resume") throw new Error("[workItem.resume] 工单仍有未解决的依赖或决策等待。下一步：先调用 workItem.diagnose 查看。");
+      return method === "decision.list" ? [] : {};
+    });
+    await test.user.click(within(screen.getByRole("region", { name: "需要你处理" })).getByRole("button", { name: "恢复" }));
+    expect(await screen.findByText("工单仍有未解决的依赖或决策等待。")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/workItem\.(resume|diagnose)|下一步/);
   });
 });

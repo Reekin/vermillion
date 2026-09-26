@@ -1,4 +1,4 @@
-import { Ban, Check, ChevronDown, ChevronRight, CircleAlert, CircleDashed, Copy, LoaderCircle, MessageSquare, Pause, Play, Plus, RotateCw, X, type LucideIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, MessageSquare, Pause, Play, Plus, RotateCw, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { type AgentRun, type DecisionCard, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction, type WorkRequest } from "@vermillion/workbench/client";
 import { writeClipboardText } from "../../chat-shell/clipboard.js";
@@ -6,10 +6,10 @@ import type { TaskTarget, WorkbenchState } from "../workbench-store.js";
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { Modal } from "./Modal.js";
 import { SupervisorDetails } from "./SupervisorDetails.js";
-import { WorkItemDialog } from "./WorkItemDialog.js";
+import { PendingDecision, WorkItemDialog } from "./WorkItemDialog.js";
 import { statusTone, workItemBoardLabel, workRequestStatus } from "./task-labels.js";
-import { Alert, Badge, Button, CollapsibleDetails, EmptyState, Field, IconButton, InlineNotice, OverflowMenu, PageHeader, Progress, SegmentedControl, StatusPill, Stepper, Toggle } from "./ui.js";
-import { formatDuration, workItemAttention, workItemProgress, type Attention } from "./workflow-display.js";
+import { Alert, Badge, Button, CollapsibleDetails, EmptyState, Field, FilterChip, IconButton, InlineNotice, ListRow, OverflowMenu, PageHeader, Progress, SegmentedControl, StatusIcon, StatusPill, Stepper, Toggle, type StatusTone } from "./ui.js";
+import { formatDuration, pendingRequestDecisions, readableActionError, workItemAttention, workItemProgress, type Attention } from "./workflow-display.js";
 import {
   boardSectionLabel, entryContains, filterShowing, isOpenWorkItem, visibleBoard, workBoard, workBoardCounts, workExpansionKey,
   type BoardEntry, type BoardFilter, type BoardSection
@@ -29,18 +29,7 @@ const relativeTime = (iso: string) => {
 };
 const fullTime = (iso: string) => new Date(iso).toLocaleString("zh-CN");
 
-type StateTone = "running" | "done" | "failed" | "attention" | "waiting" | "neutral";
-const stateIcons: Record<StateTone, LucideIcon> = { running: LoaderCircle, done: Check, failed: X, attention: CircleAlert, waiting: CircleDashed, neutral: Ban };
-
-/** 18px row-leading state marker: spinner while running, check when merged, cross on failure. */
-const StateIcon = ({ tone, label, icon }: { tone: StateTone; label: string; icon?: LucideIcon }) => {
-  const Icon = icon ?? stateIcons[tone];
-  return <span className="vm-state-icon" data-tone={tone} title={label} aria-label={label} role="img">
-    <Icon size={12} className={tone === "running" && !icon ? "vm-spin" : undefined} aria-hidden="true" />
-  </span>;
-};
-
-const itemState = (item: WorkItem, attention?: Attention): { tone: StateTone; icon?: LucideIcon } => {
+const itemState = (item: WorkItem, attention?: Attention): { tone: StatusTone; icon?: LucideIcon } => {
   if (item.status === "closed") return { tone: "done" };
   if (item.status === "cancelled") return { tone: "neutral" };
   if (attention) return attention.action === "retry" ? { tone: "failed" } : { tone: "attention", icon: attention.action === "resume" ? Pause : undefined };
@@ -65,25 +54,26 @@ const WorkItemRow = ({ item, run, actions, waitingFor, attention, handlers }: {
   const progress = workItemProgress(item, actions, run, waitingFor);
   const state = itemState(item, attention);
   const running = open && run?.status === "running" && item.run.activeTurnId;
-  const stage = attention?.title ?? (waitingFor.length ? "等待 " + waitingFor.join("、")
-    : workItemBoardLabel(item, progress.shortLabel) + (open && run?.turns ? " · 第 " + run.turns + " 轮" : ""));
+  // The cause itself is told once, in the alert; the row keeps a short stage label.
+  const stage = attention?.action === "decision" ? "等待决策" : attention ? workItemBoardLabel(item, progress.shortLabel)
+    : waitingFor.length ? "等待 " + waitingFor.join("、")
+    : workItemBoardLabel(item, progress.shortLabel) + (open && run?.turns ? " · 第 " + run.turns + " 轮" : "");
   const sessionId = item.run.sessionId ?? run?.sessionId;
   const stopped = item.run.paused || item.run.userStopped;
-  const retryable = attention?.action === "retry";
-  return <div className="vm-board-row" data-task-id={item.workItemId} data-ended={!open || undefined}>
-    <StateIcon tone={state.tone} icon={state.icon} label={stage} />
-    <Badge>{item.risk}</Badge>
-    <button type="button" className="vm-board-row__title" title={item.title} onClick={() => handlers.onOpen(item.workItemId)}>{item.title}</button>
-    <span className="vm-board-row__stage" title={stage}>{stage}</span>
-    <span className="vm-board-row__time" title={fullTime(item.updatedAt)}>{running && run ? "已运行 " + formatDuration(Date.now() - Date.parse(run.startedAt)) : relativeTime(item.updatedAt)}</span>
-    <span className="vm-board-row__actions">
-      <span className="vm-board-slot">{open && (stopped
-        ? <IconButton icon={Play} label={"恢复：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.resume", item.workItemId)} />
-        : retryable ? <IconButton icon={RotateCw} label={"重试：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.retry", item.workItemId)} />
-        : <IconButton icon={Pause} label={"暂停：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.pause", item.workItemId)} />)}</span>
-      <span className="vm-board-slot">{sessionId && <IconButton icon={MessageSquare} label={"打开执行会话：" + item.title} onClick={() => handlers.onOpenSession(sessionId)} />}</span>
-      <span className="vm-board-slot">{open && <IconButton icon={X} label={"取消工单：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.cancel", item.workItemId)} />}</span>
-    </span>
+  return <div data-task-id={item.workItemId}>
+    <ListRow title={item.title} onClick={() => handlers.onOpen(item.workItemId)} cells={{
+      state: <StatusIcon tone={state.tone} icon={state.icon} label={stage} />,
+      tag: <Badge>{item.risk}</Badge>, stage, muted: !open, timeTitle: fullTime(item.updatedAt),
+      time: running && run ? "已运行 " + formatDuration(Date.now() - Date.parse(run.startedAt)) : relativeTime(item.updatedAt),
+      controls: [
+        open && (stopped
+          ? <IconButton icon={Play} label={"恢复：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.resume", item.workItemId)} />
+          : attention?.action === "retry" ? <IconButton icon={RotateCw} label={"重试：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.retry", item.workItemId)} />
+          : <IconButton icon={Pause} label={"暂停：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.pause", item.workItemId)} />),
+        sessionId && <IconButton icon={MessageSquare} label={"打开执行会话：" + item.title} onClick={() => handlers.onOpenSession(sessionId)} />,
+        open && <IconButton icon={X} label={"取消工单：" + item.title} disabled={handlers.busy} onClick={() => handlers.onItemAction("workItem.cancel", item.workItemId)} />
+      ]
+    }} />
   </div>;
 };
 
@@ -93,8 +83,10 @@ type WorkHandlers = ItemHandlers & {
 };
 
 /** Cause, next step and the matching controls for an entry that needs the user. */
-const AttentionAlert = ({ entry, attention, subject, handlers, sessionId }: {
+const AttentionAlert = ({ entry, attention, subject, handlers, sessionId, controls = true }: {
   entry: BoardEntry; attention: Attention & { itemId?: string }; subject?: string; handlers: WorkHandlers; sessionId?: string;
+  /** Off inside work detail, which carries the same controls in its own action row. */
+  controls?: boolean;
 }) => {
   const [copied, setCopied] = useState<"done" | "failed">();
   const itemId = attention.itemId ?? (entry.kind === "item" ? entry.id : undefined);
@@ -107,10 +99,10 @@ const AttentionAlert = ({ entry, attention, subject, handlers, sessionId }: {
       {attention.command && <Button size="sm" variant="ghost" onClick={() => void writeClipboardText(attention.command!).then(() => setCopied("done"), () => setCopied("failed"))}>
         <Copy size={14} aria-hidden="true" />{copied === "done" ? "已复制" : copied === "failed" ? "复制失败" : "复制取消归档命令"}
       </Button>}
-      {action === "resume" && <Button size="sm" disabled={handlers.busy} onClick={resume}><Play size={14} aria-hidden="true" />恢复</Button>}
-      {action === "retry" && <Button size="sm" disabled={handlers.busy} onClick={retry}><RotateCw size={14} aria-hidden="true" />重试</Button>}
-      {action === "decision" && <Button size="sm" onClick={detail}>回复决策</Button>}
-      {action === "detail" && <Button size="sm" onClick={detail}>查看详情</Button>}
+      {controls && action === "resume" && <Button size="sm" disabled={handlers.busy} onClick={resume}><Play size={14} aria-hidden="true" />恢复</Button>}
+      {controls && action === "retry" && <Button size="sm" disabled={handlers.busy} onClick={retry}><RotateCw size={14} aria-hidden="true" />重试</Button>}
+      {controls && action === "decision" && <Button size="sm" onClick={detail}>回复决策</Button>}
+      {controls && action === "detail" && <Button size="sm" onClick={detail}>查看详情</Button>}
       {action === "session" && sessionId && <Button size="sm" onClick={() => handlers.onOpenSession(sessionId)}><MessageSquare size={14} aria-hidden="true" />打开会话</Button>}
     </>} />;
 };
@@ -170,26 +162,25 @@ const EndedRow = ({ entry, title, expanded, onToggle, context, handlers }: {
   const items = entry.kind === "work" ? entry.items : [entry.item];
   const closed = items.filter((item) => item.status === "closed").length;
   const cancelled = entry.kind === "work" && entry.request.status === "cancelled" && !items.length;
-  const tone: StateTone = closed ? "done" : "neutral";
+  const tone: StatusTone = closed ? "done" : "neutral";
   const commit = commitOf(items);
-  const result = cancelled || !closed ? "已取消" : closed < items.length ? "部分取消" : undefined;
+  const result = cancelled || !closed ? "已取消" : closed < items.length ? "部分取消" : commit ? undefined : "已完成";
   const multi = entry.kind === "work" && items.length > 1;
   const sessionId = entry.kind === "item" ? entry.item.run.sessionId : entry.request.workerSessionId;
   const open = () => entry.kind === "item" ? handlers.onOpen(entry.id) : items.length === 1 ? handlers.onOpen(items[0]!.workItemId) : handlers.onOpenWork(entry.id);
   return <>
-    <div className="vm-board-row" data-compact="" data-ended="" data-task-id={entry.kind === "item" ? entry.id : items.length === 1 ? items[0]!.workItemId : undefined}>
-      <StateIcon tone={tone} label={result ?? "已合入"} />
-      <span className="vm-board-row__toggle">{multi && <IconButton icon={expanded ? ChevronDown : ChevronRight} label={(expanded ? "收起" : "展开") + "工单：" + title} active={expanded} onClick={onToggle} />}</span>
-      <button type="button" className="vm-board-row__title" title={title} onClick={open}>{title}</button>
-      <span className="vm-board-row__stage">
-        {commit && <span className="vm-board-commit" title={commit}>{commit.slice(0, 7)}</span>}
-        {result && <span>{result}</span>}
-        {multi && <span>{items.length} 张工单</span>}
-      </span>
-      <span className="vm-board-row__time" title={fullTime(entry.updatedAt)}>{relativeTime(entry.updatedAt)}</span>
-      <span className="vm-board-row__actions">
-        <span className="vm-board-slot" /><span className="vm-board-slot">{sessionId && <IconButton icon={MessageSquare} label={"打开会话：" + title} onClick={() => handlers.onOpenSession(sessionId)} />}</span><span className="vm-board-slot" />
-      </span>
+    <div data-task-id={entry.kind === "item" ? entry.id : items.length === 1 ? items[0]!.workItemId : undefined}>
+      <ListRow title={title} onClick={open} cells={{
+        state: <StatusIcon tone={tone} label={result ?? "已合入"} />,
+        tag: multi && <IconButton icon={expanded ? ChevronDown : ChevronRight} label={(expanded ? "收起" : "展开") + "工单：" + title} active={expanded} onClick={onToggle} />,
+        stage: <>
+          {commit && <span className="vm-board-commit" title={commit}>{commit.slice(0, 7)}</span>}
+          {result && <span>{result}</span>}
+          {multi && <span>{items.length} 张工单</span>}
+        </>,
+        time: relativeTime(entry.updatedAt), timeTitle: fullTime(entry.updatedAt), muted: true, compact: true,
+        controls: [null, sessionId && <IconButton icon={MessageSquare} label={"打开会话：" + title} onClick={() => handlers.onOpenSession(sessionId)} />, null]
+      }} />
     </div>
     {multi && expanded && <div className="vm-board-nested">{items.map((item) => itemRow(item, context, handlers))}</div>}
   </>;
@@ -208,7 +199,7 @@ type WorkItemsSectionProps = {
   taskTarget?: TaskTarget;
 };
 
-const countTone: Record<BoardSection, string> = { attention: "attention", active: "running", ended: "neutral" };
+const countTone: Record<BoardSection, StatusTone> = { attention: "attention", active: "running", ended: "neutral" };
 
 export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, workRequests, runs, actions, decisions = [], onOpenSession, onOpenIssue, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
   const board = useRef<HTMLDivElement>(null);
@@ -259,7 +250,7 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
   const perform = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(undefined);
-    try { await action(); } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    try { await action(); } catch (caught) { setError(readableActionError(caught)); }
     finally { setBusy(false); }
   };
   const setScheduler = (value: Partial<Scheduler>) => void perform(() => client.request("scheduler.set", { workspaceId, value: { ...scheduler, ...value } }));
@@ -308,8 +299,8 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
   return (
     <div ref={board} className="vm-board">
       <PageHeader title="工作"
-        summary={(["attention", "active", "ended"] as const).map((section) => <button key={section} type="button" className="vm-count-chip" data-tone={counts[section] ? countTone[section] : "neutral"}
-          aria-pressed={filter === section} onClick={() => setFilter(filter === section ? "open" : section)}>{counts[section]} {section === "attention" ? "需要处理" : boardSectionLabel[section]}</button>)}
+        summary={(["attention", "active", "ended"] as const).map((section) => <FilterChip key={section} tone={countTone[section]} count={counts[section]}
+          label={section === "attention" ? "需要处理" : boardSectionLabel[section]} pressed={filter === section} onToggle={() => setFilter(filter === section ? "open" : section)} />)}
         actions={<>
           <Toggle label="自动推进" checked={scheduler.enabled} disabled={busy} onChange={(enabled) => setScheduler({ enabled })} />
           <Stepper label="并发" value={scheduler.maxWorkers} min={1} max={8} disabled={busy} onChange={(maxWorkers) => setScheduler({ maxWorkers })} />
@@ -340,27 +331,42 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
       {detail?.workspaceId === workspaceId && <WorkItemDialog key={workspaceId + "/" + detail.workItemId} client={client} workspaceId={workspaceId}
         workItemId={detail.workItemId} workItems={workItems} runs={runs} actions={actions} sourceTitles={sourceTitles}
         onClose={() => setDetail(undefined)} onOpenSession={onOpenSession} onOpenIssue={onOpenIssue} />}
-      {openWork?.kind === "work" && <WorkDetail entry={openWork} title={titleOf(openWork)} client={client} workspaceId={workspaceId} handlers={handlers} onClose={() => setWorkDetail(undefined)} />}
+      {openWork?.kind === "work" && <WorkDetail entry={openWork} title={titleOf(openWork)} client={client} workspaceId={workspaceId} decisions={decisions} handlers={handlers} onClose={() => setWorkDetail(undefined)} />}
     </div>
   );
 };
 
 /** Work-level detail: preparation session, supervisor, whole-work controls and the raw technical cause. */
-const WorkDetail = ({ entry, title, client, workspaceId, handlers, onClose }: {
-  entry: Extract<BoardEntry, { kind: "work" }>; title: string; client: WorkbenchClient; workspaceId: string; handlers: WorkHandlers; onClose: () => void;
+const WorkDetail = ({ entry, title, client, workspaceId, decisions, handlers, onClose }: {
+  entry: Extract<BoardEntry, { kind: "work" }>; title: string; client: WorkbenchClient; workspaceId: string; decisions: DecisionCard[]; handlers: WorkHandlers; onClose: () => void;
 }) => {
   const [technical, setTechnical] = useState(false);
+  const [answering, setAnswering] = useState<string>();
+  const [error, setError] = useState<string>();
   const { request, items } = entry;
   const state = workRequestStatus(request, items);
   const raw = [request.failure, request.waitReason, entry.attention?.raw].filter((value, index, all): value is string => Boolean(value) && all.indexOf(value) === index);
   const finished = entry.section === "ended";
+  const stopped = request.paused || request.userStopped;
+  const pending = pendingRequestDecisions(request, decisions);
+  const answer = async (decisionId: string, key: string) => {
+    setAnswering(decisionId);
+    setError(undefined);
+    try { await client.request("decision.answer", { workspaceId, decisionId, key }); }
+    catch (caught) { setError(readableActionError(caught)); }
+    finally { setAnswering(undefined); }
+  };
   return <Modal title={title} width={560} onClose={onClose} titleContent={<StatusPill tone={statusTone(state.status)}>{state.label}</StatusPill>}>
     <div className="space-y-4 p-4">
       <p className="text-label text-muted-foreground">{items.length} 张工单 · {relativeTime(request.createdAt)}开工</p>
-      {entry.attention && <AttentionAlert entry={entry} attention={entry.attention} handlers={handlers} sessionId={request.workerSessionId} />}
+      {entry.attention && <AttentionAlert entry={entry} attention={entry.attention} handlers={handlers} sessionId={request.workerSessionId} controls={false} />}
+      {pending.map((card) => <PendingDecision key={card.decisionId} card={card} disabled={!!answering} onAnswer={(key) => void answer(card.decisionId, key)} />)}
+      {error && <InlineNotice tone="error" className="px-0">{error}</InlineNotice>}
       <div className="flex flex-wrap gap-2">
         {request.workerSessionId && <Button size="sm" variant="ghost" outlined onClick={() => { onClose(); handlers.onOpenSession(request.workerSessionId!); }}><MessageSquare size={14} aria-hidden="true" />准备会话</Button>}
-        {!finished && !entry.attention && <Button size="sm" disabled={handlers.busy} onClick={() => handlers.onWorkAction(request.paused ? "work.resume" : "work.pause", entry.id)}>{request.paused ? "恢复全部推进" : "暂停全部"}</Button>}
+        {!finished && <Button size="sm" disabled={handlers.busy} onClick={() => handlers.onWorkAction(stopped ? "work.resume" : "work.pause", entry.id)}>{stopped ? "恢复全部推进" : "暂停全部"}</Button>}
+        {!finished && request.status === "failed" && !stopped && <Button size="sm" disabled={handlers.busy} onClick={() => handlers.onWorkAction("work.retry", entry.id)}>重试准备</Button>}
+        {!finished && <Button size="sm" variant="ghost" outlined disabled={handlers.busy} onClick={() => handlers.onWorkAction("work.cancel", entry.id)}>取消剩余工作</Button>}
       </div>
       <SupervisorDetails request={request} client={client} workspaceId={workspaceId} onOpenSession={(id) => { onClose(); handlers.onOpenSession(id); }} />
       {raw.length > 0 && <CollapsibleDetails open={technical} onToggle={() => setTechnical((open) => !open)}>{raw.join("\n\n")}</CollapsibleDetails>}
