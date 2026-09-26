@@ -52,7 +52,8 @@ describe("workbench search", () => {
         responseMessage("turn-1", "The needle file has a title; the needle is documented."),
         node("turn-2", 1),
         agent("turn-2", "agent-2", "Anything else?"),
-        agent("turn-2", "agent-quoted", "run \"quoted-term\" in C:\\temp")
+        agent("turn-2", "agent-quoted", "run \"quoted-term\" in C:\\temp"),
+        agent("turn-2", "agent-bold", "这是**重要**内容，示例 `**literal**`")
       ].join("\n"), "utf8");
       const item = await fixture.service.createWorkItem(fixture.workspaceId, {
         title: "Searchable work item",
@@ -101,6 +102,16 @@ describe("workbench search", () => {
         expect(stepQuery.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "tool", toolKind: "read" }]);
         const quoted = await service.search({ query: "\"quoted-term\" in C:\\temp" });
         expect(quoted.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "agent" }]);
+        // Emphasis is gone from the shown text; code keeps its characters.
+        const bold = await service.search({ query: "这是重要内容" });
+        expect(bold.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "agent" }]);
+        const literal = await service.search({ query: "**literal**" });
+        expect(literal.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "agent" }]);
+        // Step words alone look at every tool step.
+        const stepWord = await service.search({ query: "读取" });
+        expect(stepWord.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["read", "read"]);
+        const stepResult = await service.search({ query: "2 行" });
+        expect(stepResult.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["read"]);
       } finally {
         await service.dispose();
       }
@@ -128,12 +139,12 @@ describe("workbench search", () => {
   it("reads agent replies as the rendered text a reader sees", () => {
     expect(markdownToPlainText([
       "## 结论",
-      "项目只有 **`README.md`** 一个文件，见 [说明](docs/a.md)。",
+      "项目只有 **`README.md`** 一个文件，见 [说明](docs/a.md)，保留 `**raw**`。",
       "> *注意* ~~旧~~ 内容",
       "```ts",
-      "const snake_case_name = 1;",
+      "const snake_case_name = \"**x**\";",
       "```"
-    ].join("\n"))).toBe("结论\n项目只有 README.md 一个文件，见 说明。\n注意 旧 内容\nconst snake_case_name = 1;");
+    ].join("\n"))).toBe("结论\n项目只有 README.md 一个文件，见 说明，保留 **raw**。\n注意 旧 内容\nconst snake_case_name = \"**x**\";");
     const record = { line: 1, start: 0, source: "agent" as const, at: "2026-09-26T10:00:00.000Z" };
     const line = agent("t", "md", "I read **README.md**.");
     expect(readRolloutMessage(line, record)).toEqual({ id: "md", text: "I read README.md." });

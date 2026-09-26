@@ -8,6 +8,9 @@ import { zSearchResult } from "./search-contract.js";
 import type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchSource, SearchStats } from "./search-contract.js";
 import type { ToolAction, ToolCall } from "@vermillion/shared";
 import { describeToolStep } from "@vermillion/shared/tool-actions";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 export type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchSource } from "./search-contract.js";
 
 export type SearchSessionEntry = {
@@ -623,26 +626,29 @@ export type RolloutMessage = {
   toolKind?: string;
 };
 
+const markdownParser = unified().use(remarkParse).use(remarkGfm);
+
+type MarkdownNode = { type: string; value?: string; alt?: string | null; children?: MarkdownNode[] };
+
+const blockTypes = new Set(["paragraph", "heading", "code", "blockquote", "listItem", "tableRow", "thematicBreak", "html"]);
+
 /**
- * Agent replies render as Markdown; search matches and previews the words a reader sees, so markup
- * (emphasis, inline-code backticks, heading and quote markers, link syntax, fence lines) is removed.
- * Underscores are left alone so snake_case names stay intact.
+ * Agent replies render as Markdown (same parser as the message area); search matches and previews
+ * the text a reader sees: markup is gone, code keeps its literal content, blocks become lines.
  */
-export const markdownToPlainText = (markdown: string): string =>
-  markdown
-    .split(/\r?\n/)
-    .filter((line) => !/^\s*(```|~~~)/.test(line))
-    .map((line) => line
-      .replace(/^\s{0,3}#{1,6}\s+/, "")
-      .replace(/^\s{0,3}>\s?/, "")
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-      .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, "$2")
-      .replace(/(?<![\w*])\*(?=\S)([^*]+?)(?<=\S)\*(?![\w*])/g, "$1")
-      .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, "$1")
-      .replace(/`([^`]+)`/g, "$1"))
-    .join("\n")
-    .trim();
+export const markdownToPlainText = (markdown: string): string => {
+  const out: string[] = [];
+  const walk = (node: MarkdownNode): void => {
+    if (typeof node.value === "string" && node.type !== "html") out.push(node.value);
+    else if (node.type === "image" && node.alt) out.push(node.alt);
+    else if (node.type === "break") out.push("\n");
+    else if (node.type === "tableCell") out.push(" ");
+    node.children?.forEach(walk);
+    if (blockTypes.has(node.type)) out.push("\n");
+  };
+  walk(markdownParser.parse(markdown) as MarkdownNode);
+  return out.join("").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim();
+};
 
 /** The text a rollout record shows in the session, or undefined for records that show nothing. */
 export const readRolloutMessage = (lineText: string, message: RolloutMessageRecord): RolloutMessage | undefined => {
@@ -732,21 +738,45 @@ const providerSessionId = (entry: SearchSessionEntry): string | undefined =>
     ? entry.sessionId.slice("codex-thread:".length)
     : undefined);
 
+/** Words tool steps add in the message area; they never appear in the raw rollout record. */
+const STEP_WORDS = [
+  "思考", "读取", "列目录", "网络搜索", "搜索", "编辑", "运行", "查看图片", "生成图片", "压缩上下文", "调用",
+  "个条目", "处匹配", "无匹配", "无输出", "不存在", "无权限", "命令不存在", "超时", "退出码", "失败", "进行中",
+  "输出", "当前目录", "行"
+];
+const TOOL_RECORD_PATTERN =
+  String.raw`"type":"item_completed","thread_id":"[^"]*","turn_id":"[^"]*","item":\{"type":"(?:` +
+  [...toolItemTypes].join("|") + ")\"";
+
+const escapeRegex = (value: string): string => value.replace(/[\\.+*?()|[\]{}^$#&\-~]/g, "\\$&");
+
+/** Characters rendering removes or JSON escaping adds between two shown characters. */
+const STORED_GAP = String.raw`(?:[*_~` + "`" + String.raw`\[#> ]|\]\([^)\s]*\)|\\[nrt"\\/])*`;
+
 /**
- * Raw rollout patterns that find every record whose shown text can contain the query. The query as
- * typed covers most records; its JSON-escaped form covers quotes, backslashes and line breaks; and
- * tool steps are shown as "读取 README.md · 3 行", so a query mixing step words with a file or
- * command also looks for its longest Latin token. The shown text confirms every candidate.
+ * Regex for `text` as it may be stored: rendering removes emphasis, code backticks, link brackets
+ * and heading/quote markers between the shown characters, and JSON escapes quotes, backslashes and
+ * line breaks, so any of those may sit between two characters.
+ */
+const storedTextPattern = (text: string): string =>
+  [...text].map((char) => escapeRegex(JSON.stringify(char).slice(1, -1))).join(STORED_GAP);
+
+/**
+ * Raw rollout patterns that find every record whose shown text can contain the query; the shown
+ * text confirms every candidate. Tool steps also show generated words ("读取 README.md · 3 行"):
+ * when the query uses them, what remains (a file, a command) is searched, and a query made only of
+ * step words looks at every tool record.
  */
 export const rolloutCandidatePatterns = (query: string): string[] => {
-  const patterns = new Set([query, JSON.stringify(query).slice(1, -1)]);
-  const token = query
-    .split(/\s+|·/)
-    .filter((part) => /[a-z]/i.test(part))
-    .map((part) => part.replace(/^[^\x21-\x7e]+|[^\x21-\x7e]+$/g, ""))
-    .sort((left, right) => right.length - left.length)[0];
-  if (token && token.length >= 2) patterns.add(token);
-  return [...patterns].filter(Boolean);
+  const patterns = new Set([storedTextPattern(query)]);
+  if (STEP_WORDS.some((word) => query.includes(word))) {
+    let rest = query;
+    for (const word of STEP_WORDS) rest = rest.split(word).join(" ");
+    const tokens = rest.split(/[\s·“”"]+/).map((token) => token.replace(/^\d+$/, "")).filter(Boolean);
+    if (tokens.length === 0) patterns.add(TOOL_RECORD_PATTERN);
+    for (const token of tokens) patterns.add(storedTextPattern(token));
+  }
+  return [...patterns];
 };
 
 const searchRollouts = async (input: {
@@ -799,6 +829,7 @@ const searchRollouts = async (input: {
       executable,
       paths: batch,
       patterns: rolloutCandidatePatterns(input.query),
+      literal: false,
       signal: input.signal,
       onMatch: (match) => {
         let lines = found.get(match.path);

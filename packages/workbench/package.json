@@ -21,6 +21,9 @@
   "dependencies": {
     "@vermillion/shared": "workspace:*",
     "@vscode/ripgrep": "^1.15.14",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "11.0.0",
+    "unified": "11.0.5",
     "zod": "^3.25.76"
   },
   "bin": {
