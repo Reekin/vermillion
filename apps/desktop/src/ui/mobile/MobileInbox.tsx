@@ -39,7 +39,7 @@ function InboxCard({ item, client, refresh, openSession }: {
     finally { setBusy(false); }
   };
   return <Card header={<>
-    <Badge>{item.kind === "decision" ? "决策" : item.kind === "merged" ? "已合入" : "工作受阻"}</Badge>
+    <Badge status={item.kind === "merged" ? "closed" : item.kind === "integration" ? "decision" : undefined}>{item.kind === "decision" ? "决策" : item.kind === "merged" ? "已合入" : "工作受阻"}</Badge>
     {sessionId && <Button className="ml-auto" variant="ghost" outlined onClick={() => openSession(sessionId)}>进入会话</Button>}
   </>}>
     {item.kind === "decision" ? <>
