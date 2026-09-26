@@ -23,7 +23,7 @@ sudo bash vps-setup.sh --host YOUR_PUBLIC_IP --map 8443:18001 --map 8444:18002
 
 `--host` 接受公网 IPv4、无方括号的 IPv6 或域名，不含协议或端口。域名的 A/AAAA 应全部指向此 VPS。可重复 `--map HTTPS:LOOPBACK`；`--frp-port` 默认 7000。安装时隐藏输入至少 32 字符的随机 token，同一个 token 配置到各桌面。可用密码管理器生成并保存；不要把 token 放进命令参数、聊天或日志。无人值守执行用 `--token-file /root/frp-token`，文件必须是 UTF-8 单行、权限 600/400。脚本不会输出 token。
 
-Windows 可双击 `vps-setup.bat`，按提示输入 SSH 地址、公网地址和映射；它通过系统 OpenSSH 上传脚本并进入 VPS 安装终端，sudo 密码和 token 在终端内输入。需要 Windows OpenSSH Client、可交互登录和 sudo 权限。非默认 SSH 端口/IPv6 SSH 地址使用 `%USERPROFILE%\.ssh\config` 的 Host 别名。包装脚本不接受 token 参数，不在 Windows 保存 token。
+Windows 可双击 `vps-setup.bat`，按提示输入 SSH 地址、公网地址和映射；它通过系统 OpenSSH 上传脚本并进入 VPS 安装终端，sudo 密码和 token 在终端内输入。需要 PowerShell 7（`pwsh`）、Windows OpenSSH Client、可交互登录和 sudo 权限。非默认 SSH 端口/IPv6 SSH 地址使用 `%USERPROFILE%\.ssh\config` 的 Host 别名。包装脚本不接受 token 参数，不在 Windows 保存 token。
 
 脚本固定下载 **Caddy 2.11.4 / frp 0.71.0** 官方 release，核对官方校验清单（Caddy SHA512、frp SHA256），生成私有临时配置，实际执行 `frps verify` 与 `caddy validate`。全部成功后才安装自有 systemd 服务。下载失败或配置验证失败不会改服务。支持 amd64/arm64。重复执行会更新同一组配置和二进制并重启服务，不重复创建用户，也不删除证书数据。更新时会短暂断线；客户端恢复连接。若已有活动的 `caddy`/`frps` 服务，脚本拒绝接管，宜使用独立 VPS。
 
