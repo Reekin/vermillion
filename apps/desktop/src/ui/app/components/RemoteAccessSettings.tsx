@@ -40,6 +40,7 @@ export function RemoteAccessSettings() {
   const [pairing, setPairing] = useState(false);
   const [pairedName, setPairedName] = useState<string>();
   const [expired, setExpired] = useState(false);
+  const [remainingMinutes, setRemainingMinutes] = useState(10);
   const [removeDevice, setRemoveDevice] = useState<RemoteDevice>();
   const [removing, setRemoving] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -106,11 +107,14 @@ export function RemoteAccessSettings() {
     setExpired(false);
     if (!pair) return;
     let disposed = false;
+    const updateRemaining = () => setRemainingMinutes(Math.max(0, Math.ceil((Date.parse(pair.expiresAt) - Date.now()) / 60_000)));
+    updateRemaining();
+    const countdown = setInterval(updateRemaining, 1000);
     void QRCode.toDataURL(pair.qrContent, { width: 240, margin: 2 }).then((url) => {
       if (!disposed) setQrImage(url);
     }).catch(() => { if (!disposed) setError("二维码生成失败，请使用公网地址和配对码配对。"); });
     const timer = setTimeout(() => setExpired(true), Math.max(0, Date.parse(pair.expiresAt) - Date.now()));
-    return () => { disposed = true; clearTimeout(timer); };
+    return () => { disposed = true; clearTimeout(timer); clearInterval(countdown); };
   }, [pair]);
 
   const save = useCallback((patch: Partial<RemoteConfig>) => {
@@ -221,7 +225,7 @@ export function RemoteAccessSettings() {
           {qrImage && <img src={qrImage} alt="远程访问配对二维码" width={240} height={240} />}
           <span className="font-mono text-title text-strong">{pair.code}</span>
           <span className="break-all text-caption text-muted-foreground">{publicUrl}</span>
-          <InlineNotice>{`有效至 ${new Date(pair.expiresAt).toLocaleTimeString()}，仅可使用一次`}</InlineNotice>
+          <InlineNotice>{`剩余约 ${remainingMinutes} 分钟，仅可使用一次`}</InlineNotice>
         </>}
       </div>
     </Modal>}
