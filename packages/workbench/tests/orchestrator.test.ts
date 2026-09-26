@@ -39,7 +39,6 @@ it("keeps the worker session at workspace root while directing tools to its work
   expect(f.runner.resume).toHaveBeenCalledWith("original", expect.objectContaining({ cwd: f.root }));
   const message = vi.mocked(f.runner.send).mock.calls[0]![1];
   expect(message).toContain("工作目录: " + worktreePath);
-  expect(message).toContain("显式指定工具 workdir、git -C 或 worktree 内的绝对路径");
 });
 
 it("passes resolved reviewer and verifier model configuration separately from their prompts", async () => {
@@ -59,15 +58,11 @@ it("passes resolved reviewer and verifier model configuration separately from th
   expect(content).toContain("# 审阅者");
   expect(content).toContain("中文交接：查看候选成果。");
   expect(content).not.toContain("mode: override");
-  expect(content).toContain("## reviewer subagent model configuration（JSON；仅用于核对）");
   expect(content).toContain(JSON.stringify({ modelId: "reviewer-model", reasoningOptionId: "high" }));
-  expect(content).toContain("## reviewer spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）");
   expect(content).toContain(JSON.stringify({ fork_context: false, model: "reviewer-model", reasoning_effort: "high" }));
   expect(content).toContain("# Verifier override");
   expect(content).not.toContain("serviceTierId: priority");
-  expect(content).toContain("## verifier subagent model configuration（JSON；仅用于核对）");
   expect(content).toContain(JSON.stringify({ modelId: "verifier-model", reasoningOptionId: "max", serviceTierId: "priority" }));
-  expect(content).toContain("## verifier spawn_agent top-level parameters（JSON；复制到工具参数，不放入 message）");
   expect(content).toContain(JSON.stringify({ fork_context: false, model: "verifier-model", reasoning_effort: "max" }));
 });
 
@@ -115,8 +110,11 @@ it("interrupts a cancelled worker before sending work to the next shared-resourc
   await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
   f.orchestrator.start();
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  const dispatch = vi.spyOn(f.service, "dispatchBusiness");
   const second = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker-b", needs });
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await vi.waitFor(() => expect(dispatch.mock.calls.some(([, subject], index) =>
+    "workItemId" in subject && subject.workItemId === second.workItemId && dispatch.mock.settledResults[index]?.type === "fulfilled"
+  )).toBe(true));
   expect((await f.service.getWorkItem(f.workspaceId, second.workItemId)).status).toBe("queued");
   expect(f.runner.send).toHaveBeenCalledOnce();
   expect(f.active.has("worker-a")).toBe(true);
@@ -200,9 +198,12 @@ it("records an ended Worker without automatically sending a handoff reminder", a
   const item = await f.service.createWorkItem(f.workspaceId, { ...contract, sessionId: "worker" });
   f.orchestrator.start();
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
+  const dispatch = vi.spyOn(f.service, "dispatchBusiness");
   f.complete("worker");
   await vi.waitFor(async () => expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).run.activeTurnId).toBeUndefined());
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await vi.waitFor(() => expect(dispatch.mock.calls.some(([, subject], index) =>
+    "workItemId" in subject && subject.workItemId === item.workItemId && dispatch.mock.settledResults[index]?.type === "fulfilled"
+  )).toBe(true));
   expect(f.runner.send).toHaveBeenCalledOnce();
   expect((await f.service.getWorkItem(f.workspaceId, item.workItemId)).status).toBe("running");
 });

@@ -10,6 +10,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:semantic": "pnpm --filter @vermillion/workbench test:semantic",
+    "test:ui": "node apps/desktop/tests/modal-dismiss-smoke.mjs && node apps/desktop/tests/renderer-selection-smoke.mjs && node apps/desktop/tests/session-sidebar-scroll-smoke.mjs",
     "dev": "pnpm --filter @vermillion/desktop dev",
     "start": "pnpm --filter @vermillion/desktop start",
     "prepare:worktree": "node scripts/prepare-worktree.mjs",
@@ -22,6 +24,7 @@
     ]
   },
   "devDependencies": {
+    "jsdom": "^26.1.0",
     "@types/node": "^24.7.2",
     "tsx": "^4.20.6",
     "typescript": "^5.8.0",

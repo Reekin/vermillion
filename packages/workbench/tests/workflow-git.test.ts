@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { contract, git, setup, submission } from "./workflow-fixture.js";
 import { DocsService } from "../src/docs.js";
+import { WorkbenchService } from "../src/workbench-service.js";
 
 const fixtures: Awaited<ReturnType<typeof setup>>[] = [];
 const fixture = async (now?: () => string) => { const f = await setup(now); fixtures.push(f); return f; };
@@ -57,27 +58,27 @@ it("observes external Git commits through filesystem events and sends changed re
   expect((await service.getWorkItem(workspaceId, item.workItemId)).run.resumeMessage).toContain("+external change");
 });
 
-it("refreshes Explorer after external commits and index-only changes without active work items", async () => {
-  const { service, workspaceId, root } = await fixture();
+it.each(["stage", "commit", "unstage"])("refreshes Explorer after external %s without active work items", async (operation) => {
+  const { service, workspaceId, root, options } = await fixture();
   const path = ".vermillion/docs/status.md";
   await service.writeDoc(workspaceId, path, "saved content\n");
-  await new Promise((resolve) => setTimeout(resolve, 350));
+  if (operation !== "stage") await git(root, "add", path);
+  if (operation === "unstage") await git(root, "commit", "-qm", "Initial document");
+  // Start a fresh watcher after setup, so earlier notifications cannot satisfy this operation.
+  await service.dispose();
+  const observer = new WorkbenchService(options);
   const changed = vi.fn();
-  const unsubscribe = service.subscribe((event) => { if (event.type === "docs.changed") changed(); });
   try {
-    await git(root, "add", path);
-    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    changed.mockClear();
-    await git(root, "commit", "-qm", "External commit");
-    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
-    expect(await service.pendingDocChanges(workspaceId)).toEqual([]);
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    changed.mockClear();
-    await git(root, "rm", "--cached", path);
-    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
-    expect(await service.pendingDocChanges(workspaceId)).not.toEqual([]);
-  } finally { unsubscribe(); }
+    await observer.pendingDocChanges(workspaceId);
+    observer.subscribe((event) => { if (event.type === "docs.changed") changed(); });
+    if (operation === "stage") await git(root, "add", path);
+    else if (operation === "commit") await git(root, "commit", "-qm", "External commit");
+    else await git(root, "rm", "--cached", path);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled(), { timeout: 5_000 });
+    const changes = await observer.pendingDocChanges(workspaceId);
+    if (operation === "commit") expect(changes).toEqual([]);
+    else expect(changes).toContainEqual(expect.objectContaining({ path }));
+  } finally { await observer.dispose(); }
 });
 
 it("removes only an empty residual directory after Git already unregistered a worktree", async () => {

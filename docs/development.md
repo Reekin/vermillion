@@ -4,6 +4,8 @@
 
 启动、检查和打包命令见[AGENTS.md](../AGENTS.md#运行与验证)。一键启动入口 Windows 为 `start.bat`，macOS 为 `start.command`，都会在源码更新后自动构建。
 
+测试分组与统一 UI 回归入口见[自动化测试](../.vermillion/docs/Workbench/Missions/Standards.md#自动化测试)；CLI 帮助、派工和子代理说明的 Codex 评估见[文本语义检查](../.vermillion/docs/Workbench/Missions/Standards.md#文本语义检查)。
+
 新 worktree 第一次运行检查前执行 `pnpm prepare:worktree -- --worktree "<worktree>"`，或执行 `prepare-worktree.bat "<worktree>"`。准备完成条件见[开发环境准备](../.vermillion/docs/Foundation/Development/PRD.md)。
 
 Worker / Verifier 通过 `app.start / app.stop` 启停实例，先用单方法 `--help` 查询目标、候选与隔离参数，显式指定被测 checkout 或发布目录。按启动结果的 CDP 地址与定向 CLI 调用信息操作，目标与生命周期规则见[隔离实例准备](../.vermillion/docs/Foundation/Acceptance/PRD.md)。

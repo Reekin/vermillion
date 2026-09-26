@@ -5,6 +5,7 @@
     "declaration": false,
     "declarationMap": false,
     "noEmit": true,
+    "allowJs": true,
     "rootDir": "../.."
   },
   "include": [

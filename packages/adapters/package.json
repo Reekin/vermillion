@@ -8,7 +8,10 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "files": ["src", "dist"],
+  "files": [
+    "src",
+    "dist"
+  ],
   "scripts": {
     "build": "pnpm exec tsc -p tsconfig.json",
     "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit && pnpm exec tsc -p tsconfig.test.json --pretty false",
@@ -17,8 +20,5 @@
   },
   "dependencies": {
     "@vermillion/shared": "workspace:*"
-  },
-  "devDependencies": {
-    "vitest": "^3.2.4"
   }
 }

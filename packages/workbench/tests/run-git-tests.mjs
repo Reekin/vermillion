@@ -3,21 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { setTimeout as sleep } from "node:timers/promises";
+import { gitTestFiles } from "./git-test-files.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const vitest = resolve(packageRoot, "..", "..", "node_modules", "vitest", "vitest.mjs");
-const defaults = [
-  "tests/app-launcher.test.ts",
-  "tests/docs-diff.test.ts",
-  "tests/docs-discard.test.ts",
-  "tests/docs-draft.test.ts",
-  "tests/integration-git.test.ts",
-  "tests/workflow-git.test.ts",
-  "tests/worktree-cleanup.test.ts"
-];
-const files = process.env.VERMILLION_GIT_TEST_FILES?.split(",").filter(Boolean) ?? defaults;
+const files = process.env.VERMILLION_GIT_TEST_FILES?.split(",").filter(Boolean) ?? gitTestFiles;
 const concurrency = Number(process.env.VERMILLION_GIT_TEST_MAX_WORKERS ?? 2);
 const timeoutMs = Number(process.env.VERMILLION_GIT_TEST_TIMEOUT_MS ?? 90_000);
 if (!Number.isInteger(concurrency) || concurrency < 1 || !Number.isFinite(timeoutMs) || timeoutMs < 1) {
@@ -35,16 +28,16 @@ const killTree = async (pid) => {
     try { process.kill(-pid, "SIGKILL"); } catch {}
   }
   const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline && processRunning(pid)) await new Promise((done) => setTimeout(done, 25));
+  while (Date.now() < deadline && processRunning(pid)) await sleep(25);
   if (processRunning(pid)) throw new Error("Test process tree did not stop: " + pid);
 };
 
-const runFile = async (file) => {
+export const runFile = async (file) => {
   const tempRoot = await mkdtemp(join(tmpdir(), "verm-git-file-"));
   return new Promise((resolveRun) => {
   const child = spawn(process.execPath, [vitest, "run", file, "--testTimeout=0", "--hookTimeout=0"], {
     cwd: packageRoot,
-    env: { ...process.env, TEMP: tempRoot, TMP: tempRoot, TMPDIR: tempRoot },
+    env: { ...process.env, VERMILLION_GIT_TEST_FILES: file, TEMP: tempRoot, TMP: tempRoot, TMPDIR: tempRoot },
     detached: process.platform !== "win32",
     stdio: "inherit"
   });
@@ -86,17 +79,19 @@ const runFile = async (file) => {
   });
 };
 
-let next = 0;
-const results = [];
-let fatal = false;
-const worker = async () => {
-  while (!fatal && next < files.length) {
-    const file = files[next++];
-    const result = await runFile(file);
-    results.push(result);
-    if (result.fatal) fatal = true;
-    if (!result.ok) process.exitCode = 1;
-  }
-};
-await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
-for (const result of results) process.stdout.write(`${result.ok ? "PASS" : "FAIL"} ${result.file} (${result.reason})\n`);
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  let next = 0;
+  const results = [];
+  let fatal = false;
+  const worker = async () => {
+    while (!fatal && next < files.length) {
+      const file = files[next++];
+      const result = await runFile(file);
+      results.push(result);
+      if (result.fatal) fatal = true;
+      if (!result.ok) process.exitCode = 1;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
+  for (const result of results) process.stdout.write(`${result.ok ? "PASS" : "FAIL"} ${result.file} (${result.reason})\n`);
+}

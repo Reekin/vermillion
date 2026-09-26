@@ -60,6 +60,8 @@ try {
   await writeFile(join(directory, "main.cjs"), `
 const { app, BrowserWindow, ipcMain } = require("electron");
 const fs = require("node:fs");
+app.setPath("userData", __dirname + "/user-data");
+app.setPath("sessionData", __dirname + "/session-data");
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true, contextIsolation: false } });
   ipcMain.once("result", (_, result) => {

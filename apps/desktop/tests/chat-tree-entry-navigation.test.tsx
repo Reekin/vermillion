@@ -1,6 +1,6 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
 import { createRendererStore } from "../src/store/store.js";
 import type { DesktopTransport } from "../src/transport/desktop-transport.js";
@@ -11,10 +11,15 @@ import {
   type ChatTreeNavigationEntry
 } from "../src/ui/chat-shell/use-chat-tree-controller.js";
 
+afterEach(cleanup);
+
 const setup = (navigationEntry?: ChatTreeNavigationEntry, metadataOnly = false) => {
   const calls: string[] = [];
   const tree = { treeId: "root", currentSessionId: "worker", currentNodeId: "latest", nodes: [], windows: [], visibleTurnIds: [] } as unknown as ChatTreeSnapshotRpc;
-  const open = vi.fn(async () => { calls.push("open:worker"); });
+  let releaseOpen!: () => void;
+  let rejectOpen!: (error: Error) => void;
+  const opening = new Promise<void>((resolve, reject) => { releaseOpen = resolve; rejectOpen = reject; });
+  const open = vi.fn(async (_id: string, _options?: { signal?: AbortSignal }) => { calls.push("open:worker"); await opening; });
   const activate = vi.fn(async () => { calls.push("activate:worker"); });
   const get = vi.fn(async (_sessionId: string, options?: { scope?: "tree" | "path" }) => {
     calls.push(`get:${options?.scope ?? "tree"}:worker`);
@@ -25,17 +30,21 @@ const setup = (navigationEntry?: ChatTreeNavigationEntry, metadataOnly = false) 
     sessionBrowser: { open, activate },
     chatTree: { get, jump, operations: vi.fn(async () => ({ operations: [] })) }
   } as unknown as DesktopTransport;
-  let controller!: ReturnType<typeof useChatTreeController>;
   const store = createRendererStore();
   if (metadataOnly) store.ingestEnvelope({ eventId: "metadata", cursor: "1", occurredAt: "2026-09-22T00:00:00Z", event: {
     type: "session.created", sessionId: "worker", conversationId: "c", engineId: "e", status: "idle"
   } });
-  const Probe = () => {
-    controller = useChatTreeController({ store, transport, sessionId: "worker", navigationEntry, refreshSignal: 0, onStatusNotice: vi.fn() });
-    return null;
+  const onStatusNotice = vi.fn();
+  const view = renderHook(({ refreshSignal }) => useChatTreeController({
+    store, transport, sessionId: "worker", navigationEntry, refreshSignal, onStatusNotice
+  }), { initialProps: { refreshSignal: 0 } });
+  const finishOpen = async () => {
+    await act(async () => { releaseOpen(); });
+    await waitFor(() => expect(view.result.current.isChatTreeLoading).toBe(false));
+    expect(view.result.current.chatTreeError).toBeUndefined();
   };
-  renderToStaticMarkup(createElement(Probe));
-  return { controller, calls, open, activate, get, jump, store, tree };
+  return { get controller() { return view.result.current; }, calls, open, activate, get, jump, store, tree,
+    finishOpen, releaseOpen, rejectOpen, unmount: view.unmount, rerender: view.rerender, onStatusNotice };
 };
 
 describe("chat tree entry navigation", () => {
@@ -58,7 +67,7 @@ describe("chat tree entry navigation", () => {
       } });
       return { ...test.tree, windows: [{ sessionId: "worker", snapshot, cursor: "1", revision: "epoch", replaceSessionHistory: true, hasOlder: false, hasNewer: false }] } as ChatTreeSnapshotRpc;
     });
-    await test.controller.refreshChatTree();
+    await test.finishOpen();
     expect(reads).toBe(1);
     expect(test.store.getKnownSessionWindows().worker).toEqual({ revision: "epoch", cursor: "2" });
     expect(test.store.getDomainReadModel().getMessageBlock("m:md")?.text).toBe("continues");
@@ -68,14 +77,14 @@ describe("chat tree entry navigation", () => {
     expect(test.controller.isOpening).toBe(true);
     expect(test.controller.isChatTreeLoading).toBe(true);
     expect(test.controller.chatTreeError).toBeUndefined();
-    await test.controller.refreshChatTree();
+    await test.finishOpen();
     // 路径先到达供消息区展示，整棵树随后到达。
     expect(test.calls).toEqual([
       "open:worker", "activate:worker", "jump:historical", "get:path:worker", "get:tree:worker"
     ]);
     expect(test.activate).toHaveBeenCalledWith("worker", { focusTree: true });
     expect(test.open).toHaveBeenCalledWith("worker", { includeWindow: false, signal: expect.any(AbortSignal), readId: expect.stringContaining("::open::"), onProgress: expect.any(Function) });
-    await test.controller.refreshChatTree();
+    await act(async () => { await test.controller.refreshChatTree(); });
     expect(test.open).toHaveBeenCalledTimes(1);
     expect(test.activate).toHaveBeenCalledTimes(1);
     expect(test.jump).toHaveBeenCalledTimes(1);
@@ -84,20 +93,17 @@ describe("chat tree entry navigation", () => {
 
   it("shares the pending open across refresh notifications", async () => {
     const test = setup({ focusTree: true });
-    let finish!: () => void;
-    test.open.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
-    const first = test.controller.refreshChatTree();
-    const second = test.controller.refreshChatTree();
+    test.rerender({ refreshSignal: 1 });
+    test.rerender({ refreshSignal: 2 });
     expect(test.open).toHaveBeenCalledTimes(1);
-    finish();
-    await Promise.all([first, second]);
+    await test.finishOpen();
     expect(test.activate).toHaveBeenCalledTimes(1);
     expect(test.get).toHaveBeenCalledTimes(2);
   });
 
   it("preserves the saved tree position for ordinary sidebar entry", async () => {
     const test = setup({});
-    await test.controller.refreshChatTree();
+    await test.finishOpen();
     expect(test.calls).toEqual([
       "open:worker", "get:path:worker", "activate:worker", "get:tree:worker"
     ]);
@@ -107,12 +113,27 @@ describe("chat tree entry navigation", () => {
 
   it("retries a failed entry without retaining its rejected open", async () => {
     const test = setup({ focusTree: true });
-    test.open.mockRejectedValueOnce(new Error("rollout unavailable"));
-    await expect(test.controller.refreshChatTree()).rejects.toThrow("rollout unavailable");
+    await act(async () => { test.rejectOpen(new Error("rollout unavailable")); });
+    await waitFor(() => expect(test.controller.chatTreeError).toContain("rollout unavailable"));
     expect(test.get).not.toHaveBeenCalled();
-    await test.controller.refreshChatTree();
+    expect(test.onStatusNotice).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("rollout unavailable") }));
+    test.open.mockResolvedValueOnce(undefined);
+    await act(async () => { await test.controller.refreshChatTree(); });
     expect(test.open).toHaveBeenCalledTimes(2);
     expect(test.activate).toHaveBeenCalledTimes(1);
+    expect(test.controller.chatTreeError).toBeUndefined();
+    expect(test.controller.isOpening).toBe(false);
+  });
+
+  it("cancels loading on unmount and ignores a late open result", async () => {
+    const test = setup();
+    const signal = test.open.mock.calls[0]![1]!.signal!;
+    expect(signal.aborted).toBe(false);
+    test.unmount();
+    expect(signal.aborted).toBe(true);
+    await act(async () => { test.releaseOpen(); });
+    expect(test.get).not.toHaveBeenCalled();
+    expect(test.activate).not.toHaveBeenCalled();
   });
 });
 

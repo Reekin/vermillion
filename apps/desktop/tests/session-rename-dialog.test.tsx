@@ -1,34 +1,40 @@
-import { describe, expect, it } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+// @vitest-environment jsdom
+import { cleanup, render, screen } from "@testing-library/react";
+import { userEvent } from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRenameDialog } from "../src/ui/app/components/SessionRenameDialog.js";
 
-const saveButton = (markup: string): string =>
-  markup.match(/<button[^>]*>(?:保存|保存中…)<\/button>/)?.[0] ?? "";
-
-const renderDialog = (props: { title: string; busy?: boolean; error?: string }) =>
-  renderToStaticMarkup(
-    <SessionRenameDialog
-      title={props.title}
-      busy={props.busy ?? false}
-      error={props.error}
-      onSubmit={() => {}}
-      onClose={() => {}}
-    />
-  );
+afterEach(cleanup);
 
 describe("SessionRenameDialog", () => {
-  it("prefills the current title and blocks saving while it is unchanged", () => {
-    const markup = renderDialog({ title: "当前标题" });
-
-    expect(markup).toContain("重命名会话");
-    expect(markup).toContain('value="当前标题"');
-    expect(saveButton(markup)).toContain("disabled");
+  it("blocks unchanged and blank titles, then submits a trimmed edited title", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(<SessionRenameDialog title="当前标题" busy={false} error={undefined} onSubmit={onSubmit} onClose={vi.fn()} />);
+    const input = screen.getByRole<HTMLInputElement>("textbox", { name: "会话标题" });
+    const save = screen.getByRole<HTMLButtonElement>("button", { name: "保存" });
+    expect(input.value).toBe("当前标题");
+    expect(save.disabled).toBe(true);
+    await user.click(save);
+    await user.clear(input);
+    await user.type(input, "   ");
+    await user.keyboard("{Enter}");
+    expect(save.disabled).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.clear(input);
+    await user.type(input, "  新标题  ");
+    expect(save.disabled).toBe(false);
+    await user.click(save);
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("新标题");
   });
 
-  it("blocks saving for a blank title and keeps a save error visible", () => {
-    const markup = renderDialog({ title: "   ", error: "Session title must not be blank." });
-
-    expect(saveButton(markup)).toContain("disabled");
-    expect(markup).toContain("Session title must not be blank.");
+  it("disables editing during save and retains the error when saving finishes", () => {
+    const props = { title: "当前标题", onSubmit: vi.fn(), onClose: vi.fn(), error: undefined };
+    const view = render(<SessionRenameDialog {...props} busy={true} />);
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "会话标题" }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "保存中…" }).disabled).toBe(true);
+    view.rerender(<SessionRenameDialog {...props} busy={false} error="Save failed" />);
+    expect(screen.getByText("Save failed")).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "会话标题" }).disabled).toBe(false);
   });
 });

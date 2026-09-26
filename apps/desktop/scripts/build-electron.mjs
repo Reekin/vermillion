@@ -1,46 +1,11 @@
 import { mkdir, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { build, context } from "esbuild";
+import { desktopRoot, electronBuildOptions } from "./electron-build-options.mjs";
 
-const currentDir = dirname(fileURLToPath(import.meta.url));
-const desktopRoot = resolve(currentDir, "..");
 const watchMode = process.argv.includes("--watch");
-
-const mainEntryPoint = resolve(desktopRoot, "src/electron/main.ts");
-const preloadEntryPoint = resolve(desktopRoot, "src/electron/preload.cts");
 const outputDir = resolve(desktopRoot, "dist-electron");
-
-const sharedOptions = {
-  bundle: true,
-  sourcemap: true,
-  platform: "node",
-  target: "node20",
-  external: ["electron"],
-  logLevel: "info"
-};
-
-const mainBuildOptions = {
-  ...sharedOptions,
-  format: "esm",
-  entryPoints: [mainEntryPoint],
-  outfile: resolve(outputDir, "main.js")
-};
-
-const preloadBuildOptions = {
-  ...sharedOptions,
-  format: "cjs",
-  entryPoints: [preloadEntryPoint],
-  outfile: resolve(outputDir, "preload.cjs")
-};
-
-const historyWorkerBuildOptions = {
-  ...sharedOptions,
-  format: "cjs",
-  entryPoints: [resolve(desktopRoot, "../desktop-server/src/engines/codex/history-projection-worker.cjs")],
-  // The bundled runtime resolves this worker relative to dist-electron/main.js.
-  outfile: resolve(outputDir, "history-projection-worker.cjs")
-};
+const { main: mainBuildOptions, preload: preloadBuildOptions, historyWorker: historyWorkerBuildOptions } = electronBuildOptions(outputDir);
 
 await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });

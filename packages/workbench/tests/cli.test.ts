@@ -16,17 +16,17 @@ afterEach(async () => {
 });
 
 describe("vermillion cli", () => {
-  it("distinguishes Issues from execution work items in help", async () => {
+  it("exposes execution work item and Issue help through the CLI", async () => {
     const out: string[] = [];
     vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
     expect(await runCli(["--help"])).toBe(0);
     const global = out.pop()!;
-    expect(global).toMatch(/执行工单 WorkItem[^\n]*\n(?:    [^\n]*\n)*    workItem\.list/);
-    expect(global).toMatch(/Issues（问题与建议的分诊记录，不是执行工单）\n(?:    [^\n]*\n)*    issue\.list/);
+    expect(global).toContain("workItem.list");
+    expect(global).toContain("issue.list");
     expect(await runCli(["workItem.list", "--help"])).toBe(0);
-    expect(out.pop()).toContain("不返回 Issues 中的问题与建议");
+    expect(out.pop()).toContain("workItem.list");
     expect(await runCli(["issue.list", "--help"])).toBe(0);
-    expect(out.pop()).toContain("不返回执行工单（WorkItem）");
+    expect(out.pop()).toContain("issue.list");
   });
 
   it("updates, preserves and clears resource claims through workItem.update", async () => {
@@ -86,8 +86,6 @@ describe("vermillion cli", () => {
     expect(await runCli(["app.start", "--help"])).toBe(0);
     expect(out.join("")).toContain("expectedRevision");
     expect(out.join("")).toContain("expectedBuildId");
-    expect(out.join("")).toContain("源码示例");
-    expect(out.join("")).toContain("发布示例");
   });
 
   it("runs registry methods against the persistence dir and prints JSON", async () => {
