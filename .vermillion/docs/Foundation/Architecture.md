@@ -110,3 +110,19 @@ Vermillion 将逐轮生效配置作为节点执行记录持久化，并通过已
 工作台发给会话的派发、续做和通知消息，以及 CLI 帮助与报错，使用英文，不进入语言字典。
 
 Worker、监工等 agent 登记的说明与外部原文按文字保存和显示。已保存的文字记录走同一条文字显示路径，不做迁移，也不另设读取分支。
+
+## 远程访问
+
+产品行为见[手机远程](../Workbench/Mobile/PRD.md)，安全与连接约束见[手机远程实现规范](../Workbench/Mobile/Standards.md)。
+
+远程网关属于桌面主进程（`apps/desktop/src/electron/remote/`），开启远程访问时在 loopback 随机端口启动。HTTP 提供手机网页静态资源、配对与推送登记接口；一条 WebSocket 连接承载会话 RPC、会话事件推送、工作台 RPC 与 `WorkbenchEvent`。网关复用 renderer 所用的同一个 session router 与工作台 RPC handler，只在入口做设备鉴权和方法白名单，不另建查询或投影；每个连接独立持有事件订阅，断开即释放。
+
+手机网页是 `apps/desktop` 内的独立 Vite 入口，与桌面 renderer 共用 store、transport 与会话区组件。它把 `SessionClientApi` 和工作台 bridge 实现为 WebSocket 客户端，替代 Electron preload；重连沿用 store-bridge 的 cursor 回放与断档重拉快照。页面随桌面构建产物打包，由网关提供。
+
+隧道由网关的 frpc 管理器负责：按设置在 `<baseDir>/remote/` 生成 frpc 配置，把 VPS 端口映射到本次网关端口，以子进程运行并随远程访问关闭或应用退出结束，运行状态进入 `remote.status`。
+
+推送发送器挂在主进程已有的提醒触发点（用户会话完成一轮、Inbox 新增项）上，按前台与空闲条件决定是否发送，经 Node `http2` 与 .p8 签名的 JWT 直连 APNs，与桌面平台无关。
+
+远程设置、设备记录（凭据哈希、名称、APNs device token 与环境、最近连接时间）和 frpc 配置保存在全局 `<baseDir>/remote/`，不写入 workspace 注册表。`remote.*` 方法由主进程处理，经 local endpoint 供 CLI 调用，设置页通过同一组方法读写。
+
+iOS App 位于 `apps/ios`（XcodeGen 描述工程）：SwiftUI 实现桌面列表、配对与推送登记，配对凭据存钥匙串；进入桌面时用 WKWebView 加载该桌面网关提供的手机网页，并在页面脚本执行前注入该桌面的凭据；APNs device token 登记到每台已配对桌面；点击通知时按推送携带的桌面与目标打开对应页面。
