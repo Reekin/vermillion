@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowAction } from "@vermillion/workbench/client";
-import { actionRoleLabel, actionStatusText, integrationFailureSummary, integrationProgress, integrationShortStatus, waitingActions, workItemEvents, workItemProgress } from "../src/ui/app/components/workflow-display.js";
+import { actionRoleLabel, actionStatusText, formatDuration, integrationFailureSummary, integrationProgress, integrationShortStatus, readableFailure, waitingActions, workItemEvents, workItemProgress, workItemSteps } from "../src/ui/app/components/workflow-display.js";
 import { agentRun, execution, integration, workItem } from "./workbench-fixtures.js";
 
 describe("execution and integration presentation", () => {
@@ -33,7 +33,7 @@ describe("execution and integration presentation", () => {
     const returned = workItemProgress(item, [execute], activeRun);
     expect(returned.shortLabel).toBe("退回待续做");
     expect(returned.title).toBe("提交已退回");
-    expect(returned.next).toContain("当前 turn 结束");
+    expect(returned.next).toContain("当前一轮结束");
 
     const waiting = workItemProgress(item, [execute], { ...activeRun, status: "done", endedAt: "2026-01-01T00:00:02.000Z" });
     expect(waiting.shortLabel).toBe("等待调度续接");
@@ -87,5 +87,39 @@ describe("execution and integration presentation", () => {
     expect(progress.reason).toContain("成果摘要");
     expect(progress.reason).toContain("abcdef0123456789");
     expect(progress.reason).toContain("1 / 2 通过");
+  });
+
+  it("maps raw failures to a cause and next step without engine wording", () => {
+    expect(readableFailure("turn interrupted")).toEqual({ title: "本轮执行被中断", next: "重试后从原会话继续。" });
+    expect(readableFailure("进程重启，会话无法恢复").title).toBe("执行会话无法恢复");
+    expect(readableFailure('turn failed: {"error":{"type":"invalid_request_error","message":"The reasoning_content is missing"}}').title).toBe("模型请求失败：The reasoning_content is missing");
+    expect(readableFailure("Command failed: git worktree remove x\n fatal: busy").title).toBe("Git 操作失败");
+    expect(readableFailure("something odd")).toEqual({ title: "执行遇到问题", next: "打开详情查看原始原因。" });
+  });
+
+  it("drops internal run notes and turn wording from events", () => {
+    const item = workItem({ workItemId: "one", status: "closed", merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:04.000Z" } });
+    const events = workItemEvents(item, [], [agentRun({ runId: "run", sessionId: "worker", workItemId: "one", status: "done", turns: 2, startedAt: "2026-01-01T00:00:00.000Z", endedAt: "2026-01-01T00:00:02.000Z", note: "done" })]);
+    expect(events.map((event) => event.detail)).toEqual(["成果已进入主分支 · abcdef0", undefined, "共 2 轮"]);
+    expect(JSON.stringify(events)).not.toMatch(/turn|done/);
+  });
+
+  it("draws the lifecycle with passed-stage times and the current wait on the current stage", () => {
+    const actions = [execution({ actionId: "exec", workItemId: "one", createdAt: "2026-01-01T01:00:00.000Z" }), integration({ actionId: "merge", workItemId: "one", createdAt: "2026-01-01T02:00:00.000Z" })];
+    const closed = workItemSteps(workItem({ workItemId: "one", status: "closed", merge: { diffStat: "", mergedAt: "2026-01-01T03:00:00.000Z" } }), actions, []);
+    expect(closed.map((step) => [step.label, step.state])).toEqual([["排队", "done"], ["执行", "done"], ["待合入", "done"], ["已关闭", "done"]]);
+    expect(closed.every((step) => step.time)).toBe(true);
+    const waiting = workItemSteps(workItem({ workItemId: "one", status: "running" }), actions.slice(0, 1), [], { title: "已暂停", next: "", action: "resume" });
+    expect(waiting.map((step) => step.state)).toEqual(["done", "current", "pending", "pending"]);
+    expect(waiting[1]).toMatchObject({ tone: "attention", note: "已暂停" });
+    const cancelled = workItemSteps(workItem({ workItemId: "one", status: "cancelled" }), actions.slice(0, 1), []);
+    expect(cancelled[1]).toMatchObject({ state: "current", tone: "failed", note: "已取消" });
+  });
+
+  it("writes durations in readable Chinese units", () => {
+    expect(formatDuration(45_000)).toBe("45 秒");
+    expect(formatDuration(87_000)).toBe("1 分 27 秒");
+    expect(formatDuration(52 * 60_000)).toBe("52 分钟");
+    expect(formatDuration(185 * 60_000)).toBe("3 小时 5 分");
   });
 });
