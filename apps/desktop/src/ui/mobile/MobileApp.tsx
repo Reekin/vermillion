@@ -57,7 +57,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
       return result.cursor;
     } });
     const transport = createDesktopTransport(remote.session);
-    return { remote, client: createWorkbenchClient(remote.workbench), transport, store };
+    return { remote, client: createWorkbenchClient(remote.workbench), transport, store, drafts: new Map<string, string>() };
   });
   const { remote, client, transport, store } = runtime;
   const connection = useSyncExternalStore(remote.subscribeConnection, remote.getConnectionState);
@@ -70,6 +70,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const [inboxLoading, setInboxLoading] = useState(true);
   const [reloadSignal, setReloadSignal] = useState(0);
   const [inboxRefresh] = useState(createCoalescedRefresh);
+  const [workspaceRefresh] = useState(createCoalescedRefresh);
   const visibleScope = useRef({ turnIds: new Set<string>(), sessionId: "" });
   const onVisiblePathChange = useCallback((turnIds: string[], sessionId: string) => {
     visibleScope.current = { turnIds: new Set(turnIds), sessionId };
@@ -84,11 +85,19 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
     catch (cause) { if (!signal.aborted && remote.getConnectionState() === "connected") setInboxError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (!signal.aborted) setInboxLoading(false); }
   });
+  const refreshWorkspaces = () => workspaceRefresh.request(async (signal) => {
+    try {
+      const next = await client.request("workspace.list", {});
+      if (!signal.aborted) { setWorkspaces(next); setWorkspaceError(undefined); }
+    } catch (cause) {
+      if (!signal.aborted && remote.getConnectionState() === "connected") setWorkspaceError(String(cause));
+    }
+  });
   useEffect(() => {
     const changed = () => setRoute(parseMobileRoute(location.hash));
     window.addEventListener("hashchange", changed);
     void remote.connect().catch(() => undefined);
-    return () => { window.removeEventListener("hashchange", changed); inboxRefresh.cancel(); remote.dispose(); };
+    return () => { window.removeEventListener("hashchange", changed); inboxRefresh.cancel(); workspaceRefresh.cancel(); remote.dispose(); };
   }, [remote]);
   useEffect(() => {
     if (connection !== "connected") return;
@@ -103,9 +112,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
       if (cancelled) void value.unsubscribe().catch(() => undefined);
       else subscription = value;
     }).catch((cause) => { if (!cancelled) setWorkspaceError(String(cause)); });
-    void client.request("workspace.list", {}).then((value) => {
-      if (!cancelled) { setWorkspaces(value); setWorkspaceError(undefined); }
-    }).catch((cause) => { if (!cancelled) setWorkspaceError(String(cause)); });
+    void refreshWorkspaces();
     void refreshInbox();
     void sidebar.reload();
     setReloadSignal((value) => value + 1);
@@ -114,6 +121,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, client, transport, store]);
   useEffect(() => client.subscribe((event) => {
+    if (event.type === "workspaces.changed") void refreshWorkspaces();
     if (["decisions.changed", "workItems.changed", "actions.changed", "runs.changed", "workRequests.changed"].includes(event.type)) void refreshInbox();
   }), [client]);
 
@@ -130,12 +138,12 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
       <Button variant={route.page !== "inbox" ? "primary" : "ghost"} onClick={() => { location.hash = "#/sessions"; }}>会话列表</Button>
       <Button variant={route.page === "inbox" ? "primary" : "ghost"} onClick={() => { location.hash = "#/inbox"; }}>Inbox{items.length ? " · " + items.length : ""}</Button>
     </nav>
-    {route.page === "session" ? <MobileSessionPane sessionId={route.sessionId} store={store} transport={transport} reloadSignal={reloadSignal} disabled={connection !== "connected"} onVisiblePathChange={onVisiblePathChange} /> : route.page === "inbox" ?
+    {route.page === "session" ? <MobileSessionPane sessionId={route.sessionId} store={store} transport={transport} reloadSignal={reloadSignal} disabled={connection !== "connected"} onVisiblePathChange={onVisiblePathChange} draftCache={runtime.drafts} /> : route.page === "inbox" ?
       <MobileInbox items={items} error={inboxError} loading={inboxLoading} route={route} client={client} refresh={refreshInbox} openSession={openSession} /> : <>
         <PanelHeader title="会话"><Field kind="select" aria-label="筛选 workspace" value={workspaceFilter} onChange={(event) => setWorkspaceFilter(event.target.value)}>
           <option value="">全部</option>{workspaces.map((w) => <option key={w.workspaceId} value={w.workspaceId}>{w.label}</option>)}
         </Field></PanelHeader>
-        {workspaceError || (connection === "connected" && sidebar.error) ? <EmptyState title="会话列表加载失败" hint={workspaceError ?? sidebar.error} action={<Button onClick={() => void sidebar.reload()}>重试</Button>} /> :
+        {workspaceError || (connection === "connected" && sidebar.error) ? <EmptyState title="会话列表加载失败" hint={workspaceError ?? sidebar.error} action={<Button onClick={() => { void refreshWorkspaces(); void sidebar.reload(); }}>重试</Button>} /> :
           !sidebar.sessions.length ? <EmptyState title={sidebar.loading || connection !== "connected" ? "正在读取会话" : "暂无会话"} /> :
             <ul className="min-h-0 flex-1 overflow-auto">{sidebar.sessions.map((s) => <li key={s.sessionId}>
               <ListRow onClick={() => openSession(s.sessionId)} title={s.title} leading={<><StatusDot status={s.statusDot} />{s.role && s.role !== "design-partner" && <Badge>{roleLabel[s.role] ?? s.role}</Badge>}</>}

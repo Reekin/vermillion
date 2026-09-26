@@ -226,7 +226,7 @@ export const ApprovalFlowView = ({
                       )
                     }
                   >
-                    {chineseLabels ? ({ accept: "批准", acceptForSession: "本会话始终批准", decline: "拒绝", cancel: "稍后" }[decision] ?? decisionButtonLabel(decision)) : decisionButtonLabel(decision)}
+                    {chineseLabels ? ({ accept: "批准", acceptForSession: "本会话始终批准", acceptWithExecpolicyAmendment: "批准并记住规则", applyNetworkPolicyAmendment: "应用网络规则", decline: "拒绝", cancel: "取消执行" }[decision] ?? decisionButtonLabel(decision)) : decisionButtonLabel(decision)}
                   </Button>
                 ))
               ) : (

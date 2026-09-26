@@ -17,6 +17,7 @@ export type MobileSessionPaneProps = {
   transport: DesktopTransport;
   reloadSignal?: number;
   disabled?: boolean;
+  draftCache?: Map<string, string>;
   onVisiblePathChange?: (turnIds: string[], sessionId: string) => void;
 };
 
@@ -45,11 +46,12 @@ export const mobileVisiblePath = (path: ChatTreeSnapshotRpc): ChatTreeSnapshotRp
 export const MobileSessionPane = (props: MobileSessionPaneProps) =>
   <MobileSessionContent key={props.sessionId} {...props} />;
 
-const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, disabled = false, onVisiblePathChange }: MobileSessionPaneProps) => {
+const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, disabled = false, onVisiblePathChange, draftCache }: MobileSessionPaneProps) => {
   const state = useRendererStoreState(store);
   const [path, setPath] = useState<ChatTreeSnapshotRpc>();
   const [error, setError] = useState<string>();
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(() => draftCache?.get(sessionId) ?? "");
+  useEffect(() => { draftCache?.set(sessionId, draft); }, [draft, draftCache, sessionId]);
   const [busy, setBusy] = useState(false);
   const [visibility, setVisibility] = useState<Record<string, ProcessVisibilityOverride>>({});
   const refreshQueue = useMemo(createCoalescedRefresh, [sessionId, store, transport]);
