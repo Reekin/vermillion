@@ -5,13 +5,16 @@ import { workbenchRpc, zRemoteConfig, type RemoteConfig, type WorkbenchRpcRespon
 import { RemoteDevices } from "./devices.js";
 import { startRemoteGateway, type GatewayOptions } from "./gateway.js";
 import { RemoteTunnel } from "./tunnel.js";
+import { ApnsSender, pushConfigured, type PushMessage } from "./push.js";
 
 export class RemoteAccessService {
   readonly devices: RemoteDevices;
-  private config: RemoteConfig = { enabled: false, serverAddr: "", serverPort: 7000, frpToken: "", remotePort: 18080, publicPort: 443, publicUrl: "", desktopName: hostname(), frpcPath: "", trustedCaFile: "" };
+  private config: RemoteConfig = zRemoteConfig.parse({ enabled: false, serverAddr: "", frpToken: "", publicUrl: "", desktopName: hostname(), frpcPath: "" });
   private gateway?: Awaited<ReturnType<typeof startRemoteGateway>>;
   private tunnel: RemoteTunnel;
   private error?: string;
+  private pushError?: string;
+  private readonly sender = new ApnsSender();
   private operations: Promise<unknown> = Promise.resolve();
   constructor(private readonly directory: string, private readonly options: Omit<GatewayOptions, "devices" | "publicUrl" | "desktopName">) {
     this.devices = new RemoteDevices(directory);
@@ -25,7 +28,8 @@ export class RemoteAccessService {
   }
   status() {
     return { ...this.tunnel.status, ...(this.error ? { state: "error" as const, error: this.error } : {}),
-      ...(this.gateway ? { gatewayPort: this.gateway.port } : {}), connectedDevices: this.gateway?.connectedDevices() ?? 0 };
+      ...(this.gateway ? { gatewayPort: this.gateway.port } : {}), connectedDevices: this.gateway?.connectedDevices() ?? 0,
+      pushConfigured: pushConfigured(this.config), ...(this.pushError ? { pushError: this.pushError } : {}) };
   }
   getConfig(): RemoteConfig { return { ...this.config }; }
   private publicUrl(): string {
@@ -51,8 +55,10 @@ export class RemoteAccessService {
     const file = join(this.directory, "settings.json");
     await writeFile(file + ".tmp", JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
     await rename(file + ".tmp", file);
+    const reconnect = Object.keys(patch).some((key) => !key.startsWith("apns"));
     this.config = config;
-    await this.restart();
+    this.pushError = undefined;
+    if (reconnect) await this.restart();
     return this.getConfig();
   }
   async handleRequest(request: { method: string; params?: unknown }): Promise<WorkbenchRpcResponse> {
@@ -69,6 +75,7 @@ export class RemoteAccessService {
             if (!this.gateway) throw new Error("请先开启并配置远程访问");
             result = this.devices.pair(this.publicUrl(), this.config.desktopName); break;
           case "remote.device.list": result = this.devices.list(); break;
+          case "remote.push.test": result = await this.sendPush(params.deviceId!, { body: "测试推送", target: "#/inbox" }); break;
           case "remote.device.revoke":
             this.gateway?.revoke(params.deviceId!);
             await this.devices.revoke(params.deviceId!); result = {}; break;
@@ -79,6 +86,29 @@ export class RemoteAccessService {
     });
     this.operations = run;
     return run;
+  }
+  private async sendPush(deviceId: string, message: PushMessage): Promise<{ accepted: true; apnsId: string }> {
+    try {
+      if (!this.config.enabled) throw new Error("请先开启远程访问");
+      const target = this.devices.pushTargets().find((entry) => entry.deviceId === deviceId);
+      if (!target) throw new Error("设备尚未登记推送，或已被移除");
+      const reply = await this.sender.send(this.getConfig(), target.push, new URL(this.publicUrl()).origin, message);
+      if (reply.status === 410 || reply.reason === "Unregistered" || reply.reason === "BadDeviceToken") {
+        await this.devices.invalidatePush(deviceId, target.push);
+      }
+      if (reply.status !== 200) throw new Error(`APNs ${reply.status}: ${reply.reason ?? "请求失败"}`);
+      this.pushError = undefined;
+      return { accepted: true, apnsId: reply.apnsId };
+    } catch (error) {
+      this.pushError = error instanceof Error ? error.message : "推送失败";
+      throw error;
+    }
+  }
+  async notify(message: PushMessage): Promise<void> {
+    if (!this.config.enabled || !pushConfigured(this.config)) return;
+    for (const target of this.devices.pushTargets()) {
+      await this.sendPush(target.deviceId, message).catch(() => undefined);
+    }
   }
   async stop(): Promise<void> {
     await this.tunnel.stop();

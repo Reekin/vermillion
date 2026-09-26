@@ -58,6 +58,7 @@ export const workbenchRpc = {
   "remote.pair": { params: zEmpty, result: zRemotePair },
   "remote.device.list": { params: zEmpty, result: z.array(zRemoteDevice) },
   "remote.device.revoke": { params: z.object({ deviceId: z.string().min(1) }), result: zEmpty },
+  "remote.push.test": { params: z.object({ deviceId: z.string().min(1) }), result: z.object({ accepted: z.literal(true), apnsId: z.string() }) },
   "session.read": {
     params: z.object({ sessionId: z.string().min(1), limit: z.number().int().min(1).max(200).optional(), maxChars: z.number().int().min(1).max(200000).optional() }),
     result: z.unknown()

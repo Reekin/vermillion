@@ -6,7 +6,8 @@ export const app = defineMessages(
     "app.askSourceTitle": (p: { question: string }) => `澄清 · ${p.question}`,
     "app.notify.sessionCompleted": (p: { title: string }) => `「${p.title}」会话已完成`,
     "app.notify.decision": (p: { question: string }) => `需要你决定：${p.question}`,
-    "app.notify.merged": (p: { title: string }) => `已合入：${p.title}`
+    "app.notify.merged": (p: { title: string }) => `已合入：${p.title}`,
+    "app.notify.blocked": (p: { title: string }) => `工作受阻：${p.title}`
     ,
     "app.tab.sessions": "会话",
     "app.tab.work": "工作",
@@ -164,7 +165,8 @@ export const app = defineMessages(
     "app.askSourceTitle": (p) => `Clarify · ${p.question}`,
     "app.notify.sessionCompleted": (p) => `Session "${p.title}" finished`,
     "app.notify.decision": (p) => `Decision needed: ${p.question}`,
-    "app.notify.merged": (p) => `Merged: ${p.title}`
+    "app.notify.merged": (p) => `Merged: ${p.title}`,
+    "app.notify.blocked": (p) => `Work blocked: ${p.title}`
     ,
     "app.tab.sessions": "Sessions",
     "app.tab.work": "Work",

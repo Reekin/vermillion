@@ -16,7 +16,7 @@ declare global {
   };
 
   type SessionDesktopApi = {
-    pickRemoteProgramPath: () => Promise<{ canceled: boolean; path?: string }>;
+    pickRemoteProgramPath: (kind?: "apns") => Promise<{ canceled: boolean; path?: string }>;
     pickEngineProgramPath: (engineId: string) => Promise<{
       canceled: boolean;
       path?: string;

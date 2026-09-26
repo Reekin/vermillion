@@ -52,6 +52,25 @@ export async function startRemoteGateway(options: GatewayOptions) {
         reply(200, await options.summary());
         return;
       }
+      if (path === "/api/push" && (req.method === "POST" || req.method === "DELETE")) {
+        const device = options.devices.authenticate(bearer(req));
+        if (!device) { reply(401, { error: "Unauthorized" }); return; }
+        if (req.method === "DELETE") await options.devices.registerPush(device.deviceId);
+        else {
+          let body = "";
+          for await (const chunk of req) {
+            body += chunk.toString();
+            if (body.length > 4096) { reply(413, { error: "Request too large" }); return; }
+          }
+          const input = JSON.parse(body) as { token?: unknown; environment?: unknown };
+          if (typeof input.token !== "string" || !/^[a-fA-F0-9]{32,512}$/.test(input.token) ||
+              (input.environment !== "sandbox" && input.environment !== "production")) {
+            reply(400, { error: "Invalid APNs registration" }); return;
+          }
+          await options.devices.registerPush(device.deviceId, { token: input.token.toLowerCase(), environment: input.environment });
+        }
+        reply(200, {}); return;
+      }
       if (path.startsWith("/api/") || req.method !== "GET") { reply(404, { error: "Not found" }); return; }
       // Only the dedicated mobile entry and public build assets are served, never the Electron entry.
       const asset = path === "/" ? "mobile.html" : decodeURIComponent(path).replace(/^\//, "");

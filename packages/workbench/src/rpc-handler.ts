@@ -15,6 +15,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "remote.pair": desktopRequired,
     "remote.device.list": desktopRequired,
     "remote.device.revoke": desktopRequired,
+    "remote.push.test": desktopRequired,
     "session.read": (p) => service.readSession(p),
     "sessionNavigation.create": (p) => service.createSessionNavigation(p),
     "sessionNavigation.list": (p) => service.listSessionNavigations(p),

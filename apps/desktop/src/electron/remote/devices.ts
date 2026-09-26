@@ -5,7 +5,8 @@ import { join } from "node:path";
 export type RemoteDevice = {
   deviceId: string; name: string; pairedAt: string; lastConnectedAt?: string; pushAvailable: boolean;
 };
-type StoredDevice = RemoteDevice & { tokenHash: string };
+export type PushRegistration = { token: string; environment: "sandbox" | "production" };
+type StoredDevice = RemoteDevice & { tokenHash: string; push?: PushRegistration };
 export const tokenHash = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 export class RemoteDevices {
@@ -21,7 +22,23 @@ export class RemoteDevices {
       }
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  list(): RemoteDevice[] { return this.devices.map(({ tokenHash: _hash, ...device }) => ({ ...device })); }
+  list(): RemoteDevice[] { return this.devices.map(({ tokenHash: _hash, push: _push, ...device }) => ({ ...device })); }
+  pushTargets(): Array<{ deviceId: string; push: PushRegistration }> {
+    return this.devices.flatMap((d) => d.push ? [{ deviceId: d.deviceId, push: { ...d.push } }] : []);
+  }
+  async registerPush(deviceId: string, push?: PushRegistration): Promise<void> {
+    const device = this.devices.find((d) => d.deviceId === deviceId);
+    if (!device) throw new Error("设备已移除，请重新配对");
+    device.push = push;
+    device.pushAvailable = Boolean(push);
+    await this.save();
+  }
+  async invalidatePush(deviceId: string, expected: PushRegistration): Promise<void> {
+    const device = this.devices.find((d) => d.deviceId === deviceId);
+    if (device?.push?.token === expected.token && device.push.environment === expected.environment) {
+      await this.registerPush(deviceId);
+    }
+  }
   pair(publicUrl: string, desktopName: string): { code: string; expiresAt: string; qrContent: string } {
     const code = randomInt(0, 100_000_000).toString().padStart(8, "0");
     const expiresAt = this.now() + 600_000;
@@ -52,7 +69,7 @@ export class RemoteDevices {
     if (!token || token.length > 512) return undefined;
     const found = this.devices.find((d) => d.tokenHash === tokenHash(token));
     if (!found) return undefined;
-    const { tokenHash: _hash, ...device } = found;
+    const { tokenHash: _hash, push: _push, ...device } = found;
     return device;
   }
   async connected(deviceId: string): Promise<void> {

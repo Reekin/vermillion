@@ -7,6 +7,7 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "remote.pair": "Remote access enabled; creates a one-time 8-character pairing code and returns code, qrContent and expiresAt, valid for 10 minutes.",
   "remote.device.list": "Desktop online; lists paired devices with pairing time, last connection time and push availability.",
   "remote.device.revoke": "Desktop online; removes the device given by deviceId, closes its connections immediately and revokes its credential.",
+  "remote.push.test": "Desktop online; sends a test notification to the device given by deviceId that has registered APNs. Configure apnsKeyPath, apnsKeyId, apnsTeamId and apnsBundleId through remote.configure first. Success means APNs accepted it, not that the phone displayed it.",
   "docs.discardPreview": "Read-only preview: paths optionally names files or directories inside .vermillion/docs; returns the currently changed files.",
   "docs.discard": "Discards staged and unstaged changes of the confirmed files, restoring HEAD; added files are deleted. paths must be the concrete file paths returned by discardPreview; directories are not expanded. Returns the changes actually handled.",
   "docs.rebase": "Use after committing docs in a session tree conflicted with the main branch. Brings the tree's draft onto the main branch; conflicting files stay in the draft with conflict markers, to be resolved with docs.write before docs.commit. Empty files means the draft is in sync.",

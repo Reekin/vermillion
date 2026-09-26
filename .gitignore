@@ -9,3 +9,5 @@ release/
 shots/
 .qa/
 .qa-*/
+apps/ios/*.xcodeproj/
+apps/ios/build/

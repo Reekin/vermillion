@@ -11,6 +11,7 @@ export type AgentCompletionNotification = {
 };
 
 export type AgentCompletionNotifier = {
+  handleEnvelope: (envelope: EventEnvelope) => void;
   handlePush: (push: SessionEventPush) => void;
   handleBatch: (batch: SessionEventPushBatch) => void;
 };
@@ -46,6 +47,7 @@ export const createAgentCompletionNotifier = (input: {
   };
 
   return {
+    handleEnvelope,
     handlePush: (push) => handleEnvelope(push.envelope),
     handleBatch: (batch) => {
       for (const push of batch.pushes) {

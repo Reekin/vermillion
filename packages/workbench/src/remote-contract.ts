@@ -12,7 +12,11 @@ export const zRemoteConfig = z.object({
   publicUrl: z.string(),
   desktopName: z.string(),
   frpcPath: z.string(),
-  trustedCaFile: z.string().default("")
+  trustedCaFile: z.string().default(""),
+  apnsKeyPath: z.string().default(""),
+  apnsKeyId: z.string().default(""),
+  apnsTeamId: z.string().default(""),
+  apnsBundleId: z.string().default("")
 });
 
 export const zRemoteStatus = z.object({
@@ -20,7 +24,9 @@ export const zRemoteStatus = z.object({
   error: z.string().optional(),
   gatewayPort: zPort.optional(),
   connectedDevices: z.number().int().nonnegative(),
-  frpcPath: z.string().optional()
+  frpcPath: z.string().optional(),
+  pushConfigured: z.boolean(),
+  pushError: z.string().optional()
 });
 
 export const zRemotePair = z.object({

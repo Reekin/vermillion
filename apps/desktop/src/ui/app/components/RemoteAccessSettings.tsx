@@ -44,6 +44,8 @@ export function RemoteAccessSettings() {
   const [removeDevice, setRemoveDevice] = useState<RemoteDevice>();
   const [removing, setRemoving] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testingPush, setTestingPush] = useState<string>();
+  const [pushResult, setPushResult] = useState<string>();
   const saveQueue = useRef(Promise.resolve());
   const loaded = useRef(false);
   const pairDeviceIds = useRef(new Set<string>());
@@ -161,6 +163,22 @@ export function RemoteAccessSettings() {
     finally { setPairing(false); }
   };
 
+  const testPush = async (deviceId: string) => {
+    setTestingPush(deviceId); setPushResult(undefined);
+    try {
+      await client.request("remote.push.test", { deviceId });
+      setPushResult("APNs 已受理测试推送");
+    } catch (cause) { setPushResult(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setTestingPush(undefined); }
+  };
+
+  const pickPushKey = async () => {
+    try {
+      const picked = await window.sessionDesktop?.pickRemoteProgramPath("apns");
+      if (picked?.path && !picked.canceled) save({ apnsKeyPath: picked.path });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  };
+
   const revoke = async () => {
     if (!removeDevice) return;
     setRemoving(true);
@@ -210,11 +228,24 @@ export function RemoteAccessSettings() {
         {status && <span className="text-caption text-muted-foreground">{status.connectedDevices} 台设备已连接</span>}
       </div>
       {pairedName && !pair && <InlineNotice className="px-0 pb-0">{`${pairedName} 已配对`}</InlineNotice>}
+      <PanelHeader title="推送" className="-ml-4" align="start"><Badge>{status?.pushConfigured ? "已配置" : "未配置"}</Badge></PanelHeader>
+      <div className="flex items-end gap-2">
+        <div className="min-w-0 flex-1"><ConfigField label="APNs 密钥文件（.p8）" value={config.apnsKeyPath} onSave={(apnsKeyPath) => save({ apnsKeyPath: apnsKeyPath.trim() })} /></div>
+        <Button variant="ghost" size="sm" outlined disabled={saving} onClick={() => void pickPushKey()}>选择密钥</Button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <ConfigField label="Key ID" value={config.apnsKeyId} onSave={(apnsKeyId) => save({ apnsKeyId: apnsKeyId.trim() })} />
+        <ConfigField label="Team ID" value={config.apnsTeamId} onSave={(apnsTeamId) => save({ apnsTeamId: apnsTeamId.trim() })} />
+        <ConfigField label="App Bundle ID" value={config.apnsBundleId} onSave={(apnsBundleId) => save({ apnsBundleId: apnsBundleId.trim() })} />
+      </div>
+      <InlineNotice className="min-h-8 px-0 pb-0">{pushResult || status?.pushError || "在已登记推送的设备旁发送测试通知"}</InlineNotice>
       <PanelHeader title="已配对设备" className="-ml-4" />
       {devices.length === 0 && <InlineNotice className="px-0 pb-0">尚无已配对设备</InlineNotice>}
       {devices.map((device) => <ListRow key={device.deviceId} title={device.name}
         meta={<><span className="block">{`配对：${formatTime(device.pairedAt)}`}</span><span className="block">{`最近连接：${formatTime(device.lastConnectedAt)}`}</span></>}
-        trailing={<Badge>{device.pushAvailable ? "推送可用" : "推送不可用"}</Badge>}
+        trailing={<div className="flex items-center gap-2"><Badge>{device.pushAvailable ? "推送可用" : "推送不可用"}</Badge>
+          <Button variant="ghost" size="sm" outlined disabled={!device.pushAvailable || !status?.pushConfigured || !config.enabled || Boolean(testingPush) || saving}
+            onClick={() => void testPush(device.deviceId)}>{testingPush === device.deviceId ? "正在发送…" : "发送测试推送"}</Button></div>}
         hoverActions={<IconButton icon={X} label={`移除 ${device.name}`} onClick={() => setRemoveDevice(device)} />} />)}
     </>}
     {pair && <Modal title="配对新设备" width={360} onClose={() => setPair(undefined)}>

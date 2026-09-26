@@ -39,7 +39,7 @@ type SessionLocalAssetsApi = {
 };
 
 type SessionDesktopApi = {
-  pickRemoteProgramPath: () => Promise<{ canceled: boolean; path?: string }>;
+  pickRemoteProgramPath: (kind?: "apns") => Promise<{ canceled: boolean; path?: string }>;
   pickEngineProgramPath: (engineId: string) => Promise<{
     canceled: boolean;
     path?: string;
@@ -167,8 +167,8 @@ const localAssetsApi: SessionLocalAssetsApi = {
 };
 
 const desktopApi: SessionDesktopApi = {
-  pickRemoteProgramPath: async () =>
-    (await ipcRenderer.invoke(SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL)) as Awaited<ReturnType<SessionDesktopApi["pickRemoteProgramPath"]>>,
+  pickRemoteProgramPath: async (kind) =>
+    (await ipcRenderer.invoke(SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL, kind)) as Awaited<ReturnType<SessionDesktopApi["pickRemoteProgramPath"]>>,
   pickEngineProgramPath: async (engineId) =>
     (await ipcRenderer.invoke(
       SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,

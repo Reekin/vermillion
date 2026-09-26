@@ -7,6 +7,7 @@ import {
   ipcMain,
   Notification,
   powerSaveBlocker,
+  powerMonitor,
   shell,
   Tray
 } from "electron";
@@ -32,6 +33,7 @@ import {
   WORKBENCH_IPC_REQUEST_CHANNEL
 } from "./ipc-channels.js";
 import { createSessionIpcRouter } from "./session-ipc-router.js";
+import { shouldPush } from "./remote/push.js";
 import { AppLauncher, Orchestrator, RoleService, WorkbenchService, createWorkbenchRpcHandler, defaultCodexRolloutsDir, startLocalEndpoint, type AcceptanceLaunchRecord, type AppWindowInput, type AppWindowResult, type InboxItem } from "@vermillion/workbench";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "./agent-runner.js";
 import { createSessionNavigation } from "./session-navigation.js";
@@ -743,7 +745,7 @@ const boot = async (): Promise<void> => {
   };
   const completionNotifier = createAgentCompletionNotifier({
     notify: (completed) => {
-      if (!isInBackground()) {
+      if (!shouldPush(isInBackground(), powerMonitor.getSystemIdleTime())) {
         return;
       }
       void Promise.all([service.getSessionBrowserItem(completed.sessionId), interfaceLocale(service)])
@@ -751,7 +753,9 @@ const boot = async (): Promise<void> => {
           // Agent sessions (steward / worker / supervisor) and any subagent they spawn finish turns all the time;
           // only the user's own top-level sessions are worth a desktop notification. Agent outcomes surface via Inbox.
           if (session && !session.role && !session.parentSessionId) {
-            showDesktopNotification(translate(locale, "app.notify.sessionCompleted", { title: session.title }));
+            const body = translate(locale, "app.notify.sessionCompleted", { title: session.title });
+            if (isInBackground()) showDesktopNotification(body);
+            void remote.notify({ body, target: "#/session/" + encodeURIComponent(completed.sessionId) });
           }
         })
         .catch((error: unknown) => {
@@ -770,13 +774,11 @@ const boot = async (): Promise<void> => {
   const router = createSessionIpcRouter({
     service,
     onPush: (push) => {
-      completionNotifier.handlePush(push);
       if (!window.isDestroyed()) {
         window.webContents.send(SESSION_IPC_EVENTS_PUSH_CHANNEL, push);
       }
     },
     onPushBatch: (batch) => {
-      completionNotifier.handleBatch(batch);
       if (!window.isDestroyed()) {
         window.webContents.send(SESSION_IPC_EVENTS_PUSH_CHANNEL, batch);
       }
@@ -898,6 +900,8 @@ const boot = async (): Promise<void> => {
     summary: async () => ({ desktopName: remote.getConfig().desktopName, inboxCount: (await workbenchService.listInbox()).length })
   });
   await remote.initialize();
+  // Notifications observe live events independently of any renderer's reading subscriptions.
+  const stopCompletionNotifications = service.subscribe(completionNotifier.handleEnvelope);
   const desktopWorkbenchRequest = (payload: unknown) => {
     const request = payload as { method: string; params: unknown };
     return typeof request?.method === "string" && request.method.startsWith("remote.")
@@ -908,7 +912,7 @@ const boot = async (): Promise<void> => {
   );
   const inboxKey = (item: InboxItem): string => item.kind === "decision"
     ? `${item.workspaceId}:${item.card.decisionId}`
-    : `${item.workspaceId}:${item.workItem.workItemId}:${item.workItem.merge?.mergedAt}`;
+    : `${item.kind}:${item.workspaceId}:${item.workItem.workItemId}:${item.kind === "integration" ? item.action.actionId : item.workItem.merge?.mergedAt}`;
   // Reading the inbox touches every registered workspace, so one unreadable workspace must not take
   // the app down; the Inbox panel reports the same failure itself. Until a read succeeds there is no
   // baseline, and the first successful read only records keys instead of announcing every open item.
@@ -926,20 +930,26 @@ const boot = async (): Promise<void> => {
   };
   const seededInbox = await readInbox();
   let knownInbox = seededInbox && new Set(seededInbox.map(inboxKey));
+  let inboxNotifications = Promise.resolve();
   const unsubscribeWorkbench = workbenchService.subscribe((event) => {
     if (!window.isDestroyed()) {
       window.webContents.send(WORKBENCH_IPC_EVENT_CHANNEL, event);
     }
     if (event.type === "decisions.changed" || event.type === "workItems.changed") {
-      void Promise.all([readInbox(), interfaceLocale(service)]).then(([items, locale]) => {
+      inboxNotifications = inboxNotifications.then(async () => {
+        const [items, locale] = await Promise.all([readInbox(), interfaceLocale(service)]);
         if (!items) return;
         const baseline = knownInbox;
         knownInbox = new Set(items.map(inboxKey));
-        const item = baseline && items.find((entry) => !baseline.has(inboxKey(entry)));
-        if (item && isInBackground()) {
-          showDesktopNotification(item.kind === "decision"
+        for (const item of baseline ? items.filter((entry) => !baseline.has(inboxKey(entry))) : []) {
+          const body = item.kind === "decision"
             ? translate(locale, "app.notify.decision", { question: translateServiceText(locale, item.card.question) })
-            : translate(locale, "app.notify.merged", { title: item.workItem.title }));
+            : translate(locale, item.kind === "merged" ? "app.notify.merged" : "app.notify.blocked", { title: item.workItem.title });
+          if (isInBackground()) showDesktopNotification(body);
+          if (shouldPush(isInBackground(), powerMonitor.getSystemIdleTime())) {
+            const itemKey = item.kind === "decision" ? item.card.decisionId : item.workItem.workItemId;
+            void remote.notify({ body, target: `#/inbox/${encodeURIComponent(item.workspaceId)}/${encodeURIComponent(itemKey)}` });
+          }
         }
       });
     }
@@ -968,6 +978,7 @@ const boot = async (): Promise<void> => {
   orchestrator.start();
   let remoteStopped = false;
   app.on("before-quit", (event) => {
+    stopCompletionNotifications();
     if (!remoteStopped) {
       event.preventDefault();
       void remote.dispose().finally(() => { remoteStopped = true; app.quit(); });
@@ -997,8 +1008,9 @@ const boot = async (): Promise<void> => {
       };
     }
   );
-  ipcMain.handle(SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL, async () => {
-    const result = await dialog.showOpenDialog(window, { title: "选择 frpc 程序", properties: ["openFile"] });
+  ipcMain.handle(SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL, async (_event, kind: unknown) => {
+    const result = await dialog.showOpenDialog(window, { title: kind === "apns" ? "选择 APNs 密钥" : "选择 frpc 程序", properties: ["openFile"],
+      ...(kind === "apns" ? { filters: [{ name: "APNs 密钥", extensions: ["p8"] }] } : {}) });
     return { canceled: result.canceled, path: result.filePaths[0] };
   });
   ipcMain.handle(
