@@ -29,6 +29,7 @@ export type SessionIpcRouter = {
 
 export type CreateWorkbenchIpcRouterOptions = {
   service: SessionShellService;
+  disposeService?: boolean;
   onPush: (push: SessionEventPush) => void;
   onPushBatch?: (batch: SessionEventPushBatch) => void;
   createSubscriptionId?: () => string;
@@ -302,7 +303,7 @@ export const createSessionIpcRouter = (
       }
       subscriptions.clear();
       flushPushQueue();
-      await options.service.dispose();
+      if (options.disposeService !== false) await options.service.dispose();
     }
   };
 };

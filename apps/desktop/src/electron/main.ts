@@ -24,6 +24,7 @@ import {
   SESSION_IPC_READ_PROGRESS_CHANNEL,
   SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
   SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
+  SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL,
   SESSION_IPC_REQUEST_CHANNEL,
   SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
   SESSION_IPC_WRITE_CLIPBOARD_IMAGE_CHANNEL,
@@ -53,6 +54,7 @@ import { writeVerifiedClipboardText } from "./clipboard-writer.js";
 import { writeVerifiedClipboardImage } from "./clipboard-image-writer.js";
 import { createAgentCompletionNotifier } from "./agent-completion-notification.js";
 import { mergeLoginShellPath } from "./login-shell-path.js";
+import { RemoteAccessService } from "./remote/service.js";
 
 app.setName("Vermillion");
 if (process.platform === "darwin") mergeLoginShellPath();
@@ -888,8 +890,21 @@ const boot = async (): Promise<void> => {
     workbenchService.resolveSessionInstructions(workspaceId, metadata));
   workbenchService.setSessionTreeResolver(async (sessionId) => service.getSessionTreeId(sessionId));
   const workbenchRpc = createWorkbenchRpcHandler(workbenchService);
+  const remote: RemoteAccessService = new RemoteAccessService(join(persistenceBaseDir, "remote"), {
+    assetsDir: join(appRoot, "dist-web"),
+    createRouter: (push) => createSessionIpcRouter({ service, disposeService: false, onPush: push, onPushBatch: push }),
+    workbenchRequest: workbenchRpc,
+    subscribeWorkbench: (push) => workbenchService.subscribe(push),
+    summary: async () => ({ desktopName: remote.getConfig().desktopName, inboxCount: (await workbenchService.listInbox()).length })
+  });
+  await remote.initialize();
+  const desktopWorkbenchRequest = (payload: unknown) => {
+    const request = payload as { method: string; params: unknown };
+    return typeof request?.method === "string" && request.method.startsWith("remote.")
+      ? remote.handleRequest(request) : workbenchRpc(request);
+  };
   ipcMain.handle(WORKBENCH_IPC_REQUEST_CHANNEL, (_event, payload: unknown) =>
-    workbenchRpc(payload as { method: string; params: unknown })
+    desktopWorkbenchRequest(payload)
   );
   const inboxKey = (item: InboxItem): string => item.kind === "decision"
     ? `${item.workspaceId}:${item.card.decisionId}`
@@ -943,7 +958,7 @@ const boot = async (): Promise<void> => {
         ? { ok: true, result: response.result }
         : { ok: false, error: response.error.message };
     }
-    return workbenchRpc(request);
+    return desktopWorkbenchRequest(request);
   }, { pid: process.pid, instanceId: process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN });
   const orchestrator = new Orchestrator({
     service: workbenchService,
@@ -951,7 +966,13 @@ const boot = async (): Promise<void> => {
     runner: agentRunner
   });
   orchestrator.start();
-  app.on("before-quit", () => {
+  let remoteStopped = false;
+  app.on("before-quit", (event) => {
+    if (!remoteStopped) {
+      event.preventDefault();
+      void remote.dispose().finally(() => { remoteStopped = true; app.quit(); });
+      return;
+    }
     orchestrator.dispose();
     unsubscribeWorkbench();
     workbenchService.dispose();
@@ -976,6 +997,10 @@ const boot = async (): Promise<void> => {
       };
     }
   );
+  ipcMain.handle(SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL, async () => {
+    const result = await dialog.showOpenDialog(window, { title: "选择 frpc 程序", properties: ["openFile"] });
+    return { canceled: result.canceled, path: result.filePaths[0] };
+  });
   ipcMain.handle(
     SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
     (_event, text: unknown) => {

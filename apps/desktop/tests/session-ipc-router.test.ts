@@ -24,6 +24,19 @@ const createEnvelope = (sequence: number, delta = String(sequence)): EventEnvelo
 });
 
 describe("Workbench IPC router", () => {
+  it("releases a remote subscription without disposing the shared desktop service", async () => {
+    const unsubscribe = vi.fn();
+    const dispose = vi.fn(async () => {});
+    const service = { subscribeFromCursor: () => unsubscribe, dispose } as unknown as SessionShellService;
+    const remote = createSessionIpcRouter({ service, disposeService: false, onPush: () => {} });
+    await remote.handleRequest({ id: "remote-sub", method: "events.subscribe", params: {} });
+    await remote.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(dispose).not.toHaveBeenCalled();
+    const owner = createSessionIpcRouter({ service, onPush: () => {} });
+    await owner.dispose();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
   it("batches subscription pushes before crossing the Electron IPC boundary", async () => {
     let subscribed:
       | ((envelope: EventEnvelope) => void)

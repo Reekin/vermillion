@@ -15,7 +15,10 @@ export function electronBuildOptions(outputDir) {
     external: ["electron"], logLevel: "info"
   };
   return {
-    main: { ...shared, format: "esm", entryPoints: [resolve(desktopRoot, "src/electron/main.ts")],
+    main: { ...shared, format: "esm",
+      // Bundled CommonJS dependencies (ws) call require; ESM output needs one.
+      banner: { js: 'import { createRequire as createNodeRequire } from "node:module"; const require = createNodeRequire(import.meta.url);' },
+      entryPoints: [resolve(desktopRoot, "src/electron/main.ts")],
       outfile: resolve(outputDir, "main.js") },
     preload: { ...shared, format: "cjs", entryPoints: [resolve(desktopRoot, "src/electron/preload.cts")],
       outfile: resolve(outputDir, "preload.cjs") },

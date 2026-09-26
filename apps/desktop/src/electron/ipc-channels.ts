@@ -11,6 +11,9 @@ export const SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL =
 export const SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL =
   "vermillion:desktop:pick-engine-program";
 
+export const SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL =
+  "vermillion:desktop:pick-remote-program";
+
 export const SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL =
   "vermillion:desktop:write-clipboard-text";
 

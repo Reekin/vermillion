@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { zDiagnosis } from "./diagnosis.js";
 import { zRoleDocument } from "./role-document.js";
+import { zRemoteConfig, zRemoteDevice, zRemotePair, zRemoteStatus } from "./remote-contract.js";
 import {
   zAcceptanceItem,
   zAgentRun,
@@ -52,6 +53,11 @@ const zDocsScope = zWs.extend({ sessionId: z.string().min(1).optional() });
 
 /** Single method registry: name -> params/result schemas. Handler and client are both derived from it. */
 export const workbenchRpc = {
+  "remote.status": { params: zEmpty, result: zRemoteStatus },
+  "remote.configure": { params: z.object({ patch: zRemoteConfig.partial().optional() }), result: zRemoteConfig },
+  "remote.pair": { params: zEmpty, result: zRemotePair },
+  "remote.device.list": { params: zEmpty, result: z.array(zRemoteDevice) },
+  "remote.device.revoke": { params: z.object({ deviceId: z.string().min(1) }), result: zEmpty },
   "session.read": {
     params: z.object({ sessionId: z.string().min(1), limit: z.number().int().min(1).max(200).optional(), maxChars: z.number().int().min(1).max(200000).optional() }),
     result: z.unknown()

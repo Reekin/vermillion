@@ -15,6 +15,7 @@ import { Alert, Button, CollapsibleDetails, Field, InlineNotice, Select } from "
 import { engineWarningDetails, engineWarningReason } from "../output-log.js";
 import { setLocale, type Locale } from "../../../i18n/index.js";
 import { useT } from "../../../i18n/react.js";
+import { RemoteAccessSettings } from "./RemoteAccessSettings.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
@@ -230,6 +231,7 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
           );
         })}
       </div>
+      <RemoteAccessSettings />
     </div>
   );
 };

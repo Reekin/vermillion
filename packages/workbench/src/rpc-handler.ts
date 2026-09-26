@@ -6,7 +6,15 @@ import { ServiceError } from "./service-text.js";
 type Handlers = { [M in WorkbenchRpcMethod]: (params: WorkbenchRpcParams<M>) => Promise<WorkbenchRpcResult<M>> };
 
 export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
+  const desktopRequired = async (): Promise<never> => {
+    throw new Error("Remote access requires a running desktop (desktop required).");
+  };
   const handlers: Handlers = {
+    "remote.status": desktopRequired,
+    "remote.configure": desktopRequired,
+    "remote.pair": desktopRequired,
+    "remote.device.list": desktopRequired,
+    "remote.device.revoke": desktopRequired,
     "session.read": (p) => service.readSession(p),
     "sessionNavigation.create": (p) => service.createSessionNavigation(p),
     "sessionNavigation.list": (p) => service.listSessionNavigations(p),

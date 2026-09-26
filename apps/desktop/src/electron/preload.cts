@@ -17,6 +17,7 @@ import {
   SESSION_IPC_READ_PROGRESS_CHANNEL,
   SESSION_IPC_MATERIALIZE_ATTACHMENT_CHANNEL,
   SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,
+  SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL,
   SESSION_IPC_REQUEST_CHANNEL,
   SESSION_IPC_WRITE_CLIPBOARD_TEXT_CHANNEL,
   SESSION_IPC_WRITE_CLIPBOARD_IMAGE_CHANNEL,
@@ -38,6 +39,7 @@ type SessionLocalAssetsApi = {
 };
 
 type SessionDesktopApi = {
+  pickRemoteProgramPath: () => Promise<{ canceled: boolean; path?: string }>;
   pickEngineProgramPath: (engineId: string) => Promise<{
     canceled: boolean;
     path?: string;
@@ -165,6 +167,8 @@ const localAssetsApi: SessionLocalAssetsApi = {
 };
 
 const desktopApi: SessionDesktopApi = {
+  pickRemoteProgramPath: async () =>
+    (await ipcRenderer.invoke(SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL)) as Awaited<ReturnType<SessionDesktopApi["pickRemoteProgramPath"]>>,
   pickEngineProgramPath: async (engineId) =>
     (await ipcRenderer.invoke(
       SESSION_IPC_PICK_ENGINE_PROGRAM_CHANNEL,

@@ -36,6 +36,7 @@
     "hast-util-to-jsx-runtime": "2.3.6",
     "lucide-react": "^0.544.0",
     "mermaid": "^11.14.0",
+    "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
@@ -45,6 +46,7 @@
     "remark-rehype": "11.1.2",
     "tailwind-merge": "^3.3.1",
     "unified": "11.0.5",
+    "ws": "^8.21.3",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
@@ -53,8 +55,10 @@
     "@testing-library/user-event": "^14.6.7",
     "@types/d3-hierarchy": "^3.1.7",
     "@types/hast": "3.0.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.0.2",
     "electron": "^37.2.6",
     "esbuild": "^0.25.9",
