@@ -21,6 +21,20 @@ const setup = async () => {
 };
 
 describe("role prompt composition", () => {
+  it("lists each role's customization mode and effective model configuration", async () => {
+    const { root, globalDir, roles } = await setup();
+    await writeFile(join(globalDir, "reviewer.md"), "---\nmodel: global-model\nreasoningOptionId: high\n---\n# Reviewer\nReview.\n");
+    await writeFile(join(globalDir, "liaison.md"), "# Liaison\nCollect.\n");
+    await roles.writeOverride(root, "worker", "---\nmode: append\nreasoningOptionId: max\n---\nProject part.");
+    await roles.writeOverride(root, "reviewer", "---\nmode: override\nmodel: project-model\n---\n# Project Reviewer\nOnly project.");
+    const listed = Object.fromEntries((await roles.list(root)).map((role) => [role.roleId, role]));
+    expect(listed.worker).toEqual({ roleId: "worker", source: "workspace", mode: "append", title: "Global", modelConfig: { modelId: "example", reasoningOptionId: "max" } });
+    expect(listed.reviewer).toEqual({ roleId: "reviewer", source: "workspace", mode: "override", title: "Project Reviewer", modelConfig: { modelId: "project-model" } });
+    expect(listed.liaison).toEqual({ roleId: "liaison", source: "global", mode: "global", title: "Liaison" });
+    await roles.removeOverride(root, "reviewer");
+    expect((await roles.list(root)).find((role) => role.roleId === "reviewer")).toMatchObject({ mode: "global", modelConfig: { modelId: "global-model", reasoningOptionId: "high" } });
+  });
+
   it("lists the supervisor and composes its project prompt and model configuration", async () => {
     const { root, globalDir, roles } = await setup();
     await writeFile(join(globalDir, "supervisor.md"), "---\nmodel: supervisor-model\nreasoning: max\n---\n# Supervisor\nCheck the work.\n");

@@ -14,6 +14,27 @@ const selectionValue = (value: string | null | undefined) => value === null ? de
 const appendSelectionValue = (value: string | null | undefined) => value === null ? defaultValue : value ?? inheritGlobalValue;
 const settingValue = (value: string) => value === defaultValue ? null : value === inheritGlobalValue ? undefined : value || undefined;
 
+/** Models of the new-session engine as the composer offers them, plus the composer's current model for inherited fields. */
+export const loadRoleModelOptions = async (transport: DesktopTransport): Promise<{ models: EngineModelRpc[]; inheritedModelId?: string }> => {
+  const [settings, engines] = await Promise.all([transport.settings.get(), transport.engine.list()]);
+  const engineId = settings.defaultNewSessionEngineId ?? engines[0]?.engineId;
+  if (!engineId) return { models: [] };
+  const catalog = await transport.engine.listModels(engineId);
+  const models = resolveComposerModels({
+    catalog,
+    allowedModelIds: settings.allowedModelIdsByEngineId?.[engineId],
+    customModelReasoningOptionIds: settings.customModelReasoningOptionIdsByEngineId?.[engineId]
+  });
+  const execution = resolveComposerExecutionSelection({
+    models,
+    currentModelId: settings.executionPreferencesByEngineId?.[engineId]?.selectedModelId
+  });
+  return { models, ...(execution?.modelId ? { inheritedModelId: execution.modelId } : {}) };
+};
+
+/** Mode names shown to users; the stored values stay global / override / append. */
+export const roleModeLabel: Record<RoleDocument["mode"], string> = { global: "沿用全局", override: "覆盖正文", append: "追加正文" };
+
 export const RoleEditor = ({ store, transport }: { store: WorkbenchStore; transport: DesktopTransport }) => {
   const client = store((s) => s.client);
   const workspaceId = store((s) => s.browsingWorkspaceId);
@@ -41,22 +62,6 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
 
   useEffect(() => {
     let cancelled = false;
-    const loadModels = async () => {
-      const [settings, engines] = await Promise.all([transport.settings.get(), transport.engine.list()]);
-      const engineId = settings.defaultNewSessionEngineId ?? engines[0]?.engineId;
-      if (!engineId) return { models: [] };
-      const catalog = await transport.engine.listModels(engineId);
-      const models = resolveComposerModels({
-        catalog,
-        allowedModelIds: settings.allowedModelIdsByEngineId?.[engineId],
-        customModelReasoningOptionIds: settings.customModelReasoningOptionIdsByEngineId?.[engineId]
-      });
-      const execution = resolveComposerExecutionSelection({
-        models,
-        currentModelId: settings.executionPreferencesByEngineId?.[engineId]?.selectedModelId
-      });
-      return { models, inheritedModelId: execution?.modelId };
-    };
     void client.request("role.editor.read", { workspaceId, roleId })
       .then((role) => {
         if (cancelled) return;
@@ -65,7 +70,7 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
         setDocument(role.document);
       })
       .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
-    void loadModels()
+    void loadRoleModelOptions(transport)
       .then((options) => {
         if (cancelled) return;
         setModels(options.models);
@@ -152,7 +157,7 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
           {document ? (
             <div className="space-y-4">
               <Select label="本 workspace 定制方式" value={document.mode} disabled={saving} onChange={(value) => changeMode(value as RoleDocument["mode"])}
-                options={[{ value: "global", label: "global" }, { value: "override", label: "override" }, { value: "append", label: "append" }]} />
+                options={(["global", "override", "append"] as const).map((mode) => ({ value: mode, label: roleModeLabel[mode] }))} />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Select label="模型" value={isAppend ? document.model ?? inheritGlobalValue : document.model ?? ""} disabled={fieldDisabled}
                   onChange={(value) => update({ model: value === inheritGlobalValue ? undefined : value || undefined })}

@@ -89,7 +89,10 @@ export class RoleService {
     for (const roleId of [...ids].sort()) {
       if (retiredRoles.has(roleId)) continue;
       const { content, source } = await this.read(workspaceRoot, roleId);
-      out.push({ roleId, source, title: titleOf(content) || roleId });
+      const mode = source === "global" ? "global" : parsePrompt(content).mode;
+      const resolved = await this.resolve(workspaceRoot, roleId);
+      const { modelConfig } = resolved;
+      out.push({ roleId, source, mode, title: titleOf(resolved.content) || roleId, ...(modelConfig ? { modelConfig } : {}) });
     }
     return out;
   }
