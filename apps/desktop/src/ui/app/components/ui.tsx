@@ -5,9 +5,9 @@
  * primitives own layout, states and typography. See .vermillion/docs/Foundation/UIUX/Standards.md.
  *
  * Buttons       Button, IconButton
- * Text          Badge, StatusPill, StatusIcon, SectionLabel, InlineNotice, Alert, StatusDot, Progress, Steps
+ * Text          Badge, StatusPill, StatusIcon, FilterChip, SectionLabel, InlineNotice, Alert, StatusDot, Progress, Steps
  * Fields        Field (input / textarea / number), Select, SegmentedControl, Toggle, Checkbox, Stepper, SettingRow
- * Structure     PageHeader, PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
+ * Structure     PageHeader, PanelHeader, Tabs, TabList, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
@@ -100,15 +100,20 @@ export const StatusPill = ({ tone, icon, children }: { tone: StatusTone; icon?: 
   );
 };
 
-/** Row-leading 18px state icon for list rows; `label` names the state for assistive tech. */
-export const StatusIcon = ({ tone, icon, label }: { tone: StatusTone; icon?: LucideIcon; label: string }) => {
+/** 18px row-leading state marker for list rows and checklists: spinner while running, check when done, cross on failure. */
+export const StatusIcon = ({ tone, label, icon }: { tone: StatusTone; label: string; icon?: LucideIcon }) => {
   const Icon = icon ?? statusIcons[tone];
   return (
-    <span className="vm-state-icon" data-tone={tone} role="img" aria-label={label}>
+    <span className="vm-state-icon" data-tone={tone} role="img" aria-label={label} title={label}>
       <Icon size={12} aria-hidden="true" className={cn(tone === "running" && !icon && "vm-spin")} />
     </span>
   );
 };
+
+/** Count that doubles as a filter toggle, e.g. the page header's "1 需要处理". Zero counts read neutral. */
+export const FilterChip = ({ tone, count, label, pressed, onToggle }: { tone: StatusTone; count: number; label: string; pressed: boolean; onToggle: () => void }) => (
+  <button type="button" className="vm-count-chip" data-tone={count ? tone : "neutral"} aria-pressed={pressed} onClick={onToggle}>{count} {label}</button>
+);
 
 /** Counted progress as a segmented bar plus the numbers, e.g. "0 / 1 已合入". */
 export const Progress = ({ segments, label }: { segments: Array<"done" | "running" | "failed" | "pending">; label: ReactNode }) => (
@@ -412,6 +417,25 @@ export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ i
   </nav>
 );
 
+/** Material groups inside one object (a panel or dialog): underlined tabs whose counts say what is inside. */
+export const TabList = <T extends string>({ label, items, selected, onSelect }: {
+  label: string; items: Array<{ id: T; label: string; count?: string }>; selected: T; onSelect: (id: T) => void;
+}) => (
+  <div role="tablist" aria-label={label} className="vm-tablist"
+    onKeyDown={(event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+      const index = items.findIndex((item) => item.id === selected);
+      const nextIndex = (index + (event.key === "ArrowRight" ? 1 : items.length - 1)) % items.length;
+      event.preventDefault();
+      onSelect(items[nextIndex]!.id);
+      (event.currentTarget.children[nextIndex] as HTMLElement | undefined)?.focus();
+    }}>
+    {items.map((item) => <button key={item.id} type="button" role="tab" aria-selected={item.id === selected} tabIndex={item.id === selected ? 0 : -1} onClick={() => onSelect(item.id)}>
+      {item.label}{item.count && <span className="vm-tablist__count">{item.count}</span>}
+    </button>)}
+  </div>
+);
+
 /**
  * Read-only detail that floats beside `children` while the pointer rests on them (or they hold focus).
  * The trigger is a plain block wrapper, so the decorated layout never changes.
@@ -466,6 +490,11 @@ type ListRowProps = {
   titleClassName?: string;
   /** Dense one-line list with fixed status, hover-action and action slots. */
   columns?: { info?: ReactNode; status: ReactNode; action?: ReactNode; hoverAction?: ReactNode; control?: ReactNode; controls?: boolean };
+  /**
+   * Standard 44px object row (work items, roles): state icon | tag | title | stage | time | hover controls.
+   * Controls sit in fixed slots that stay in place when hidden; `muted` dims ended objects, `compact` is the 40px variant.
+   */
+  cells?: { state: ReactNode; tag?: ReactNode; stage?: ReactNode; time?: ReactNode; timeTitle?: string; controls?: ReactNode[]; muted?: boolean; compact?: boolean; id?: string };
   expanded?: boolean;
 };
 
@@ -473,7 +502,18 @@ type ListRowProps = {
  * Standard row for sidebars and lists: leading | title / meta | trailing. Clickable when `onClick` is given;
  * the selection bar on the left is the same everywhere.
  */
-export const ListRow = ({ leading, leadingAction, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName, columns, expanded }: ListRowProps) => {
+export const ListRow = ({ leading, leadingAction, title, meta, trailing, hoverActions, selected, depth = 0, onClick, onContextMenu, className, titleClassName, columns, cells, expanded }: ListRowProps) => {
+  if (cells) return (
+    <div className={cn("vm-row-cells", className)} data-compact={cells.compact || undefined} data-muted={cells.muted || undefined} data-row-id={cells.id} style={depth ? { paddingLeft: 16 + depth * 28 } : undefined}>
+      <span className="vm-row-cells__state">{cells.state}</span>
+      <span className="vm-row-cells__tag">{cells.tag}</span>
+      {onClick ? <button type="button" className="vm-row-cells__title" title={typeof title === "string" ? title : undefined} aria-expanded={expanded} onClick={onClick}>{title}</button>
+        : <span className="vm-row-cells__title">{title}</span>}
+      <span className="vm-row-cells__stage" title={typeof cells.stage === "string" ? cells.stage : undefined}>{cells.stage}</span>
+      <span className="vm-row-cells__time" title={cells.timeTitle}>{cells.time}</span>
+      <span className="vm-row-cells__controls">{(cells.controls ?? []).map((control, index) => <span key={index} className="vm-row-cells__slot">{control}</span>)}</span>
+    </div>
+  );
   if (columns) return (
     <div className={cn("vm-list-columns", columns.controls && "vm-list-columns-controls", className)} style={{ paddingLeft: 12 + depth * 14 }}>
       <span className="vm-list-leading">{leading}</span>

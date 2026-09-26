@@ -1,6 +1,9 @@
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
-import { isOpenWorkItem, isOpenWorkRequest, isPreparingWork } from "./work-board-display.js";
 import type { StatusTone } from "./ui.js";
+
+export const isOpenWorkItem = (item: WorkItem) => item.status !== "closed" && item.status !== "cancelled";
+export const isPreparingWork = (request: WorkRequest) => request.status !== "cancelled" && (request.status !== "ready" || Boolean(request.activeTurnId));
+export const isOpenWorkRequest = (request: WorkRequest, items: WorkItem[]) => isPreparingWork(request) || items.some(isOpenWorkItem);
 
 export const statusLabel: Record<WorkItem["status"], string> = { preparing: "准备", queued: "排队", running: "执行", merging: "待合入", closed: "已关闭", cancelled: "已取消" };
 export type CurrentWorkState = "running" | "queued" | "paused" | "stopped" | "interrupted" | "confirmation" | "decision" | "finished";

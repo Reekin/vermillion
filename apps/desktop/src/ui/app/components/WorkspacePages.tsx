@@ -61,7 +61,6 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
   const expandedWorkGroups = store((s) => s.expandedWorkGroups);
   const setWorkGroupExpanded = store((s) => s.setWorkGroupExpanded);
   const showAgentSession = store((s) => s.showAgentSession);
-  const showTaskBoard = store((s) => s.showTaskBoard);
   const browseWorkspace = store((s) => s.browseWorkspace);
   const openEditor = store((s) => s.openEditor);
   const [error, setError] = useState<string>();
@@ -100,7 +99,7 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
     ) : <div className="min-h-0 flex-1 overflow-auto">
       {section === "workItems" && <div>
         {viewError ? <EmptyState title="工作加载失败" hint={viewError} /> : view && (
-          <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} workRequests={view.workRequests} decisions={view.decisions} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={false} onExpand={showTaskBoard} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} detailTarget={(linkedWorkItemTarget ?? workItemTarget)?.workspaceId === activeWorkspaceId ? linkedWorkItemTarget ?? workItemTarget : undefined} onDetailTargetConsumed={() => { setLinkedWorkItemTarget(undefined); onWorkItemTargetConsumed?.(); }} onOpenIssue={(issueId) => store.getState().showIssue({ workspaceId: activeWorkspaceId, issueId })} />
+          <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} workRequests={view.workRequests} decisions={view.decisions} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} detailTarget={(linkedWorkItemTarget ?? workItemTarget)?.workspaceId === activeWorkspaceId ? linkedWorkItemTarget ?? workItemTarget : undefined} onDetailTargetConsumed={() => { setLinkedWorkItemTarget(undefined); onWorkItemTargetConsumed?.(); }} onOpenIssue={(issueId) => store.getState().showIssue({ workspaceId: activeWorkspaceId, issueId })} />
         )}
       </div>}
       <div hidden={section !== "domains"}>

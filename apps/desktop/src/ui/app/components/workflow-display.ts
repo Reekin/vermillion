@@ -1,5 +1,6 @@
-import { actionIsOpen, actionNote, isUserPaused, type AgentRun, type Execution, type WorkflowAction, type WorkItem } from "@vermillion/workbench/client";
-import { statusLabel, workSessionLabel } from "./task-labels.js";
+import { actionIsOpen, actionNote, isUserPaused, type AgentRun, type DecisionCard, type Execution, type WorkflowAction, type WorkItem, type WorkRequest } from "@vermillion/workbench/client";
+import { isOpenWorkItem, isOpenWorkRequest, isPreparingWork, statusLabel, workSessionLabel } from "./task-labels.js";
+import type { Step } from "./ui.js";
 
 export const roleLabel: Record<string, string> = { worker: "Worker", supervisor: "监工", workbench: "工作台", "design-partner": "设计伙伴", maintainer: "Maintainer", liaison: "Liaison" };
 export const actionStatusLabel: Record<WorkflowAction["status"], string> = { pending: "待接手", running: "处理中", decision: "待处置", done: "已解决", cancelled: "已取消" };
@@ -99,7 +100,140 @@ const rejectionSummary = (reason: string) => {
   return line.length > 160 ? line.slice(0, 157) + "…" : line;
 };
 
-const readableRunNote = (note?: string) => note && /工单已进入\s+\w+/i.test(note) ? "本轮执行已交接后续处理。" : note;
+const readableRunNote = (note?: string) => !note || /^(done|completed|ok)$/i.test(note.trim()) ? undefined
+  : /工单已进入\s+\w+/i.test(note) ? "本轮执行已交接后续处理。" : note;
+
+const truncate = (value: string, max: number) => value.length > max ? value.slice(0, max - 1) + "…" : value;
+
+export type ReadableFailure = { title: string; next: string; command?: string };
+
+/** Turns an engine, Git or scheduler failure into a cause and next step; the raw text stays in technical detail. */
+export const readableFailure = (text: string): ReadableFailure => {
+  if (/is archived/i.test(text)) return { title: "会话已被 Codex 归档，无法继续。", next: "取消归档后点恢复即可继续。", command: text.match(/`(codex unarchive [^`]+)`/)?.[1] };
+  if (/Historical execution is paused/i.test(text)) return { title: "历史执行已暂停", next: "核对迁移备份后再恢复。" };
+  if (/进程重启|无法恢复/.test(text)) return { title: "执行会话无法恢复", next: "重试会重新安排执行。" };
+  if (/turn interrupted/i.test(text)) return { title: "本轮执行被中断", next: "重试后从原会话继续。" };
+  if (/多轮未提交/.test(text)) return { title: "Worker 多轮未提交成果", next: "打开会话查看进展，再决定重试或取消。" };
+  if (/turn failed/i.test(text)) {
+    const message = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1];
+    return { title: "模型请求失败" + (message ? "：" + truncate(message.replace(/\\(.)/g, "$1"), 80) : ""), next: "检查模型与引擎配置后重试。" };
+  }
+  if (/conflict/i.test(text)) return { title: "合入发生冲突", next: "由 Worker 处理冲突后继续。" };
+  if (/Worker must commit its worktree/i.test(text)) return { title: "Worker worktree 仍有未提交修改。", next: "由 Worker 提交后重新交付。" };
+  if (/Command failed:\s*git/i.test(text)) return { title: "Git 操作失败", next: "打开详情查看原始输出。" };
+  return { title: "执行遇到问题", next: "打开详情查看原始原因。" };
+};
+
+/** A rejected board action as one readable sentence: drops the RPC method prefix and the CLI's "下一步" hint. */
+export const readableActionError = (caught: unknown) => {
+  const message = caught instanceof Error ? caught.message : String(caught);
+  const text = message.replace(/^\s*\[[\w.]+\]\s*/, "").split(/\s*下一步[:：]/)[0]!.trim();
+  return text || "操作没有完成，请稍后重试。";
+};
+
+/** What the user can do right from the board: resume, retry, answer or inspect in detail, or open the session. */
+export type AttentionAction = "resume" | "retry" | "decision" | "detail" | "session";
+export type Attention = ReadableFailure & { action?: AttentionAction; raw?: string };
+
+const isPending = (card: DecisionCard) => !card.answer && !card.withdrawn;
+
+export const pendingItemDecisions = (item: WorkItem, decisions: DecisionCard[], actions: WorkflowAction[]) => decisions.filter((card) => isPending(card)
+  && (card.workItemId === item.workItemId || item.decisions.includes(card.decisionId)
+    || actions.some((action) => action.actionId === card.actionId && action.workItemId === item.workItemId)));
+
+export const pendingRequestDecisions = (request: WorkRequest, decisions: DecisionCard[]) =>
+  decisions.filter((card) => isPending(card) && card.requestId === request.requestId && !card.workItemId);
+
+const decisionAttention = (card: DecisionCard): Attention => ({ title: "等待你答复：" + card.question, next: "打开详情或 Inbox 选择答复。", action: "decision" });
+
+/** Why an open work item cannot continue without the user; undefined while it can proceed on its own. */
+export const workItemAttention = (item: WorkItem, actions: WorkflowAction[], decisions: DecisionCard[]): Attention | undefined => {
+  if (!isOpenWorkItem(item) || item.status === "preparing") return undefined;
+  const card = pendingItemDecisions(item, decisions, actions)[0];
+  if (card) return decisionAttention(card);
+  if (item.run.paused) {
+    const known = item.run.waitReason && /Historical execution is paused/i.test(item.run.waitReason) ? readableFailure(item.run.waitReason) : undefined;
+    return { ...(known ?? { title: "已暂停", next: "恢复后 Worker 从原会话继续执行。" }), action: "resume", raw: known ? item.run.waitReason : undefined };
+  }
+  if (item.run.userStopped && !item.run.activeTurnId) return { title: "会话已由你停止", next: "恢复后继续推进本单。", action: "resume" };
+  const blocked = actions.find((action) => action.workItemId === item.workItemId && action.kind === "integration" && actionIsOpen(action) && action.status === "decision" && !action.agent);
+  if (blocked) return { title: "合入受阻：" + (integrationFailureSummary(blocked) ?? "需要处理后继续"), next: recoveryCondition(blocked), action: "detail", raw: blocked.kind === "integration" ? blocked.failure : undefined };
+  if (item.run.lastFailure && !item.run.activeTurnId) return { ...readableFailure(item.run.lastFailure), action: "retry", raw: item.run.lastFailure };
+  if (item.run.turnStatus === "unknown") return { title: "运行状态未确认", next: "打开会话确认情况后再恢复或重试。", action: "session" };
+  return undefined;
+};
+
+/** Work-level attention: preparation problems, or the whole work paused. Item problems are reported per item. */
+export const workRequestAttention = (request: WorkRequest, items: WorkItem[], decisions: DecisionCard[]): Attention | undefined => {
+  if (!isOpenWorkRequest(request, items)) return undefined;
+  const stopped = request.paused || (request.userStopped && !request.activeTurnId);
+  if (isPreparingWork(request)) {
+    const card = pendingRequestDecisions(request, decisions)[0];
+    if (card) return decisionAttention(card);
+    if (request.failure) return { ...readableFailure(request.failure), action: stopped ? "resume" : "retry", raw: request.failure };
+    if (request.paused) {
+      const known = request.waitReason && /Historical execution is paused/i.test(request.waitReason) ? readableFailure(request.waitReason) : undefined;
+      return { ...(known ?? { title: "准备已暂停", next: "恢复后继续整理文档并建单。" }), action: "resume", raw: known ? request.waitReason : undefined };
+    }
+    if (stopped) return { title: "准备会话已由你停止", next: "恢复后继续整理文档并建单。", action: "resume" };
+    if (request.status === "failed") return { title: "准备失败", next: "重试会重新开始准备。", action: "retry" };
+    if (request.turnStatus === "unknown") return { title: "运行状态未确认", next: "打开准备会话确认情况后再恢复。", action: "session" };
+    return undefined;
+  }
+  if (request.paused) return { title: "工作已暂停", next: "恢复全部推进后，未结束的工单继续执行。", action: "resume" };
+  return undefined;
+};
+
+/** Human duration: "45 秒", "1 分 27 秒", "52 分钟", "3 小时 5 分". */
+export const formatDuration = (ms: number) => {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return seconds + " 秒";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 10) return minutes + " 分 " + (seconds % 60) + " 秒";
+  if (minutes < 60) return minutes + " 分钟";
+  return Math.floor(minutes / 60) + " 小时" + (minutes % 60 ? " " + (minutes % 60) + " 分" : "");
+};
+
+/** Total time the item's Worker runs spent executing; open runs count up to `now`. */
+export const executionDuration = (runs: AgentRun[], now = Date.now()) => {
+  const total = runs.reduce((sum, run) => sum + Math.max(0, (run.endedAt ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt)), 0);
+  return total > 0 ? total : undefined;
+};
+
+/** Stage time: HH:MM today, otherwise prefixed with M/D so stages across days read in order. */
+const clock = (value?: string, now = new Date()) => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  const hm = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return date.toDateString() === now.toDateString() ? hm : (date.getMonth() + 1) + "/" + date.getDate() + " " + hm;
+};
+const earliest = (values: Array<string | undefined>) => values.filter((value): value is string => Boolean(value)).sort()[0];
+
+/** Lifecycle for the detail header: queued → executing → merging → closed, with times of passed stages. */
+export const workItemSteps = (item: WorkItem, actions: WorkflowAction[], runs: AgentRun[], attention?: Attention, waitNote?: string): Step[] => {
+  const own = actions.filter((action) => action.workItemId === item.workItemId);
+  const itemRuns = runs.filter((run) => run.workItemId === item.workItemId);
+  const reached = {
+    queued: item.createdAt,
+    running: earliest([...itemRuns.map((run) => run.startedAt), ...own.filter((action) => action.kind === "execute").map((action) => action.createdAt)]),
+    merging: earliest(own.filter((action) => action.kind === "integration").map((action) => action.createdAt)),
+    closed: item.status === "closed" ? item.merge?.mergedAt ?? item.updatedAt : undefined
+  };
+  const stages = [["queued", "排队"], ["running", "执行"], ["merging", "待合入"], ["closed", "已关闭"]] as const;
+  const cancelled = item.status === "cancelled";
+  const currentIndex = item.status === "closed" ? 3 : cancelled
+    ? (reached.merging ? 2 : reached.running ? 1 : 0)
+    : Math.max(0, stages.findIndex(([status]) => status === item.status));
+  return stages.map(([, label], index) => {
+    const time = clock(reached[stages[index]![0]]);
+    if (index < currentIndex || item.status === "closed") return { label, time, state: "done" };
+    if (index > currentIndex) return { label, state: "pending" };
+    if (cancelled) return { label, time, state: "current", tone: "failed", note: "已取消" };
+    return { label, time, state: "current", tone: attention ? (attention.action === "retry" ? "failed" : "attention") : "running",
+      // A wait note that only repeats the stage name adds nothing.
+      note: attention?.title ?? (item.status === "preparing" ? "准备中" : waitNote && waitNote !== label ? waitNote : undefined) };
+  });
+};
 
 const matchingRun = (item: WorkItem, run?: AgentRun) => run && (!item.run.sessionId || run.sessionId === item.run.sessionId) ? run : undefined;
 
@@ -139,13 +273,13 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
     next: "全部前置工单关闭后，调度器会继续安排本单。", at: item.updatedAt
   };
   if (item.run.lastFailure && !item.run.activeTurnId) return {
-    shortLabel: "执行受阻", title: "执行遇到问题", reason: rejectionSummary(item.run.lastFailure),
-    handler: "Worker", next: "检查原因后，可明确继续任务。", at: item.updatedAt
+    shortLabel: "执行受阻", title: readableFailure(item.run.lastFailure).title, reason: undefined,
+    handler: "你", next: readableFailure(item.run.lastFailure).next, at: item.updatedAt
   };
   if (item.status === "queued" && rejection && execute && (execute.status === "running" || execute.stage === "execute")) {
     return {
       shortLabel: "退回待续做", title: "提交已退回", reason: rejectionSummary(rejection.reason), handler: "当前 Worker 会话",
-      next: "当前 turn 结束后，工作台会把处理说明送回 Worker。", userAction: "无需操作。", at: rejection.at
+      next: "当前一轮结束后，工作台会把处理说明送回 Worker。", userAction: "无需操作。", at: rejection.at
     };
   }
   if (item.status === "queued" && execute?.status === "pending" && (execute.stage === "deliver" || execute.notices.length > 0)) {
@@ -156,7 +290,7 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
       title: returned ? "提交已退回" : "等待 Worker 续做",
       reason: returned ? rejectionSummary(rejection.reason) : undefined,
       handler: active ? "当前 Worker 会话" : "工作台",
-      next: active ? "当前 turn 结束后，工作台会把处理说明送回 Worker。" : "调度器会恢复原 Worker 会话并送达处理说明。",
+      next: active ? "当前一轮结束后，工作台会把处理说明送回 Worker。" : "调度器会恢复原 Worker 会话并送达处理说明。",
       userAction: "无需操作。", at: returned ? rejection.at : item.updatedAt
     };
   }
@@ -200,11 +334,11 @@ export const workItemEvents = (item: WorkItem, actions: WorkflowAction[], runs: 
   for (const rejection of item.rejections) events.push({ at: rejection.at, title: "提交已退回", detail: rejectionSummary(rejection.reason) });
   for (const notice of execute?.notices ?? []) events.push({ at: notice.at, title: notice.kind === "rejected" ? "退回说明等待送达" : "续做消息等待送达", detail: notice.kind === "rejected" ? "退回原因已记录，等待交给 Worker。" : "续做说明已记录，等待送达。" });
   for (const run of runs.filter((entry) => entry.workItemId === item.workItemId)) {
-    events.push({ at: run.startedAt, title: "Worker 开始执行", detail: run.turns ? `${run.turns} 个 turn` : undefined });
+    events.push({ at: run.startedAt, title: "Worker 开始执行", detail: run.turns ? `共 ${run.turns} 轮` : undefined });
     if (run.endedAt) events.push({ at: run.endedAt, title: "本轮执行结束", detail: readableRunNote(run.note) });
   }
   if (execute?.deliveredAt && item.rejections.some((entry) => entry.at <= execute.deliveredAt!)) events.push({ at: execute.deliveredAt, title: "退回后的执行消息已送达", detail: "Worker 已收到处理说明。" });
-  if (item.merge?.mergedAt) events.push({ at: item.merge.mergedAt, title: "合入完成", detail: item.merge.commit ? `成果已进入主分支 · ${item.merge.commit.slice(0, 8)}` : undefined });
+  if (item.merge?.mergedAt) events.push({ at: item.merge.mergedAt, title: "合入完成", detail: item.merge.commit ? `成果已进入主分支 · ${item.merge.commit.slice(0, 7)}` : undefined });
   const seen = new Set<string>();
   return events.filter((event) => {
     const key = `${event.at}|${event.title}|${event.detail ?? ""}`;

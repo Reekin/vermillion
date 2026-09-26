@@ -27,6 +27,7 @@ import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
 import { currentWorkContext, decisionsForWork } from "./current-work-context.js";
 import { Button, InlineNotice, Select, Tabs } from "./components/ui.js";
+import { workBoardAttentionCount } from "./components/work-board-display.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
@@ -84,6 +85,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const { item: currentWorkItem, request: currentWorkRequest } = workContext;
   const decisions = store((s) => s.view?.decisions);
   const actions = store((s) => s.view?.actions);
+  const workAttentionCount = useMemo(() => workBoardAttentionCount({ requests: workRequests ?? [], items: workItems ?? [], decisions: decisions ?? [], actions: actions ?? [] }), [workRequests, workItems, decisions, actions]);
   const currentDecisions = useMemo(() => decisionsForWork(decisions ?? [], actions ?? [], workContext, workSessionId), [decisions, actions, workContext, workSessionId]);
   const [decisionMode, setDecisionMode] = useState<{ sessionId?: string; decisionId?: string; ordinary: boolean }>({ ordinary: true });
   const currentDecision = currentDecisions.find((card) => card.decisionId === decisionMode.decisionId) ?? (currentDecisions.length === 1 ? currentDecisions[0] : undefined);
@@ -293,7 +295,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)}>
+            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab.id === "workItems" && workAttentionCount ? { ...tab, count: workAttentionCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)}>
               {section === "sessions"
                 ? <Button className="vm-docs-toggle" size="sm" variant="ghost" aria-expanded={docsExplorerOpen} onClick={() => setDocsExplorerOpen((open) => !open)}>文档栏</Button>
                 : <WorkspaceSwitcher store={store} />}

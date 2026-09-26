@@ -3,7 +3,7 @@ import { useState } from "react";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Alert, PageHeader, Progress, SegmentedControl, Select, StatusPill, Steps, Tabs, Toggle } from "../src/ui/app/components/ui.js";
+import { Alert, FilterChip, ListRow, PageHeader, Progress, SegmentedControl, Select, StatusIcon, StatusPill, Steps, TabList, Tabs, Toggle } from "../src/ui/app/components/ui.js";
 
 afterEach(cleanup);
 
@@ -152,5 +152,44 @@ describe("Tabs and Toggle", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     await user.click(toggle);
     expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("board primitives", () => {
+  it("keeps object-row controls in fixed slots and opens the object from its title", async () => {
+    const onClick = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(<ListRow title="工单" onClick={onClick} cells={{ state: <StatusIcon tone="running" label="执行" />, stage: "执行", time: "刚刚", controls: [null, <button key="s">会话</button>, null] }} />);
+    expect(container.querySelectorAll(".vm-row-cells__slot")).toHaveLength(3);
+    expect(screen.getByRole("img", { name: "执行" }).getAttribute("data-tone")).toBe("running");
+    await user.click(screen.getByRole("button", { name: "工单" }));
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("switches material tabs by click and arrow keys and shows counts", async () => {
+    const Harness = () => {
+      const [tab, setTab] = useState<"a" | "b">("a");
+      return <TabList label="材料" selected={tab} onSelect={setTab} items={[{ id: "a", label: "进展" }, { id: "b", label: "验收", count: "2/2" }]} />;
+    };
+    const user = userEvent.setup();
+    render(<Harness />);
+    expect(screen.getByRole("tab", { name: "进展" }).getAttribute("aria-selected")).toBe("true");
+    screen.getByRole("tab", { name: "进展" }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: /验收/ }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: /验收/ }).textContent).toBe("验收2/2");
+  });
+
+  it("reads zero counts as neutral and reports its pressed filter", async () => {
+    const onToggle = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(<FilterChip tone="attention" count={0} label="需要处理" pressed={false} onToggle={onToggle} />);
+    expect(screen.getByRole("button", { name: "0 需要处理" }).getAttribute("data-tone")).toBe("neutral");
+    rerender(<FilterChip tone="attention" count={2} label="需要处理" pressed onToggle={onToggle} />);
+    const chip = screen.getByRole("button", { name: "2 需要处理" });
+    expect(chip.getAttribute("data-tone")).toBe("attention");
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    await user.click(chip);
+    expect(onToggle).toHaveBeenCalledOnce();
   });
 });
