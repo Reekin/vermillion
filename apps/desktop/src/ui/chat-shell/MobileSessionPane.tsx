@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatTreeSnapshotRpc, Turn } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
@@ -17,16 +17,35 @@ export type MobileSessionPaneProps = {
   transport: DesktopTransport;
   reloadSignal?: number;
   disabled?: boolean;
+  onVisiblePathChange?: (turnIds: string[], sessionId: string) => void;
 };
 
 export const mobileSendSessionId = (path: ChatTreeSnapshotRpc): string =>
   path.currentSessionId ?? path.nodes.find((node) => node.nodeId === path.visibleNodeIds?.at(-1))?.sessionId ?? path.sessionId;
 
+/** Mobile follows the selected branch to its tip without moving the desktop cursor. */
+export const mobileVisiblePath = (path: ChatTreeSnapshotRpc): ChatTreeSnapshotRpc => {
+  const memberId = mobileSendSessionId(path);
+  const tip = path.nodes.filter((node) => node.sessionId === memberId)
+    .reduce<ChatTreeSnapshotRpc["nodes"][number] | undefined>((latest, node) =>
+      !latest || node.order > latest.order ? node : latest, undefined);
+  if (!tip) return path;
+  const byId = new Map(path.nodes.map((node) => [node.nodeId, node]));
+  const visibleNodeIds: string[] = [];
+  let node: typeof tip | undefined = tip;
+  while (node) {
+    visibleNodeIds.unshift(node.nodeId);
+    node = node.parentNodeId ? byId.get(node.parentNodeId) : undefined;
+  }
+  return { ...path, currentNodeId: tip.nodeId, visibleNodeIds,
+    visibleTurnIds: visibleNodeIds.flatMap((id) => byId.get(id)?.turnId ? [byId.get(id)!.turnId!] : []) };
+};
+
 /** The mobile shell owns the single transport/store binding and reconnect signal. */
 export const MobileSessionPane = (props: MobileSessionPaneProps) =>
   <MobileSessionContent key={props.sessionId} {...props} />;
 
-const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, disabled = false }: MobileSessionPaneProps) => {
+const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, disabled = false, onVisiblePathChange }: MobileSessionPaneProps) => {
   const state = useRendererStoreState(store);
   const [path, setPath] = useState<ChatTreeSnapshotRpc>();
   const [error, setError] = useState<string>();
@@ -49,7 +68,7 @@ const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, d
         replaceSessionHistory: window.replaceSessionHistory,
         revision: !window.hasOlder && !window.hasNewer ? window.revision : undefined
       })), readId);
-      setPath({ ...next, windows: undefined });
+      setPath({ ...mobileVisiblePath(next), windows: undefined });
       setError(undefined);
     } finally {
       finish();
@@ -70,6 +89,11 @@ const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, d
   const domain = store.getDomainReadModel();
   const targetSessionId = path ? mobileSendSessionId(path) : sessionId;
   const turnIds = path?.visibleTurnIds ?? [];
+  const visiblePathKey = turnIds.join("\n");
+  useLayoutEffect(() => {
+    onVisiblePathChange?.(turnIds, targetSessionId);
+    return () => onVisiblePathChange?.([], targetSessionId);
+  }, [visiblePathKey, targetSessionId, onVisiblePathChange]);
   const revision = useRendererVisibleTurnsRevision(store, turnIds, path ? undefined : targetSessionId);
   const { session } = useRendererSessionSelection(store, targetSessionId,
     () => ({ session: domain.getSession(targetSessionId) }));
@@ -80,6 +104,7 @@ const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, d
     : [], [domain, path, revision]);
   const rows = useMemo(() => buildTurnTranscriptRows(domain, turns, directory), [domain, turns, directory]);
   const currentTurn = (session?.lastTurnId ? domain.getTurn(session.lastTurnId) : undefined) ?? turns.at(-1);
+  const completedVisibleKey = turns.filter((turn) => turn.status === "completed").map((turn) => turn.turnId).join("\n");
   const running = Boolean(currentTurn && currentTurn.status !== "completed");
   const status = session?.status === "awaiting_approval" ? "等待审批"
     : session?.status === "error" ? "失败" : running ? "运行中" : path ? "就绪" : "正在加载";
@@ -102,7 +127,7 @@ const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, d
     markRead();
     document.addEventListener("visibilitychange", markRead);
     return () => document.removeEventListener("visibilitychange", markRead);
-  }, [disabled, path?.visibleNodeIds?.at(-1), sessionId, transport]);
+  }, [disabled, path?.visibleNodeIds?.at(-1), completedVisibleKey, reloadSignal, sessionId, transport]);
 
   const runAction = async (action: () => Promise<unknown>) => {
     if (disabled || actionPending.current) return;

@@ -27,6 +27,7 @@ import {
 
 export type TurnProcessPanelProps = {
   collapseActivity?: boolean;
+  chineseLabels?: boolean;
   row: TurnTranscriptRow;
   hiddenRows?: TurnTranscriptRow[];
   participantDirectory: ParticipantDirectory;
@@ -128,6 +129,7 @@ export const buildTurnHistoryItems = (
 
 export const TurnProcessPanel = ({
   collapseActivity = false,
+  chineseLabels = false,
   row,
   hiddenRows = [],
   participantDirectory,
@@ -159,6 +161,7 @@ export const TurnProcessPanel = ({
               if (item.kind === "approval") {
                 return (
                   <ApprovalFlowView
+                    chineseLabels={chineseLabels}
                     key={item.id}
                     approvals={[item.approval]}
                     participantDirectory={participantDirectory}
@@ -169,6 +172,7 @@ export const TurnProcessPanel = ({
               if (item.kind === "interaction") {
                 return (
                   <InteractionFlowView
+                    chineseLabels={chineseLabels}
                     key={item.id}
                     interactions={[item.interaction]}
                     participantDirectory={participantDirectory}
@@ -212,6 +216,7 @@ export const TurnProcessPanel = ({
             <span>{row.approvals.length}</span>
           </header>
           <ApprovalFlowView
+            chineseLabels={chineseLabels}
             approvals={row.approvals}
             participantDirectory={participantDirectory}
             onRespond={onRespondApproval}
@@ -226,6 +231,7 @@ export const TurnProcessPanel = ({
             <span>{interactions.length}</span>
           </header>
           <InteractionFlowView
+            chineseLabels={chineseLabels}
             interactions={interactions}
             participantDirectory={participantDirectory}
             onRespond={onRespondInteraction}

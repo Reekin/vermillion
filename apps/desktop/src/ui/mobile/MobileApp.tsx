@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createWorkbenchClient, type InboxItem, type Workspace } from "@vermillion/workbench/client";
 import { createRendererStore } from "../../store/store.js";
 import { createDesktopTransport } from "../../transport/desktop-transport.js";
@@ -68,6 +68,10 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const [inboxError, setInboxError] = useState<string>();
   const [inboxLoading, setInboxLoading] = useState(true);
   const [reloadSignal, setReloadSignal] = useState(0);
+  const visibleScope = useRef({ turnIds: new Set<string>(), sessionId: "" });
+  const onVisiblePathChange = useCallback((turnIds: string[], sessionId: string) => {
+    visibleScope.current = { turnIds: new Set(turnIds), sessionId };
+  }, []);
   const sidebar = useSessionSidebar({ transport, store, workspaceIds: workspaces.filter((w) => !workspaceFilter || w.workspaceId === workspaceFilter).map((w) => w.workspaceId) });
   const openSession = (id: string) => { location.hash = sessionHash(id); };
   const refreshInbox = async () => {
@@ -85,7 +89,12 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
     if (connection !== "connected") return;
     let cancelled = false;
     let subscription: Awaited<ReturnType<typeof connectDesktopTransportToStore>> | undefined;
-    void connectDesktopTransportToStore({ transport, store }).then((value) => {
+    void connectDesktopTransportToStore({ transport, store, isBackgroundStream: ({ event }) => {
+      const scope = visibleScope.current;
+      return scope.turnIds.size > 0
+        ? !("turnId" in event && typeof event.turnId === "string" && scope.turnIds.has(event.turnId))
+        : !("sessionId" in event && event.sessionId === scope.sessionId);
+    } }).then((value) => {
       if (cancelled) void value.unsubscribe().catch(() => undefined);
       else subscription = value;
     }).catch((cause) => { if (!cancelled) setWorkspaceError(String(cause)); });
@@ -116,7 +125,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
       <Button variant={route.page !== "inbox" ? "primary" : "ghost"} onClick={() => { location.hash = "#/sessions"; }}>会话列表</Button>
       <Button variant={route.page === "inbox" ? "primary" : "ghost"} onClick={() => { location.hash = "#/inbox"; }}>Inbox{items.length ? " · " + items.length : ""}</Button>
     </nav>
-    {route.page === "session" ? <MobileSessionPane sessionId={route.sessionId} store={store} transport={transport} reloadSignal={reloadSignal} disabled={connection !== "connected"} /> : route.page === "inbox" ?
+    {route.page === "session" ? <MobileSessionPane sessionId={route.sessionId} store={store} transport={transport} reloadSignal={reloadSignal} disabled={connection !== "connected"} onVisiblePathChange={onVisiblePathChange} /> : route.page === "inbox" ?
       <MobileInbox items={items} error={inboxError} loading={inboxLoading} route={route} client={client} refresh={refreshInbox} openSession={openSession} /> : <>
         <PanelHeader title="会话"><Field kind="select" aria-label="筛选 workspace" value={workspaceFilter} onChange={(event) => setWorkspaceFilter(event.target.value)}>
           <option value="">全部</option>{workspaces.map((w) => <option key={w.workspaceId} value={w.workspaceId}>{w.label}</option>)}

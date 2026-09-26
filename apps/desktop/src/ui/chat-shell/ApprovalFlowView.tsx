@@ -21,6 +21,7 @@ export type ApprovalResponseInput = {
 };
 
 export type ApprovalFlowViewProps = {
+  chineseLabels?: boolean;
   approvals: ApprovalRequest[];
   participantDirectory?: ParticipantDirectory;
   onRespond?: (input: ApprovalResponseInput) => Promise<void>;
@@ -126,6 +127,7 @@ const decisionLabelsFor = (approval: ApprovalRequest): string[] => {
 };
 
 export const ApprovalFlowView = ({
+  chineseLabels = false,
   approvals,
   participantDirectory = defaultDirectory,
   onRespond
@@ -224,7 +226,7 @@ export const ApprovalFlowView = ({
                       )
                     }
                   >
-                    {decisionButtonLabel(decision)}
+                    {chineseLabels ? ({ accept: "批准", acceptForSession: "本会话始终批准", decline: "拒绝", cancel: "稍后" }[decision] ?? decisionButtonLabel(decision)) : decisionButtonLabel(decision)}
                   </Button>
                 ))
               ) : (
