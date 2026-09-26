@@ -453,6 +453,8 @@ export class AppLauncher {
 
 export const resolveAppCommand = (appRoot: string): AppCommand => {
   const repoRoot = resolve(appRoot, "..", ".."), desktopDir = resolve(repoRoot, "apps", "desktop");
-  const electron = process.platform === "win32" ? resolve(repoRoot, "node_modules", "electron", "dist", "electron.exe") : resolve(repoRoot, "node_modules", "electron", "dist", "electron");
+  const executable = process.platform === "win32" ? "electron.exe"
+    : process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : "electron";
+  const electron = resolve(repoRoot, "node_modules", "electron", "dist", executable);
   return { exe: electron, args: [resolve(desktopDir, "dist-electron", "main.js")], cwd: desktopDir };
 };
