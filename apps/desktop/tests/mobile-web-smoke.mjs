@@ -138,6 +138,7 @@ try {
   await browser("open", conversationUrl.href);
   await visible("document.querySelector('textarea[aria-label=\"消息\"]') && !document.querySelector('textarea[aria-label=\"消息\"]').disabled");
   await browser("find", "label", "消息", "fill", prompt);
+  await visible("document.querySelector('.awb-mobile-composer button[type=submit]:not(:disabled)') !== null");
   await browser("find", "role", "button", "click", "--name", "发送", "--exact");
   check("Unique pure-text prompt submitted through the mobile composer");
   await until("real agent reply and completed turn", async () => {
