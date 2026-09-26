@@ -64,8 +64,8 @@ await writeFile(browserConfig, "{}\n", { mode: 0o600 });
 // Do not inherit a shared CDP connection, profile, restore key or launch script.
 const browserEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("AGENT_BROWSER_")));
 browserEnv.AGENT_BROWSER_DEFAULT_TIMEOUT = "120000";
-const browserFlags = ["--config", browserConfig, "--session", browserSession, "--json",
-  ...(args.insecure ? ["--ignore-https-errors"] : [])];
+const browserFlags = ["--session", browserSession, "--json"];
+let browserConfigured = false;
 
 async function run(program, argv, label, env = process.env, timeout = 135_000) {
   try {
@@ -77,7 +77,10 @@ async function cli(method, params = {}) {
   try { return JSON.parse(stdout); } catch { throw new Error(`Invalid CLI response: ${method}`); }
 }
 async function browser(...argv) {
-  const stdout = await run(args.browser, [...browserFlags, ...argv], `Browser ${argv[0]}`, browserEnv);
+  const launchFlags = !browserConfigured && argv[0] === "open"
+    ? ["--config", browserConfig, ...(args.insecure ? ["--ignore-https-errors"] : [])] : [];
+  if (argv[0] === "open") browserConfigured = true;
+  const stdout = await run(args.browser, [...launchFlags, ...browserFlags, ...argv], `Browser ${argv[0]}`, browserEnv);
   let result;
   try { result = JSON.parse(stdout); } catch { throw new Error(`Invalid browser response: ${argv[0]}`); }
   if (result.success === false) throw new Error(`Browser ${argv[0]} failed (details withheld)`);
