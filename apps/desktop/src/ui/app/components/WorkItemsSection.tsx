@@ -360,7 +360,7 @@ const WorkDetail = ({ entry, title, client, workspaceId, handlers, onClose }: {
       {entry.attention && <AttentionAlert entry={entry} attention={entry.attention} handlers={handlers} sessionId={request.workerSessionId} />}
       <div className="flex flex-wrap gap-2">
         {request.workerSessionId && <Button size="sm" variant="ghost" outlined onClick={() => { onClose(); handlers.onOpenSession(request.workerSessionId!); }}><MessageSquare size={14} aria-hidden="true" />准备会话</Button>}
-        {!finished && <Button size="sm" disabled={handlers.busy} onClick={() => handlers.onWorkAction(request.paused ? "work.resume" : "work.pause", entry.id)}>{request.paused ? "恢复全部推进" : "暂停全部"}</Button>}
+        {!finished && !entry.attention && <Button size="sm" disabled={handlers.busy} onClick={() => handlers.onWorkAction(request.paused ? "work.resume" : "work.pause", entry.id)}>{request.paused ? "恢复全部推进" : "暂停全部"}</Button>}
       </div>
       <SupervisorDetails request={request} client={client} workspaceId={workspaceId} onOpenSession={(id) => { onClose(); handlers.onOpenSession(id); }} />
       {raw.length > 0 && <CollapsibleDetails open={technical} onToggle={() => setTechnical((open) => !open)}>{raw.join("\n\n")}</CollapsibleDetails>}
