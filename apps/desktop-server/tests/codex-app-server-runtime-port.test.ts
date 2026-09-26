@@ -302,6 +302,22 @@ describe("Codex app-server runtime port", () => {
     });
   });
 
+  it("opens a web search step on completion when it started without an action", () => {
+    const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1" });
+    port.attachThreadToSession("session-web", "thread-web");
+    const events: Array<{ method: string; params: Record<string, unknown> }> = [];
+    port.subscribe((event) => events.push(event));
+    const notify = (port as unknown as { handleNotification: (method: string, params: Record<string, unknown>) => void })
+      .handleNotification.bind(port);
+    const item = { type: "webSearch", id: "web-1", query: "" };
+    notify("item/started", { threadId: "thread-web", turnId: "turn-web", item: { ...item, action: null } });
+    notify("item/completed", { threadId: "thread-web", turnId: "turn-web",
+      item: { ...item, action: { type: "openPage", url: "https://example.com/docs" } } });
+    const tool = events.filter((event) => event.method.startsWith("tool."));
+    expect(tool.map((event) => event.method)).toEqual(["tool.started", "tool.completed"]);
+    expect(tool[0]!.params).toMatchObject({ toolCallId: "session-web:web-1", toolName: "webSearch", inputSummary: expect.stringContaining("https://example.com/docs") });
+  });
+
   it("uses current role instructions at first start and injects each later revision once", async () => {
     const rebuilt = vi.fn();
     const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1",

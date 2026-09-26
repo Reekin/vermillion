@@ -3350,11 +3350,14 @@ export class CodexAppServerRuntimePort
     }
 
     if (isCodexWebSearchThreadItem(item)) {
+      const toolItemKey = this.codexToolItemKey(turnId, item.id);
       if (method === "item/started") {
+        // Codex starts a search before its action is known; the step is then opened on completion.
         const inputSummary = summarizeCodexWebSearchAction(item.action, item.query);
         if (!inputSummary) {
           return;
         }
+        this.startedCodexToolItemIds.add(toolItemKey);
         this.rememberProcessActivitySummary(
           sessionId,
           turnId,
@@ -3374,6 +3377,7 @@ export class CodexAppServerRuntimePort
 
       const outputSummary = summarizeCodexWebSearchAction(item.action, item.query);
       if (!outputSummary) {
+        this.startedCodexToolItemIds.delete(toolItemKey);
         return;
       }
       this.rememberProcessActivitySummary(
@@ -3382,6 +3386,17 @@ export class CodexAppServerRuntimePort
         "webSearch",
         outputSummary
       );
+      if (!this.startedCodexToolItemIds.has(toolItemKey)) {
+        this.emitEvent("tool.started", {
+          sessionId,
+          turnId,
+          toolCallId: item.id,
+          toolName: "webSearch",
+          inputSummary: outputSummary,
+          engineId: this.engineId
+        });
+      }
+      this.startedCodexToolItemIds.delete(toolItemKey);
       this.emitEvent("tool.completed", {
         sessionId,
         turnId,

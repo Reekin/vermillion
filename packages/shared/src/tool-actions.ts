@@ -57,6 +57,14 @@ const firstLine = (value: string | undefined): string | undefined =>
     .map((line) => line.trim())
     .find((line) => line.length > 0);
 
+/** Web steps are summarized as "Open page\nurl: …"; the query or address is what they act on. */
+const webTarget = (summary: string | undefined): string | undefined => {
+  const field = /^(?:query|url|pattern):\s*(.+)$/m.exec(summary ?? "")?.[1]?.trim();
+  if (field) return field;
+  const listed = /^-\s*(.+)$/m.exec(summary ?? "")?.[1]?.trim();
+  return listed ?? (summary && !/^(Search|Open page|Find in page|Web search)$/.test(summary.trim()) ? firstLine(summary) : undefined);
+};
+
 const countLines = (value: string | undefined): number =>
   value ? value.split(/\r?\n/).filter((line) => line.trim().length > 0).length : 0;
 
@@ -346,7 +354,9 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
           ? toolCall.inputSummary ? baseName(toolCall.inputSummary) : undefined
           : fixedKind === "compact"
             ? undefined
-            : firstLine(toolCall.inputSummary);
+            : fixedKind === "web"
+              ? webTarget(toolCall.inputSummary)
+              : firstLine(toolCall.inputSummary);
     return {
       kind: fixedKind,
       verb: verbs[fixedKind],

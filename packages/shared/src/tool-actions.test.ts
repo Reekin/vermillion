@@ -119,6 +119,10 @@ describe("tool actions", () => {
     expect(actionsFromNamedTool("write", { path: "f.ts" })).toEqual([{ kind: "edit", target: "f.ts" }]);
     expect(describeToolStep(call({ toolName: "read", inputSummary: JSON.stringify({ path: "docs/x.md" }) }), { text: "1\n2" }))
       .toMatchObject({ kind: "read", object: "x.md", result: "2 行" });
+    expect(describeToolStep(call({ toolName: "webSearch", inputSummary: "Open page\nurl: https://example.com/docs" })))
+      .toMatchObject({ kind: "web", object: "https://example.com/docs" });
+    expect(describeToolStep(call({ toolName: "webSearch", inputSummary: "Search\nquery: tripo multiview" })))
+      .toMatchObject({ kind: "web", object: "tripo multiview" });
     expect(describeToolStep(call({ toolName: "reasoning", outputSummary: "**Plan**\nnext" })))
       .toMatchObject({ kind: "think", verb: "思考", object: "Plan" });
     expect(describeToolStep(call({ toolName: "mcp.docs.search", inputSummary: "{\"q\":1}" })))
