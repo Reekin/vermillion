@@ -15,7 +15,7 @@ const requests: WorkRequest[] = [
 ];
 const merged = workItem({
   workItemId: "merged", title: "隔离会话树实例", status: "closed", risk: "R2", sourceSessionId: "src-3", treeId: "tree-3", updatedAt: day(12),
-  acceptance: [{ text: "单次返回可连接实例" }, { text: "父会话可展开" }],
+  acceptance: [{ text: "单次返回可连接实例" }, { text: "父会话可展开，见 `x.ts`" }],
   verify: { verdict: "pass", verifiedAt: day(12), items: [{ index: 0, status: "pass", evidence: "真实 CLI 单次返回 pid" }, { index: 1, status: "pass", evidence: "展开可见子会话" }] },
   evidence: { summary: "`app.start` 现在支持 fixture", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [], submittedAt: day(12) },
   merge: { commit: "5cb9327e11d47bb3adbfac8a", diffStat: "", mergedAt: day(12) }
@@ -83,6 +83,7 @@ describe("work board", () => {
     await test.user.click(within(dialog).getByRole("tab", { name: /^验收/ }));
     expect(within(dialog).getByText("2 条全部通过", { exact: false })).toBeTruthy();
     expect(within(dialog).queryByText("真实 CLI 单次返回 pid")).toBeNull();
+    expect(within(dialog).getByText("x.ts").tagName).toBe("CODE");
     await test.user.click(within(dialog).getAllByRole("button", { name: "证据" })[0]!);
     expect(within(dialog).getByText("真实 CLI 单次返回 pid")).toBeTruthy();
   });

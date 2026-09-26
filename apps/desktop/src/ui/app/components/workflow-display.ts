@@ -230,7 +230,8 @@ export const workItemSteps = (item: WorkItem, actions: WorkflowAction[], runs: A
     if (index > currentIndex) return { label, state: "pending" };
     if (cancelled) return { label, time, state: "current", tone: "failed", note: "已取消" };
     return { label, time, state: "current", tone: attention ? (attention.action === "retry" ? "failed" : "attention") : "running",
-      note: attention?.title ?? (item.status === "preparing" ? "准备中" : waitNote) };
+      // A wait note that only repeats the stage name adds nothing.
+      note: attention?.title ?? (item.status === "preparing" ? "准备中" : waitNote && waitNote !== label ? waitNote : undefined) };
   });
 };
 

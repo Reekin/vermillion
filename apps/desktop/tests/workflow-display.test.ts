@@ -112,6 +112,9 @@ describe("execution and integration presentation", () => {
     const waiting = workItemSteps(workItem({ workItemId: "one", status: "running" }), actions.slice(0, 1), [], { title: "已暂停", next: "", action: "resume" });
     expect(waiting.map((step) => step.state)).toEqual(["done", "current", "pending", "pending"]);
     expect(waiting[1]).toMatchObject({ tone: "attention", note: "已暂停" });
+    const running = workItemSteps(workItem({ workItemId: "one", status: "running" }), actions.slice(0, 1), [], undefined, "执行");
+    expect(running[1]).toMatchObject({ state: "current", tone: "running", note: undefined });
+    expect(workItemSteps(workItem({ workItemId: "one", status: "queued" }), [], [], undefined, "等待前置工单")[0]!.note).toBe("等待前置工单");
     const cancelled = workItemSteps(workItem({ workItemId: "one", status: "cancelled" }), actions.slice(0, 1), []);
     expect(cancelled[1]).toMatchObject({ state: "current", tone: "failed", note: "已取消" });
   });

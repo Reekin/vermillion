@@ -43,7 +43,8 @@ const headerState = (item: WorkItem, progressLabel: string, attention?: Attentio
 /** A question waiting for the user, with its options as buttons; the recommended one is primary. */
 export const PendingDecision = ({ card, disabled, onAnswer }: { card: DecisionCard; disabled: boolean; onAnswer: (key: string) => void }) => (
   <div className="vm-detail-decision">
-    <p className="text-label font-medium text-strong">等待你答复：{card.question}</p>
+    <p className="text-caption font-medium text-muted-foreground">等待你答复</p>
+    <div className="text-strong"><Markdown>{card.question}</Markdown></div>
     <div className="mt-2 flex flex-wrap gap-2">
       {card.options.map((option) => <Button key={option.key} size="sm" variant={option.key === card.recommended ? "primary" : "secondary"} disabled={disabled} title={option.detail} onClick={() => onAnswer(option.key)}>{option.label}</Button>)}
     </div>
@@ -137,7 +138,7 @@ const Verification = ({ item }: { item: WorkItem }) => {
         return <li key={index} className="vm-check">
           <StatusIcon tone={state.tone} icon={state.icon} label={state.label} />
           <div className="min-w-0">
-            <p className="text-label font-normal text-foreground">{acceptance.text}</p>
+            <Markdown>{acceptance.text}</Markdown>
             {expanded && entry?.evidence && <div className="mt-1.5 text-caption text-muted-foreground"><Markdown>{entry.evidence}</Markdown></div>}
           </div>
           {entry?.evidence ? <Button variant="ghost" size="sm" aria-expanded={expanded} onClick={() => setOpen((current) => expanded ? current.filter((value) => value !== index) : [...current, index])}>{expanded ? "收起" : "证据"}</Button> : <span />}
@@ -181,7 +182,8 @@ const Decisions = ({ cards }: { cards: DecisionCard[] }) => <section>
   <h3 className="vm-detail-heading">已处理决策</h3>
   <div className="space-y-3">
     {cards.map((card) => <div key={card.decisionId}>
-      <p className="text-label text-foreground">{card.withdrawn ? "已撤回" : "已答复"}：{card.question}</p>
+      <p className="text-caption text-muted-foreground">{card.withdrawn ? "已撤回" : "已答复"}</p>
+      <Markdown>{card.question}</Markdown>
       {card.answer && <p className="mt-1 text-caption text-muted-foreground">答复：{(card.options.find((option) => option.key === card.answer?.key)?.label ?? card.answer.key) + (card.answer.note ? " · " + card.answer.note : "")}</p>}
       {card.deliveryPending && <p className="mt-1 text-caption text-muted-foreground">答复尚未送达：{card.deliveryFailure ?? "等待执行会话接收"}</p>}
     </div>)}
