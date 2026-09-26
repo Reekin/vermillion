@@ -189,9 +189,21 @@ importers:
 
   packages/workbench:
     dependencies:
+      '@vermillion/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@vscode/ripgrep':
         specifier: ^1.15.14
         version: 1.18.0
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+      remark-parse:
+        specifier: 11.0.0
+        version: 11.0.0
+      unified:
+        specifier: 11.0.5
+        version: 11.0.5
       zod:
         specifier: ^3.25.76
         version: 3.25.76

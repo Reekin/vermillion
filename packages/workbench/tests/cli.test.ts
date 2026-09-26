@@ -238,7 +238,11 @@ describe("vermillion cli", () => {
     });
     const rolloutPath = join(base, "sessions", "cli-search-rollout.jsonl");
     await mkdir(join(base, "sessions"), { recursive: true });
-    await writeFile(rolloutPath, "{\"type\":\"session_meta\",\"payload\":{\"originator\":\"vermillion\"}}\n{\"payload\":{\"turn_id\":\"turn-cli\",\"text\":\"cli-search-needle\"}}\n", "utf8");
+    await writeFile(rolloutPath, [
+      { timestamp: "2026-01-01T00:00:00.000Z", type: "session_meta", payload: { originator: "vermillion" } },
+      { timestamp: "2026-01-01T00:00:01.000Z", ordinal: 1, type: "event_msg", payload: { type: "chat_tree_node_started", revision: 1, node_id: "turn-cli", parent_node_id: null, turn_id: "turn-cli", order: 0 } },
+      { timestamp: "2026-01-01T00:00:02.000Z", ordinal: 2, type: "event_msg", payload: { type: "item_completed", thread_id: "thread", turn_id: "turn-cli", item: { type: "AgentMessage", id: "msg-cli", content: [{ type: "Text", text: "found cli-search-needle here" }] } } }
+    ].map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
     await writeFile(join(base, "session-index.json"), JSON.stringify({
       version: 1,
       entries: [{
@@ -256,6 +260,12 @@ describe("vermillion cli", () => {
     }, null, 2), "utf8");
     const result = await call("search.query", { query: "cli-search-needle" });
     expect(result.hits.map((hit: { kind: string }) => hit.kind)).toEqual(["workItem", "session"]);
-    expect(result.hits[1]).toMatchObject({ sessionId: "session-cli-search", turnId: "turn-cli" });
+    expect(result.hits[1]).toMatchObject({
+      sessionId: "session-cli-search",
+      turnId: "turn-cli",
+      source: "agent",
+      turnNumber: 1,
+      messageAt: "2026-01-01T00:00:02.000Z"
+    });
   });
 });

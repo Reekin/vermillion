@@ -5,10 +5,15 @@ const zSearchMatch = z.object({
   end: z.number().int().positive()
 });
 
+/** Who a session hit belongs to: the user, the agent's reply, or a tool call shown in the process steps. */
+export const zSearchSource = z.enum(["user", "agent", "tool"]);
+
+/** Session hits and their neighbours are messages; `line` is the rollout line the message sits on. */
 const zSearchContextLine = z.object({
   line: z.number().int().positive(),
   text: z.string(),
-  matches: z.array(zSearchMatch)
+  matches: z.array(zSearchMatch),
+  source: zSearchSource.optional()
 });
 
 export const zSearchQuery = z.object({
@@ -34,7 +39,12 @@ export const zSearchHit = z.object({
   context: z.array(zSearchContextLine).min(1),
   workItemId: z.string().min(1).optional(),
   sessionId: z.string().min(1).optional(),
-  turnId: z.string().min(1).optional()
+  turnId: z.string().min(1).optional(),
+  /** Session hits only: message source, tool action kind, 1-based turn number and message time. */
+  source: zSearchSource.optional(),
+  toolKind: z.string().min(1).optional(),
+  turnNumber: z.number().int().positive().optional(),
+  messageAt: z.string().min(1).optional()
 });
 
 export const zSearchStats = z.object({
@@ -58,6 +68,7 @@ export const zSearchCancel = z.object({ queryId: z.string().min(1) });
 export const zSearchCancelResult = z.object({ cancelled: z.boolean() });
 
 export type SearchQuery = z.infer<typeof zSearchQuery>;
+export type SearchSource = z.infer<typeof zSearchSource>;
 export type SearchContextLine = z.infer<typeof zSearchContextLine>;
 export type SearchHit = z.infer<typeof zSearchHit>;
 export type SearchStats = z.infer<typeof zSearchStats>;
