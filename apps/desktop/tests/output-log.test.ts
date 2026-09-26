@@ -82,11 +82,11 @@ describe("output log", () => {
     expect(withEngineConfigWarnings({ message: "Send failed", severity: "error", source: "send", engineId: "pi" }, [warning]).context).toBeUndefined();
     const error = withEngineConfigWarnings({ message: "Send failed", severity: "error", source: "send", engineId: "codex" }, [warning]);
     expect(error.context).toEqual({ engineConfigWarnings: [{ engineId: "codex", summary: warning.summary, details: warning.details, path: warning.path }] });
-    expect(engineWarningDetails(warning)).toBe("// 引擎配置警告\n详情  No such file\n配置  /Users/test/.codex/config.toml");
+    expect(engineWarningDetails(warning)).toBe("// 引擎配置警告\n原文  " + warning.summary + "\n详情  No such file\n配置  /Users/test/.codex/config.toml");
     const [entry] = appendOutputEntry([], { ...error, detail: "os error 2", stack: "Error: x" }, at, "d");
     expect(outputEntryDetails(entry!)).toBe([
       "// 原始信息\nos error 2",
-      "// 引擎配置警告\n摘要  " + warning.summary + "\n详情  No such file\n配置  /Users/test/.codex/config.toml",
+      "// 引擎配置警告\n原文  " + warning.summary + "\n详情  No such file\n配置  /Users/test/.codex/config.toml",
       "// 调用栈\nError: x"
     ].join("\n\n"));
   });

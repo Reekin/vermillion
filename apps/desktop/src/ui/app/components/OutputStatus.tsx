@@ -10,6 +10,7 @@ import { Button, IconButton } from "./ui.js";
 import {
   countOutput,
   engineWarningDetails,
+  engineWarningReason,
   matchesOutputFilter,
   outputEntryConfigPath,
   outputEntryDetails,
@@ -62,6 +63,8 @@ type Row = {
   firstAt: string;
   source: string;
   message: string;
+  /** What the user can do about it; shown under the message in the detail pane. */
+  next?: string;
   count: number;
   details?: string;
   meta: ReactNode[];
@@ -155,7 +158,8 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTit
     const filter = { severities, text };
     const problems = warnings.map((warning, index): Row => ({
       key: `problem-${warning.engineId}-${index}`, group: "problems", severity: "warning", at: warning.at, firstAt: warning.at,
-      source: `${warning.engineLabel} 配置`, message: warning.summary, count: 1, details: engineWarningDetails(warning),
+      source: `${warning.engineLabel} 配置`, message: engineWarningReason(warning.engineLabel).title, next: engineWarningReason(warning.engineLabel).next,
+      count: 1, details: engineWarningDetails(warning),
       meta: [<span key="engine">引擎 {warning.engineLabel}</span>, ...(warning.path ? [<span key="path" title={warning.path}>配置 {fileName(warning.path)}</span>] : [])]
     }));
     const events = entries.map((entry): Row => ({
@@ -187,7 +191,7 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTit
       setCopyState(state);
       window.setTimeout(() => setCopyState("idle"), 1_500);
     };
-    void writeClipboardText(selected.details ? `${selected.message}\n\n${selected.details}` : selected.message)
+    void writeClipboardText([selected.message, selected.next, selected.details].filter(Boolean).join("\n\n"))
       .then(() => settle("copied"), () => settle("failed"));
   };
 
@@ -260,6 +264,7 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTit
             </span>
           </div>
           <p className="vm-output-detail__message">{selected.message}</p>
+          {selected.next && <p className="vm-output-detail__next">{selected.next}</p>}
           {selected.meta.length > 0 && <div className="vm-output-detail__meta">{selected.meta}</div>}
           {selected.details && <DetailCode text={selected.details} />}
         </section>

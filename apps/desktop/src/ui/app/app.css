@@ -197,6 +197,14 @@
   .vm-list-info { grid-column: 2 / -1; grid-row: 2; max-width: none; white-space: normal; overflow-wrap: anywhere; padding-bottom: 4px; }
   .vm-list-info:empty { display: none; }
 }
+/* Alert: attention or failure the user must act on. Semantic colour on the icon, border and a light fill only. */
+.vm-alert { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--awb-severity-warning-soft); border-radius: var(--awb-control-radius); background: var(--awb-severity-warning-soft); }
+.vm-alert[data-tone="error"] { border-color: var(--awb-severity-error-soft); background: var(--awb-severity-error-soft); }
+.vm-alert__icon { flex: none; margin-top: 3px; color: var(--awb-severity-warning); }
+.vm-alert[data-tone="error"] .vm-alert__icon { color: var(--awb-severity-error); }
+.vm-alert__title { margin: 0; font-size: var(--text-label); font-weight: 500; line-height: 1.45; color: var(--awb-ink-strong); }
+.vm-alert__next { margin: 4px 0 0; font-size: var(--text-caption); line-height: 1.45; color: var(--awb-ink-muted); }
+
 /* Output: status bar summary and the output panel. Severity colour marks icons, counters, level tags and the selection bar only. */
 .vm-output-icon { flex: none; }
 .vm-output-icon[data-severity="error"] { color: var(--awb-severity-error); }
@@ -248,6 +256,7 @@
 .vm-output-level[data-severity="info"] { background: var(--awb-severity-info-soft); color: var(--awb-severity-info); }
 .vm-output-detail__actions { display: flex; gap: 8px; margin-left: auto; }
 .vm-output-detail__message { margin: 0; padding: 8px 16px 12px; font-size: var(--text-label); line-height: 1.5; color: var(--awb-ink-strong); overflow-wrap: anywhere; }
+.vm-output-detail__next { margin: -4px 0 0; padding: 0 16px 12px; font-size: var(--text-caption); color: var(--awb-ink-muted); }
 .vm-output-detail__meta { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 0 16px 12px; font-size: var(--text-caption); color: var(--awb-ink-muted); overflow-wrap: anywhere; }
 .vm-output-code { flex: 1; min-height: 0; margin: 0 16px 16px; padding: 8px 12px; overflow: auto; border: 1px solid var(--awb-rule); border-radius: var(--awb-control-radius); background: var(--awb-input); font-family: var(--awb-font-mono); font-size: var(--text-micro); line-height: 1.6; color: var(--awb-ink); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .vm-output-code__section { color: var(--awb-ink-faint); }

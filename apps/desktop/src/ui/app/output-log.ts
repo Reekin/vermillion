@@ -110,7 +110,7 @@ export const outputEntryDetails = (entry: OutputEntry): string | undefined => {
   const { engineConfigWarnings, ...rest } = entry.context ?? {};
   for (const warning of Array.isArray(engineConfigWarnings) ? engineConfigWarnings as WarningContext[] : []) {
     sections.push(["// 引擎配置警告",
-      warning.summary && "摘要  " + warning.summary,
+      warning.summary && "原文  " + warning.summary,
       warning.details && "详情  " + warning.details,
       warning.path && "配置  " + warning.path].filter(Boolean).join("\n"));
   }
@@ -128,8 +128,14 @@ export const outputEntryConfigPath = (entry: OutputEntry): string | undefined =>
   return Array.isArray(warnings) ? (warnings as WarningContext[]).find((warning) => warning.path)?.path : undefined;
 };
 
-export const engineWarningDetails = (warning: { details?: string; path?: string }): string | undefined => {
-  const lines = [warning.details && "详情  " + warning.details, warning.path && "配置  " + warning.path]
+/** User-facing wording of an engine configuration warning; the engine's summary is kept as original text. */
+export const engineWarningReason = (engineLabel: string): { title: string; next: string } => ({
+  title: `${engineLabel} 配置无法加载，已改用默认配置`,
+  next: "检查配置文件里引用的文件路径，修正后下一次发送即生效，无需重启。"
+});
+
+export const engineWarningDetails = (warning: { summary?: string; details?: string; path?: string }): string | undefined => {
+  const lines = [warning.summary && "原文  " + warning.summary, warning.details && "详情  " + warning.details, warning.path && "配置  " + warning.path]
     .filter((line): line is string => Boolean(line));
   return lines.length ? ["// 引擎配置警告", ...lines].join("\n") : undefined;
 };

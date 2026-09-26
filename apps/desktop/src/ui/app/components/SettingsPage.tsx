@@ -10,8 +10,8 @@ import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { RendererStore } from "../../../store/store.js";
 import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-signal.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
-import { Button, CollapsibleDetails, Field, InlineNotice } from "./ui.js";
-import { engineWarningDetails } from "../output-log.js";
+import { Alert, Button, CollapsibleDetails, Field, InlineNotice } from "./ui.js";
+import { engineWarningDetails, engineWarningReason } from "../output-log.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
@@ -213,21 +213,19 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
               {(settings?.engineConfigWarningsByEngineId?.[engine.engineId] ?? []).map((warning, index) => {
                 const key = `${engine.engineId}:${index}`;
                 const details = engineWarningDetails(warning);
+                const reason = engineWarningReason(engine.displayName);
                 return (
-                  <div key={key}>
-                    <InlineNotice tone="error" className="px-0 pb-0">
-                      {`配置警告：${warning.summary}`}
-                    </InlineNotice>
+                  <Alert key={key} title={reason.title} next={reason.next}>
                     {details && (
                       <CollapsibleDetails
-                        title="警告详情"
+                        title="技术详情"
                         open={openWarning === key}
                         onToggle={() => setOpenWarning((current) => (current === key ? undefined : key))}
                       >
                         {details}
                       </CollapsibleDetails>
                     )}
-                  </div>
+                  </Alert>
                 );
               })}
             </div>
