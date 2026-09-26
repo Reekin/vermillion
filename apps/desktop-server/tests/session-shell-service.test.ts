@@ -437,6 +437,7 @@ describe("SessionShellService", () => {
       defaultNewSessionEngineId: "pi",
       engineProgramPathsByEngineId: {},
       engineProgramResolutionsByEngineId: {},
+      engineConfigWarningsByEngineId: {},
       allowedModelIdsByEngineId: { codex: ["gpt-5.5-codex"] },
       customModelReasoningOptionIdsByEngineId: {
         codex: { "custom-model": ["low", "high"] }
@@ -460,6 +461,7 @@ describe("SessionShellService", () => {
       defaultNewSessionEngineId: "codex",
       engineProgramPathsByEngineId: {},
       engineProgramResolutionsByEngineId: {},
+      engineConfigWarningsByEngineId: {},
       allowedModelIdsByEngineId: { codex: ["gpt-5.5-codex"] },
       customModelReasoningOptionIdsByEngineId: {
         codex: { "custom-model": ["low", "high"] }

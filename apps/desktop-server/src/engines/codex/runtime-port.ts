@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   AdapterRuntimePort,
@@ -22,6 +23,7 @@ import type {
   EventType
 } from "@vermillion/shared";
 import type { TurnExecutionProfile } from "@vermillion/shared";
+import type { EngineConfigWarningRpc } from "@vermillion/shared";
 import { RuntimePipelineDiagnostics } from "../../runtime/runtime-pipeline-diagnostics.js";
 import type { GetAuthStatusParams } from "../../codex-app-server-generated/GetAuthStatusParams.js";
 import type { GetAuthStatusResponse } from "../../codex-app-server-generated/GetAuthStatusResponse.js";
@@ -876,6 +878,9 @@ export class CodexAppServerRuntimePort
   private sequence = 0;
   private codexHome: string | undefined;
   private sqliteHome: string | undefined;
+  /** Warnings the running app-server reported at initialize, e.g. an unloadable config.toml it replaced with defaults. */
+  private configWarnings: EngineConfigWarningRpc[] = [];
+  private readonly configWarningListeners = new Set<() => void>();
   private startConfig: AgentAdapterRuntimeConfig = {};
   private readonly recordTurnChanges: ((input: RecordedCodexTurnChanges) => void) | undefined;
   private readonly recordRoleContextRebuilt: ((sessionId: string, developerInstructions: string) => void) | undefined;
@@ -985,10 +990,7 @@ export class CodexAppServerRuntimePort
     }
     await this.start();
     try {
-      const response = (await this.rpc("config/read", {
-        includeLayers: false,
-        cwd: null
-      })) as Partial<ConfigReadResponse>;
+      const response = (await this.readLatestConfig(undefined)) as Partial<ConfigReadResponse>;
       const config = isRecord(response.config) ? response.config : undefined;
       const configuredPath = config
         ? resolveConfiguredPath(config.sqlite_home ?? config["sqliteHome"])
@@ -1016,6 +1018,8 @@ export class CodexAppServerRuntimePort
 
     this.startConfig = config;
     this.lifecycle.setState("starting");
+    // A new process reports its own warnings after initialize.
+    this.setConfigWarnings([]);
     try {
       const command = await this.resolveCommand();
       const spawnCommand = resolveEngineSpawnCommand(
@@ -1627,10 +1631,41 @@ export class CodexAppServerRuntimePort
 
   public async readConfig(cwd?: string): Promise<ConfigReadResponse> {
     await this.start(this.startConfig);
-    return (await this.rpc("config/read", {
-      includeLayers: false,
-      cwd: cwd ?? null
-    } satisfies ConfigReadParams)) as ConfigReadResponse;
+    return this.readLatestConfig(cwd);
+  }
+
+  public getConfigWarnings(): EngineConfigWarningRpc[] {
+    // Codex reports an unloadable user config without a path; that config is CODEX_HOME/config.toml.
+    const userConfig = this.codexHome ? join(this.codexHome, "config.toml") : undefined;
+    return this.configWarnings.map((warning) => ({
+      ...warning,
+      ...(!warning.path && userConfig ? { path: userConfig } : {})
+    }));
+  }
+
+  public subscribeConfigWarnings(listener: () => void): () => void {
+    this.configWarningListeners.add(listener);
+    return () => this.configWarningListeners.delete(listener);
+  }
+
+  /** config/read reloads the whole user config; success means the reported config problems are resolved. */
+  private async readLatestConfig(
+    cwd: string | undefined,
+    options: RuntimeOperationOptions = {}
+  ): Promise<ConfigReadResponse> {
+    const response = (await this.rpc(
+      "config/read",
+      { includeLayers: false, cwd: cwd ?? null } satisfies ConfigReadParams,
+      options
+    )) as ConfigReadResponse;
+    this.setConfigWarnings([]);
+    return response;
+  }
+
+  private setConfigWarnings(warnings: EngineConfigWarningRpc[]): void {
+    if (!warnings.length && !this.configWarnings.length) return;
+    this.configWarnings = warnings;
+    for (const listener of this.configWarningListeners) listener();
   }
 
   public async readOpenAiCompatibleAuth(cwd?: string): Promise<CodexOpenAiCompatibleAuth> {
@@ -2326,11 +2361,7 @@ export class CodexAppServerRuntimePort
     cwd: string | undefined,
     options: RuntimeOperationOptions
   ): Promise<string> {
-    const config = (await this.rpc(
-      "config/read",
-      { includeLayers: false, cwd: cwd ?? null } satisfies ConfigReadParams,
-      options
-    )) as ConfigReadResponse;
+    const config = await this.readLatestConfig(cwd, options);
     const base = config.config.developer_instructions?.trim();
     return base ? `${base}\n\n${extra}` : extra;
   }
@@ -2695,6 +2726,19 @@ export class CodexAppServerRuntimePort
 
   private handleNotification(method: string, params: Record<string, unknown>): void {
     switch (method) {
+      case "configWarning": {
+        const summary = optionalString(params.summary);
+        if (!summary) return;
+        const warning: EngineConfigWarningRpc = {
+          summary,
+          ...(optionalString(params.details) ? { details: optionalString(params.details) } : {}),
+          ...(optionalString(params.path) ? { path: optionalString(params.path) } : {})
+        };
+        const key = JSON.stringify(warning);
+        if (this.configWarnings.some((existing) => JSON.stringify(existing) === key)) return;
+        this.setConfigWarnings([...this.configWarnings, warning]);
+        return;
+      }
       case "thread/settings/updated": {
         const threadId = optionalString(params.threadId);
         const settings = isRecord(params.threadSettings)

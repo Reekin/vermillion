@@ -5,7 +5,7 @@
  * primitives own layout, states and typography. See .vermillion/docs/Foundation/UIUX/Standards.md.
  *
  * Buttons       Button, IconButton
- * Text          Badge, SectionLabel, InlineNotice, StatusDot
+ * Text          Badge, SectionLabel, InlineNotice, Alert, StatusDot
  * Fields        Field (input / textarea / select / number), Toggle, Checkbox, Stepper
  * Structure     PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
@@ -19,7 +19,7 @@ import type {
   TextareaHTMLAttributes
 } from "react";
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Minus, MoreHorizontal, Plus, type LucideIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleX, Minus, MoreHorizontal, Plus, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
@@ -95,6 +95,28 @@ export const InlineNotice = ({ children, tone = "muted", className }: { children
     {children}
   </p>
 );
+
+/** Something the user must act on: why it happened, what to do next, and the actions and details for it. */
+export const Alert = ({ tone = "attention", title, next, actions, children }: {
+  tone?: "attention" | "error";
+  title: ReactNode;
+  next?: ReactNode;
+  actions?: ReactNode;
+  children?: ReactNode;
+}) => {
+  const Icon = tone === "error" ? CircleX : TriangleAlert;
+  return (
+    <div role="alert" className="vm-alert" data-tone={tone}>
+      <Icon size={14} className="vm-alert__icon" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <p className="vm-alert__title">{title}</p>
+        {next && <p className="vm-alert__next">{next}</p>}
+        {children}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+    </div>
+  );
+};
 
 /**
  * Session activity marker, coloured like the session tree nodes: `running` pulses in yellow, `unread_completed`
@@ -178,15 +200,17 @@ export const OverflowMenu = ({ label, items }: { label: string; items: OverflowM
 };
 
 /** Window-wide status feedback with an anchored, keyboard-accessible summary panel. */
-export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenChange }: {
+export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenChange, trailing }: {
   icon: LucideIcon;
   label: string;
   notice?: string;
   children: ReactNode;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Right-aligned status items such as the output summary. */
+  trailing?: ReactNode;
 }) => (
-  <footer aria-label="状态条" className="flex h-8 shrink-0 items-center border-t border-border-strong bg-app-shell px-2">
+  <footer aria-label="状态条" className="flex h-8 shrink-0 items-center gap-1 border-t border-border-strong bg-app-shell px-2">
     <div role="status" className="min-w-0 max-w-full truncate text-caption text-foreground" title={notice}>
       {notice ?? (
         <Popover.Root open={open} onOpenChange={onOpenChange}>
@@ -201,6 +225,7 @@ export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenCha
         </Popover.Root>
       )}
     </div>
+    {trailing && <div className="ml-auto flex min-w-0 items-center gap-1">{trailing}</div>}
   </footer>
 );
 

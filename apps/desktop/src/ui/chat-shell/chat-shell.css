@@ -24,6 +24,13 @@
   --awb-success: #919491;
   --awb-warning: #94928f;
   --awb-danger: #918d8e;
+  /* Severity marks only (icons, counters, level tags, selection bars); never body text or large fills. */
+  --awb-severity-error: #d48a86;
+  --awb-severity-error-soft: rgba(212, 138, 134, 0.14);
+  --awb-severity-warning: #d49a62;
+  --awb-severity-warning-soft: rgba(212, 154, 98, 0.14);
+  --awb-severity-info: #8fa9c4;
+  --awb-severity-info-soft: rgba(143, 169, 196, 0.12);
   --awb-warm: #8c8987;
   --awb-radius-soft: 4px;
   --awb-radius-tight: 3px;
@@ -1244,29 +1251,6 @@ button:disabled {
 .awb-composer-status__pill.is-error {
   background: var(--awb-accent-soft);
   color: var(--awb-ink-strong);
-}
-
-.awb-composer-status__notice {
-  flex: 1;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding-left: 8px;
-  border-left: 1px solid var(--awb-rule-strong);
-  font-weight: 400;
-  font-size: var(--awb-text-caption);
-  line-height: 1.45;
-  color: var(--awb-ink-muted);
-}
-
-.awb-composer-status__notice.is-error {
-  color: var(--awb-ink-strong);
-}
-
-.awb-composer-status__notice.is-warning {
-  color: var(--awb-ink);
 }
 
 .awb-composer-suggestions {

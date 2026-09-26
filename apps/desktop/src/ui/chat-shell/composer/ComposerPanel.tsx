@@ -103,7 +103,6 @@ export const ComposerPanel = ({
   queue,
   suggestions,
   status,
-  statusNotice,
   pendingApprovals = [],
   pendingInteractions = [],
   contextUsage,
@@ -157,7 +156,6 @@ export const ComposerPanel = ({
   queue: QueuedComposerMessage[];
   suggestions: ComposerSuggestionState | undefined;
   status: ComposerStatusModel;
-  statusNotice?: ComposerStatusNotice;
   pendingApprovals?: ApprovalRequest[];
   pendingInteractions?: RuntimeInteraction[];
   contextUsage?: ContextUsage;
@@ -421,7 +419,7 @@ export const ComposerPanel = ({
     </div>
     <div className="awb-composer__actions awb-composer-panel__actions">
       <div className="awb-composer__meta">
-        <ComposerStatusBar status={status} notice={statusNotice} />
+        <ComposerStatusBar status={status} />
         {threadGoal ? (
           <div
             className={`awb-composer-goal awb-composer-goal--${threadGoal.status}`}

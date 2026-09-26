@@ -282,7 +282,7 @@ describe("composer content lifetime", () => {
     expect(h.render().attachments).toEqual([attachment]);
     expect(h.send).toHaveBeenCalledOnce();
     expect(h.send).toHaveBeenCalledWith(expect.objectContaining({ attachments: [attachment.attachment] }));
-    expect(notice).toHaveBeenLastCalledWith(expect.objectContaining({ message: "Send failed: The current runtime rejected the send request.", source: "send", severity: "error" }));
+    expect(notice).toHaveBeenLastCalledWith(expect.objectContaining({ message: "发送失败，查看详情后重试", detail: "The current runtime rejected the send request.", source: "send", severity: "error" }));
   });
 
   it("clears only the submitted tree after an asynchronous send", async () => {

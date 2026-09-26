@@ -1,4 +1,4 @@
-import type { DiagnosticsWriteInputRpc } from "@vermillion/shared";
+import type { DiagnosticsWriteInputRpc, EngineConfigWarningRpc } from "@vermillion/shared";
 import type { AgentWorkbenchCapabilities } from "../capability-registry.js";
 import type {
   EngineProgramCommand,
@@ -62,6 +62,11 @@ export type EngineIntegration = {
   engineMethods?: readonly EngineMethodHandler[];
   /** 标题生成可用的 OpenAI 兼容凭据；不可用时返回 undefined。 */
   resolveTitleAuth?: () => Promise<OpenAiSessionTitleAuth | undefined>;
+  /** 引擎进程报告的配置警告；引擎没有这类报告时省略。 */
+  configWarnings?: {
+    list: () => EngineConfigWarningRpc[];
+    subscribe: (listener: () => void) => () => void;
+  };
 };
 
 export type EngineIntegrationFactory = (

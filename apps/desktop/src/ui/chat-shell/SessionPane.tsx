@@ -133,6 +133,8 @@ export type SessionPaneProps = {
   composerSubmitOverride?: ComposerSubmitOverride;
   composerDraftKey?: string;
   onComposerChange?: (actions: ComposerActions | undefined) => void;
+  /** Receives every new status notice; the app shell shows them in its output. */
+  onNotice?: (notice: ComposerStatusNotice) => void;
   /** Records preparation cancellation or a Worker pause before the shared session Stop command interrupts its turn. */
   onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
   /** Compact readers reserve all available width for messages. */
@@ -663,6 +665,7 @@ export const SessionPane = ({
   composerSubmitOverride,
   composerDraftKey,
   onComposerChange,
+  onNotice,
   onViewChange,
   renderChatTree,
   renderImageContextMenu,
@@ -689,7 +692,6 @@ export const SessionPane = ({
   const executionPreferencesByEngineIdRef = useRef<
     SessionSettingsRpc["executionPreferencesByEngineId"]
   >({});
-  const [statusNotice, setStatusNoticeState] = useState<ComposerStatusNotice | undefined>();
   const [processVisibilityByTurnId, setProcessVisibilityByTurnId] = useState<
     Record<string, ProcessVisibilityOverride>
   >({});
@@ -720,24 +722,30 @@ export const SessionPane = ({
     [transport]
   );
 
-  const setStatusNotice = useCallback(
-    (action: SetStateAction<ComposerStatusNotice | undefined>): void => {
-      if (typeof action === "function") {
-        setStatusNoticeState((current) => {
-          const next = action(current);
-          if (next && next !== current) {
-            writeStatusNoticeLog(next);
-          }
-          return next;
-        });
-        return;
-      }
-      if (action) {
-        writeStatusNoticeLog(action);
-      }
-      setStatusNoticeState(action);
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
+  const noticeSessionIdRef = useRef<string | undefined>(undefined);
+  /** Every new notice goes to the app shell output, tagged with the session shown when it was reported. */
+  const recordStatusNotice = useCallback(
+    (reported: ComposerStatusNotice): ComposerStatusNotice => {
+      const notice = reported.sessionId || !noticeSessionIdRef.current
+        ? reported : { ...reported, sessionId: noticeSessionIdRef.current };
+      onNoticeRef.current?.(notice);
+      writeStatusNoticeLog(notice);
+      return notice;
     },
     [writeStatusNoticeLog]
+  );
+
+  // Only the last notice is kept, so recovery updates can tell whether their failure was already reported.
+  const lastNoticeRef = useRef<ComposerStatusNotice | undefined>(undefined);
+  const setStatusNotice = useCallback(
+    (action: SetStateAction<ComposerStatusNotice | undefined>): void => {
+      const current = lastNoticeRef.current;
+      const next = typeof action === "function" ? action(current) : action;
+      lastNoticeRef.current = next && next !== current ? recordStatusNotice(next) : next;
+    },
+    [recordStatusNotice]
   );
 
   const onExecutionPreferenceChange = useCallback(
@@ -755,7 +763,7 @@ export const SessionPane = ({
         })
         .catch((error) => {
           setStatusNotice({
-            message: `Execution preference save failed: ${(error as Error).message}`,
+            message: "保存执行偏好失败", detail: (error as Error).message,
             source: "settings",
             ...statusNoticeErrorDetails(error)
           });
@@ -838,10 +846,11 @@ export const SessionPane = ({
   useEffect(() => {
     if (!isVisible || !windowVisible || !sessionId || !readNodeId || !unreadVisibleKey) return;
     void transport.chatTree.markRead({ sessionId, nodeId: readNodeId }).catch((error: Error) => {
-      setStatusNotice({ source: "chat-tree", message: "更新已读状态失败：" + error.message });
+      setStatusNotice({ source: "chat-tree", message: "更新已读状态失败", detail: error.message });
     });
   }, [readNodeId, unreadVisibleKey, isVisible, windowVisible, sessionId, transport, setStatusNotice]);
   useEffect(() => {
+    noticeSessionIdRef.current = viewSessionId;
     onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId });
   }, [onViewChange, viewSessionId, viewTurnId]);
 
@@ -956,7 +965,7 @@ export const SessionPane = ({
     void transport.sessionBrowser.open(viewSessionId, { forceProviderHydration: true, includeWindow: false })
       .then(() => refreshChatTree())
       .catch((error) => setStatusNotice({
-        message: `Session refresh failed: ${(error as Error).message}`,
+        message: "刷新会话失败", detail: (error as Error).message,
         source: "session-browser",
         ...statusNoticeErrorDetails(error)
       }));
@@ -1019,16 +1028,6 @@ export const SessionPane = ({
   );
 
   useEffect(() => {
-    if (!statusNotice || statusNotice.persistent) {
-      return;
-    }
-    const timeoutId = setTimeout(() => {
-      setStatusNotice((current) => (current === statusNotice ? undefined : current));
-    }, 2_000);
-    return () => clearTimeout(timeoutId);
-  }, [statusNotice]);
-
-  useEffect(() => {
     let disposed = false;
     void transport.engine
       .list()
@@ -1040,7 +1039,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: `Engine list failed: ${(error as Error).message}`,
+            message: "读取引擎列表失败", detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1082,7 +1081,7 @@ export const SessionPane = ({
         if (!disposed) {
           setSettingsHydrated(true);
           setStatusNotice({
-            message: `Settings load failed: ${(error as Error).message}`,
+            message: "读取设置失败", detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1116,7 +1115,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: `Engine surface failed: ${(error as Error).message}`,
+            message: "读取引擎能力失败", detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1147,7 +1146,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: `Event subscribe failed: ${(error as Error).message}`,
+            message: "订阅会话事件失败，界面可能不会实时更新", detail: (error as Error).message,
             persistent: true,
             source: "subscription",
             ...statusNoticeErrorDetails(error)
@@ -1307,7 +1306,6 @@ export const SessionPane = ({
           approvals={activeSessionApprovals}
           interactions={activeSessionInteractions}
           isOpeningSelectedSession={isOpeningSelectedSession}
-          statusNotice={statusNotice}
           onStatusNotice={setStatusNotice}
           onPreviewImage={onPreviewImage}
           createSession={sessionId ? undefined : createSession}

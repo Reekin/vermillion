@@ -7,19 +7,25 @@ import type {
   SessionSettingsUpdateRpc
 } from "@vermillion/shared";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
+import type { RendererStore } from "../../../store/store.js";
+import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-signal.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
-import { Button, Field, InlineNotice } from "./ui.js";
+import { Alert, Button, CollapsibleDetails, Field, InlineNotice } from "./ui.js";
+import { engineWarningDetails, engineWarningReason } from "../output-log.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
+  sessionStore: RendererStore;
 };
 
-export const SettingsPage = ({ transport }: SettingsPageProps) => {
+export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => {
+  const configWarningsSignal = useEngineConfigWarningsSignal(sessionStore);
   const [settings, setSettings] = useState<SessionSettingsRpc | undefined>(undefined);
   const [engines, setEngines] = useState<EngineDefinitionRpc[]>([]);
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [modelCatalogError, setModelCatalogError] = useState<string | undefined>(undefined);
+  const [openWarning, setOpenWarning] = useState<string | undefined>(undefined);
 
   const reload = useCallback(async () => {
     const [nextSettings, nextEngines] = await Promise.all([
@@ -39,6 +45,11 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
       disposed = true;
     };
   }, [reload]);
+
+  useEffect(() => {
+    if (!configWarningsSignal) return;
+    void transport.settings.get().then(setSettings, () => undefined);
+  }, [configWarningsSignal, transport]);
 
   // 标题模型的可选值与输入器一致，取当前新会话引擎的模型目录。
   const titleEngineId =
@@ -199,6 +210,24 @@ export const SettingsPage = ({ transport }: SettingsPageProps) => {
                   {`未找到 ${resolution.path}，新建会话时该引擎无法启动。`}
                 </InlineNotice>
               )}
+              {(settings?.engineConfigWarningsByEngineId?.[engine.engineId] ?? []).map((warning, index) => {
+                const key = `${engine.engineId}:${index}`;
+                const details = engineWarningDetails(warning);
+                const reason = engineWarningReason(engine.displayName);
+                return (
+                  <Alert key={key} title={reason.title} next={reason.next}>
+                    {details && (
+                      <CollapsibleDetails
+                        title="技术详情"
+                        open={openWarning === key}
+                        onToggle={() => setOpenWarning((current) => (current === key ? undefined : key))}
+                      >
+                        {details}
+                      </CollapsibleDetails>
+                    )}
+                  </Alert>
+                );
+              })}
             </div>
           );
         })}
