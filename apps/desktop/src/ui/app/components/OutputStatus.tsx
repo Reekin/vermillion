@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { CircleX, Copy, ExternalLink, Info, Search, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
@@ -71,11 +71,14 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: 
   const latestId = store((state) => state.latestId);
   const open = store((state) => state.open);
   const warningsSignal = useRendererStoreState(sessionStore).refreshSignals.engineConfigWarnings;
+  const [engineLabels, setEngineLabels] = useState<Record<string, string>>({});
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let disposed = false;
     void Promise.all([transport.settings.get(), transport.engine.list()]).then(([settings, engines]) => {
       if (disposed) return;
+      setEngineLabels(Object.fromEntries(engines.map((engine) => [engine.engineId, engine.displayName])));
       store.getState().setWarnings(settings.engineConfigWarningsByEngineId ?? {},
         (engineId) => engines.find((engine) => engine.engineId === engineId)?.displayName ?? engineId);
     }, () => undefined);
@@ -111,8 +114,8 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: 
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="top" align="end" sideOffset={6} className="z-50">
-          <Popover.Popup aria-label="输出" className="vm-output-panel">
-            <OutputPanel store={store} onOpenSession={onOpenSession} onClose={() => setOpen(false)} />
+          <Popover.Popup aria-label="输出" className="vm-output-panel" initialFocus={searchRef}>
+            <OutputPanel store={store} engineLabels={engineLabels} searchRef={searchRef} onOpenSession={onOpenSession} onClose={() => setOpen(false)} />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -120,8 +123,10 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: 
   );
 };
 
-const OutputPanel = ({ store, onOpenSession, onClose }: {
+const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }: {
   store: OutputStore;
+  engineLabels: Record<string, string>;
+  searchRef: RefObject<HTMLInputElement | null>;
   onOpenSession?: (sessionId: string) => boolean;
   onClose: () => void;
 }) => {
@@ -144,12 +149,14 @@ const OutputPanel = ({ store, onOpenSession, onClose }: {
       key: entry.id, group: "events", severity: entry.severity, at: entry.at,
       source: entry.source ? sourceLabels[entry.source] : "应用", message: entry.message, count: entry.count,
       details: outputEntryDetails(entry), sessionId: entry.sessionId,
-      meta: entry.engineId ? [<span key="engine">引擎 {entry.engineId}</span>] : []
+      meta: entry.engineId ? [<span key="engine">引擎 {engineLabels[entry.engineId] ?? entry.engineId}</span>] : []
     }));
     return [...problems, ...events].filter((row) => matchesOutputFilter(filter, row.severity, [row.message, row.source, row.details]));
-  }, [entries, severities, text, warnings]);
+  }, [engineLabels, entries, severities, text, warnings]);
 
-  const selected = rows.find((row) => row.key === selectedKey) ?? rows[0];
+  // Without a choice, show the newest error: it is usually why the panel was opened.
+  const selected = rows.find((row) => row.key === selectedKey)
+    ?? rows.find((row) => row.group === "events" && row.severity === "error") ?? rows[0];
   useEffect(() => setCopyState("idle"), [selected?.key]);
 
   const toggleSeverity = (severity: OutputSeverity) => setSeverities((current) => {
@@ -205,7 +212,7 @@ const OutputPanel = ({ store, onOpenSession, onClose }: {
         </div>
         <label className="vm-output-search">
           <Search size={14} aria-hidden="true" />
-          <input data-ui-raw="search box inside the output popover" value={text} placeholder="筛选"
+          <input ref={searchRef} data-ui-raw="search box inside the output popover" value={text} placeholder="筛选"
             aria-label="筛选输出" onChange={(event) => setText(event.target.value)} />
         </label>
         <button type="button" className="vm-output-icon-button" title="清空事件记录" aria-label="清空事件记录"
