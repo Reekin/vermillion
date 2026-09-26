@@ -1,3 +1,4 @@
+import { actionsFromNamedTool } from "@vermillion/shared";
 import {
   parseMessageBlock,
   parseTerminalStream,
@@ -220,6 +221,7 @@ export const buildPiTurnEntities = (input: {
             turnId: draft.turnId,
             toolName: block.name,
             inputSummary: summarize(block.arguments),
+            actions: actionsFromNamedTool(block.name, block.arguments),
             status: "running",
             startedAt: entry.timestamp
           })

@@ -165,6 +165,17 @@ export const zMessageBlockSchema = z.object({
 
 const zToolActorRef = zActorRef.optional();
 
+/** Engine-reported meaning of a tool call, e.g. a shell command that reads a file. */
+export const zToolActionKind = z.enum(["read", "list", "search", "edit", "run"]);
+
+export const zToolAction = z.object({
+  kind: zToolActionKind,
+  /** File or directory path for read/list, query for search, command for run. */
+  target: z.string().optional(),
+  /** Directory a search runs in. */
+  path: z.string().optional()
+});
+
 export const zToolCallSchema = z.object({
   toolCallId: zToolCallId,
   sessionId: zSessionId,
@@ -173,6 +184,7 @@ export const zToolCallSchema = z.object({
   status: zToolCallStatus,
   inputSummary: z.string().optional(),
   outputSummary: z.string().optional(),
+  actions: z.array(zToolAction).optional(),
   actor: zToolActorRef,
   startedAt: zIsoDateTime,
   completedAt: zIsoDateTime.optional()
@@ -296,6 +308,7 @@ export type Conversation = z.infer<typeof zConversationSchema>;
 export type ChatSession = z.infer<typeof zChatSessionSchema>;
 export type Turn = z.infer<typeof zTurnSchema>;
 export type MessageBlock = z.infer<typeof zMessageBlockSchema>;
+export type ToolAction = z.infer<typeof zToolAction>;
 export type ToolCall = z.infer<typeof zToolCallSchema>;
 export type TerminalStream = z.infer<typeof zTerminalStreamSchema>;
 export type ApprovalRequest = z.infer<typeof zApprovalRequestSchema>;

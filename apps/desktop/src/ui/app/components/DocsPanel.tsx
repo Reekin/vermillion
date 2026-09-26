@@ -145,7 +145,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
         {pending.length > 0 && <span className="font-mono text-micro text-accent-strong">{pending.length} 处变更</span>}
       </PanelHeader>
       {viewError && <InlineNotice tone="error">工作区数据加载失败：<span className="break-all font-mono text-micro text-muted-foreground">{viewError}</span></InlineNotice>}
-      {view && !viewError && tree.length === 0 && <InlineNotice>.vermillion/docs 下还没有文件。和设计伙伴聊出第一份 spec 吧。</InlineNotice>}
+      {view && !viewError && tree.length === 0 && <InlineNotice>还没有文档。会话中写入 .vermillion/docs 的文档会显示在这里。</InlineNotice>}
       <ul className="min-h-0 flex-1 overflow-auto pb-2">
         {tree.map((node) => renderNode(node, 0))}
       </ul>

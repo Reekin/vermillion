@@ -59,7 +59,7 @@ export const resolveRecoveryNotice = (
     if (!value || typeof value !== "object" || !("status" in value)) continue;
     if (value.status === "failed" && (!current || current.source === source)) {
       const message = "message" in value && typeof value.message === "string"
-        ? value.message : "Unknown error";
+        ? value.message : "未知错误";
       current = {
         message: summary,
         detail: message,
@@ -107,54 +107,54 @@ export const resolveComposerStatusModel = (
   if (input.activeSession?.status === "awaiting_approval" && pendingApproval) {
     return {
       kind: "awaiting_approval",
-      label: "Awaiting approval",
-      detail: `Approval requested for ${pendingApproval.requestId}`
+      label: "等待审批",
+      detail: `等待审批：${pendingApproval.requestId}`
     };
   }
 
   if (input.activeSession?.status === "running") {
     return {
       kind: "running",
-      label: "Running",
-      detail: input.supportsSteer ? "Steer supported" : "Queue only"
+      label: "运行中",
+      detail: input.supportsSteer ? "可补充到当前轮次" : "新消息会排队"
     };
   }
 
   if (input.activeSession?.status === "error") {
     return {
       kind: "error",
-      label: "Attention",
-      detail: `Session ${input.activeSession.sessionId} has errors.`
+      label: "需要处理",
+      detail: `会话 ${input.activeSession.sessionId} 出现错误。`
     };
   }
 
   if ((input.queuedCount ?? 0) > 0 && input.activeSession) {
     return {
       kind: "queue_pending",
-      label: `${input.queuedCount} queued`,
-      detail: "Will auto-send when idle"
+      label: `${input.queuedCount} 条排队`,
+      detail: "空闲后自动发送"
     };
   }
 
   if (input.activeSession) {
     return {
       kind: "idle",
-      label: "Ready",
-      detail: `In ${input.activeSession.sessionId}`
+      label: "就绪",
+      detail: `会话 ${input.activeSession.sessionId}`
     };
   }
 
   if (input.selectedEngineId) {
     return {
       kind: "no_session",
-      label: "No thread selected",
-      detail: `Selected engine: ${input.selectedEngineId}`
+      label: "就绪",
+      detail: `新会话引擎：${input.selectedEngineId}`
     };
   }
 
   return {
     kind: "no_session",
-    label: "Ready"
+    label: "就绪"
   };
 };
 

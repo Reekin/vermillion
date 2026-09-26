@@ -18,6 +18,7 @@ import {
   zContextUsageSchema,
   zMessagePhase,
   zSessionRelationSchema,
+  zToolAction,
   zTurnExecutionProfileSchema,
   zThreadGoalSchema
 } from "./domain.js";
@@ -174,6 +175,7 @@ const zToolStartedEvent = z
     toolCallId: zToolCallId,
     toolName: z.string().min(1),
     inputSummary: z.string().optional(),
+    actions: z.array(zToolAction).optional(),
     ...zActorFields
   });
 

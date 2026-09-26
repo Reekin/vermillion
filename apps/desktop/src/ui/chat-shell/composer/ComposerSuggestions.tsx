@@ -33,10 +33,10 @@ export const ComposerSuggestions = ({
   return (
     <div className="awb-composer-suggestions" role="listbox">
       {suggestions.loading && suggestions.items.length === 0 ? (
-        <div className="awb-composer-suggestions__empty">Loading…</div>
+        <div className="awb-composer-suggestions__empty">加载中…</div>
       ) : null}
       {!suggestions.loading && suggestions.items.length === 0 ? (
-        <div className="awb-composer-suggestions__empty">No matches</div>
+        <div className="awb-composer-suggestions__empty">没有匹配项</div>
       ) : null}
       {suggestions.items.map((item, index) => (
         <button

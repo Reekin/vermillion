@@ -28,7 +28,7 @@ import {
   InteractionFlowView,
   type InteractionResponseInput
 } from "../InteractionFlowView.js";
-import { ConfigurationSelect } from "./ConfigurationControl.js";
+import { ExecutionConfigControl } from "./ExecutionConfigControl.js";
 import { ComposerQueue } from "./ComposerQueue.js";
 import { ComposerStatusBar } from "./ComposerStatusBar.js";
 import { ComposerSuggestions } from "./ComposerSuggestions.js";
@@ -76,16 +76,17 @@ const formatContextUsageLabel = (contextUsage: ContextUsage): string => {
   return `${percent}% · ${usedTokens}/${formatTokenCount(contextUsage.contextWindow)}`;
 };
 
-const threadGoalStatusLabel = (status: ThreadGoal["status"]): string => {
-  switch (status) {
-    case "budgetLimited":
-      return "Budget";
-    case "usageLimited":
-      return "Usage";
-    default:
-      return status[0]?.toUpperCase() + status.slice(1);
-  }
+const threadGoalStatusLabels: Record<ThreadGoal["status"], string> = {
+  active: "进行中",
+  paused: "已暂停",
+  blocked: "受阻",
+  usageLimited: "用量已达上限",
+  budgetLimited: "预算已达上限",
+  complete: "已完成"
 };
+
+const threadGoalStatusLabel = (status: ThreadGoal["status"]): string =>
+  threadGoalStatusLabels[status];
 
 const formatThreadGoalUsage = (goal: ThreadGoal): string | undefined => {
   if (!goal.tokenBudget) {
@@ -290,7 +291,7 @@ export const ComposerPanel = ({
     />
     {beforeEditor ? <div className="awb-composer__before-editor">{beforeEditor}</div> : null}
     {selectedSkills.length > 0 ? (
-      <div className="awb-composer-skills" aria-label="Selected skills">
+      <div className="awb-composer-skills" aria-label="已选技能">
         {selectedSkills.map((skill) => (
           <article key={skill.id} className="awb-composer-skill">
             <div className="awb-composer-skill__copy">
@@ -310,7 +311,7 @@ export const ComposerPanel = ({
       </div>
     ) : null}
     {attachments.length > 0 ? (
-      <div className="awb-composer__attachments" aria-label="Composer attachments">
+      <div className="awb-composer__attachments" aria-label="附件">
         {attachments.map((attachment) => (
           <article
             key={attachment.attachment.attachmentId}
@@ -326,7 +327,7 @@ export const ComposerPanel = ({
                     alt: attachment.displayName
                   })
                 }
-                aria-label={`Preview ${attachment.displayName}`}
+                aria-label={`预览 ${attachment.displayName}`}
                 disabled={!onPreviewAttachment}
               >
                 <img src={attachment.previewUrl} alt={attachment.displayName} />
@@ -346,7 +347,7 @@ export const ComposerPanel = ({
               variant="ghost"
               size="sm"
               className="awb-composer__attachment-remove"
-              aria-label={`Remove ${attachment.displayName}`}
+              aria-label={`移除 ${attachment.displayName}`}
               onClick={() => onRemoveAttachment(attachment.attachment.attachmentId)}
             >
               ×
@@ -356,7 +357,7 @@ export const ComposerPanel = ({
       </div>
     ) : null}
     {pendingApprovals.length > 0 ? (
-      <section className="awb-composer-approvals" aria-label="Pending approvals">
+      <section className="awb-composer-approvals" aria-label="待审批">
         <ApprovalFlowView
           approvals={pendingApprovals}
           onRespond={onRespondApproval}
@@ -364,7 +365,7 @@ export const ComposerPanel = ({
       </section>
     ) : null}
     {pendingInteractions.length > 0 ? (
-      <section className="awb-composer-approvals" aria-label="Pending interactions">
+      <section className="awb-composer-approvals" aria-label="待回答">
         <InteractionFlowView
           interactions={pendingInteractions}
           onRespond={onRespondInteraction}
@@ -395,7 +396,7 @@ export const ComposerPanel = ({
           variant="primary"
           size="icon"
           className="awb-composer__primary-action"
-          aria-label={primaryAction === "stop" ? "Stop" : submitLabel ?? (primaryAction === "steer" ? "Steer" : "Send")}
+          aria-label={primaryAction === "stop" ? "停止" : submitLabel ?? (primaryAction === "steer" ? "补充到当前轮次" : "发送")}
           title={primaryAction === "stop" ? "停止" : submitLabel ?? (primaryAction === "steer" ? "补充到当前轮次" : "发送")}
           onClick={() =>
             primaryAction === "stop" ? void onStop() : void onPrimaryAction()
@@ -423,11 +424,11 @@ export const ComposerPanel = ({
         {threadGoal ? (
           <div
             className={`awb-composer-goal awb-composer-goal--${threadGoal.status}`}
-            aria-label={`Goal ${threadGoalStatusLabel(threadGoal.status)}: ${threadGoal.objective}`}
+            aria-label={`目标 ${threadGoalStatusLabel(threadGoal.status)}: ${threadGoal.objective}`}
             title={threadGoal.objective}
           >
             <span className="awb-composer-goal__dot" aria-hidden="true" />
-            <span className="awb-composer-goal__label">Goal</span>
+            <span className="awb-composer-goal__label">目标</span>
             <span className="awb-composer-goal__status">
               {threadGoalStatusLabel(threadGoal.status)}
             </span>
@@ -444,65 +445,26 @@ export const ComposerPanel = ({
       </div>
       <div className="awb-composer__right-rail">
         {isExecutionLoading || models.length > 0 || extraExecutionControls ? (
-          <div className="awb-composer-execution" aria-label="Turn configuration">
+          <div className="awb-composer-execution" aria-label="本轮配置">
             {extraExecutionControls}
-            <ConfigurationSelect label="模型"
-              aria-label="模型"
-              value={selectedExecution?.modelId ?? ""}
-              onChange={(event) => onModelChange(event.target.value)}
-              disabled={isExecutionDisabled || isExecutionLoading || models.length === 0}
-              >
-              {isExecutionLoading ? <option value="">加载中…</option> : null}
-              {models.map((model) => (
-                <option key={model.modelId} value={model.modelId}>
-                  {model.displayName}
-                </option>
-              ))}
-              </ConfigurationSelect>
-            {reasoningOptions.length > 0 ? (
-              <ConfigurationSelect label="推理"
-                aria-label="推理"
-                value={selectedExecution?.reasoningOptionId ?? ""}
-                onChange={(event) => onReasoningOptionChange(event.target.value)}
-                disabled={isExecutionDisabled}
-              >
-                <option value="">
-                  {defaultReasoningLabel
-                    ? `默认 (${defaultReasoningLabel})`
-                    : "默认"}
-                </option>
-                {reasoningOptions.map((option) => (
-                  <option key={option.optionId} value={option.optionId}>
-                    {option.displayName}
-                  </option>
-                ))}
-              </ConfigurationSelect>
-            ) : null}
-            {serviceTiers.length > 0 ? (
-              <ConfigurationSelect label="速度"
-                aria-label="速度"
-                value={selectedExecution?.serviceTierId ?? ""}
-                onChange={(event) => onServiceTierChange(event.target.value)}
-                disabled={isExecutionDisabled}
-              >
-                <option value="">标准</option>
-                {serviceTiers.map((tier) => (
-                  <option
-                    key={tier.tierId}
-                    value={tier.tierId}
-                    title={tier.description}
-                  >
-                    {tier.displayName}
-                  </option>
-                ))}
-              </ConfigurationSelect>
-            ) : null}
+            <ExecutionConfigControl
+              models={models}
+              reasoningOptions={reasoningOptions}
+              serviceTiers={serviceTiers}
+              {...(selectedExecution ? { selectedExecution } : {})}
+              {...(defaultReasoningLabel ? { defaultReasoningLabel } : {})}
+              loading={isExecutionLoading}
+              disabled={isExecutionDisabled}
+              onModelChange={onModelChange}
+              onReasoningOptionChange={onReasoningOptionChange}
+              onServiceTierChange={onServiceTierChange}
+            />
           </div>
         ) : null}
         {contextUsage ? (
           <div
             className="awb-composer-context"
-            aria-label={`Context usage ${formatContextUsageLabel(contextUsage)}`}
+            aria-label={`上下文用量 ${formatContextUsageLabel(contextUsage)}`}
             tabIndex={0}
             style={
               {
@@ -514,7 +476,7 @@ export const ComposerPanel = ({
           >
             <span className="awb-composer-context__ring" aria-hidden="true" />
             <span className="awb-composer-context__tooltip" role="tooltip">
-              Context {formatContextUsageLabel(contextUsage)}
+              上下文 {formatContextUsageLabel(contextUsage)}
             </span>
           </div>
         ) : null}

@@ -94,7 +94,7 @@ const TerminalViewport = ({
   return (
     <>
       <div ref={hostRef} className="awb-terminal-output" aria-hidden="true" />
-      <pre className="awb-sr-only" aria-label="Terminal output text">
+      <pre className="awb-sr-only" aria-label="终端输出文本">
         {accessibleText}
       </pre>
     </>
@@ -130,7 +130,7 @@ const TerminalStreamItem = ({
         accessibleText={normalized || "(waiting for output...)"}
       />
       <details className="awb-timeline-item__detail">
-        <summary>Plain Text Snapshot</summary>
+        <summary>纯文本快照</summary>
         <pre>{normalized || "(waiting for output...)"}</pre>
       </details>
     </article>
@@ -142,7 +142,7 @@ export const TerminalStreamView = ({
   participantDirectory = defaultDirectory
 }: TerminalStreamViewProps): ReactElement => {
   if (terminalStreams.length === 0) {
-    return <p className="awb-detail__empty">No terminal stream in this turn.</p>;
+    return <p className="awb-detail__empty">这一轮没有终端输出。</p>;
   }
 
   return (

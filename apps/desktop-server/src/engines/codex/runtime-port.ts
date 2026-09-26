@@ -96,7 +96,8 @@ import {
   summarizeCodexMcpToolCall,
   summarizeCodexRawReasoningItem,
   summarizeCodexReasoningThreadItem,
-  summarizeCodexWebSearchAction
+  summarizeCodexWebSearchAction,
+  codexCommandActions
 } from "./extensions/process-activity.js";
 import { resolveHostToolDefinition } from "../../host-tools.js";
 import type {
@@ -2436,10 +2437,10 @@ export class CodexAppServerRuntimePort
         const itemId = String(params.itemId ?? requestId);
         const title =
           method === "item/fileChange/requestApproval"
-            ? "Approve file change"
+            ? "批准文件修改"
             : method === "item/permissions/requestApproval"
-              ? "Approve additional permissions"
-              : "Approve command execution";
+              ? "批准额外权限"
+              : "批准运行命令";
         const details = [
           typeof params.reason === "string" ? params.reason : undefined,
           typeof params.command === "string" ? params.command : undefined,
@@ -3274,6 +3275,7 @@ export class CodexAppServerRuntimePort
           toolCallId: item.id,
           toolName: "commandExecution",
           inputSummary: item.command,
+          actions: codexCommandActions(item),
           engineId: this.engineId
         });
         this.emitEvent("terminal.started", {

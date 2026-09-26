@@ -551,6 +551,7 @@ export class DomainProjector {
             toolName: event.toolName,
             status: "running",
             inputSummary: event.inputSummary,
+            actions: event.actions,
             actor,
             startedAt: timestamp
           })
@@ -570,6 +571,7 @@ export class DomainProjector {
             toolName: existing?.toolName ?? unknownToolName,
             status: existing?.status ?? "running",
             inputSummary: existing?.inputSummary,
+            actions: existing?.actions,
             outputSummary: appendLimitedStreamText(existing?.outputSummary, event.delta),
             actor: existing?.actor ?? actor,
             startedAt: existing?.startedAt ?? timestamp,
@@ -591,6 +593,7 @@ export class DomainProjector {
             toolName: existing?.toolName ?? unknownToolName,
             status: event.status,
             inputSummary: existing?.inputSummary,
+            actions: existing?.actions,
             outputSummary:
               event.outputSummary != null
                 ? appendLimitedStreamText(undefined, event.outputSummary)

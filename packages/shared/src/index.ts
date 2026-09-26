@@ -12,4 +12,5 @@ export * from "./paths.js";
 export * from "./session-profile.js";
 export * from "./session-title.js";
 export * from "./stream-text-limits.js";
+export * from "./tool-actions.js";
 export * from "./unified-diff.js";

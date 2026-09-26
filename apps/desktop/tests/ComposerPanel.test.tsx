@@ -74,7 +74,7 @@ const baseProps: ComponentProps<typeof ComposerPanel> = {
 };
 
 describe("ComposerPanel", () => {
-  it("renders provider-native model and reasoning options and locks them while steering", () => {
+  it("shows the model, reasoning and speed in one control and locks it while steering", () => {
     render(
       <ComposerPanel
         {...baseProps}
@@ -115,15 +115,56 @@ describe("ComposerPanel", () => {
       />
     );
 
-    for (const [name, value] of [["模型", "gpt-5.5-codex"], ["推理", "xhigh"], ["速度", "ultrafast"]]) {
-      const select = screen.getByRole<HTMLSelectElement>("combobox", { name });
-      expect(select.value).toBe(value);
-      expect(select.disabled).toBe(true);
-    }
-    expect(screen.getByRole("option", { name: "标准" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "默认" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Steer" })).toBeTruthy();
+    const trigger = screen.getByRole<HTMLButtonElement>("button", { name: "模型配置" });
+    expect(trigger.textContent).toContain("GPT-5.5 Codex");
+    expect(trigger.textContent).toContain("Extra high · Ultrafast");
+    expect(trigger.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "补充到当前轮次" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Queue" })).toBeNull();
+  });
+
+  it("changes model, reasoning and speed from the configuration panel", async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    const onReasoningOptionChange = vi.fn();
+    const onServiceTierChange = vi.fn();
+    render(
+      <ComposerPanel
+        {...baseProps}
+        models={[
+          {
+            modelId: "gpt-5.6-luna",
+            displayName: "GPT-5.6-Luna",
+            reasoningOptions: [{ optionId: "max", displayName: "Max" }],
+            defaultReasoningOptionId: "max",
+            serviceTiers: [{ tierId: "fast", displayName: "Fast" }],
+            isDefault: true
+          },
+          { modelId: "opus-5", displayName: "Opus 5", reasoningOptions: [], serviceTiers: [], isDefault: false }
+        ]}
+        selectedExecution={{ modelId: "gpt-5.6-luna" }}
+        reasoningOptions={[{ optionId: "max", displayName: "Max" }]}
+        serviceTiers={[{ tierId: "fast", displayName: "Fast" }]}
+        onModelChange={onModelChange}
+        onReasoningOptionChange={onReasoningOptionChange}
+        onServiceTierChange={onServiceTierChange}
+      />
+    );
+
+    const trigger = screen.getByRole("button", { name: "模型配置" });
+    expect(trigger.textContent).toContain("GPT-5.6-Luna");
+    expect(trigger.textContent).toContain("Max · 标准");
+    await user.click(trigger);
+    const panel = within(screen.getByRole("dialog", { name: "模型配置" }));
+    expect(panel.getByRole("button", { name: "默认 (Max)" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(panel.getByRole("button", { name: "Opus 5" }));
+    await user.click(panel.getByRole("button", { name: "Max" }));
+    await user.click(panel.getByRole("button", { name: "Fast" }));
+    expect(onModelChange).toHaveBeenCalledWith("opus-5");
+    expect(onReasoningOptionChange).toHaveBeenCalledWith("max");
+    expect(onServiceTierChange).toHaveBeenCalledWith("fast");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "模型配置" })).toBeNull();
   });
 
   it("previews and removes the selected attachment", async () => {
@@ -143,10 +184,10 @@ describe("ComposerPanel", () => {
       />
     );
 
-    expect(screen.getAllByRole("button", { name: /^Preview / })).toHaveLength(2);
-    await user.click(screen.getByRole("button", { name: "Preview second.png" }));
+    expect(screen.getAllByRole("button", { name: /^预览 / })).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "预览 second.png" }));
     expect(preview).toHaveBeenCalledExactlyOnceWith({ src: "data:image/png;base64,BBBB", alt: "second.png" });
-    await user.click(screen.getByRole("button", { name: "Remove first.png" }));
+    await user.click(screen.getByRole("button", { name: "移除 first.png" }));
     expect(remove).toHaveBeenCalledExactlyOnceWith("image-1");
   });
 
@@ -166,8 +207,8 @@ describe("ComposerPanel", () => {
       />
     );
 
-    expect(screen.getByLabelText("Context usage 33% · 42.0k/128k")).toBeTruthy();
-    expect(screen.getByRole("tooltip").textContent).toBe("Context 33% · 42.0k/128k");
+    expect(screen.getByLabelText("上下文用量 33% · 42.0k/128k")).toBeTruthy();
+    expect(screen.getByRole("tooltip").textContent).toBe("上下文 33% · 42.0k/128k");
   });
 
   it("renders the goal badge as passive status text", () => {
@@ -218,13 +259,13 @@ describe("ComposerPanel", () => {
       />
     );
 
-    const approval = within(screen.getByRole("region", { name: "Pending approvals" }));
+    const approval = within(screen.getByRole("region", { name: "待审批" }));
     expect(approval.getByText("Run shell command")).toBeTruthy();
     expect(approval.getByText("echo hello")).toBeTruthy();
-    await userEvent.setup().click(approval.getByRole("button", { name: "Approve" }));
+    await userEvent.setup().click(approval.getByRole("button", { name: "批准" }));
     expect(respond).toHaveBeenCalledExactlyOnceWith({
       sessionId: "session-1", requestId: "approval-1", action: "approve", decision: "accept"
     });
-    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
   });
 });

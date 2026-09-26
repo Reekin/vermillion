@@ -76,7 +76,8 @@ import {
   summarizeCodexImageViewOutput,
   summarizeCodexMcpToolCall,
   summarizeCodexReasoningThreadItem,
-  summarizeCodexWebSearchAction
+  summarizeCodexWebSearchAction,
+  codexCommandActions
 } from "./extensions/process-activity.js";
 import {
   consumeCodexRolloutTimestampForItem,
@@ -574,6 +575,7 @@ const hydrateCodexTurnEntities = async (input: {
             turnId: turn.id,
             toolName: "commandExecution",
             inputSummary: item.command,
+            actions: codexCommandActions(item),
             outputSummary: item.aggregatedOutput != null
               ? appendLimitedStreamText(undefined, item.aggregatedOutput)
               : undefined,

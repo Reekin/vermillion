@@ -34,7 +34,7 @@ export const ToolTimelineView = ({
   participantDirectory = defaultDirectory
 }: ToolTimelineViewProps): ReactElement => {
   if (toolCalls.length === 0) {
-    return <p className="awb-detail__empty">No tool call in this turn.</p>;
+    return <p className="awb-detail__empty">这一轮没有工具调用。</p>;
   }
 
   return (
@@ -58,12 +58,12 @@ export const ToolTimelineView = ({
             </header>
 
             <details className="awb-timeline-item__detail" open={toolCall.status === "running"}>
-              <summary>Input summary</summary>
+              <summary>输入</summary>
               <pre>{toolCall.inputSummary?.trim() || "(no input summary)"}</pre>
             </details>
 
             <details className="awb-timeline-item__detail">
-              <summary>Output summary</summary>
+              <summary>输出</summary>
               <pre>{toolCall.outputSummary?.trim() || "(no output yet)"}</pre>
             </details>
           </article>

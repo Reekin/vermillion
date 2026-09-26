@@ -32,15 +32,15 @@ export const ComposerQueue = ({
   }
 
   return (
-    <div className="awb-composer-queue" aria-label="Queued follow-ups">
+    <div className="awb-composer-queue" aria-label="排队中的消息">
       {queue.map((item) => (
         <article key={item.id} className="awb-composer-queue__item">
           <div className="awb-composer-queue__copy">
             <strong>
               {item.text ||
                 (item.skills.length > 0
-                  ? "Skill-enabled follow-up"
-                  : "Attachment-only follow-up")}
+                  ? "带技能的追加消息"
+                  : "仅含附件的追加消息")}
             </strong>
             <span>
               {item.skills.length} skill(s) · {item.attachments.length} attachment(s) ·{" "}

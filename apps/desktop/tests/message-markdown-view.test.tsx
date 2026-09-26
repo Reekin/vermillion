@@ -453,7 +453,7 @@ describe("MessageMarkdownView", () => {
     );
 
     expect(html).toContain('class="awb-code-comment"');
-    expect(html).toContain("Finding");
+    expect(html).toContain("审阅意见");
     expect(html).toContain("[P2] Off-by-one");
     expect(html).toContain("Loop iterates past the end when length is 0.");
     expect(html).toContain("I:/repo/src/foo.ts:10-11");

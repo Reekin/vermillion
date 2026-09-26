@@ -40,6 +40,8 @@ export type MessageMarkdownViewProps = {
   copyBlocks?: readonly MessageBlock[];
   onPreviewImage?: (input: { src: string; alt: string }) => void;
   renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
+  /** Turn metadata shown on the copy line; keeps that line visible. */
+  footer?: ReactNode;
 };
 
 const openExternalLink = (href: string): void => {
@@ -607,7 +609,7 @@ export const renderMessageMarkdown = ({
             type="button"
             className="awb-inline-image-button"
             onClick={() =>
-              onPreviewImage({ src: previewSrc ?? src, alt: alt ?? "Image preview" })
+              onPreviewImage({ src: previewSrc ?? src, alt: alt ?? "图片预览" })
             }
           >
             <img src={previewSrc} alt={alt ?? ""} {...props} />
@@ -640,7 +642,7 @@ const MermaidBlock = ({ source, renderId }: MermaidBlockProps): ReactElement => 
   useEffect(() => {
     let disposed = false;
     if (source.trim().length === 0) {
-      setState({ status: "failed", error: "Empty Mermaid diagram." });
+      setState({ status: "failed", error: "Mermaid 图为空。" });
       return () => {
         disposed = true;
       };
@@ -663,7 +665,7 @@ const MermaidBlock = ({ source, renderId }: MermaidBlockProps): ReactElement => 
         if (!disposed) {
           setState({
             status: "failed",
-            error: error instanceof Error ? error.message : "Mermaid render failed."
+            error: error instanceof Error ? error.message : "Mermaid 图渲染失败。"
           });
         }
       });
@@ -674,7 +676,7 @@ const MermaidBlock = ({ source, renderId }: MermaidBlockProps): ReactElement => 
   }, [renderId, source]);
 
   return (
-    <figure className="awb-mermaid" aria-label="Mermaid diagram">
+    <figure className="awb-mermaid" aria-label="Mermaid 图">
       {state.status === "rendered" ? (
         <div
           className="awb-mermaid__surface"
@@ -698,7 +700,8 @@ export const MessageMarkdownView = memo(({
   block,
   copyBlocks,
   onPreviewImage,
-  renderFileLinkContextMenu
+  renderFileLinkContextMenu,
+  footer
 }: MessageMarkdownViewProps): ReactElement => {
   const [isCopied, setIsCopied] = useState(false);
   const copyResetTimerRef = useRef<number | undefined>(undefined);
@@ -751,6 +754,35 @@ export const MessageMarkdownView = memo(({
     },
     []
   );
+
+  const copyButton = copyText ? (
+          <button
+            type="button"
+            className={`awb-message__copy${isCopied ? " is-copied" : ""}`}
+            aria-label={isCopied ? "已复制消息" : "复制消息"}
+            title={isCopied ? "已复制" : "复制"}
+            onClick={() => {
+              void writeClipboardText(copyText)
+                .then(showCopiedFeedback)
+                .catch((error) => {
+                  if (!window.sessionDesktop) {
+                    console.error("复制消息失败。", error);
+                  }
+                });
+            }}
+          >
+            {isCopied ? (
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 20 20">
+                <path d="m4 10 4 4 8-8" />
+              </svg>
+            ) : (
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 20 20">
+                <rect x="8" y="8" width="9" height="9" rx="1.75" />
+                <path d="M12 8V5.75A1.75 1.75 0 0 0 10.25 4h-4.5A1.75 1.75 0 0 0 4 5.75v4.5A1.75 1.75 0 0 0 5.75 12H8" />
+              </svg>
+            )}
+          </button>
+        ) : null;
 
   return (
     <article
@@ -810,10 +842,10 @@ export const MessageMarkdownView = memo(({
                 <section
                   key={`${block.blockId}:directive:${index}`}
                   className="awb-code-comment"
-                  aria-label="Code review finding"
+                  aria-label="代码审阅意见"
                 >
                   <header className="awb-code-comment__header">
-                    <span className="awb-code-comment__eyebrow">Finding</span>
+                    <span className="awb-code-comment__eyebrow">审阅意见</span>
                     {priorityLabel && (
                       <span className="awb-code-comment__priority">{priorityLabel}</span>
                     )}
@@ -851,34 +883,12 @@ export const MessageMarkdownView = memo(({
             ) : null}
           </>
         )}
-        {copyText ? (
-          <button
-            type="button"
-            className={`awb-message__copy${isCopied ? " is-copied" : ""}`}
-            aria-label={isCopied ? "Message copied" : "Copy message"}
-            title={isCopied ? "Copied" : "Copy"}
-            onClick={() => {
-              void writeClipboardText(copyText)
-                .then(showCopiedFeedback)
-                .catch((error) => {
-                  if (!window.sessionDesktop) {
-                    console.error("Message clipboard write failed.", error);
-                  }
-                });
-            }}
-          >
-            {isCopied ? (
-              <svg aria-hidden="true" focusable="false" viewBox="0 0 20 20">
-                <path d="m4 10 4 4 8-8" />
-              </svg>
-            ) : (
-              <svg aria-hidden="true" focusable="false" viewBox="0 0 20 20">
-                <rect x="8" y="8" width="9" height="9" rx="1.75" />
-                <path d="M12 8V5.75A1.75 1.75 0 0 0 10.25 4h-4.5A1.75 1.75 0 0 0 4 5.75v4.5A1.75 1.75 0 0 0 5.75 12H8" />
-              </svg>
-            )}
-          </button>
-        ) : null}
+        {footer ? (
+          <div className="awb-message__footer">
+            {copyButton}
+            <span className="awb-message__meta">{footer}</span>
+          </div>
+        ) : copyButton}
       </div>
     </article>
   );

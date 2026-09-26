@@ -31,7 +31,10 @@ import type {
   Turn,
   SessionWindowRpc
 } from "@vermillion/shared";
-import type { ChatTreeSendOperation } from "@vermillion/shared";
+import type { ChatTreeSendOperation, EngineModelCatalogRpc, TurnExecutionProfile } from "@vermillion/shared";
+import { describeToolStep, formatDurationZh, summarizeToolSteps } from "@vermillion/shared";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { buildProcessActivityEntries } from "./ProcessActivityView.js";
 import { recordUiOperation } from "../../diagnostics/ui-performance.js";
 import { PendingBranchMessage } from "./PendingBranchMessage.js";
 import {
@@ -167,6 +170,8 @@ type TranscriptPaneProps = {
   loadingOlderTurns: boolean;
   onLoadOlder: () => void;
   processVisibilityByTurnId: Readonly<Record<string, ProcessVisibilityOverride>>;
+  /** Model names for the turn footer; ids are shown until the catalog arrives. */
+  modelCatalog?: EngineModelCatalogRpc;
   onToggleProcess: (turnId: string, defaultExpanded: boolean) => void;
   onPreviewImage?: (input: ImageLightboxState) => void;
   renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
@@ -217,15 +222,58 @@ const toComposerExecutionSelection = (
       }
     : undefined;
 
-const formatTimestamp = (iso: string | undefined): string => {
+const pad2 = (value: number): string => String(value).padStart(2, "0");
+
+const isSameDay = (left: Date, right: Date): boolean =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+/** "14:42" today, "昨天 22:10", "9月11日 07:18", with the year when it differs. */
+export const formatMessageTime = (iso: string | undefined, now = new Date()): string | undefined => {
   if (!iso) {
-    return "-";
+    return undefined;
   }
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
-    return iso;
+    return undefined;
   }
-  return date.toLocaleString();
+  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  if (isSameDay(date, now)) {
+    return clock;
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(date, yesterday)) {
+    return `昨天 ${clock}`;
+  }
+  const day = `${date.getMonth() + 1}月${date.getDate()}日`;
+  return date.getFullYear() === now.getFullYear()
+    ? `${day} ${clock}`
+    : `${date.getFullYear()}年${day} ${clock}`;
+};
+
+const describeTurnExecution = (
+  profile: TurnExecutionProfile | undefined,
+  catalog: EngineModelCatalogRpc | undefined
+): string | undefined => {
+  if (!profile) {
+    return undefined;
+  }
+  const model = catalog?.models.find((candidate) => candidate.modelId === profile.modelId);
+  const reasoning = profile.reasoningOptionId
+    ? (model?.reasoningOptions.find((option) => option.optionId === profile.reasoningOptionId)
+        ?.displayName ?? profile.reasoningOptionId)
+    : undefined;
+  return [model?.displayName ?? profile.modelId, reasoning].filter(Boolean).join(" · ");
+};
+
+const turnDurationMs = (turn: Turn): number | undefined => {
+  if (!turn.completedAt) {
+    return undefined;
+  }
+  const duration = Date.parse(turn.completedAt) - Date.parse(turn.startedAt);
+  return Number.isFinite(duration) && duration > 0 ? duration : undefined;
 };
 
 const maxSessionHeadingLength = 20;
@@ -233,7 +281,7 @@ const maxSessionHeadingLength = 20;
 export const truncateSessionHeading = (value: string | undefined): string => {
   const normalized = value?.trim();
   if (!normalized) {
-    return "Thread";
+    return "新会话";
   }
   if (normalized.length <= maxSessionHeadingLength) {
     return normalized;
@@ -241,6 +289,7 @@ export const truncateSessionHeading = (value: string | undefined): string => {
   return `${normalized.slice(0, maxSessionHeadingLength)}…`;
 };
 
+/** Session list time: "刚刚", "5 分钟前", "3 小时前", "昨天 22:10", "9月11日". */
 export const formatRelativeActivityAge = (
   iso: string | undefined,
   nowMs = Date.now()
@@ -253,46 +302,26 @@ export const formatRelativeActivityAge = (
     return undefined;
   }
   const elapsedMinutes = Math.max(0, Math.floor((nowMs - timestamp) / 60_000));
+  if (elapsedMinutes < 1) {
+    return "刚刚";
+  }
   if (elapsedMinutes < 60) {
-    return `${elapsedMinutes}m`;
+    return `${elapsedMinutes} 分钟前`;
   }
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) {
-    return `${elapsedHours}h`;
+  const date = new Date(timestamp);
+  const now = new Date(nowMs);
+  if (isSameDay(date, now)) {
+    return `${Math.floor(elapsedMinutes / 60)} 小时前`;
   }
-  return `${Math.floor(elapsedHours / 24)}d`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(date, yesterday)) {
+    return `昨天 ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  }
+  const day = `${date.getMonth() + 1}月${date.getDate()}日`;
+  return date.getFullYear() === now.getFullYear() ? day : `${date.getFullYear()}年${day}`;
 };
 
-
-const summarizeProcessToggle = (input: {
-  hiddenMessageCount?: number;
-  toolCount: number;
-  terminalCount: number;
-  approvalCount: number;
-}): string => {
-  const parts: string[] = [];
-  if (input.hiddenMessageCount && input.hiddenMessageCount > 0) {
-    parts.push(
-      `${input.hiddenMessageCount} earlier message${
-        input.hiddenMessageCount === 1 ? "" : "s"
-      }`
-    );
-  }
-  if (input.toolCount > 0) {
-    parts.push(`${input.toolCount} tool${input.toolCount === 1 ? "" : "s"}`);
-  }
-  if (input.terminalCount > 0) {
-    parts.push(
-      `${input.terminalCount} terminal${input.terminalCount === 1 ? "" : "s"}`
-    );
-  }
-  if (input.approvalCount > 0) {
-    parts.push(
-      `${input.approvalCount} approval${input.approvalCount === 1 ? "" : "s"}`
-    );
-  }
-  return parts.join(" · ");
-};
 
 const countHiddenMessages = (rows: TranscriptRow[]): number => {
   const messageIds = new Set<string>();
@@ -395,11 +424,15 @@ const buildRenderedTurnGroups = (
   return groups;
 };
 
-const resolveProcessOutputToggleLabel = (expanded: boolean): string =>
-  expanded ? "Hide process output" : "Show process output";
-
-const formatPreviousMessagesLabel = (count: number): string =>
-  `${count} previous message${count === 1 ? "" : "s"} >`;
+/** One-line account of what a finished turn did before its answer. */
+const summarizeTurnProcess = (row: TranscriptRow, hiddenMessageCount: number): string => {
+  const steps = buildProcessActivityEntries(row.toolCalls, row.terminalStreams).map((entry) => entry.step);
+  const durationMs = turnDurationMs(row.turn);
+  return summarizeToolSteps(steps, {
+    messageCount: hiddenMessageCount,
+    ...(durationMs !== undefined ? { durationMs } : {})
+  }) || "查看执行过程";
+};
 
 const TranscriptPane = memo(
   ({
@@ -424,6 +457,7 @@ const TranscriptPane = memo(
     loadingOlderTurns,
     onLoadOlder,
     processVisibilityByTurnId,
+    modelCatalog,
     onToggleProcess,
     onPreviewImage,
     renderFileLinkContextMenu,
@@ -437,7 +471,7 @@ const TranscriptPane = memo(
       className={`awb-transcript${isSwitchPending || openingError ? " awb-transcript--waiting" : ""}`}
       ref={transcriptRef}
       role="region"
-      aria-label="Transcript"
+      aria-label="消息记录"
       aria-busy={isSwitchPending}
       tabIndex={0}
     >
@@ -468,7 +502,7 @@ const TranscriptPane = memo(
               onClick={onLoadOlder}
               disabled={loadingOlderTurns || isOpeningSelectedSession}
             >
-              {loadingOlderTurns ? "Loading earlier…" : "Load earlier"}
+              {loadingOlderTurns ? "正在加载更早的消息…" : "加载更早的消息"}
             </button>
           </div>
         )}
@@ -480,6 +514,12 @@ const TranscriptPane = memo(
           const nextGroup = groups[index + 1];
           const isFollowedBySameTurn =
             nextGroup?.visibleRow.turn.turnId === visibleRow.turn.turnId;
+          const previousGroup = groups[index - 1];
+          // Rows of one running turn read as one block: messages and steps without entry spacing between them.
+          const continuesTurn =
+            !isUserTurn &&
+            previousGroup?.visibleRow.turn.turnId === visibleRow.turn.turnId &&
+            previousGroup.visibleRow.messageRole !== "user";
           const hiddenMessageCount = countHiddenMessages(hiddenRows);
           const hasCollapsedContent = hiddenRows.length > 0;
           const hasExpandableDetails =
@@ -495,17 +535,23 @@ const TranscriptPane = memo(
               defaultExpanded,
               processVisibilityByTurnId[visibleRow.turn.turnId]
             );
-          const processSummary = summarizeProcessToggle({
-            hiddenMessageCount,
-            toolCount: visibleRow.toolCalls.length,
-            terminalCount: visibleRow.terminalStreams.length,
-            approvalCount: visibleRow.approvals.length
-          });
-          const processToggleLabel = resolveProcessOutputToggleLabel(isProcessExpanded);
-          const previousMessagesLabel = formatPreviousMessagesLabel(hiddenMessageCount);
+          const processSummary = hasExpandableDetails
+            ? summarizeTurnProcess(visibleRow, hiddenMessageCount)
+            : "";
           const isFinalDisplayedAssistantRow =
             !isUserTurn && visibleRow.turn.status === "completed" && !isInlineProcessRow;
-          const shouldShowTimestamp = isUserTurn || isFinalDisplayedAssistantRow;
+          const messageTime = isUserTurn
+            ? formatMessageTime(visibleRow.startedAt ?? visibleRow.turn.startedAt)
+            : undefined;
+          const turnFooter = isFinalDisplayedAssistantRow
+            ? [
+                describeTurnExecution(visibleRow.turn.executionProfile, modelCatalog),
+                (() => {
+                  const durationMs = turnDurationMs(visibleRow.turn);
+                  return durationMs !== undefined ? formatDurationZh(durationMs) : undefined;
+                })()
+              ].filter(Boolean).join(" · ") || undefined
+            : undefined;
           const shouldRenderExtensions = isFinalDisplayedAssistantRow;
           return (
             <article
@@ -514,19 +560,8 @@ const TranscriptPane = memo(
               data-final-response-row={visibleRow.isFinalResponseRow ? "true" : "false"}
               className={`awb-chat-entry ${isUserTurn ? "is-user" : "is-assistant"} ${
                 isFollowedBySameTurn ? "is-followed-by-same-turn" : ""
-              }`}
+              }${continuesTurn ? " is-continuing-turn" : ""}`}
             >
-              {shouldShowTimestamp && (
-                <header className="awb-chat-entry__identity">
-                  <time className="awb-chat-entry__timestamp">
-                    {formatTimestamp(
-                      visibleRow.startedAt ??
-                        visibleRow.turn.completedAt ??
-                        visibleRow.turn.startedAt
-                    )}
-                  </time>
-                </header>
-              )}
               {hasExpandableDetails && (
                 <div
                   className={`awb-turn__process ${
@@ -535,24 +570,16 @@ const TranscriptPane = memo(
                 >
                   <button
                     type="button"
-                    className={`awb-turn__process-toggle ${
-                      hasCollapsedContent ? "is-history-divider" : ""
-                    }`}
+                    className="awb-turn__process-toggle"
                     onClick={() => onToggleProcess(visibleRow.turn.turnId, defaultExpanded)}
                     aria-expanded={isProcessExpanded}
                   >
-                    {hasCollapsedContent ? (
-                      <>
-                        <span aria-hidden="true" />
-                        <span>{previousMessagesLabel}</span>
-                        <span aria-hidden="true" />
-                      </>
+                    {isProcessExpanded ? (
+                      <ChevronDown size={14} aria-hidden="true" />
                     ) : (
-                      <>
-                        <span>{processToggleLabel}</span>
-                        <span>{processSummary}</span>
-                      </>
+                      <ChevronRight size={14} aria-hidden="true" />
                     )}
+                    <span>{processSummary}</span>
                   </button>
                   {isProcessExpanded && (
                     <TurnProcessPanel
@@ -584,7 +611,7 @@ const TranscriptPane = memo(
                 <div className="awb-chat-entry__messages">
                   {visibleRow.blocks.length === 0 && (
                     <p className="awb-turn__empty">
-                      {isUserTurn ? "No message content." : "Waiting for response…"}
+                      {isUserTurn ? "消息没有内容。" : "等待回复…"}
                     </p>
                   )}
                   {visibleRow.blocks.map((block, blockIndex) => (
@@ -592,14 +619,20 @@ const TranscriptPane = memo(
                       key={block.blockId}
                       block={block}
                       copyBlocks={
-                        blockIndex === visibleRow.blocks.length - 1
+                        // Intermediate messages of a running turn stay compact; copy comes with the answer.
+                        blockIndex === visibleRow.blocks.length - 1 &&
+                        (isUserTurn || visibleRow.turn.status === "completed")
                           ? visibleRow.blocks
                           : undefined
                       }
                       onPreviewImage={onPreviewImage}
                       renderFileLinkContextMenu={renderFileLinkContextMenu}
+                      footer={blockIndex === visibleRow.blocks.length - 1 ? turnFooter : undefined}
                     />
                   ))}
+                  {messageTime ? (
+                    <time className="awb-chat-entry__timestamp">{messageTime}</time>
+                  ) : null}
                 </div>
               )}
               {shouldRenderExtensions
@@ -645,6 +678,7 @@ const TranscriptPane = memo(
     previous.isSwitchPending === next.isSwitchPending &&
     previous.loadingOlderTurns === next.loadingOlderTurns &&
     previous.processVisibilityByTurnId === next.processVisibilityByTurnId &&
+    previous.modelCatalog === next.modelCatalog &&
     previous.transcriptRef === next.transcriptRef &&
     previous.transcriptContentRef === next.transcriptContentRef &&
     previous.onPreviewImage === next.onPreviewImage &&
@@ -1188,6 +1222,25 @@ export const SessionPane = ({
     );
   }, []);
 
+  const [turnModelCatalog, setTurnModelCatalog] = useState<EngineModelCatalogRpc | undefined>();
+  useEffect(() => {
+    if (!displayedEngineId) {
+      setTurnModelCatalog(undefined);
+      return;
+    }
+    let cancelled = false;
+    // Model names for turn footers; failures keep showing the recorded model ids.
+    void transport.engine
+      .listModels(displayedEngineId)
+      .then((catalog) => {
+        if (!cancelled) setTurnModelCatalog(catalog);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [displayedEngineId, transport]);
+
   const onPreviewImage = useCallback((image: ImageLightboxState): void => {
     setLightboxImage(image);
   }, []);
@@ -1242,6 +1295,7 @@ export const SessionPane = ({
             loadingOlderTurns={false}
             onLoadOlder={() => undefined}
             processVisibilityByTurnId={processVisibilityByTurnId}
+            modelCatalog={turnModelCatalog}
             onToggleProcess={onToggleProcess}
             onPreviewImage={onPreviewImage}
             renderFileLinkContextMenu={renderFileLinkContextMenu}
