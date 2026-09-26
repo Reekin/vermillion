@@ -45,7 +45,7 @@ export const ChatTreePanel = ({
   );
 
   if (loading) {
-    return <p className="awb-detail__empty">Loading chat tree…</p>;
+    return <p className="awb-detail__empty">正在加载会话树…</p>;
   }
 
   if (error) {
@@ -53,7 +53,7 @@ export const ChatTreePanel = ({
   }
 
   if (!chatTree) {
-    return <p className="awb-detail__empty">Select a session to inspect its chat tree.</p>;
+    return <p className="awb-detail__empty">选择一个会话查看它的会话树。</p>;
   }
 
   return (

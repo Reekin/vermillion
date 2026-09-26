@@ -3,7 +3,7 @@ import type {
   MessageBlock,
   RuntimeInteraction
 } from "@vermillion/shared";
-import { Fragment, type ReactElement } from "react";
+import type { ReactElement } from "react";
 import type { ImageLightboxState } from "./ImageLightbox.js";
 import {
   MessageMarkdownView,
@@ -164,12 +164,7 @@ export const TurnProcessPanel = ({
   return (
     <div className="awb-turn-process">
       {historyItems.length > 0 && (
-        <section className="awb-turn-process__section awb-turn-process__section--plain">
-          <header className="awb-turn-process__section-header">
-            <h4>Earlier in this turn</h4>
-            <span>{historyItems.length}</span>
-          </header>
-          <div className="awb-turn-process__history">
+        <div className="awb-process-steps awb-turn-process__history">
             {historyItems.map((item) => {
               if (item.kind === "activity") {
                 return (
@@ -201,7 +196,7 @@ export const TurnProcessPanel = ({
                 );
               }
               return (
-                <Fragment key={item.id}>
+                <div key={item.id} className="awb-process-step__message">
                   {item.blocks.map((block, blockIndex) => (
                     <MessageMarkdownView
                       key={block.blockId}
@@ -215,11 +210,10 @@ export const TurnProcessPanel = ({
                       renderFileLinkContextMenu={renderFileLinkContextMenu}
                     />
                   ))}
-                </Fragment>
+                </div>
               );
             })}
-          </div>
-        </section>
+        </div>
       )}
 
       {renderStandaloneActivity &&
@@ -234,7 +228,7 @@ export const TurnProcessPanel = ({
       {renderStandaloneActivity && row.approvals.length > 0 && (
         <section className="awb-turn-process__section">
           <header className="awb-turn-process__section-header">
-            <h4>Approval requests</h4>
+            <h4>审批请求</h4>
             <span>{row.approvals.length}</span>
           </header>
           <ApprovalFlowView
@@ -248,7 +242,7 @@ export const TurnProcessPanel = ({
       {renderStandaloneActivity && interactions.length > 0 && (
         <section className="awb-turn-process__section">
           <header className="awb-turn-process__section-header">
-            <h4>Interaction requests</h4>
+            <h4>待回答的问题</h4>
             <span>{interactions.length}</span>
           </header>
           <InteractionFlowView

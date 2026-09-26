@@ -54,16 +54,16 @@ const decisionFromLabel = (
 
 const decisionButtonLabel = (label: string): string => {
   if (label === "accept") {
-    return "Approve";
+    return "批准";
   }
   if (label === "acceptForSession") {
-    return "Approve for Session";
+    return "本会话内都批准";
   }
   if (label === "decline") {
-    return "Deny";
+    return "拒绝";
   }
   if (label === "cancel") {
-    return "Later";
+    return "稍后";
   }
   return label.replace(/([a-z])([A-Z])/g, "$1 $2");
 };
@@ -149,7 +149,7 @@ export const ApprovalFlowView = ({
   };
 
   if (approvals.length === 0) {
-    return <p className="awb-detail__empty">No approval request in this turn.</p>;
+    return <p className="awb-detail__empty">这一轮没有审批请求。</p>;
   }
 
   return (
@@ -203,7 +203,7 @@ export const ApprovalFlowView = ({
                     disabled={disabled}
                     onClick={() => void onAction(approval, "approve", "accept")}
                   >
-                    Approve
+                    批准
                   </Button>
                   <Button
                     variant="danger"
@@ -211,7 +211,7 @@ export const ApprovalFlowView = ({
                     disabled={disabled}
                     onClick={() => void onAction(approval, "deny", "decline")}
                   >
-                    Deny
+                    拒绝
                   </Button>
                   <Button
                     variant="ghost"
@@ -219,7 +219,7 @@ export const ApprovalFlowView = ({
                     disabled={disabled}
                     onClick={() => void onAction(approval, "defer")}
                   >
-                    Later
+                    稍后
                   </Button>
                 </>
               )}

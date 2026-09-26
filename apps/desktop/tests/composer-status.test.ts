@@ -53,8 +53,8 @@ describe("resolveComposerStatus", () => {
 
     expect(status).toEqual({
       kind: "awaiting_approval",
-      label: "Awaiting approval",
-      detail: "Approval requested for 0"
+      label: "等待审批",
+      detail: "等待审批：0"
     });
     expect(resolveComposerStatus({
       selectedEngineId: "codex",
@@ -78,7 +78,7 @@ describe("resolveComposerStatus", () => {
           requestedAt: "2026-04-18T00:00:00.000Z"
         }
       ]
-    })).toBe("Awaiting approval: Approval requested for 0");
+    })).toBe("等待审批: 等待审批：0");
   });
 
   it("falls back to active-session readiness after approval is resolved", () => {
@@ -107,7 +107,7 @@ describe("resolveComposerStatus", () => {
           }
         ]
       })
-    ).toBe("Ready: In session-1");
+    ).toBe("就绪: 会话 session-1");
   });
 
   it("keeps explicit notices separate from the derived baseline", () => {
@@ -124,7 +124,7 @@ describe("resolveComposerStatus", () => {
         },
         supportsSteer: true
       })
-    ).toBe("Running: Steer supported");
+    ).toBe("运行中: 可补充到当前轮次");
   });
 
   it("surfaces queued follow-ups when the session is otherwise idle", () => {
@@ -143,8 +143,8 @@ describe("resolveComposerStatus", () => {
       })
     ).toEqual({
       kind: "queue_pending",
-      label: "2 queued",
-      detail: "Will auto-send when idle"
+      label: "2 条排队",
+      detail: "空闲后自动发送"
     });
   });
 
@@ -164,8 +164,8 @@ describe("resolveComposerStatus", () => {
       })
     ).toEqual({
       kind: "running",
-      label: "Running",
-      detail: "Steer supported"
+      label: "运行中",
+      detail: "可补充到当前轮次"
     });
   });
 });

@@ -1,7 +1,7 @@
 import type { ResponseItem } from "../../../codex-app-server-generated/ResponseItem.js";
 import type { ThreadItem } from "../../../codex-app-server-generated/v2/ThreadItem.js";
 import { statSync } from "node:fs";
-import { filePathToFileUri } from "@vermillion/shared";
+import { filePathToFileUri, type ToolAction } from "@vermillion/shared";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -301,3 +301,22 @@ export const mapCodexResponseItemStatus = (
   status: string | undefined
 ): "completed" | "failed" | "cancelled" =>
   status === "failed" ? "failed" : status === "cancelled" ? "cancelled" : "completed";
+
+type CodexCommandItem = Extract<ThreadItem, { type: "commandExecution" }>;
+
+/** Codex's parsed reading of a shell command; omitted when Codex could not classify any part. */
+export const codexCommandActions = (item: CodexCommandItem): ToolAction[] | undefined => {
+  const actions = (item.commandActions ?? []).map((action): ToolAction => {
+    switch (action.type) {
+      case "read":
+        return { kind: "read", target: action.path ?? action.name };
+      case "listFiles":
+        return { kind: "list", ...(action.path ? { target: action.path } : {}) };
+      case "search":
+        return { kind: "search", ...(action.query ? { target: action.query } : {}), ...(action.path ? { path: action.path } : {}) };
+      default:
+        return { kind: "run", target: action.command };
+    }
+  });
+  return actions.some((action) => action.kind !== "run") ? actions : undefined;
+};

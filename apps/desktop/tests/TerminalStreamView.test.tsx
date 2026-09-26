@@ -32,8 +32,8 @@ describe("TerminalStreamView", () => {
 
     expect(markup).toContain('class="awb-terminal-output"');
     expect(markup).toContain('aria-hidden="true"');
-    expect(markup).toContain('aria-label="Terminal output text"');
+    expect(markup).toContain('aria-label="终端输出文本"');
     expect(markup).toContain("$ pwd");
-    expect(markup).toContain("Plain Text Snapshot");
+    expect(markup).toContain("纯文本快照");
   });
 });

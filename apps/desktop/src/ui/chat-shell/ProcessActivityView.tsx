@@ -1,5 +1,25 @@
 import type { ReactElement } from "react";
-import type { TerminalStream, ToolCall } from "@vermillion/shared";
+import {
+  Archive,
+  Eye,
+  Globe,
+  Image as ImageIcon,
+  ImagePlus,
+  Lightbulb,
+  List,
+  Pencil,
+  Search,
+  SquareTerminal,
+  Wrench,
+  type LucideIcon
+} from "lucide-react";
+import {
+  describeToolStep,
+  type TerminalStream,
+  type ToolCall,
+  type ToolStep,
+  type ToolStepKind
+} from "@vermillion/shared";
 import type { ImageLightboxState } from "./ImageLightbox.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { normalizeTerminalOutput } from "./terminal-output.js";
@@ -13,22 +33,24 @@ export type ProcessActivityViewProps = {
 export type ProcessActivityEntry = {
   id: string;
   startedAt?: string;
-  label: string;
-  summary: string;
-  status: ToolCall["status"] | TerminalStream["status"];
+  step: ToolStep;
   inputText?: string;
   outputText?: string;
-  terminalStreams: TerminalStream[];
 };
 
-const truncateInline = (value: string, maxLength = 180): string =>
-  value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
-
-const firstUsefulLine = (value: string | undefined): string | undefined =>
-  value
-    ?.split(/\r?\n/g)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
+const stepIcons: Record<ToolStepKind, LucideIcon> = {
+  think: Lightbulb,
+  read: Eye,
+  list: List,
+  search: Search,
+  edit: Pencil,
+  run: SquareTerminal,
+  web: Globe,
+  view: ImageIcon,
+  generate: ImagePlus,
+  compact: Archive,
+  other: Wrench
+};
 
 const compareIsoDateAsc = (left?: string, right?: string): number => {
   if (!left && !right) {
@@ -46,39 +68,6 @@ const compareIsoDateAsc = (left?: string, right?: string): number => {
     return left.localeCompare(right);
   }
   return leftDate - rightDate;
-};
-
-const statusLabel = (entry: ProcessActivityEntry): string => {
-  const exitCodes = entry.terminalStreams
-    .map((stream) => stream.exitCode)
-    .filter((exitCode): exitCode is number => typeof exitCode === "number");
-  const exitCode = exitCodes.at(-1);
-  if (
-    (entry.status === "completed" || entry.status === "failed") &&
-    typeof exitCode === "number"
-  ) {
-    return `${entry.status} (exit ${exitCode})`;
-  }
-  return entry.status;
-};
-
-const displayToolName = (toolName: string): string => {
-  switch (toolName) {
-    case "commandExecution":
-      return "Shell";
-    case "contextCompaction":
-      return "Compaction";
-    case "reasoning":
-      return "Reasoning";
-    case "webSearch":
-      return "Web search";
-    case "imageView":
-      return "View image";
-    case "imageGeneration":
-      return "Image generation";
-    default:
-      return toolName;
-  }
 };
 
 const splitProcessImageOutput = (
@@ -112,45 +101,44 @@ const splitProcessImageOutput = (
   }
   const text = `${value.slice(0, imageStart)}${value.slice(closeIndex + 1)}`.trim();
   return {
-    alt: value.slice(imageStart + 2, altEnd).trim() || "Image preview",
+    alt: value.slice(imageStart + 2, altEnd).trim() || "图片预览",
     src,
     text: text.length > 0 ? text : undefined
   };
 };
 
-const buildToolSummary = (toolCall: ToolCall): string => {
-  if (toolCall.toolName === "contextCompaction") {
-    return toolCall.status === "completed"
-      ? (toolCall.outputSummary ?? "compaction finished")
-      : (toolCall.inputSummary ?? "compacting...");
+const lastExitCode = (streams: TerminalStream[]): number | undefined =>
+  streams
+    .map((stream) => stream.exitCode)
+    .filter((exitCode): exitCode is number => typeof exitCode === "number")
+    .at(-1);
+
+const withTerminalStatus = (toolCall: ToolCall, streams: TerminalStream[]): ToolCall => {
+  if (streams.some((stream) => stream.status === "failed")) {
+    return { ...toolCall, status: "failed" };
   }
-  const input = firstUsefulLine(toolCall.inputSummary);
-  const label = displayToolName(toolCall.toolName);
-  return input && input.toLocaleLowerCase() !== label.toLocaleLowerCase()
-    ? `${label} ${input}`
-    : label;
+  if (streams.some((stream) => stream.status === "running")) {
+    return { ...toolCall, status: "running" };
+  }
+  return toolCall;
 };
 
-const buildTerminalSummary = (stream: TerminalStream): string => {
-  const output = firstUsefulLine(normalizeTerminalOutput(stream.outputText));
-  return output ? `Terminal ${output}` : `Terminal ${stream.terminalId}`;
+const terminalStep = (stream: TerminalStream, output: string): ToolStep => {
+  const lines = output.split(/\r?\n/).filter((line) => line.trim()).length;
+  const running = stream.status === "running";
+  const failed = stream.status === "failed" || (typeof stream.exitCode === "number" && stream.exitCode !== 0);
+  return {
+    kind: "run",
+    verb: "运行",
+    object: "终端",
+    result: running ? "进行中" : failed ? "失败" : lines > 0 ? `输出 ${lines} 行` : "无输出",
+    failed,
+    running,
+    targets: []
+  };
 };
 
-const mergeStatus = (
-  toolCall: ToolCall,
-  terminalStreams: TerminalStream[]
-): ProcessActivityEntry["status"] => {
-  const failedTerminal = terminalStreams.find((stream) => stream.status === "failed");
-  if (failedTerminal) {
-    return "failed";
-  }
-  const runningTerminal = terminalStreams.find((stream) => stream.status === "running");
-  if (runningTerminal) {
-    return "running";
-  }
-  return toolCall.status;
-};
-
+/** Tool calls and their terminal output in time order, each described as one readable step. */
 export const buildProcessActivityEntries = (
   toolCalls: ToolCall[],
   terminalStreams: TerminalStream[]
@@ -169,37 +157,40 @@ export const buildProcessActivityEntries = (
   }
 
   const toolIds = new Set(toolCalls.map((toolCall) => toolCall.toolCallId));
-  const toolEntries = toolCalls.map((toolCall) => {
+  const toolEntries = toolCalls.map((toolCall): ProcessActivityEntry => {
     const linkedStreams = streamsByToolCallId.get(toolCall.toolCallId) ?? [];
     const terminalOutput = linkedStreams
       .map((stream) => normalizeTerminalOutput(stream.outputText))
       .filter((value) => value.length > 0)
       .join("\n\n");
+    const outputText = terminalOutput || toolCall.outputSummary;
+    const exitCode = lastExitCode(linkedStreams);
     return {
       id: `tool:${toolCall.toolCallId}`,
       startedAt: toolCall.startedAt,
-      label: displayToolName(toolCall.toolName),
-      summary: buildToolSummary(toolCall),
-      status: mergeStatus(toolCall, linkedStreams),
-      inputText: toolCall.inputSummary,
-      outputText: terminalOutput || toolCall.outputSummary,
-      terminalStreams: linkedStreams
+      step: describeToolStep(withTerminalStatus(toolCall, linkedStreams), {
+        ...(outputText !== undefined ? { text: outputText } : {}),
+        ...(exitCode !== undefined ? { exitCode } : {})
+      }),
+      ...(toolCall.inputSummary !== undefined ? { inputText: toolCall.inputSummary } : {}),
+      ...(outputText !== undefined ? { outputText } : {})
     };
   });
 
   const orphanLinkedStreams = Array.from(streamsByToolCallId.entries())
     .filter(([toolCallId]) => !toolIds.has(toolCallId))
     .flatMap(([, streams]) => streams);
-  const terminalEntries = [...standaloneStreams, ...orphanLinkedStreams].map((stream) => ({
-    id: `terminal:${stream.terminalId}`,
-    startedAt: stream.startedAt,
-    label: "Terminal",
-    summary: buildTerminalSummary(stream),
-    status: stream.status,
-    inputText: undefined,
-    outputText: normalizeTerminalOutput(stream.outputText),
-    terminalStreams: [stream]
-  }));
+  const terminalEntries = [...standaloneStreams, ...orphanLinkedStreams].map(
+    (stream): ProcessActivityEntry => {
+      const outputText = normalizeTerminalOutput(stream.outputText);
+      return {
+        id: `terminal:${stream.terminalId}`,
+        startedAt: stream.startedAt,
+        step: terminalStep(stream, outputText),
+        outputText
+      };
+    }
+  );
 
   return [...toolEntries, ...terminalEntries].sort((left, right) => {
     const byDate = compareIsoDateAsc(left.startedAt, right.startedAt);
@@ -217,6 +208,8 @@ export const ProcessActivityItemView = ({
   entry: ProcessActivityEntry;
   onPreviewImage?: (input: ImageLightboxState) => void;
 }): ReactElement => {
+  const { step } = entry;
+  const Icon = stepIcons[step.kind];
   const rawOutputText = entry.outputText?.trim();
   const inputText = entry.inputText?.trim();
   const outputText = rawOutputText && rawOutputText !== inputText ? rawOutputText : undefined;
@@ -224,27 +217,31 @@ export const ProcessActivityItemView = ({
   const imagePreviewSrc = buildLocalImagePreviewSrc(imageOutput?.src, entry.id);
   const imageText =
     imageOutput?.text === `path: ${inputText}` ? undefined : imageOutput?.text;
+  const row = (
+    <>
+      <Icon className="awb-process-step__icon" size={14} aria-hidden="true" />
+      <span className="awb-process-step__verb">{step.verb}</span>
+      <span className="awb-process-step__object">{step.object}</span>
+      <span className="awb-process-step__result">
+        {step.running ? <span className="awb-process-step__spinner" aria-hidden="true" /> : null}
+        {step.result}
+      </span>
+    </>
+  );
+  if (!inputText && !outputText) {
+    return (
+      <div className="awb-process-step" data-kind={step.kind} data-failed={step.failed || undefined}>
+        <div className="awb-process-step__row">{row}</div>
+      </div>
+    );
+  }
   return (
-    <details
-      key={entry.id}
-      className="awb-process-activity"
-      open={entry.status === "running"}
-    >
-      <summary className="awb-process-activity__summary">
-        <span className="awb-process-activity__title">
-          {truncateInline(entry.summary)}
-        </span>
-        <span className={`awb-process-activity__status is-${entry.status}`}>
-          {statusLabel(entry)}
-        </span>
-      </summary>
-      <div className="awb-process-activity__body">
-        <div className="awb-process-activity__meta">
-          <span>{entry.label}</span>
-          {inputText ? <code>{inputText}</code> : <code>(no parameters)</code>}
-        </div>
+    <details className="awb-process-step" data-kind={step.kind} data-failed={step.failed || undefined}>
+      <summary className="awb-process-step__row">{row}</summary>
+      <div className="awb-process-step__body">
+        {inputText ? <code className="awb-process-step__input">{inputText}</code> : null}
         {imageOutput ? (
-          <div className="awb-process-activity__media-output">
+          <div className="awb-process-step__media-output">
             {onPreviewImage ? (
               <button
                 type="button"
@@ -259,22 +256,12 @@ export const ProcessActivityItemView = ({
                 <img src={imagePreviewSrc} alt={imageOutput.alt} />
               </button>
             ) : (
-              <img
-                className="awb-process-activity__image"
-                src={imagePreviewSrc}
-                alt={imageOutput.alt}
-              />
+              <img className="awb-process-step__image" src={imagePreviewSrc} alt={imageOutput.alt} />
             )}
-            {imageText ? (
-              <pre className="awb-process-activity__output">
-                {imageText}
-              </pre>
-            ) : null}
+            {imageText ? <pre className="awb-process-step__output">{imageText}</pre> : null}
           </div>
-        ) : outputText || entry.status === "running" ? (
-          <pre className="awb-process-activity__output">
-            {outputText || "(no output yet)"}
-          </pre>
+        ) : outputText ? (
+          <pre className="awb-process-step__output">{outputText}</pre>
         ) : null}
       </div>
     </details>
@@ -289,17 +276,13 @@ export const ProcessActivityView = ({
   const entries = buildProcessActivityEntries(toolCalls, terminalStreams);
 
   if (entries.length === 0) {
-    return <p className="awb-detail__empty">No activity in this turn.</p>;
+    return <p className="awb-detail__empty">这一轮没有执行步骤。</p>;
   }
 
   return (
-    <div className="awb-process-activity-list">
+    <div className="awb-process-steps">
       {entries.map((entry) => (
-        <ProcessActivityItemView
-          key={entry.id}
-          entry={entry}
-          onPreviewImage={onPreviewImage}
-        />
+        <ProcessActivityItemView key={entry.id} entry={entry} onPreviewImage={onPreviewImage} />
       ))}
     </div>
   );

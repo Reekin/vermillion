@@ -158,7 +158,7 @@ describe("SessionPane", () => {
     expect(html).toContain('data-navigation="session-1/turn-1"');
     expect(renderTurnNavigation).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-1", turnId: "turn-1" });
     expect(html).toContain('class="awb-chat-entry__timestamp"');
-    expect(html).toContain('aria-label="Pending approvals"');
+    expect(html).toContain('aria-label="待审批"');
     expect(html).toContain("Approve shell command");
     expect(html.indexOf("awb-composer-approvals")).toBeLessThan(html.indexOf("<textarea"));
     expect(html).not.toContain("awb-shell__sidebar");
@@ -169,15 +169,20 @@ describe("SessionPane", () => {
       "\u8fd9\u662f\u4e00\u4e2a\u7279\u522b\u7279\u522b\u957f\u7684\u9996\u8f6e\u8f93\u5165\u6807\u9898\u7528\u4e8e\u9a8c\u8bc1\u2026"
     );
     expect(truncateSessionHeading("short title")).toBe("short title");
-    expect(truncateSessionHeading("   ")).toBe("Thread");
+    expect(truncateSessionHeading("   ")).toBe("新会话");
   });
 
-  it("formats completed-turn age using minute, hour, and day units", () => {
-    const now = new Date("2026-05-04T12:00:00.000Z").getTime();
+  it("formats session list times as relative Chinese phrases", () => {
+    const now = new Date(2026, 4, 4, 12, 0, 0).getTime();
+    const at = (...parts: [number, number, number, number, number]) => new Date(...parts).toISOString();
 
-    expect(formatRelativeActivityAge("2026-05-04T11:55:00.000Z", now)).toBe("5m");
-    expect(formatRelativeActivityAge("2026-05-04T09:30:00.000Z", now)).toBe("2h");
-    expect(formatRelativeActivityAge("2026-05-01T08:00:00.000Z", now)).toBe("3d");
+    expect(formatRelativeActivityAge(at(2026, 4, 4, 11, 59), now)).toBe("1 分钟前");
+    expect(formatRelativeActivityAge(new Date(now - 20_000).toISOString(), now)).toBe("刚刚");
+    expect(formatRelativeActivityAge(at(2026, 4, 4, 11, 55), now)).toBe("5 分钟前");
+    expect(formatRelativeActivityAge(at(2026, 4, 4, 9, 30), now)).toBe("2 小时前");
+    expect(formatRelativeActivityAge(at(2026, 4, 3, 22, 10), now)).toBe("昨天 22:10");
+    expect(formatRelativeActivityAge(at(2026, 4, 1, 8, 0), now)).toBe("5月1日");
+    expect(formatRelativeActivityAge(at(2025, 11, 30, 8, 0), now)).toBe("2025年12月30日");
     expect(formatRelativeActivityAge(undefined, now)).toBeUndefined();
     expect(formatRelativeActivityAge("not-a-date", now)).toBeUndefined();
   });
