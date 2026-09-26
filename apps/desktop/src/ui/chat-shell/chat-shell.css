@@ -27,8 +27,8 @@
   /* Severity marks only (icons, counters, level tags, selection bars); never body text or large fills. */
   --awb-severity-error: #d48a86;
   --awb-severity-error-soft: rgba(212, 138, 134, 0.14);
-  --awb-severity-warning: #cfb76a;
-  --awb-severity-warning-soft: rgba(207, 183, 106, 0.14);
+  --awb-severity-warning: #d49a62;
+  --awb-severity-warning-soft: rgba(212, 154, 98, 0.14);
   --awb-severity-info: #8fa9c4;
   --awb-severity-info-soft: rgba(143, 169, 196, 0.12);
   --awb-warm: #8c8987;

@@ -6,6 +6,8 @@ export type OutputSeverity = "info" | "warning" | "error";
 /** One line of the event log; identical notices collapse into one entry with a count. */
 export type OutputEntry = {
   id: string;
+  /** First and latest occurrence. */
+  firstAt: string;
   at: string;
   severity: OutputSeverity;
   source?: ComposerStatusNotice["source"];
@@ -46,6 +48,7 @@ export const appendOutputEntry = (
   const previous = log.find((entry) => identity(entry) === key);
   const entry: OutputEntry = {
     id: previous?.id ?? id,
+    firstAt: previous?.firstAt ?? at,
     at,
     severity,
     source: notice.source,
@@ -155,6 +158,20 @@ export const sourceLabels: Record<NonNullable<ComposerStatusNotice["source"]>, s
   "chat-tree": "会话树",
   delegation: "委派",
   settings: "设置"
+};
+
+/** List time: 刚刚, N 分钟前, today's clock time, or 昨天 HH:MM. */
+export const formatRelativeTime = (at: string, now: Date = new Date()): string => {
+  const time = new Date(at);
+  const seconds = Math.max(0, Math.round((now.getTime() - time.getTime()) / 1000));
+  if (seconds < 60) return "刚刚";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  const clock = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (time.toDateString() === now.toDateString()) return clock;
+  if (time.toDateString() === yesterday.toDateString()) return `昨天 ${clock}`;
+  return `${time.getMonth() + 1}月${time.getDate()}日 ${clock}`;
 };
 
 export const severityLabels: Record<OutputSeverity, string> = { error: "错误", warning: "警告", info: "信息" };

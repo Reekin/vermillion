@@ -10,6 +10,7 @@ import {
   stampEngineConfigWarnings,
   statusBarDismissDelayMs,
   withEngineConfigWarnings,
+  formatRelativeTime,
   type OutputEntry
 } from "../src/ui/app/output-log.js";
 
@@ -23,7 +24,14 @@ describe("output log", () => {
     log = appendOutputEntry(log, { message: "Send failed", severity: "error", source: "send" }, "t1", "a");
     log = appendOutputEntry(log, { message: "Copied" }, "t2", "b");
     log = appendOutputEntry(log, { message: "Send failed", severity: "error", source: "send" }, "t3", "c");
-    expect(log.map((entry) => [entry.id, entry.count, entry.at])).toEqual([["a", 2, "t3"], ["b", 1, "t2"]]);
+    expect(log.map((entry) => [entry.id, entry.count, entry.firstAt, entry.at])).toEqual([["a", 2, "t1", "t3"], ["b", 1, "t2", "t2"]]);
+  });
+
+  it("formats list times relative to now", () => {
+    const now = new Date(2026, 8, 26, 14, 30, 0);
+    expect(formatRelativeTime(new Date(2026, 8, 26, 14, 29, 40).toISOString(), now)).toBe("刚刚");
+    expect(formatRelativeTime(new Date(2026, 8, 26, 14, 20, 0).toISOString(), now)).toBe("10 分钟前");
+    expect(formatRelativeTime(new Date(2026, 8, 25, 22, 10, 0).toISOString(), now)).toMatch(/^昨天 22:10$/);
   });
 
   it("keeps a bounded history", () => {

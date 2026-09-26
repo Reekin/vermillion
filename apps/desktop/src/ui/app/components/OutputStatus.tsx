@@ -15,6 +15,7 @@ import {
   severityLabels,
   sourceLabels,
   statusBarDismissDelayMs,
+  formatRelativeTime,
   type OutputSeverity,
   type OutputStore
 } from "../output-log.js";
@@ -22,9 +23,9 @@ import {
 const severityIcons: Record<OutputSeverity, LucideIcon> = { error: CircleX, warning: TriangleAlert, info: Info };
 const allSeverities: OutputSeverity[] = ["error", "warning", "info"];
 
-const SeverityIcon = ({ severity, className }: { severity: OutputSeverity; className?: string }) => {
+const SeverityIcon = ({ severity, className, size = 14 }: { severity: OutputSeverity; className?: string; size?: number }) => {
   const Icon = severityIcons[severity];
-  return <Icon size={14} aria-label={severityLabels[severity]} className={cn("vm-output-icon", className)} data-severity={severity} />;
+  return <Icon size={size} aria-label={severityLabels[severity]} className={cn("vm-output-icon", className)} data-severity={severity} />;
 };
 
 const formatTime = (at: string): string => new Date(at).toLocaleTimeString([], { hour12: false });
@@ -50,6 +51,7 @@ type Row = {
   group: "problems" | "events";
   severity: OutputSeverity;
   at: string;
+  firstAt: string;
   source: string;
   message: string;
   count: number;
@@ -109,7 +111,7 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: 
       <Popover.Trigger render={<button type="button" className="vm-output-counts" aria-label={`输出：${counts.error} 个错误，${counts.warning} 个警告`} />}>
         {(["error", "warning"] as const).map((severity) => (
           <span key={severity} className="vm-output-count" data-zero={counts[severity] === 0}>
-            <SeverityIcon severity={severity} />{counts[severity]}
+            <SeverityIcon severity={severity} size={12} />{counts[severity]}
           </span>
         ))}
       </Popover.Trigger>
@@ -142,12 +144,12 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }:
   const rows = useMemo((): Row[] => {
     const filter = { severities, text };
     const problems = warnings.map((warning, index): Row => ({
-      key: `problem-${warning.engineId}-${index}`, group: "problems", severity: "warning", at: warning.at,
+      key: `problem-${warning.engineId}-${index}`, group: "problems", severity: "warning", at: warning.at, firstAt: warning.at,
       source: `${warning.engineLabel} 配置`, message: warning.summary, count: 1, details: engineWarningDetails(warning),
       meta: [<span key="engine">引擎 {warning.engineLabel}</span>, ...(warning.path ? [<span key="path">配置 {warning.path}</span>] : [])]
     }));
     const events = entries.map((entry): Row => ({
-      key: entry.id, group: "events", severity: entry.severity, at: entry.at,
+      key: entry.id, group: "events", severity: entry.severity, at: entry.at, firstAt: entry.firstAt,
       source: entry.source ? sourceLabels[entry.source] : "应用", message: entry.message, count: entry.count,
       details: outputEntryDetails(entry), sessionId: entry.sessionId,
       meta: entry.engineId ? [<span key="engine">引擎 {engineLabels[entry.engineId] ?? entry.engineId}</span>] : []
@@ -187,7 +189,7 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }:
               <button type="button" className="vm-output-row" data-severity={row.severity} aria-selected={row === selected}
                 onClick={() => setSelectedKey(row.key)}>
                 <SeverityIcon severity={row.severity} />
-                <span className="vm-output-time">{formatTime(row.at)}</span>
+                <span className="vm-output-time" title={formatTime(row.at)}>{formatRelativeTime(row.at)}</span>
                 <span className="vm-output-source">{row.source}</span>
                 <span className="vm-output-message">{row.message}</span>
                 {row.count > 1 ? <span className="vm-output-repeat">×{row.count}</span> : <span />}
@@ -231,7 +233,7 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }:
               <SeverityIcon severity={selected.severity} />{severityLabels[selected.severity]}
             </span>
             <span>{selected.source}</span>
-            <span className="vm-output-time">{formatTime(selected.at)}{selected.count > 1 ? ` · 出现 ${selected.count} 次` : ""}</span>
+            <span className="vm-output-time">{selected.count > 1 ? `${formatTime(selected.firstAt)} – ${formatTime(selected.at)} · 出现 ${selected.count} 次` : formatTime(selected.at)}</span>
             <span className="vm-output-detail__actions">
               {selected.sessionId && onOpenSession && (
                 <Button size="sm" variant="ghost" outlined onClick={() => { if (onOpenSession(selected.sessionId!)) onClose(); }}>
