@@ -692,7 +692,6 @@ export const SessionPane = ({
   const executionPreferencesByEngineIdRef = useRef<
     SessionSettingsRpc["executionPreferencesByEngineId"]
   >({});
-  const [statusNotice, setStatusNoticeState] = useState<ComposerStatusNotice | undefined>();
   const [processVisibilityByTurnId, setProcessVisibilityByTurnId] = useState<
     Record<string, ProcessVisibilityOverride>
   >({});
@@ -738,20 +737,16 @@ export const SessionPane = ({
     [writeStatusNoticeLog]
   );
 
-  const statusNoticeRef = useRef<ComposerStatusNotice | undefined>(undefined);
+  // Only the last notice is kept, so recovery updates can tell whether their failure was already reported.
+  const lastNoticeRef = useRef<ComposerStatusNotice | undefined>(undefined);
   const setStatusNotice = useCallback(
     (action: SetStateAction<ComposerStatusNotice | undefined>): void => {
-      const current = statusNoticeRef.current;
-      let next = typeof action === "function" ? action(current) : action;
-      if (next && next !== current) {
-        next = recordStatusNotice(next);
-      }
-      statusNoticeRef.current = next;
-      setStatusNoticeState(next);
+      const current = lastNoticeRef.current;
+      const next = typeof action === "function" ? action(current) : action;
+      lastNoticeRef.current = next && next !== current ? recordStatusNotice(next) : next;
     },
     [recordStatusNotice]
   );
-
 
   const onExecutionPreferenceChange = useCallback(
     (engineId: string, execution: ComposerExecutionSelection): void => {
@@ -1032,17 +1027,6 @@ export const SessionPane = ({
     })
   );
 
-
-  useEffect(() => {
-    if (!statusNotice || statusNotice.persistent) {
-      return;
-    }
-    const timeoutId = setTimeout(() => {
-      setStatusNotice((current) => (current === statusNotice ? undefined : current));
-    }, 2_000);
-    return () => clearTimeout(timeoutId);
-  }, [statusNotice]);
-
   useEffect(() => {
     let disposed = false;
     void transport.engine
@@ -1322,7 +1306,6 @@ export const SessionPane = ({
           approvals={activeSessionApprovals}
           interactions={activeSessionInteractions}
           isOpeningSelectedSession={isOpeningSelectedSession}
-          statusNotice={statusNotice}
           onStatusNotice={setStatusNotice}
           onPreviewImage={onPreviewImage}
           createSession={sessionId ? undefined : createSession}

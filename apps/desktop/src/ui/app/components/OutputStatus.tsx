@@ -3,9 +3,10 @@ import { Popover } from "@base-ui/react/popover";
 import { CircleX, Copy, ExternalLink, Info, Search, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { RendererStore } from "../../../store/store.js";
-import { useRendererStoreState } from "../../chat-shell/use-renderer-store-state.js";
+import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-signal.js";
 import { writeClipboardText } from "../../chat-shell/clipboard.js";
 import { cn } from "../lib/cn.js";
+import { Button, IconButton } from "./ui.js";
 import {
   countOutput,
   engineWarningDetails,
@@ -70,7 +71,7 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: 
   const warnings = store((state) => state.warnings);
   const latestId = store((state) => state.latestId);
   const open = store((state) => state.open);
-  const warningsSignal = useRendererStoreState(sessionStore).refreshSignals.engineConfigWarnings;
+  const warningsSignal = useEngineConfigWarningsSignal(sessionStore);
   const [engineLabels, setEngineLabels] = useState<Record<string, string>>({});
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -215,9 +216,8 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }:
           <input ref={searchRef} data-ui-raw="search box inside the output popover" value={text} placeholder="筛选"
             aria-label="筛选输出" onChange={(event) => setText(event.target.value)} />
         </label>
-        <button type="button" className="vm-output-icon-button" title="清空事件记录" aria-label="清空事件记录"
-          disabled={!entries.length} onClick={() => store.getState().clear()}><Trash2 size={14} /></button>
-        <button type="button" className="vm-output-icon-button" title="关闭" aria-label="关闭" onClick={onClose}><X size={14} /></button>
+        <IconButton icon={Trash2} label="清空事件记录" disabled={!entries.length} onClick={() => store.getState().clear()} />
+        <IconButton icon={X} label="关闭" onClick={onClose} />
       </div>
       <ul className="vm-output-list">
         {renderGroup("problems", "当前问题")}
@@ -234,13 +234,13 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }:
             <span className="vm-output-time">{formatTime(selected.at)}{selected.count > 1 ? ` · 出现 ${selected.count} 次` : ""}</span>
             <span className="vm-output-detail__actions">
               {selected.sessionId && onOpenSession && (
-                <button type="button" className="vm-output-button" onClick={() => { if (onOpenSession(selected.sessionId!)) onClose(); }}>
+                <Button size="sm" variant="ghost" outlined onClick={() => { if (onOpenSession(selected.sessionId!)) onClose(); }}>
                   <ExternalLink size={14} aria-hidden="true" />打开会话
-                </button>
+                </Button>
               )}
-              <button type="button" className="vm-output-button" onClick={copy}>
+              <Button size="sm" variant="ghost" outlined onClick={copy}>
                 <Copy size={14} aria-hidden="true" />{copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : "复制"}
-              </button>
+              </Button>
             </span>
           </div>
           <p className="vm-output-detail__message">{selected.message}</p>

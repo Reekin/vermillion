@@ -78,7 +78,6 @@ export type ResolveComposerStatusInput = {
   selectedEngineId?: string;
   activeSession?: ChatSession;
   approvals?: ApprovalRequest[];
-  notice?: ComposerStatusNotice;
   queuedCount?: number;
   supportsSteer?: boolean;
 };

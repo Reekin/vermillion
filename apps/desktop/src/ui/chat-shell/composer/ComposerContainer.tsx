@@ -57,7 +57,6 @@ export type ComposerContainerProps = {
   approvals: ApprovalRequest[];
   interactions: RuntimeInteraction[];
   isOpeningSelectedSession: boolean;
-  statusNotice?: ComposerStatusNotice;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   onPreviewImage?: (input: ImageLightboxState) => void;
   createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
@@ -105,7 +104,6 @@ export const ComposerContainer = memo(({
   approvals,
   interactions,
   isOpeningSelectedSession,
-  statusNotice,
   onStatusNotice,
   onPreviewImage,
   createSession,
@@ -147,7 +145,6 @@ export const ComposerContainer = memo(({
     allowSessionLastTurnFallback,
     approvals,
     isOpeningSelectedSession,
-    statusNotice,
     onStatusNotice,
     createSession,
     initializeDraftExecution,

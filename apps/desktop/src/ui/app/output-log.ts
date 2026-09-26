@@ -15,7 +15,6 @@ export type OutputEntry = {
   sessionId?: string;
   engineId?: string;
   count: number;
-  seen: boolean;
 };
 
 /** A configuration problem an engine reported; listed under current problems until the engine clears it. */
@@ -55,14 +54,10 @@ export const appendOutputEntry = (
     context: notice.context,
     sessionId: notice.sessionId,
     engineId: notice.engineId,
-    count: (previous?.count ?? 0) + 1,
-    seen: !needsAttention(severity)
+    count: (previous?.count ?? 0) + 1
   };
   return [entry, ...log.filter((existing) => existing !== previous)].slice(0, OUTPUT_LOG_LIMIT);
 };
-
-export const markOutputSeen = (log: OutputEntry[]): OutputEntry[] =>
-  log.every((entry) => entry.seen) ? log : log.map((entry) => (entry.seen ? entry : { ...entry, seen: true }));
 
 export type OutputCounts = Record<OutputSeverity, number>;
 
@@ -97,7 +92,7 @@ export const outputEntryDetails = (entry: OutputEntry): string | undefined => {
   return parts.length ? parts.join("\n\n") : undefined;
 };
 
-export const engineWarningDetails = (warning: EngineConfigWarningView): string | undefined => {
+export const engineWarningDetails = (warning: { details?: string; path?: string }): string | undefined => {
   const parts = [warning.details, warning.path ? `配置文件：${warning.path}` : undefined]
     .filter((part): part is string => Boolean(part));
   return parts.length ? parts.join("\n\n") : undefined;
@@ -189,15 +184,14 @@ export const createOutputStore = (now: () => string = () => new Date().toISOStri
       sequence += 1;
       const entries = appendOutputEntry(get().entries, notice, now(), `output-${sequence}`);
       const entry = entries[0]!;
-      set({ entries: get().open ? markOutputSeen(entries) : entries,
-        latestId: get().open && needsAttention(entry.severity) ? undefined : entry.id });
+      set({ entries, latestId: get().open && needsAttention(entry.severity) ? undefined : entry.id });
     },
     setWarnings: (byEngineId, engineLabel) =>
       set({ warnings: stampEngineConfigWarnings(get().warnings, byEngineId, engineLabel, now()) }),
     setOpen: (open) => {
       if (!open) return set({ open });
       const latest = get().entries.find((entry) => entry.id === get().latestId);
-      set({ open, entries: markOutputSeen(get().entries),
+      set({ open,
         latestId: latest && needsAttention(latest.severity) ? undefined : get().latestId });
     },
     dismissLatest: (id) => set((state) => (state.latestId === id ? { latestId: undefined } : state)),

@@ -122,10 +122,6 @@ describe("resolveComposerStatus", () => {
           createdAt: "2026-04-18T00:00:00.000Z",
           updatedAt: "2026-04-18T00:00:00.000Z"
         },
-        notice: {
-          message: "Message sent.",
-          source: "send"
-        },
         supportsSteer: true
       })
     ).toBe("Running: Steer supported");

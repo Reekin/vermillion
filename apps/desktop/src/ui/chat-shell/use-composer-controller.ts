@@ -379,7 +379,6 @@ type UseComposerControllerInput = {
   allowSessionLastTurnFallback?: boolean;
   approvals: ApprovalRequest[];
   isOpeningSelectedSession: boolean;
-  statusNotice?: ComposerStatusNotice;
   onStatusNotice: (notice: ComposerStatusNotice | undefined) => void;
   /** Draft state only: creates the session for the first message and returns its id. */
   createSession?: (input: { content: string; attachments: Attachment[]; execution?: SessionExecutionProfileInput }) => Promise<string>;
@@ -627,7 +626,6 @@ export const useComposerController = (
     selectedEngineId: input.selectedEngineId,
     activeSession: input.activeSession,
     approvals: input.approvals,
-    notice: input.statusNotice,
     queuedCount: queue.length,
     supportsSteer: capabilities.supportsSteer
   });

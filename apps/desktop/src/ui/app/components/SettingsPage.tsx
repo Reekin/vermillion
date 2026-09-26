@@ -8,9 +8,10 @@ import type {
 } from "@vermillion/shared";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { RendererStore } from "../../../store/store.js";
-import { useRendererStoreState } from "../../chat-shell/use-renderer-store-state.js";
+import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-signal.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
 import { Button, CollapsibleDetails, Field, InlineNotice } from "./ui.js";
+import { engineWarningDetails } from "../output-log.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
@@ -18,7 +19,7 @@ type SettingsPageProps = {
 };
 
 export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => {
-  const configWarningsSignal = useRendererStoreState(sessionStore).refreshSignals.engineConfigWarnings;
+  const configWarningsSignal = useEngineConfigWarningsSignal(sessionStore);
   const [settings, setSettings] = useState<SessionSettingsRpc | undefined>(undefined);
   const [engines, setEngines] = useState<EngineDefinitionRpc[]>([]);
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
@@ -211,8 +212,7 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
               )}
               {(settings?.engineConfigWarningsByEngineId?.[engine.engineId] ?? []).map((warning, index) => {
                 const key = `${engine.engineId}:${index}`;
-                const details = [warning.details, warning.path ? `配置文件：${warning.path}` : undefined]
-                  .filter(Boolean).join("\n\n");
+                const details = engineWarningDetails(warning);
                 return (
                   <div key={key}>
                     <InlineNotice tone="error" className="px-0 pb-0">

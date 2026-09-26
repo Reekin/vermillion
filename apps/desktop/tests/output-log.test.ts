@@ -6,7 +6,6 @@ import {
   createOutputStore,
   engineWarningDetails,
   matchesOutputFilter,
-  markOutputSeen,
   outputEntryDetails,
   stampEngineConfigWarnings,
   statusBarDismissDelayMs,
@@ -25,9 +24,6 @@ describe("output log", () => {
     log = appendOutputEntry(log, { message: "Copied" }, "t2", "b");
     log = appendOutputEntry(log, { message: "Send failed", severity: "error", source: "send" }, "t3", "c");
     expect(log.map((entry) => [entry.id, entry.count, entry.at])).toEqual([["a", 2, "t3"], ["b", 1, "t2"]]);
-    expect(log[0]?.seen).toBe(false);
-    expect(log[1]?.seen).toBe(true);
-    expect(markOutputSeen(log).every((entry) => entry.seen)).toBe(true);
   });
 
   it("keeps a bounded history", () => {
@@ -53,7 +49,7 @@ describe("output log", () => {
     expect(statusBarDismissDelayMs(error!)).toBeUndefined();
   });
 
-  it("clears events but keeps current problems, and opening marks errors seen and hides them from the status bar", () => {
+  it("clears events but keeps current problems, and opening hides errors from the status bar", () => {
     const store = createOutputStore(() => at);
     store.getState().setWarnings({ codex: [{ summary: "bad config" }] }, () => "Codex");
     store.getState().report({ message: "Send failed", severity: "error", source: "send", engineId: "codex" });
@@ -61,7 +57,6 @@ describe("output log", () => {
     expect(outputEntryDetails(store.getState().entries[0]!)).toContain("bad config");
     store.getState().setOpen(true);
     expect(store.getState().latestId).toBeUndefined();
-    expect(store.getState().entries.every((entry) => entry.seen)).toBe(true);
     store.getState().clear();
     expect(store.getState().entries).toEqual([]);
     expect(store.getState().warnings).toHaveLength(1);
