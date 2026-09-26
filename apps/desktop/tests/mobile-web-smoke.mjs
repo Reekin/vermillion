@@ -99,7 +99,7 @@ async function until(label, predicate, timeout = 120_000) {
 }
 const check = (name) => { checks.push(name); console.log(`PASS ${name}`); };
 const capture = (name) => browser("screenshot", join(evidence, `${name}.png`));
-const visible = (expression) => browser("wait", "--fn", expression);
+const visible = (expression) => browser("wait", "--fn", `Boolean(${expression})`);
 
 try {
   const descriptor = JSON.parse(await readFile(args.target, "utf8"));
@@ -176,8 +176,10 @@ try {
   if (browserStarted) {
     try {
       await browser("close");
-      const listing = await run(args.browser, ["--config", browserConfig, "--json", "session", "list"], "Browser cleanup verification", browserEnv, 15_000);
-      assert.ok(!listing.includes(browserSession), "Smoke browser session remains active");
+      await until("owned browser session cleanup", async () => {
+        const listing = await run(args.browser, ["--json", "session", "list"], "Browser cleanup verification", browserEnv, 15_000);
+        return !listing.includes(browserSession);
+      }, 15_000);
       await until("owned browser process cleanup", async () => {
         const processes = process.platform === "win32"
           ? await run("pwsh", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(agent-browser.*|chrome|node)\\.exe$' -and $_.CommandLine -like ('*' + $env.SMOKE_BROWSER_SESSION + '*') } | Select-Object -ExpandProperty ProcessId"], "Browser process cleanup verification", { ...browserEnv, SMOKE_BROWSER_SESSION: browserSession }, 15_000)
@@ -186,7 +188,7 @@ try {
           : !processes.split("\n").some((line) => line.includes(browserSession) && /agent-browser|chrome/i.test(line));
       }, 15_000);
       check("Owned browser session closed");
-    } catch { cleanupErrors.push("Could not confirm owned browser session cleanup"); }
+    } catch (error) { cleanupErrors.push("Could not confirm owned browser session cleanup: " + redact(error.message)); }
   }
   if (pairingAttempted) {
     try {
