@@ -1,4 +1,4 @@
-import { FileText, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { Ban, Check, CircleAlert, FileText, LoaderCircle, Plus, RefreshCw, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DomainConfig, DomainDefinition, Issue, PatrolRun, WorkbenchClient } from "@vermillion/workbench/client";
 import { Button, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, MarkdownPreview, OverflowMenu, PanelHeader, Select, SettingRow, StatusPill, Toggle, type StatusTone } from "./ui.js";
@@ -236,7 +236,7 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
             </div>
             <ul>{groupPatrolRuns(runs).map((entry) => entry.kind === "skipped"
               ? <li key={entry.runs[0]!.patrolRunId} className="vm-patrol-entry">
-                <StatusPill tone="neutral">跳过</StatusPill>
+                <PatrolIcon tone="skipped" />
                 <span className="vm-patrol-entry__text">{skippedSummary(entry.runs)}</span>
                 <span className="vm-patrol-entry__time">{patrolTime(entry.runs[0]!.startedAt)}</span>
               </li>
@@ -269,18 +269,23 @@ const FileRow = ({ icon, name, path, onOpen }: { icon: ReactNode; name: string; 
   </button>
 );
 
-const patrolRunPill: Record<PatrolTone, { tone: StatusTone; label: string }> = {
-  clean: { tone: "done", label: "无问题" }, issue: { tone: "attention", label: "发现问题" },
-  failed: { tone: "failed", label: "失败" }, running: { tone: "running", label: "巡检中" }
+const patrolIcons: Record<PatrolTone | "skipped", { icon: LucideIcon; label: string }> = {
+  clean: { icon: Check, label: "无问题" }, issue: { icon: CircleAlert, label: "发现问题" },
+  failed: { icon: X, label: "失败" }, running: { icon: LoaderCircle, label: "巡检中" }, skipped: { icon: Ban, label: "已跳过" }
+};
+
+/** Row-leading 18px state icon, coloured by the patrol result. */
+const PatrolIcon = ({ tone }: { tone: PatrolTone | "skipped" }) => {
+  const { icon: Icon, label } = patrolIcons[tone];
+  return <span className="vm-patrol-icon" data-tone={tone} role="img" aria-label={label}><Icon size={12} aria-hidden="true" className={tone === "running" ? "vm-spin" : undefined} /></span>;
 };
 
 const PatrolRow = ({ run, onOpenSession, onOpenIssues }: { run: PatrolRun; onOpenSession: (sessionId: string) => void; onOpenIssues: () => void }) => {
   const tone = patrolTone(run);
-  const pill = run.status === "queued" ? { tone: "running" as const, label: "等待巡检" } : patrolRunPill[tone];
-  const title = run.summary || (tone === "issue" ? `发现 ${run.issueIds.length} 个问题` : pill.label);
+  const title = run.summary || (run.status === "queued" ? "等待巡检" : tone === "issue" ? `发现 ${run.issueIds.length} 个问题` : patrolIcons[tone].label);
   const meta = [patrolTrigger[run.trigger], run.changedPaths.length ? `${run.changedPaths.length} 个文件变更` : undefined].filter(Boolean).join(" · ");
   return <li className="vm-patrol-entry">
-    <StatusPill tone={pill.tone}>{pill.label}</StatusPill>
+    <PatrolIcon tone={tone} />
     <span className="vm-patrol-entry__text">{title}<small>{meta}</small></span>
     <span className="vm-patrol-entry__actions">
       {run.issueIds.length > 0 && <Button size="sm" variant="ghost" onClick={onOpenIssues}>{run.issueIds.length} 个 Issue</Button>}

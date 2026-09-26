@@ -228,13 +228,14 @@
 .vm-role-mode::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--color-faint-foreground); }
 .vm-role-mode[data-mode="global"] { color: var(--color-muted-foreground); }
 .vm-role-mode[data-mode="append"]::before { background: var(--color-state-info); }
-.vm-role-mode[data-mode="override"]::before { background: var(--color-accent-strong); }
+.vm-role-mode[data-mode="override"]::before { background: var(--color-state-running); }
 .vm-role-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 12px 24px 0; font-size: var(--text-caption); color: var(--color-muted-foreground); }
 .vm-role-legend .vm-role-mode { margin-left: 8px; }
 .vm-role-legend .vm-role-mode:first-child { margin-left: 0; }
 @container (max-width: 760px) {
   .vm-role-row__main, .vm-role-row--head { grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) 100px; }
-  .vm-role-row__duty, .vm-role-row--head > :nth-child(2) { display: none; }
+  .vm-role-row__duty { grid-column: 1 / -1; grid-row: 2; margin-top: -8px; }
+  .vm-role-row--head > :nth-child(2) { display: none; }
 }
 
 /* Domain detail: header, definition + patrol settings side by side, then files and patrol records. */
@@ -248,7 +249,7 @@
 .vm-domain-card__title { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: var(--text-label); font-weight: 600; color: var(--color-strong); }
 .vm-domain-card__count { font-size: var(--text-caption); font-weight: 400; color: var(--color-muted-foreground); }
 .vm-domain-definition .vm-markdown { font-size: var(--text-label); }
-.vm-domain-definition .vm-markdown h2 { font-size: var(--text-label); color: var(--color-muted-foreground); }
+.vm-domain-definition .vm-markdown h2 { font-size: var(--text-label); color: var(--color-strong); }
 .vm-domain-definition .vm-markdown > * + * { margin-top: 8px; }
 .vm-domain-file { display: flex; width: 100%; align-items: center; gap: 8px; min-height: 36px; padding: 6px 4px; border-top: 1px solid var(--color-border); border-radius: var(--radius-sm); text-align: left; }
 li:first-child > .vm-domain-file { border-top: 0; }
@@ -262,7 +263,11 @@ li:first-child > .vm-domain-file { border-top: 0; }
 .vm-patrol-strip > i[data-tone="failed"] { background: var(--color-state-failed); opacity: 1; }
 .vm-patrol-strip > i[data-tone="running"] { background: var(--color-state-running); opacity: 1; }
 .vm-patrol-entry { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 0; border-top: 1px solid var(--color-border); }
-.vm-patrol-entry .vm-pill { width: 84px; }
+.vm-patrol-icon { display: inline-flex; width: 18px; height: 18px; flex-shrink: 0; align-items: center; justify-content: center; align-self: flex-start; margin-top: 1px; border-radius: 50%; background: var(--color-surface-selected); color: var(--color-muted-foreground); }
+.vm-patrol-icon[data-tone="clean"] { background: var(--color-state-done-soft); color: var(--color-state-done); }
+.vm-patrol-icon[data-tone="issue"] { background: var(--color-state-attention-soft); color: var(--color-state-attention); }
+.vm-patrol-icon[data-tone="failed"] { background: var(--color-state-failed-soft); color: var(--color-state-failed); }
+.vm-patrol-icon[data-tone="running"] { background: var(--color-state-running-soft); color: var(--color-state-running); }
 .vm-patrol-entry__text { display: flex; flex: 1; min-width: 0; flex-direction: column; font-size: var(--text-label); color: var(--color-foreground); overflow-wrap: anywhere; }
 .vm-patrol-entry__text small { font-size: var(--text-caption); color: var(--color-muted-foreground); }
 .vm-patrol-entry__actions { display: flex; flex-shrink: 0; gap: 4px; }
