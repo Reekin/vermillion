@@ -8,6 +8,8 @@
 
 每次向会话发消息时，工作台都按会话的角色和所属 workspace 取当下的角色正文：设计伙伴和开工准备用设计伙伴正文，Worker 用包含 Reviewer、Verifier 交接说明的完整 Worker 指令，监工用 supervisor 正文，Maintainer 再附加领域专属指令。改了角色文件，下一条消息就生效，不需要重建会话。角色正文作为 developer 指令送给模型；用户在 Codex 配置里写的 `developer_instructions` 仍然生效，Vermillion 不修改用户的 `config.toml`。送达方式见[架构](../../Foundation/Architecture.md#角色指令送达)。
 
+引擎工具派出的 subagent（包括 Reviewer、Verifier）的指令和模型在派发时确定，此后不按上述规则重新注入。用户在工作台里直接向 subagent 发消息，或从它 fork 出会话继续对话时，只送达用户输入，不注入设计伙伴等角色正文、workspaceId 或工作台会话身份，也不改变它的模型配置（见[工作台 · 模型配置](../Think/PRD.md#模型配置)）。
+
 - **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/design-partner.md)。
 - **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/worker.md)。
 - **Reviewer**：审阅 Worker 的候选改动，由 Worker 拉起，指令见 [reviewer.md](../../../../packages/workbench/roles/reviewer.md)。
