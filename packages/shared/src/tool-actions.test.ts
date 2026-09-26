@@ -114,6 +114,16 @@ describe("tool actions", () => {
   });
 
   it("maps named tools and non-command tool types", () => {
+    const targets = "targets: 01a0df3e-99a7-7ce1-91dd-808ee698fea9, 01a0df3e-a5b1-70c3-ae01-b3ae82f1c843";
+    expect(describeToolStep(call({ toolName: "subagent.spawn", inputSummary: "任务：提炼情节单元\n先读口径文件\nmodel: gpt-5\n" + targets })))
+      .toMatchObject({ kind: "agent", verb: "启动子代理", object: "任务：提炼情节单元" });
+    expect(describeToolStep(call({ toolName: "subagent.wait", inputSummary: targets,
+      outputSummary: "01a0df3e-99a7: completed — 原始场景 214 条\n01a0df3e-a5b1: running" })))
+      .toMatchObject({ kind: "agent", verb: "等待子代理", object: "2 个", result: "1 个已完成", failed: false });
+    expect(describeToolStep(call({ toolName: "subagent.close", inputSummary: targets })))
+      .toMatchObject({ verb: "关闭子代理", object: "2 个" });
+    expect(describeToolStep(call({ toolName: "subagent.wait", inputSummary: targets, outputSummary: "a: errored — boom" })))
+      .toMatchObject({ result: "1 个出错", failed: true });
     expect(actionsFromNamedTool("read", { path: "a/b.md" })).toEqual([{ kind: "read", target: "a/b.md" }]);
     expect(actionsFromNamedTool("grep", { pattern: "x", path: "src" })).toEqual([{ kind: "search", target: "x", path: "src" }]);
     expect(actionsFromNamedTool("write", { path: "f.ts" })).toEqual([{ kind: "edit", target: "f.ts" }]);

@@ -1,5 +1,5 @@
 import {
-  Archive, ArrowUpRight, ChevronDown, ChevronRight, Eye, FileText, Globe, Image as ImageIcon, ImagePlus, Lightbulb,
+  Archive, ArrowUpRight, Bot, ChevronDown, ChevronRight, Eye, FileText, Globe, Image as ImageIcon, ImagePlus, Lightbulb,
   List, ListTodo, MessageSquare, Pencil, Search, Terminal, Wrench, type LucideIcon
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
@@ -44,6 +44,7 @@ const toolIcons: Record<string, LucideIcon> = {
   view: ImageIcon,
   generate: ImagePlus,
   compact: Archive,
+  agent: Bot,
   other: Wrench
 };
 

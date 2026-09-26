@@ -16,6 +16,7 @@ export type ToolStepKind =
   | "view"
   | "generate"
   | "compact"
+  | "agent"
   | "other";
 
 export type ToolStep = {
@@ -45,6 +46,7 @@ const verbs: Record<ToolStepKind, string> = {
   view: "查看图片",
   generate: "生成图片",
   compact: "压缩上下文",
+  agent: "子代理",
   other: "调用"
 };
 
@@ -337,8 +339,48 @@ const kindForTool = (toolName: string): ToolStepKind | undefined => {
     case "contextCompaction":
       return "compact";
     default:
-      return undefined;
+      return toolName.startsWith("subagent.") ? "agent" : undefined;
   }
+};
+
+const agentVerbs: Record<string, string> = {
+  "subagent.spawn": "启动子代理",
+  "subagent.message": "发消息给子代理",
+  "subagent.resume": "恢复子代理",
+  "subagent.wait": "等待子代理",
+  "subagent.close": "关闭子代理"
+};
+
+/**
+ * Subagent calls name their targets by thread id, which says nothing to a reader: spawn and
+ * message show the task text, the others how many agents they act on. Engines report each agent
+ * as "<thread>: <status>…" in the output, which gives a wait its outcome.
+ */
+const describeAgentStep = (toolCall: ToolCall, running: boolean): ToolStep => {
+  const input = toolCall.inputSummary ?? "";
+  const targets = /^targets:\s*(.+)$/m.exec(input)?.[1]?.split(",").map((id) => id.trim()).filter(Boolean) ?? [];
+  const task = firstLine(input.replace(/^(?:targets|model|reasoning):.*$/gm, ""));
+  const sendsTask = toolCall.toolName === "subagent.spawn" || toolCall.toolName === "subagent.message";
+  const object = sendsTask && task ? task : targets.length > 0 ? `${targets.length} 个` : undefined;
+  const statuses = (toolCall.outputSummary ?? "").split(/\r?\n/)
+    .map((line) => /^\S+:\s*([A-Za-z_]+)/.exec(line.trim())?.[1]?.toLowerCase())
+    .filter((status): status is string => Boolean(status));
+  const errored = statuses.filter((status) => status === "errored").length;
+  const completed = statuses.filter((status) => status === "completed" || status === "shutdown").length;
+  const failed = toolCall.status === "failed" || errored > 0;
+  const result = running ? "进行中"
+    : toolCall.toolName !== "subagent.wait" ? undefined
+      : errored > 0 ? `${errored} 个出错`
+        : completed > 0 ? `${completed} 个已完成` : "未完成";
+  return {
+    kind: "agent",
+    verb: agentVerbs[toolCall.toolName] ?? verbs.agent,
+    ...(object ? { object: truncate(object) } : {}),
+    ...(result ? { result } : {}),
+    failed,
+    running,
+    targets: []
+  };
 };
 
 /** One readable step for a tool call: verb, object and result. */
@@ -346,6 +388,9 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
   const running = toolCall.status === "running";
   const text = output.text ?? toolCall.outputSummary;
   const fixedKind = kindForTool(toolCall.toolName);
+  if (fixedKind === "agent") {
+    return describeAgentStep(toolCall, running);
+  }
   if (fixedKind) {
     const object =
       fixedKind === "think"
@@ -466,7 +511,7 @@ export const formatDurationZh = (durationMs: number): string => {
 };
 
 const summaryOrder: ToolStepKind[] = [
-  "list", "read", "search", "edit", "run", "web", "view", "generate", "other", "compact", "think"
+  "list", "read", "search", "edit", "run", "web", "view", "generate", "agent", "other", "compact", "think"
 ];
 
 const summaryPhrase = (kind: ToolStepKind, count: number): string => {
@@ -489,6 +534,8 @@ const summaryPhrase = (kind: ToolStepKind, count: number): string => {
       return `生成 ${count} 张图片`;
     case "compact":
       return "压缩上下文";
+    case "agent":
+      return `子代理操作 ${count} 次`;
     case "think":
       return `思考 ${count} 次`;
     default:

@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import {
   Archive,
+  Bot,
   Eye,
   Globe,
   Image as ImageIcon,
@@ -49,6 +50,7 @@ const stepIcons: Record<ToolStepKind, LucideIcon> = {
   view: ImageIcon,
   generate: ImagePlus,
   compact: Archive,
+  agent: Bot,
   other: Wrench
 };
 
