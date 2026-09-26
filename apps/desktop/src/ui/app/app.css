@@ -201,6 +201,71 @@
 .vm-toggle[aria-checked="true"] .vm-toggle-track { border-color: var(--color-state-done); background: var(--color-state-done); }
 .vm-toggle[aria-checked="true"] .vm-toggle-track > span { margin-left: auto; background: var(--color-strong); }
 .vm-toggle:disabled { opacity: 0.5; }
+/* SettingRow: name and current state on the left, row actions and the control on the right. */
+.vm-setting-row { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 0; border-top: 1px solid var(--color-border); }
+.vm-setting-row:first-of-type { border-top: 0; }
+.vm-setting-row__text { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.vm-setting-row__label { font-size: var(--text-label); font-weight: 500; color: var(--color-foreground); }
+.vm-setting-row__state { font-size: var(--text-caption); color: var(--color-muted-foreground); }
+.vm-setting-row__actions { display: flex; flex-shrink: 0; align-items: center; gap: 4px; }
+
+/* Roles table: name + id, duty, effective model, customization mode, overflow menu. */
+.vm-page { container-type: inline-size; max-width: 1120px; padding-bottom: 24px; }
+.vm-role-table { margin: 0 24px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
+.vm-role-row { display: flex; align-items: center; gap: 8px; padding-right: 12px; border-top: 1px solid var(--color-border); }
+.vm-role-row:first-child { border-top: 0; }
+.vm-role-row:not(.vm-role-row--head):hover { background: var(--color-surface-hover); }
+.vm-role-row__main, .vm-role-row--head { display: grid; flex: 1; min-width: 0; grid-template-columns: minmax(140px, 1.1fr) minmax(0, 1.6fr) minmax(150px, 1fr) 120px; align-items: center; gap: 16px; padding: 12px 16px; text-align: left; }
+.vm-role-row--head { padding: 8px 56px 8px 16px; background: var(--color-app-shell); font-size: var(--text-micro); font-weight: 500; color: var(--color-muted-foreground); }
+.vm-role-row__name { display: flex; min-width: 0; flex-direction: column; }
+.vm-role-row__name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-label); font-weight: 500; color: var(--color-strong); }
+.vm-role-row__name span { font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }
+.vm-role-row__duty { font-size: var(--text-caption); color: var(--color-muted-foreground); }
+.vm-role-row__model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-label); color: var(--color-foreground); }
+.vm-role-row__model > span { color: var(--color-muted-foreground); }
+.vm-role-mode { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--text-caption); color: var(--color-foreground); }
+.vm-role-mode::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--color-faint-foreground); }
+.vm-role-mode[data-mode="global"] { color: var(--color-muted-foreground); }
+.vm-role-mode[data-mode="append"]::before { background: var(--color-state-info); }
+.vm-role-mode[data-mode="override"]::before { background: var(--color-accent-strong); }
+.vm-role-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 12px 24px 0; font-size: var(--text-caption); color: var(--color-muted-foreground); }
+.vm-role-legend .vm-role-mode { margin-left: 8px; }
+.vm-role-legend .vm-role-mode:first-child { margin-left: 0; }
+@container (max-width: 760px) {
+  .vm-role-row__main, .vm-role-row--head { grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) 100px; }
+  .vm-role-row__duty, .vm-role-row--head > :nth-child(2) { display: none; }
+}
+
+/* Domain detail: header, definition + patrol settings side by side, then files and patrol records. */
+.vm-domain-item__title { display: inline-flex; align-items: center; gap: 8px; }
+.vm-domain-item__mark { width: 6px; height: 6px; border-radius: 50%; background: var(--color-state-attention); }
+.vm-domain-detail { display: flex; max-width: 920px; flex-direction: column; gap: 12px; padding: 20px 24px 32px; }
+.vm-domain-detail__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.vm-domain-id { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-surface-selected); font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }
+.vm-domain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; gap: 12px; }
+.vm-domain-card { padding: 12px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-app-shell); }
+.vm-domain-card__title { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: var(--text-label); font-weight: 600; color: var(--color-strong); }
+.vm-domain-card__count { font-size: var(--text-caption); font-weight: 400; color: var(--color-muted-foreground); }
+.vm-domain-definition .vm-markdown { font-size: var(--text-label); }
+.vm-domain-definition .vm-markdown h2 { font-size: var(--text-label); color: var(--color-muted-foreground); }
+.vm-domain-definition .vm-markdown > * + * { margin-top: 8px; }
+.vm-domain-file { display: flex; width: 100%; align-items: center; gap: 8px; min-height: 36px; padding: 6px 4px; border-top: 1px solid var(--color-border); border-radius: var(--radius-sm); text-align: left; }
+li:first-child > .vm-domain-file { border-top: 0; }
+.vm-domain-file:hover { background: var(--color-surface-hover); }
+.vm-domain-file__icon { display: inline-flex; color: var(--color-muted-foreground); }
+.vm-domain-file__name { flex-shrink: 0; font-size: var(--text-label); font-weight: 500; color: var(--color-strong); }
+.vm-domain-file__path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }
+.vm-patrol-strip { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
+.vm-patrol-strip > i { width: 10px; height: 10px; border-radius: 2px; background: var(--color-state-done); opacity: 0.6; }
+.vm-patrol-strip > i[data-tone="issue"] { background: var(--color-state-attention); opacity: 1; }
+.vm-patrol-strip > i[data-tone="failed"] { background: var(--color-state-failed); opacity: 1; }
+.vm-patrol-strip > i[data-tone="running"] { background: var(--color-state-running); opacity: 1; }
+.vm-patrol-entry { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 0; border-top: 1px solid var(--color-border); }
+.vm-patrol-entry .vm-pill { width: 84px; }
+.vm-patrol-entry__text { display: flex; flex: 1; min-width: 0; flex-direction: column; font-size: var(--text-label); color: var(--color-foreground); overflow-wrap: anywhere; }
+.vm-patrol-entry__text small { font-size: var(--text-caption); color: var(--color-muted-foreground); }
+.vm-patrol-entry__actions { display: flex; flex-shrink: 0; gap: 4px; }
+.vm-patrol-entry__time { flex-shrink: 0; font-family: var(--font-mono); font-size: var(--text-micro); color: var(--color-muted-foreground); }
 .vm-stepper { display: inline-flex; align-items: center; flex-shrink: 0; gap: 6px; }
 .vm-stepper-control { display: inline-flex; align-items: center; border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: var(--color-input); }
 .vm-stepper-control > button { width: 22px; height: 22px; }

@@ -321,14 +321,6 @@ export const zDocFile = z.object({
 });
 export type DocFile = z.infer<typeof zDocFile>;
 
-export const zRoleFile = z.object({
-  roleId: z.string().min(1),
-  title: z.string(),
-  /** Which layer the effective prompt comes from. */
-  source: z.enum(["global", "workspace"])
-});
-export type RoleFile = z.infer<typeof zRoleFile>;
-
 /** Explicit role model fields; omitted fields inherit the composer's selection. */
 export const zRoleExecutionOverrides = z.object({
   modelId: z.string().min(1).optional(),
@@ -336,6 +328,18 @@ export const zRoleExecutionOverrides = z.object({
   serviceTierId: z.string().min(1).nullable().optional()
 });
 export type RoleExecutionOverrides = z.infer<typeof zRoleExecutionOverrides>;
+
+export const zRoleFile = z.object({
+  roleId: z.string().min(1),
+  title: z.string(),
+  /** Which layer the editable file comes from. */
+  source: z.enum(["global", "workspace"]),
+  /** How this workspace customizes the role: follow global, replace the body, or append to it. */
+  mode: z.enum(["global", "override", "append"]),
+  /** Effective model settings after composing global and workspace layers; omitted fields follow the composer. */
+  modelConfig: zRoleExecutionOverrides.optional()
+});
+export type RoleFile = z.infer<typeof zRoleFile>;
 
 export const zResolvedRole = z.object({
   content: z.string(),

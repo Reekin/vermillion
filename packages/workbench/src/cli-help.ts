@@ -45,6 +45,7 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "issue.list": "只读查询 Issues 中的问题与建议记录，可按领域和状态筛选；不返回执行工单（WorkItem）。",
   "issue.update": "更新 Issue 分诊、证据或处理结果；关闭和重复需要处理原因。",
   "domain.config.set": "用户管理领域巡检与自动开单授权；按领域独立保存。",
+  "role.list": "只读查询；列出 workspace 可用的角色，返回来源、定制方式 mode（global 沿用全局、append 追加正文、override 覆盖正文）以及合成后生效的 modelConfig，未包含的字段沿用输入器配置。",
   "domain.instruction.write": "编辑领域专属 Maintainer developer instruction；保存到当前 workspace。",
   "domain.remove": "删除领域定义、领域巡检指令与巡检配置；历史 Issue 和巡检记录保留。",
   "workspace.directories": "只读查询；返回 workspace 中 Git 已跟踪文件所在的目录，供触发目录勾选。",

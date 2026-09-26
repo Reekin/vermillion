@@ -6,7 +6,7 @@
  *
  * Buttons       Button, IconButton
  * Text          Badge, StatusPill, SectionLabel, InlineNotice, Alert, StatusDot, Progress, Steps
- * Fields        Field (input / textarea / number), Select, SegmentedControl, Toggle, Checkbox, Stepper
+ * Fields        Field (input / textarea / number), Select, SegmentedControl, Toggle, Checkbox, Stepper, SettingRow
  * Structure     PageHeader, PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
@@ -346,10 +346,23 @@ export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenCha
   </footer>
 );
 
-export const Toggle = ({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) => (
+/** On/off switch. `labelHidden` keeps the name for assistive tech when a surrounding `SettingRow` already shows it. */
+export const Toggle = ({ label, checked, disabled, labelHidden, onChange }: { label: string; checked: boolean; disabled?: boolean; labelHidden?: boolean; onChange: (checked: boolean) => void }) => (
   <button type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)} className="vm-toggle">
-    <span className="vm-toggle-track" aria-hidden="true"><span /></span>{label}
+    <span className="vm-toggle-track" aria-hidden="true"><span /></span>{!labelHidden && label}
   </button>
+);
+
+/** One setting per row: name with its current state underneath on the left, extra actions and the control on the right. */
+export const SettingRow = ({ label, state, actions, control }: { label: ReactNode; state?: ReactNode; actions?: ReactNode; control?: ReactNode }) => (
+  <div className="vm-setting-row">
+    <div className="vm-setting-row__text">
+      <span className="vm-setting-row__label">{label}</span>
+      {state && <span className="vm-setting-row__state">{state}</span>}
+    </div>
+    {actions && <div className="vm-setting-row__actions">{actions}</div>}
+    {control}
+  </div>
 );
 
 /** Multi-select control; `indeterminate` marks a parent whose children are only partly selected. */
