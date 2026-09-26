@@ -385,7 +385,7 @@ export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ i
     {items.map((item) => <button key={item.id} type="button" aria-current={selected === item.id ? "page" : undefined} onClick={() => onSelect(item.id)}>
       {item.label}{item.count ? <span className="vm-tab-count" aria-label={`${item.count} 项需要处理`}>{item.count}</span> : null}
     </button>)}
-    {children && <div className="ml-auto flex shrink-0 items-center gap-2 pl-4">{children}</div>}
+    {children && <div className="vm-tabs__end">{children}</div>}
   </nav>
 );
 
