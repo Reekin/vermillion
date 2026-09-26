@@ -24,6 +24,13 @@
   --awb-success: #919491;
   --awb-warning: #94928f;
   --awb-danger: #918d8e;
+  /* Severity marks only (icons, counters, level tags, selection bars); never body text or large fills. */
+  --awb-severity-error: #d48a86;
+  --awb-severity-error-soft: rgba(212, 138, 134, 0.14);
+  --awb-severity-warning: #cfb76a;
+  --awb-severity-warning-soft: rgba(207, 183, 106, 0.14);
+  --awb-severity-info: #8fa9c4;
+  --awb-severity-info-soft: rgba(143, 169, 196, 0.12);
   --awb-warm: #8c8987;
   --awb-radius-soft: 4px;
   --awb-radius-tight: 3px;
@@ -1214,7 +1221,6 @@ button:disabled {
   align-items: center;
   min-height: var(--awb-control-height-md);
   min-width: 0;
-  position: relative;
 }
 
 .awb-composer-status__pill {
@@ -1245,192 +1251,6 @@ button:disabled {
 .awb-composer-status__pill.is-error {
   background: var(--awb-accent-soft);
   color: var(--awb-ink-strong);
-}
-
-.awb-composer-status__notice {
-  flex: 1;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding-left: 8px;
-  border-left: 1px solid var(--awb-rule-strong);
-  font-weight: 400;
-  font-size: var(--awb-text-caption);
-  line-height: 1.45;
-  color: var(--awb-ink-muted);
-}
-
-.awb-composer-status__notice.is-error {
-  color: var(--awb-ink-strong);
-}
-
-.awb-composer-status__notice.is-warning {
-  color: var(--awb-ink);
-}
-
-button.awb-composer-status__notice {
-  border-top: 0;
-  border-right: 0;
-  border-bottom: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.awb-composer-status__log {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 3px;
-  height: 22px;
-  min-width: 22px;
-  padding: 0 5px;
-  border: 1px solid var(--awb-rule-strong);
-  border-radius: var(--awb-radius-tight);
-  background: transparent;
-  color: var(--awb-ink-muted);
-  font-size: var(--awb-text-micro);
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.awb-composer-status__log:hover,
-.awb-composer-status__log[aria-expanded="true"] {
-  background: var(--awb-accent-soft);
-  color: var(--awb-ink-strong);
-}
-
-.awb-composer-status__log.is-warning {
-  border-color: var(--awb-ink-muted);
-  color: var(--awb-ink-strong);
-  font-weight: 700;
-}
-
-.awb-composer-status__log-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--awb-ink-strong);
-}
-
-.awb-notice-log {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  display: flex;
-  flex-direction: column;
-  width: min(560px, calc(100vw - 360px));
-  max-height: 360px;
-  border-radius: var(--awb-radius-soft);
-  border: 1px solid var(--awb-rule-strong);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
-  color: #f4f6fb;
-  z-index: 5; /* above the composer resize handle */
-  background: var(--awb-panel-elevated);
-}
-
-.awb-notice-log__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(140, 143, 141, 0.24);
-  font-size: var(--awb-text-caption);
-  font-weight: 500;
-}
-
-.awb-notice-log button {
-  border: 0;
-  padding: 2px 6px;
-  border-radius: var(--awb-radius-tight);
-  background: transparent;
-  color: rgba(244, 246, 251, 0.7);
-  font-size: var(--awb-text-micro);
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.awb-notice-log button:hover:not(:disabled) {
-  background: rgba(140, 143, 141, 0.18);
-  color: #f4f6fb;
-}
-
-.awb-notice-log button:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
-.awb-notice-log__list {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.awb-notice-log__item {
-  display: grid;
-  gap: 4px;
-  padding: 8px 8px;
-  border-radius: calc(var(--awb-radius-soft) - 4px);
-}
-
-.awb-notice-log__item:hover {
-  background: rgba(140, 143, 141, 0.1);
-}
-
-.awb-notice-log__meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: var(--awb-text-micro);
-  font-weight: 500;
-  color: rgba(244, 246, 251, 0.7);
-}
-
-.awb-notice-log__time {
-  font-family: var(--awb-font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.awb-notice-log__item-actions {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 2px;
-}
-
-.awb-notice-log__message {
-  margin: 0;
-  font-size: var(--awb-text-caption);
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.awb-notice-log__details {
-  margin: 0;
-  max-height: 200px;
-  overflow: auto;
-  padding: 8px;
-  border-radius: var(--awb-radius-tight);
-  background: rgba(0, 0, 0, 0.3);
-  font-family: var(--awb-font-mono, monospace);
-  font-size: var(--awb-text-micro);
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  user-select: text;
-}
-
-.awb-notice-log__empty {
-  margin: 0;
-  padding: 12px;
-  font-size: var(--awb-text-caption);
-  color: rgba(244, 246, 251, 0.7);
 }
 
 .awb-composer-suggestions {
@@ -1494,8 +1314,7 @@ button.awb-composer-status__notice {
 
 .awb-composer__actions {
   display: grid;
-  /* The status column keeps a stable share so the latest notice stays readable and never shifts the rail. */
-  grid-template-columns: minmax(112px, 2fr) minmax(0, 3fr);
+  grid-template-columns: 112px minmax(0, 1fr);
   align-items: start;
   min-width: 0;
   gap: 8px;

@@ -59,17 +59,6 @@ import {
 import { TurnProcessPanel } from "./TurnProcessPanel.js";
 import { buildParticipantDirectory } from "./participant-directory.js";
 import {
-  appendNoticeLogEntry,
-  autoDismissesNotice,
-  dismissedByOpeningLog,
-  markNoticeLogSeen,
-  stampEngineConfigWarnings,
-  withEngineConfigWarnings,
-  type EngineConfigWarningView,
-  type NoticeLogEntry
-} from "./notice-log.js";
-import type { NoticeLogView } from "./composer/ComposerStatusBar.js";
-import {
   resolveRecoveryNotice,
   statusNoticeErrorDetails,
   type ComposerStatusNotice
@@ -144,6 +133,8 @@ export type SessionPaneProps = {
   composerSubmitOverride?: ComposerSubmitOverride;
   composerDraftKey?: string;
   onComposerChange?: (actions: ComposerActions | undefined) => void;
+  /** Receives every new status notice; the app shell shows them in its output. */
+  onNotice?: (notice: ComposerStatusNotice) => void;
   /** Records preparation cancellation or a Worker pause before the shared session Stop command interrupts its turn. */
   onViewChange?: (view: { sessionId?: string; turnId?: string }) => void;
   /** Compact readers reserve all available width for messages. */
@@ -674,6 +665,7 @@ export const SessionPane = ({
   composerSubmitOverride,
   composerDraftKey,
   onComposerChange,
+  onNotice,
   onViewChange,
   renderChatTree,
   renderImageContextMenu,
@@ -701,12 +693,6 @@ export const SessionPane = ({
     SessionSettingsRpc["executionPreferencesByEngineId"]
   >({});
   const [statusNotice, setStatusNoticeState] = useState<ComposerStatusNotice | undefined>();
-  const [noticeLog, setNoticeLog] = useState<NoticeLogEntry[]>([]);
-  const [engineConfigWarningsByEngineId, setEngineConfigWarningsByEngineId] = useState<
-    SessionSettingsRpc["engineConfigWarningsByEngineId"]
-  >({});
-  const engineConfigWarningsRef = useRef<EngineConfigWarningView[]>([]);
-  const noticeSequenceRef = useRef(0);
   const [processVisibilityByTurnId, setProcessVisibilityByTurnId] = useState<
     Record<string, ProcessVisibilityOverride>
   >({});
@@ -737,13 +723,15 @@ export const SessionPane = ({
     [transport]
   );
 
-  /** Every new notice enters the log; errors carry the active engine configuration warnings. */
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
+  const noticeSessionIdRef = useRef<string | undefined>(undefined);
+  /** Every new notice goes to the app shell output, tagged with the session shown when it was reported. */
   const recordStatusNotice = useCallback(
     (reported: ComposerStatusNotice): ComposerStatusNotice => {
-      const notice = withEngineConfigWarnings(reported, engineConfigWarningsRef.current);
-      noticeSequenceRef.current += 1;
-      const id = `notice-${noticeSequenceRef.current}`;
-      setNoticeLog((log) => appendNoticeLogEntry(log, notice, new Date().toISOString(), id));
+      const notice = reported.sessionId || !noticeSessionIdRef.current
+        ? reported : { ...reported, sessionId: noticeSessionIdRef.current };
+      onNoticeRef.current?.(notice);
       writeStatusNoticeLog(notice);
       return notice;
     },
@@ -764,11 +752,6 @@ export const SessionPane = ({
     [recordStatusNotice]
   );
 
-  const openNoticeLog = useCallback((): void => {
-    setNoticeLog(markNoticeLogSeen);
-    setStatusNotice((current) => (current && dismissedByOpeningLog(current) ? undefined : current));
-  }, [setStatusNotice]);
-  const clearNoticeLog = useCallback((): void => setNoticeLog([]), []);
 
   const onExecutionPreferenceChange = useCallback(
     (engineId: string, execution: ComposerExecutionSelection): void => {
@@ -872,6 +855,7 @@ export const SessionPane = ({
     });
   }, [readNodeId, unreadVisibleKey, isVisible, windowVisible, sessionId, transport, setStatusNotice]);
   useEffect(() => {
+    noticeSessionIdRef.current = viewSessionId;
     onViewChange?.({ sessionId: viewSessionId, turnId: viewTurnId });
   }, [onViewChange, viewSessionId, viewTurnId]);
 
@@ -1048,43 +1032,9 @@ export const SessionPane = ({
     })
   );
 
-  const engineConfigWarningsSignal = state.refreshSignals.engineConfigWarnings;
-  useEffect(() => {
-    if (!engineConfigWarningsSignal) return;
-    let disposed = false;
-    void transport.settings
-      .get()
-      .then((settings) => {
-        if (!disposed) setEngineConfigWarningsByEngineId(settings.engineConfigWarningsByEngineId ?? {});
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-    };
-  }, [engineConfigWarningsSignal, transport]);
-
-  const [engineConfigWarnings, setEngineConfigWarnings] = useState<EngineConfigWarningView[]>([]);
-  useEffect(() => {
-    setEngineConfigWarnings((previous) => stampEngineConfigWarnings(
-      previous,
-      engineConfigWarningsByEngineId,
-      (engineId) => availableEngines.find((engine) => engine.engineId === engineId)?.displayName ?? engineId,
-      new Date().toISOString()
-    ));
-  }, [availableEngines, engineConfigWarningsByEngineId]);
-  engineConfigWarningsRef.current = engineConfigWarnings;
-  const noticeLogView = useMemo(
-    (): NoticeLogView => ({
-      entries: noticeLog,
-      engineWarnings: engineConfigWarnings,
-      onOpen: openNoticeLog,
-      onClear: clearNoticeLog
-    }),
-    [clearNoticeLog, engineConfigWarnings, noticeLog, openNoticeLog]
-  );
 
   useEffect(() => {
-    if (!statusNotice || !autoDismissesNotice(statusNotice)) {
+    if (!statusNotice || statusNotice.persistent) {
       return;
     }
     const timeoutId = setTimeout(() => {
@@ -1141,7 +1091,6 @@ export const SessionPane = ({
         const executionPreferences = settings.executionPreferencesByEngineId ?? {};
         executionPreferencesByEngineIdRef.current = executionPreferences;
         setExecutionPreferencesByEngineId(executionPreferences);
-        setEngineConfigWarningsByEngineId(settings.engineConfigWarningsByEngineId ?? {});
         setSettingsHydrated(true);
       })
       .catch((error) => {
@@ -1374,7 +1323,6 @@ export const SessionPane = ({
           interactions={activeSessionInteractions}
           isOpeningSelectedSession={isOpeningSelectedSession}
           statusNotice={statusNotice}
-          noticeLog={noticeLogView}
           onStatusNotice={setStatusNotice}
           onPreviewImage={onPreviewImage}
           createSession={sessionId ? undefined : createSession}

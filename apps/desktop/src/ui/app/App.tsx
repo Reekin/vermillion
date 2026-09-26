@@ -10,6 +10,7 @@ import { WorkbenchChatTree } from "./components/WorkbenchChatTree.js";
 import { DocsPanel } from "./components/DocsPanel.js";
 import { StartWorkButton } from "./components/StartWorkButton.js";
 import type { ComposerActions } from "../chat-shell/composer/composer-types.js";
+import type { ComposerStatusNotice } from "../chat-shell/composer-status.js";
 import { InboxPanel } from "./components/InboxPanel.js";
 import { Modal } from "./components/Modal.js";
 import { ContextMenu } from "./components/ContextMenu.js";
@@ -20,6 +21,8 @@ import { TextEditor } from "./components/TextEditor.js";
 import { RoleEditor } from "./components/RoleEditor.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { TaskStatusBar } from "./components/TaskStatusBar.js";
+import { OutputStatus } from "./components/OutputStatus.js";
+import { createOutputStore } from "./output-log.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
 import { currentWorkContext, decisionsForWork } from "./current-work-context.js";
@@ -53,6 +56,8 @@ const tabs: Array<{ id: WorkspaceSection; label: string }> = [
 
 export const App = ({ sessionStore, transport }: AppProps) => {
   const store = useMemo(() => createWorkbenchStore(createRendererWorkbenchClient()), []);
+  const outputStore = useMemo(() => createOutputStore(), []);
+  const reportNotice = useCallback((notice: ComposerStatusNotice) => outputStore.getState().report(notice), [outputStore]);
   const panel = store((s) => s.panel);
   const overlay = store((s) => s.overlay);
   const section = store((s) => s.workspaceSection);
@@ -307,6 +312,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   onViewChange={setWorkTarget}
                   composerDraftKey="think"
                   onComposerChange={setComposerActions}
+                  onNotice={reportNotice}
                   renderTurnNavigation={renderSessionNavigation}
                   renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} transport={transport} />}
                   renderImageContextMenu={({ onCopy, ...props }) => <ContextMenu {...props} zIndex={1001}
@@ -373,7 +379,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       </div>
       </div>
       {navigationError && <InlineNotice tone="error">{navigationError}</InlineNotice>}
-      <TaskStatusBar store={store} />
+      <TaskStatusBar store={store} trailing={<OutputStatus store={outputStore} sessionStore={sessionStore} transport={transport}
+        onOpenSession={(id) => { const session = sidebar.findSession(id); if (!session) return false; void openSessionTarget(session.workspaceId, session.sessionId); return true; }} />} />
       <TextEditor store={store} />
       <RoleEditor store={store} transport={transport} />
       {searchOpen && <SearchDialog client={store.getState().client} onClose={() => setSearchOpen(false)} onOpenWorkItem={openSearchWorkItem} onOpenDoc={openSearchDoc} onOpenSession={openSearchSession} />}

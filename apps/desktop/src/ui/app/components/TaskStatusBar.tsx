@@ -1,10 +1,10 @@
 import { ListTodo } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { Badge, Button, EmptyState, InlineNotice, ListRow, PanelHeader, StatusBar } from "./ui.js";
 import { statusLabel } from "./task-labels.js";
 
-export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
+export const TaskStatusBar = ({ store, trailing }: { store: WorkbenchStore; trailing?: ReactNode }) => {
   const tasks = store((s) => s.tasks);
   const error = store((s) => s.tasksError);
   const workspaces = store((s) => s.workspaces);
@@ -23,7 +23,7 @@ export const TaskStatusBar = ({ store }: { store: WorkbenchStore }) => {
 
   const notice = result && (result.kind === "commit" ? "已提交文档 · " + result.message : "已开工 · " + result.title);
   return (
-    <StatusBar icon={ListTodo} label={`当前工单: ${tasks.length}`} notice={notice} open={open} onOpenChange={setOpen}>
+    <StatusBar icon={ListTodo} label={`当前工单: ${tasks.length}`} notice={notice} open={open} onOpenChange={setOpen} trailing={trailing}>
       <PanelHeader title="当前工单" />
       {error ? <InlineNotice tone="error">工单加载失败：{error}</InlineNotice> : tasks.length === 0 && <EmptyState title="当前没有工单" />}
       <ul>

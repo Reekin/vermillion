@@ -4,6 +4,8 @@ export type ComposerStatusNotice = {
   message: string;
   /** Engine that ran the operation; used to attribute engine configuration warnings. */
   engineId?: string;
+  /** Session the notice concerns; the output offers to open it. */
+  sessionId?: string;
   severity?: "info" | "warning" | "error";
   persistent?: boolean;
   stack?: string;

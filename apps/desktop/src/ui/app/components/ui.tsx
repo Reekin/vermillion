@@ -178,15 +178,17 @@ export const OverflowMenu = ({ label, items }: { label: string; items: OverflowM
 };
 
 /** Window-wide status feedback with an anchored, keyboard-accessible summary panel. */
-export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenChange }: {
+export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenChange, trailing }: {
   icon: LucideIcon;
   label: string;
   notice?: string;
   children: ReactNode;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Right-aligned status items such as the output summary. */
+  trailing?: ReactNode;
 }) => (
-  <footer aria-label="状态条" className="flex h-8 shrink-0 items-center border-t border-border-strong bg-app-shell px-2">
+  <footer aria-label="状态条" className="flex h-8 shrink-0 items-center gap-1 border-t border-border-strong bg-app-shell px-2">
     <div role="status" className="min-w-0 max-w-full truncate text-caption text-foreground" title={notice}>
       {notice ?? (
         <Popover.Root open={open} onOpenChange={onOpenChange}>
@@ -201,6 +203,7 @@ export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenCha
         </Popover.Root>
       )}
     </div>
+    {trailing && <div className="ml-auto flex min-w-0 items-center gap-1">{trailing}</div>}
   </footer>
 );
 
