@@ -232,7 +232,7 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
   const attention = workItemAttention(item, itemActions, itemDecisions);
   const events = workItemEvents(item, itemActions, itemRuns);
   const state = headerState(item, progress.shortLabel, attention);
-  const duration = executionDuration(itemRuns);
+  const duration = executionDuration(item, itemActions, itemRuns);
   const commit = item.merge?.commit;
   const sourceTitle = (item.treeId && sourceTitles[item.treeId]) || "来源会话";
   const passed = item.verify?.items.filter((entry) => entry.status === "pass").length ?? 0;
@@ -297,4 +297,3 @@ export const WorkItemDialog = ({ client, workspaceId, workItemId, workItems, run
     </footer>
   </Modal>;
 };
-

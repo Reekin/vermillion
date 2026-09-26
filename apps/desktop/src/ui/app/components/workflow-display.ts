@@ -194,12 +194,6 @@ export const formatDuration = (ms: number) => {
   return Math.floor(minutes / 60) + " 小时" + (minutes % 60 ? " " + (minutes % 60) + " 分" : "");
 };
 
-/** Total time the item's Worker runs spent executing; open runs count up to `now`. */
-export const executionDuration = (runs: AgentRun[], now = Date.now()) => {
-  const total = runs.reduce((sum, run) => sum + Math.max(0, (run.endedAt ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt)), 0);
-  return total > 0 ? total : undefined;
-};
-
 /** Stage time: HH:MM today, otherwise prefixed with M/D so stages across days read in order. */
 const clock = (value?: string, now = new Date()) => {
   if (!value) return undefined;
@@ -208,17 +202,37 @@ const clock = (value?: string, now = new Date()) => {
   return date.toDateString() === now.toDateString() ? hm : (date.getMonth() + 1) + "/" + date.getDate() + " " + hm;
 };
 const earliest = (values: Array<string | undefined>) => values.filter((value): value is string => Boolean(value)).sort()[0];
+const latest = (values: Array<string | undefined>) => values.filter((value): value is string => Boolean(value)).sort().at(-1);
+
+/** When the item first started executing, was last submitted for merge, and closed. */
+const workItemMilestones = (item: WorkItem, actions: WorkflowAction[], runs: AgentRun[]) => {
+  const own = actions.filter((action) => action.workItemId === item.workItemId);
+  const integrations = own.filter((action) => action.kind === "integration").map((action) => action.createdAt);
+  return {
+    queued: item.createdAt,
+    running: earliest([
+      ...runs.filter((run) => run.workItemId === item.workItemId).map((run) => run.startedAt),
+      ...own.flatMap((action) => action.kind === "execute" ? [action.startedAt] : [])
+    ]),
+    merging: earliest(integrations),
+    lastSubmitted: latest(integrations),
+    closed: item.status === "closed" ? item.merge?.mergedAt ?? item.updatedAt : undefined
+  };
+};
+
+/** From the first execution to the last submission; an item still executing counts up to `now`. */
+export const executionDuration = (item: WorkItem, actions: WorkflowAction[], runs: AgentRun[], now = Date.now()) => {
+  const reached = workItemMilestones(item, actions, runs);
+  if (!reached.running) return undefined;
+  const end = item.status === "running" || item.status === "preparing" ? now
+    : Date.parse(reached.lastSubmitted ?? (item.status === "cancelled" ? item.updatedAt : reached.running));
+  const total = end - Date.parse(reached.running);
+  return total > 0 ? total : undefined;
+};
 
 /** Lifecycle for the detail header: queued → executing → merging → closed, with times of passed stages. */
 export const workItemSteps = (item: WorkItem, actions: WorkflowAction[], runs: AgentRun[], attention?: Attention, waitNote?: string): Step[] => {
-  const own = actions.filter((action) => action.workItemId === item.workItemId);
-  const itemRuns = runs.filter((run) => run.workItemId === item.workItemId);
-  const reached = {
-    queued: item.createdAt,
-    running: earliest([...itemRuns.map((run) => run.startedAt), ...own.filter((action) => action.kind === "execute").map((action) => action.createdAt)]),
-    merging: earliest(own.filter((action) => action.kind === "integration").map((action) => action.createdAt)),
-    closed: item.status === "closed" ? item.merge?.mergedAt ?? item.updatedAt : undefined
-  };
+  const reached = workItemMilestones(item, actions, runs);
   const stages = [["queued", "排队"], ["running", "执行"], ["merging", "待合入"], ["closed", "已关闭"]] as const;
   const cancelled = item.status === "cancelled";
   const currentIndex = item.status === "closed" ? 3 : cancelled

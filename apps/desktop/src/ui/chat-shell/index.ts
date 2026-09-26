@@ -4,8 +4,6 @@ export * from "./InteractionFlowView.js";
 export * from "./MessageMarkdownView.js";
 export * from "./ParticipantIdentityBadge.js";
 export * from "./ProcessActivityView.js";
-export * from "./TerminalStreamView.js";
-export * from "./ToolTimelineView.js";
 export * from "./TurnProcessPanel.js";
 export * from "./ChatTreePanel.js";
 export * from "./participant-directory.js";

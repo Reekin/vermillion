@@ -8,12 +8,16 @@ const zSearchMatch = z.object({
 /** Who a session hit belongs to: the user, the agent's reply, or a tool call shown in the process steps. */
 export const zSearchSource = z.enum(["user", "agent", "tool"]);
 
-/** Session hits and their neighbours are messages; `line` is the rollout line the message sits on. */
+/**
+ * Session hits and their neighbours are messages (`line` is the rollout line the message sits on);
+ * work item hits and neighbours are parts of the detail, `label` naming the place ("验收 3").
+ */
 const zSearchContextLine = z.object({
   line: z.number().int().positive(),
   text: z.string(),
   matches: z.array(zSearchMatch),
-  source: zSearchSource.optional()
+  source: zSearchSource.optional(),
+  label: z.string().min(1).optional()
 });
 
 export const zSearchQuery = z.object({

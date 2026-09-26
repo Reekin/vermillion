@@ -295,15 +295,19 @@ const resolveActions = (toolCall: ToolCall): ToolAction[] | undefined => {
   return toolCall.actions ?? actionsFromNamedTool(toolCall.toolName, parseJson(toolCall.inputSummary));
 };
 
+/**
+ * Localized shells print the message in the system code page, which can arrive garbled; PowerShell's
+ * error ids (ObjectNotFound, UnauthorizedAccess…) stay ASCII, so they are checked alongside the text.
+ */
 const failureReason = (output: string | undefined, exitCode: number | undefined): string => {
   const text = output ?? "";
-  if (/cannot find path|no such file|cannot find the (file|path)|does not exist|不存在|找不到/i.test(text)) {
+  if (/cannot find path|no such file|cannot find the (file|path)|does not exist|ObjectNotFound|ItemNotFound|PathNotFound|不存在|找不到/i.test(text)) {
     return "不存在";
   }
-  if (/permission denied|access is denied|拒绝访问/i.test(text)) {
+  if (/permission denied|access is denied|UnauthorizedAccess|PermissionDenied|拒绝访问/i.test(text)) {
     return "无权限";
   }
-  if (/is not recognized as|command not found|not found in path/i.test(text)) {
+  if (/is not recognized as|command not found|not found in path|CommandNotFoundException/i.test(text)) {
     return "命令不存在";
   }
   if (/timed out|timeout/i.test(text)) {

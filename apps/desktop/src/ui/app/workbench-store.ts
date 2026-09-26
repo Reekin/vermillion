@@ -83,8 +83,6 @@ export type WorkbenchState = {
   showTask: (target: TaskTarget) => void;
   showIssue: (target: IssueTarget) => void;
   editor: EditorTarget | undefined;
-  /** Open the workbench work-items tab. */
-  showTaskBoard: () => void;
   /** Outcome of the last commit dialog action, briefly shown in the global status bar. */
   docCommit: CommitOutcome | undefined;
   setDocCommit: (result: CommitOutcome | undefined) => void;
@@ -397,7 +395,6 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         set({ issueTarget: target, workspaceSection: "issues", panel: "workbench", overlay: undefined });
       },
       editor: undefined,
-      showTaskBoard: () => set({ workspaceSection: "workItems", panel: "workbench", overlay: undefined }),
       docCommit: undefined,
       setDocCommit: (result) => set({ docCommit: result }),
 

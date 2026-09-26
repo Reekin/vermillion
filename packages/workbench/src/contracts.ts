@@ -430,6 +430,8 @@ export const zExecution = zProcess.extend({
   stage: z.enum(["open", "deliver", "execute"]),
   integrationActionId: z.string().optional(),
   runId: z.string().optional(),
+  /** First delivery the Worker accepted; execution time counts from here, not from queueing. */
+  startedAt: z.string().optional(),
   deliveredAt: z.string().optional(),
   pendingNoticeCount: z.number().int().nonnegative().optional(),
   notices: z.array(zExecutionNotice)

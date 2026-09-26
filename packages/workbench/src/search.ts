@@ -42,14 +42,13 @@ type SearchWorkspace = {
 };
 
 type TextDocument = {
-  kind: "workItem" | "doc";
+  kind: "doc";
   id: string;
   workspaceId: string;
   workspaceLabel: string;
   title: string;
   path?: string;
   text: string;
-  workItemId?: string;
 };
 
 type SearchAccumulator = {
@@ -167,13 +166,69 @@ const searchTextDocument = (
       ...(document.path ? { path: document.path } : {}),
       line: index + 1,
       column: matches[0]!.start + 1,
-      context: contextForLines(lines, index, query, contextLines),
-      ...(document.workItemId ? { workItemId: document.workItemId } : {})
+      context: contextForLines(lines, index, query, contextLines)
     } satisfies SearchHit;
     if (!addHit(accumulator, hit)) return false;
     if (accumulator.pending.length >= HIT_EVENT_BATCH_SIZE) flushHits(accumulator);
   }
   return true;
+};
+
+/** What the work item detail shows, in its order; each part is one result with its place. */
+const workItemParts = (item: WorkItem): Array<{ label: string; text: string }> => [
+  { label: "标题", text: item.title },
+  { label: "目标", text: item.objective },
+  ...item.scope.inScope.map((text) => ({ label: "范围", text })),
+  ...item.scope.outOfScope.map((text) => ({ label: "不做", text })),
+  ...item.acceptance.flatMap((entry, index) => {
+    const result = item.verify?.items.find((candidate) => candidate.index === index)?.evidence;
+    return [
+      { label: "验收 " + (index + 1), text: entry.text },
+      ...(result ? [{ label: "验收 " + (index + 1) + " 结果", text: result }] : [])
+    ];
+  }),
+  ...item.review.map((entry, index) => ({ label: "审阅 " + (index + 1), text: entry.comment + "\n理由：" + entry.reason })),
+  ...item.decisions.map((text) => ({ label: "决策", text })),
+  ...(item.evidence?.summary ? [{ label: "成果", text: item.evidence.summary }] : [])
+].map((part) => ({ label: part.label, text: markdownToPlainText(part.text) })).filter((part) => part.text);
+
+const partLine = (parts: Array<{ label: string; text: string }>, index: number, query: string): SearchContextLine | undefined => {
+  const part = parts[index];
+  if (!part) return undefined;
+  const text = part.text.length > NEIGHBOUR_TEXT_CHARS ? part.text.slice(0, NEIGHBOUR_TEXT_CHARS) + "…" : part.text;
+  return { line: index + 1, text, matches: findMatches(text, query), label: part.label };
+};
+
+const searchWorkItem = (
+  item: WorkItem,
+  workspace: SearchWorkspace,
+  query: string,
+  accumulator: SearchAccumulator,
+  stats: SearchStats
+): void => {
+  const parts = workItemParts(item);
+  stats.sourcesScanned += 1;
+  stats.bytesScanned += parts.reduce((sum, part) => sum + Buffer.byteLength(part.text, "utf8"), 0);
+  parts.forEach((part, index) => {
+    const matches = findMatches(part.text, query);
+    if (matches.length === 0) return;
+    addHit(accumulator, {
+      id: `workItem:${workspace.workspaceId}:${item.workItemId}:${index + 1}`,
+      kind: "workItem",
+      workspaceId: workspace.workspaceId,
+      workspaceLabel: workspace.label,
+      title: item.title,
+      line: index + 1,
+      column: matches[0]!.start + 1,
+      context: [
+        partLine(parts, index - 1, query),
+        { ...toContextLine(index + 1, part.text, query, matches[0]!.start), label: part.label },
+        partLine(parts, index + 1, query)
+      ].filter((line): line is SearchContextLine => Boolean(line)),
+      workItemId: item.workItemId
+    });
+    if (accumulator.pending.length >= HIT_EVENT_BATCH_SIZE) flushHits(accumulator);
+  });
 };
 
 const isVermillionRollout = (header: string): boolean => {
@@ -355,14 +410,13 @@ const runRipgrepBatch = async (input: {
 /**
  * Heads of the rollout records that make up what a session shows: completed items (user messages,
  * agent replies, tool calls), legacy user/agent message events, and the turn markers that number
- * turns. Only the fixed-width head is matched, so a pass over a huge rollout outputs a few hundred
- * bytes per record.
+ * turns. Only the head before the first nested object is matched, so a pass over a huge rollout
+ * outputs a few hundred bytes per record; fields inside the head are read by name, in any order.
  */
 const ROLLOUT_INDEX_PATTERN =
-  String.raw`^\{"timestamp":"[^"]*",(?:"ordinal":\d+,)?"type":"event_msg","payload":\{"type":"(?:` +
-  String.raw`item_completed","thread_id":"[^"]*","turn_id":"[^"]*","item":\{"type":"[A-Za-z]+"` +
-  String.raw`|user_message"|agent_message"|task_started","turn_id":"[^"]*"` +
-  String.raw`|chat_tree_node_started","revision":\d+,"node_id":"[^"]*","parent_node_id":(?:null|"[^"]*"),"turn_id":"[^"]*","order":\d+)`;
+  String.raw`^\{[^{]*"type":"event_msg"[^{]*"payload":\{"type":"(?:` +
+  String.raw`item_completed"[^{}]*"item":\{"type":"[A-Za-z]+"` +
+  String.raw`|user_message"|agent_message"|task_started"[^{}]*|chat_tree_node_started"[^{}]*)`;
 
 const toolItemTypes = new Set([
   "CommandExecution", "McpToolCall", "DynamicToolCall", "CollabAgentToolCall", "WebSearch",
@@ -391,33 +445,33 @@ export const buildRolloutIndex = (heads: Array<{ line: number; byteOffset: numbe
   const startedTurns: string[] = [];
   let currentTurnId: string | undefined;
   for (const head of [...heads].sort((left, right) => left.line - right.line)) {
-    const at = /^\{"timestamp":"([^"]*)"/.exec(head.text)?.[1] ?? "";
-    const item = /"turn_id":"([^"]*)","item":\{"type":"([A-Za-z]+)"/.exec(head.text);
-    if (item) {
-      const [, turnId, itemType] = item;
+    const at = /"timestamp":"([^"]*)"/.exec(head.text)?.[1] ?? "";
+    const kind = /"payload":\{"type":"([a-z_]+)"/.exec(head.text)?.[1];
+    const turnId = /"turn_id":"([^"]*)"/.exec(head.text)?.[1];
+    if (kind === "item_completed") {
+      const itemType = /"item":\{"type":"([A-Za-z]+)"/.exec(head.text)?.[1];
       const source: SearchSource | undefined = itemType === "UserMessage"
         ? "user"
         : itemType === "AgentMessage" ? "agent" : toolItemTypes.has(itemType!) ? "tool" : undefined;
       if (source) messages.push({ line: head.line, start: head.byteOffset, source, at, ...(turnId ? { turnId } : {}) });
       continue;
     }
-    const node = /"turn_id":"([^"]*)","order":(\d+)/.exec(head.text);
-    if (node) {
-      nodeOrders.set(node[1]!, Number(node[2]));
+    if (kind === "chat_tree_node_started") {
+      const order = /"order":(\d+)/.exec(head.text)?.[1];
+      if (turnId && order) nodeOrders.set(turnId, Number(order));
       continue;
     }
-    const started = /"task_started","turn_id":"([^"]*)"/.exec(head.text);
-    if (started) {
-      currentTurnId = started[1]!;
+    if (kind === "task_started") {
+      if (!turnId) continue;
+      currentTurnId = turnId;
       if (!startedTurns.includes(currentTurnId)) startedTurns.push(currentTurnId);
       continue;
     }
-    const legacy = /"type":"(user_message|agent_message)"/.exec(head.text);
-    if (legacy) {
+    if (kind === "user_message" || kind === "agent_message") {
       messages.push({
         line: head.line,
         start: head.byteOffset,
-        source: legacy[1] === "user_message" ? "user" : "agent",
+        source: kind === "user_message" ? "user" : "agent",
         at,
         ...(currentTurnId ? { turnId: currentTurnId } : {})
       });
@@ -608,15 +662,24 @@ const toolInput = (item: Record<string, unknown>): ToolInput | undefined => {
   }
 };
 
-/** "读取 README.md · 3 行": the step exactly as the message area lists it. */
-const toolStepText = (input: ToolInput, message: RolloutMessageRecord, id: string): { text: string; kind: string } => {
+/**
+ * "读取 README.md · 3 行": the step exactly as the message area lists it. Only the object (file,
+ * command, query) comes from the record; the verb and result are generated, so only the object is
+ * searchable.
+ */
+const toolStepText = (input: ToolInput, message: RolloutMessageRecord, id: string): Omit<RolloutMessage, "id"> => {
   const { exitCode, ...call } = input;
   const step = describeToolStep(
     { ...call, toolCallId: id, sessionId: "search", turnId: message.turnId ?? "search", startedAt: message.at },
     { ...(call.outputSummary ? { text: call.outputSummary } : {}), ...(exitCode !== undefined ? { exitCode } : {}) }
   );
   const head = [step.verb, step.object].filter(Boolean).join(" ");
-  return { text: step.result ? `${head} · ${step.result}` : head, kind: step.kind };
+  const objectStart = step.verb.length + 1;
+  return {
+    text: step.result ? `${head} · ${step.result}` : head,
+    toolKind: step.kind,
+    searchable: step.object ? { start: objectStart, end: objectStart + step.object.length } : { start: 0, end: 0 }
+  };
 };
 
 export type RolloutMessage = {
@@ -624,6 +687,15 @@ export type RolloutMessage = {
   id?: string;
   text: string;
   toolKind?: string;
+  /** Part of `text` taken from the record; absent when all of it is. */
+  searchable?: { start: number; end: number };
+};
+
+const messageMatches = (message: RolloutMessage, query: string): Array<{ start: number; end: number }> => {
+  if (!message.searchable) return findMatches(message.text, query);
+  const { start, end } = message.searchable;
+  return findMatches(message.text.slice(start, end), query)
+    .map((match) => ({ start: match.start + start, end: match.end + start }));
 };
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm);
@@ -677,7 +749,7 @@ export const readRolloutMessage = (lineText: string, message: RolloutMessageReco
   const input = toolInput(item);
   if (!input) return undefined;
   const step = toolStepText(input, message, id ?? String(message.line));
-  return step.text ? withId({ text: step.text, toolKind: step.kind }) : undefined;
+  return step.text ? withId(step) : undefined;
 };
 
 const listRolloutFiles = async (root: string): Promise<string[]> => {
@@ -738,16 +810,6 @@ const providerSessionId = (entry: SearchSessionEntry): string | undefined =>
     ? entry.sessionId.slice("codex-thread:".length)
     : undefined);
 
-/** Words tool steps add in the message area; they never appear in the raw rollout record. */
-const STEP_WORDS = [
-  "思考", "读取", "列目录", "网络搜索", "搜索", "编辑", "运行", "查看图片", "生成图片", "压缩上下文", "调用",
-  "个条目", "处匹配", "无匹配", "无输出", "不存在", "无权限", "命令不存在", "超时", "退出码", "失败", "进行中",
-  "输出", "当前目录", "行"
-];
-const TOOL_RECORD_PATTERN =
-  String.raw`"type":"item_completed","thread_id":"[^"]*","turn_id":"[^"]*","item":\{"type":"(?:` +
-  [...toolItemTypes].join("|") + ")\"";
-
 const escapeRegex = (value: string): string => value.replace(/[\\.+*?()|[\]{}^$#&\-~]/g, "\\$&");
 
 /** Characters rendering removes or JSON escaping adds between two shown characters. */
@@ -761,31 +823,6 @@ const STORED_GAP = String.raw`(?:[*_~` + "`" + String.raw`\[#> ]|\]\([^)\s]*\)|\
 const storedTextPattern = (text: string): string =>
   [...text].map((char) => escapeRegex(JSON.stringify(char).slice(1, -1))).join(STORED_GAP);
 
-/**
- * Raw rollout patterns that find every record whose shown text can contain the query; the shown
- * text confirms every candidate. Tool steps also show generated words ("读取 README.md · 3 行"):
- * when the query uses them, what remains (a file, a command) is searched, and a query made only of
- * step words looks at every tool record.
- */
-export const rolloutCandidatePatterns = (query: string): string[] => {
-  const patterns = new Set([storedTextPattern(query)]);
-  // Any part of a generated step word ("目录", "条目") counts, not only whole words.
-  let rest = query;
-  for (const word of STEP_WORDS) rest = rest.split(word).join(" ");
-  let generated = rest !== query;
-  const tokens = rest.split(/[\s·“”"]+/).filter((token) => {
-    if (!token) return false;
-    if (/^\d+$/.test(token) || STEP_WORDS.some((word) => word.includes(token))) {
-      generated = true;
-      return false;
-    }
-    return true;
-  });
-  if (!generated) return [...patterns];
-  if (tokens.length === 0) patterns.add(TOOL_RECORD_PATTERN);
-  for (const token of tokens) patterns.add(storedTextPattern(token));
-  return [...patterns];
-};
 
 const searchRollouts = async (input: {
   entries: SearchSessionEntry[];
@@ -836,7 +873,7 @@ const searchRollouts = async (input: {
     const run = await runRipgrepBatch({
       executable,
       paths: batch,
-      patterns: rolloutCandidatePatterns(input.query),
+      patterns: [storedTextPattern(input.query)],
       literal: false,
       signal: input.signal,
       onMatch: (match) => {
@@ -901,7 +938,7 @@ const searchRollouts = async (input: {
           const text = shownMessage.text.length > NEIGHBOUR_TEXT_CHARS
             ? (step < 0 ? "…" + shownMessage.text.slice(-NEIGHBOUR_TEXT_CHARS) : shownMessage.text.slice(0, NEIGHBOUR_TEXT_CHARS) + "…")
             : shownMessage.text;
-          return { line: record.line, text, matches: findMatches(text, input.query), source: record.source };
+          return { line: record.line, text, matches: messageMatches({ ...shownMessage, text }, input.query).filter((match) => match.end <= text.length), source: record.source };
         }
         return undefined;
       };
@@ -910,7 +947,7 @@ const searchRollouts = async (input: {
         const record = rolloutIndex.messages[position]!;
         const shownMessage = await messageAt(position);
         if (!shownMessage) continue;
-        const matches = findMatches(shownMessage.text, input.query);
+        const matches = messageMatches(shownMessage, input.query);
         if (matches.length === 0) continue;
         // Forked sessions copy their ancestors' records; a shared message is listed once per tree.
         const messageKey = [treeId, record.turnId ?? "", shownMessage.id ?? `${record.source}:${shownMessage.text}`].join(":");
@@ -918,7 +955,12 @@ const searchRollouts = async (input: {
         sharedMessageKeys.add(messageKey);
         const before = await neighbour(position, -1);
         const after = await neighbour(position, 1);
-        const hitLine = { ...toContextLine(record.line, shownMessage.text, input.query, matches[0]!.start), source: record.source };
+        const hitLine = {
+          ...toContextLine(record.line, shownMessage.text, input.query, matches[0]!.start),
+          // Tool steps are short; only their object part is highlighted.
+          ...(shownMessage.searchable ? { matches } : {}),
+          source: record.source
+        };
         const turnNumber = record.turnId ? rolloutIndex.turnNumbers.get(record.turnId) : undefined;
         const hit = {
           id: `session:${entry.workspaceId}:${entry.sessionId}:${record.line}`,
@@ -1133,18 +1175,7 @@ export const searchWorkbench = async (input: {
 
   for (const { workspace, workItems } of workspaceData) {
     if (input.signal?.aborted) break;
-    for (const workItem of workItems) {
-      const document: TextDocument = {
-        kind: "workItem",
-        id: workItem.workItemId,
-        workspaceId: workspace.workspaceId,
-        workspaceLabel: workspace.label,
-        title: workItem.title,
-        text: JSON.stringify(workItem, null, 2),
-        workItemId: workItem.workItemId
-      };
-      if (!searchTextDocument(document, query, contextLines, accumulator, stats)) break;
-    }
+    for (const workItem of workItems) searchWorkItem(workItem, workspace, query, accumulator, stats);
     flushHits(accumulator);
     if (accumulator.truncated) break;
     const docs = await input.listDocs(workspace.workspaceId);

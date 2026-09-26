@@ -116,7 +116,7 @@ describe("chat tree entry navigation", () => {
     await act(async () => { test.rejectOpen(new Error("rollout unavailable")); });
     await waitFor(() => expect(test.controller.chatTreeError).toContain("rollout unavailable"));
     expect(test.get).not.toHaveBeenCalled();
-    expect(test.onStatusNotice).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("rollout unavailable") }));
+    expect(test.onStatusNotice).toHaveBeenCalledWith(expect.objectContaining({ severity: "error", detail: "rollout unavailable" }));
     test.open.mockResolvedValueOnce(undefined);
     await act(async () => { await test.controller.refreshChatTree(); });
     expect(test.open).toHaveBeenCalledTimes(2);
