@@ -84,5 +84,13 @@ describe("SearchDialog", () => {
 
     await user.keyboard("{Enter}");
     expect(onOpenSession).toHaveBeenCalledWith(expect.objectContaining({ id: second.id }));
+
+    // Enter on a focused button runs that button, not the selected result.
+    onOpenSession.mockClear();
+    const treeToggle = within(results).getByRole("button", { name: /树/ });
+    treeToggle.focus();
+    await user.keyboard("{Enter}");
+    expect(onOpenSession).not.toHaveBeenCalled();
+    expect(treeToggle.getAttribute("aria-expanded")).toBe("false");
   });
 });

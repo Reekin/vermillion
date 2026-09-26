@@ -446,12 +446,12 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
     return result;
   }, [flatGroups, sessionTrees, expandedKinds, collapsedTrees]);
 
-  /** ↑↓ walk the listed matches, Enter opens the selected one; the IME keeps its own Enter. */
+  /** ↑↓ walk the listed matches, Enter opens the selected one; the IME and focused buttons keep their own Enter. */
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (composing || event.nativeEvent.isComposing) return;
     const visible = rows.flatMap((row) => row.type === "hit" ? [row.hit] : []);
     if (event.key === "Enter") {
-      if (!selected) return;
+      if (!selected || (event.target as HTMLElement).closest("button, a")) return;
       event.preventDefault();
       openHit(selected);
       return;

@@ -260,7 +260,8 @@ type RipgrepRun = { filesSearched: number; bytesSearched: number };
 const runRipgrepBatch = async (input: {
   executable: string;
   paths: string[];
-  query: string;
+  /** Any of these patterns matches. */
+  patterns: string[];
   /** False runs the pattern as a regex; the line index uses `^` to report every line start. */
   literal?: boolean;
   caseSensitive?: boolean;
@@ -271,7 +272,7 @@ const runRipgrepBatch = async (input: {
     "--null", "--with-filename", "--no-heading", "--no-config", "--no-messages",
     "--only-matching", "--line-number", "--byte-offset",
     ...(input.literal === false ? [] : ["--fixed-strings"]), ...(input.caseSensitive ? [] : ["--ignore-case"]), "--stats",
-    "-e", input.query, "--", ...input.paths
+    ...input.patterns.flatMap((pattern) => ["-e", pattern]), "--", ...input.paths
   ], { stdio: ["ignore", "pipe", "pipe"] });
 
   const run: RipgrepRun = { filesSearched: 0, bytesSearched: 0 };
@@ -444,7 +445,7 @@ const readRolloutIndexes = async (
     await runRipgrepBatch({
       executable,
       paths: batch,
-      query: ROLLOUT_INDEX_PATTERN,
+      patterns: [ROLLOUT_INDEX_PATTERN],
       literal: false,
       caseSensitive: true,
       ...(signal ? { signal } : {}),
@@ -708,6 +709,23 @@ const providerSessionId = (entry: SearchSessionEntry): string | undefined =>
     ? entry.sessionId.slice("codex-thread:".length)
     : undefined);
 
+/**
+ * Raw rollout patterns that find every record whose shown text can contain the query. The query as
+ * typed covers most records; its JSON-escaped form covers quotes, backslashes and line breaks; and
+ * tool steps are shown as "读取 README.md · 3 行", so a query mixing step words with a file or
+ * command also looks for its longest Latin token. The shown text confirms every candidate.
+ */
+export const rolloutCandidatePatterns = (query: string): string[] => {
+  const patterns = new Set([query, JSON.stringify(query).slice(1, -1)]);
+  const token = query
+    .split(/\s+|·/)
+    .filter((part) => /[a-z]/i.test(part))
+    .map((part) => part.replace(/^[^\x21-\x7e]+|[^\x21-\x7e]+$/g, ""))
+    .sort((left, right) => right.length - left.length)[0];
+  if (token && token.length >= 2) patterns.add(token);
+  return [...patterns].filter(Boolean);
+};
+
 const searchRollouts = async (input: {
   entries: SearchSessionEntry[];
   rolloutsDir?: string;
@@ -757,7 +775,7 @@ const searchRollouts = async (input: {
     const run = await runRipgrepBatch({
       executable,
       paths: batch,
-      query: input.query,
+      patterns: rolloutCandidatePatterns(input.query),
       signal: input.signal,
       onMatch: (match) => {
         let lines = found.get(match.path);

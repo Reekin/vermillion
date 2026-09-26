@@ -51,7 +51,8 @@ describe("workbench search", () => {
         agent("turn-1", "agent-1", "The needle file has a title; the needle is documented."),
         responseMessage("turn-1", "The needle file has a title; the needle is documented."),
         node("turn-2", 1),
-        agent("turn-2", "agent-2", "Anything else?")
+        agent("turn-2", "agent-2", "Anything else?"),
+        agent("turn-2", "agent-quoted", "run \"quoted-term\" in C:\\temp")
       ].join("\n"), "utf8");
       const item = await fixture.service.createWorkItem(fixture.workspaceId, {
         title: "Searchable work item",
@@ -95,6 +96,11 @@ describe("workbench search", () => {
         expect(metadataOnly.hits.filter((hit) => hit.kind === "session")).toEqual([]);
         const secondTurn = await service.search({ query: "anything else" });
         expect(secondTurn.hits).toMatchObject([{ kind: "session", source: "agent", turnId: "turn-2", turnNumber: 2 }]);
+        // Step words and escaped characters exist only in the shown text, not in the raw record.
+        const stepQuery = await service.search({ query: "读取 needle.md · 2 行" });
+        expect(stepQuery.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "tool", toolKind: "read" }]);
+        const quoted = await service.search({ query: "\"quoted-term\" in C:\\temp" });
+        expect(quoted.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "agent" }]);
       } finally {
         await service.dispose();
       }
