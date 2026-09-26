@@ -6,6 +6,8 @@ SwiftUI desktop list and pairing, with desktop-provided pages hosted in WKWebVie
 
 From the repository root:
 
+On macOS, double-click `apps/ios/build.command` to generate and build the simulator app. It uses the installed XcodeGen and Xcode command line tools. The App icon uses the repository's Vermillion desktop artwork, flattened onto an opaque background for iOS distribution.
+
 ```sh
 xcodegen generate --spec apps/ios/project.yml
 xcodebuild -project apps/ios/Vermillion.xcodeproj -scheme Vermillion \
@@ -28,7 +30,7 @@ The simulator must trust the TLS certificate. For an isolated local Caddy gatewa
 xcrun simctl openurl <UUID> 'vermillion://pair?url=https%3A%2F%2F127.0.0.1%3A8443&code=12345678&name=Mac'
 ```
 
-This fills the pairing form; tap 配对 to confirm. Camera scanning requires a device camera; manual input and QR URL opening work on a simulator. Credentials are stored only in a this-device-only Keychain item. List summaries refresh when foregrounded, every 15 seconds while active, and on pull-to-refresh. Removal unregisters push before deleting the local credential; an offline desktop must become reachable before removal can complete.
+This fills the pairing form; tap 配对 to confirm. Camera scanning requires a device camera; manual input and QR URL opening work on a simulator. Credentials are stored only in a this-device-only Keychain item. List summaries refresh when foregrounded, every 15 seconds while active, and on pull-to-refresh. Removal attempts to unregister push and deletes the local credential even when the desktop is offline or has revoked it. A failed unregister leaves a notice asking you to remove the device on that desktop.
 
 ## Gateway and native bridge
 
@@ -39,7 +41,7 @@ This fills the pairing form; tap 配对 to confirm. Camera scanning requires a d
 - HTTP redirects are refused for all API requests. Only HTTPS origins without userinfo, query, or path are accepted for pairing.
 - At document start, the main frame at the paired HTTPS origin receives `window.__VERMILLION_REMOTE__ = {token}`. No token is placed in a URL. Navigation and response policies reject other origins, including redirects; new windows stay within the paired origin. The web data store is nonpersistent.
 - The matching HTTPS main frame can return to the native list with `window.webkit.messageHandlers.vermillion.postMessage({type:'exit'})`. The native toolbar also provides 桌面列表, including while the desktop is offline.
-- APNs custom fields are `desktopUrl` (paired HTTPS origin) and `target` (`#/session/<encoded-id>` or `#/inbox/<encoded-workspace>/<encoded-key>`). Unknown desktops and invalid paths are rejected. A notification selects its desktop and replaces the current native destination.
+- APNs custom fields are `desktopUrl` (paired HTTPS origin) and `target` (`#/session/<encoded-id>`, `#/inbox/<encoded-workspace>/<encoded-key>`, or `#/inbox` for a test notification). Unknown desktops and invalid paths are rejected. A notification selects its desktop and replaces the current native destination.
 
 Enable notifications using 开启通知. Registration is sent to every paired desktop, including desktops paired after APNs registration; foreground and pull-to-refresh retry registration failures. The list shows failed registrations.
 
@@ -54,6 +56,10 @@ To exercise the notification transport on a simulator, create a payload outside 
 ```
 
 Then `xcrun simctl push <UUID> app.vermillion.mobile /absolute/path/push.json`. Tap the delivered notification and verify the actual session or Inbox page. Simulator injection does not prove APNs delivery.
+
+The UI suite includes opt-in isolated integration tests. Prefix xcodebuild with `env TEST_RUNNER_IOS_GATEWAYS='[{"url":"https://…","code":"12345678","name":"Mac"},{"url":"https://…","code":"87654321","name":"PC"}]'` and select `-only-testing:VermillionUITests/PairingUITests/testIsolatedGateways`. It performs manual pairing, QR-content pairing, web exit, desktop switching and process-restart credential reuse. Use fresh one-time codes for each run. Set `-parallel-testing-enabled NO` so `simctl` addresses the same dedicated device as the test runner.
+
+For `testTappedSimulatorNotification`, set `TEST_RUNNER_IOS_PUSH_TITLE`, `TEST_RUNNER_IOS_PUSH_DESKTOP` and `TEST_RUNNER_IOS_PUSH_MARKER` to the expected notification title, native desktop name and actual visible web content. The test enables notifications, presses Home, logs `VERMILLION_PUSH_READY`, waits for the externally injected notification, taps it in Springboard and checks the target content. For `testOfflineDesktop`, stop the isolated desktop through `app.stop` and set `TEST_RUNNER_IOS_OFFLINE_DESKTOP` to its name. Integration tests skip explicitly when these prerequisites are absent. Screenshots are retained in the `.xcresult` bundle.
 
 ## Signing and device installation
 
@@ -71,7 +77,7 @@ In desktop Settings → 远程访问 → 推送, choose the `.p8` file and enter
 
 ## TestFlight
 
-Create the matching App Store Connect App record. Configure a distribution signing team and App Store profile, supply the required App icon and App Store metadata, and increment `CURRENT_PROJECT_VERSION` for each upload. Archive with Release:
+Create the matching App Store Connect App record. Configure a distribution signing team and App Store profile, supply App Store metadata, and increment `CURRENT_PROJECT_VERSION` for each upload. The universal 1024-pixel App icon is included. Archive with Release:
 
 ```sh
 xcodebuild -project apps/ios/Vermillion.xcodeproj -scheme Vermillion \

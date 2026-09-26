@@ -1,6 +1,6 @@
 import { createPrivateKey, randomUUID, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { connect, type OutgoingHttpHeaders } from "node:http2";
+import { connect, type ClientHttp2Stream, type OutgoingHttpHeaders } from "node:http2";
 import type { RemoteConfig } from "@vermillion/workbench";
 import type { PushRegistration } from "./devices.js";
 
@@ -21,7 +21,9 @@ export async function sendApnsRequest(request: ApnsRequest): Promise<ApnsReply> 
     client.on("error", fail);
     client.on("close", () => { if (!settled) fail(new Error("APNs 连接已关闭")); });
     client.once("connect", () => {
-      const stream = client.request(request.headers);
+      let stream: ClientHttp2Stream;
+      try { stream = client.request(request.headers); }
+      catch (error) { fail(error instanceof Error ? error : new Error("APNs 请求无效")); return; }
       let status = 0, body = "", apnsId = String(request.headers["apns-id"]);
       stream.setEncoding("utf8");
       stream.on("response", (headers) => { status = Number(headers[":status"]); apnsId = String(headers["apns-id"] ?? apnsId); });

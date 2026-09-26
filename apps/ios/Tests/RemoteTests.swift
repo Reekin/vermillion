@@ -34,6 +34,7 @@ final class RemoteTests: XCTestCase {
         XCTAssertEqual(pair.2, "Mac")
         XCTAssertTrue(RemotePolicy.target("#/session/a%2Fb"))
         XCTAssertTrue(RemotePolicy.target("#/inbox/workspace/key"))
+        XCTAssertTrue(RemotePolicy.target("#/inbox"))
         for target in ["https://evil.example", "#/session/", "#/inbox/a", "#/settings", "#/session/a?token=x"] { XCTAssertFalse(RemotePolicy.target(target)) }
     }
     func testCredentialsRoundTrip() throws {
@@ -51,5 +52,45 @@ final class RemoteTests: XCTestCase {
         store.notification(["desktopUrl": "https://test.example", "target": "#/inbox/workspace/key"])
         XCTAssertEqual(store.destination?.target, "#/inbox/workspace/key")
         XCTAssertEqual(store.destination?.desktop.name, "Mac")
+        store.notification(["desktopUrl": "https://test.example", "target": "#/inbox"])
+        XCTAssertEqual(store.destination?.target, "#/inbox")
+    }
+    @MainActor func testOfflineDesktopCanBeRemoved() async throws {
+        let previous = try Credentials.load()
+        defer { try? Credentials.save(previous) }
+        let desktop = Desktop(origin: URL(string: "https://127.0.0.1:1")!, deviceId: "id", name: "Offline", token: "test")
+        let store = DesktopStore()
+        store.desktops = [desktop]
+        try Credentials.save([desktop])
+        await store.remove(desktop)
+        XCTAssertTrue(store.desktops.isEmpty)
+        XCTAssertTrue(try Credentials.load().isEmpty)
+        XCTAssertEqual(store.error, "已从本机移除。无法取消推送登记，请在该桌面的已配对设备中移除此设备。")
+    }
+    @MainActor func testRemovalCannotBeOvertakenByPushRegistration() async throws {
+        let previous = try Credentials.load()
+        defer { try? Credentials.save(previous) }
+        let a = Desktop(origin: URL(string: "https://a.example")!, deviceId: "A", name: "A", token: "a")
+        let b = Desktop(origin: URL(string: "https://b.example")!, deviceId: "B", name: "B", token: "b")
+        let started = expectation(description: "A registration suspended")
+        var resume: CheckedContinuation<Void, Never>?
+        var events: [String] = []
+        let store = DesktopStore { desktop, method, _ in
+            events.append("\(method) \(desktop.deviceId)")
+            if events.count == 1 {
+                await withCheckedContinuation { continuation in resume = continuation; started.fulfill() }
+            }
+        }
+        store.desktops = [a, b]
+        let registration = Task { await store.setPushToken(Data([1, 2])) }
+        await fulfillment(of: [started], timeout: 3)
+        let removal = Task { await store.remove(b) }
+        await Task.yield()
+        let retry = Task { await store.registerPush() }
+        resume?.resume()
+        await registration.value; await removal.value; await retry.value
+        XCTAssertEqual(events, ["POST A", "POST B", "DELETE B", "POST A"])
+        XCTAssertEqual(store.desktops.map(\.deviceId), ["A"])
+        XCTAssertEqual(try Credentials.load().map(\.deviceId), ["A"])
     }
 }

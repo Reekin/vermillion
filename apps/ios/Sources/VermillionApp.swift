@@ -14,8 +14,13 @@ struct Destination: Identifiable {
     @Published var error: String?
     @Published var pairingURL: URL?
     private var pushToken: String?
+    private var pushOperation: Task<Void, Never>?
+    private let pushRequest: (Desktop, String, [String: String]?) async throws -> Void
 
-    init() {
+    init(pushRequest: @escaping (Desktop, String, [String: String]?) async throws -> Void = { desktop, method, body in
+        _ = try await Gateway.request(origin: desktop.origin, path: "api/push", method: method, token: desktop.token, body: body)
+    }) {
+        self.pushRequest = pushRequest
         do { desktops = try Credentials.load() } catch { self.error = error.localizedDescription }
     }
     func pair(address: String, code: String) async throws {
@@ -45,17 +50,34 @@ struct Destination: Identifiable {
         }
     }
     func remove(_ desktop: Desktop) async {
-        do {
-            _ = try await Gateway.request(origin: desktop.origin, path: "api/push", method: "DELETE", token: desktop.token)
-            let next = desktops.filter { $0.id != desktop.id }
-            try Credentials.save(next); desktops = next
-        } catch { self.error = "移除失败：\(error.localizedDescription)" }
+        await serializePush {
+            var unregisterFailed = false
+            do { try await self.pushRequest(desktop, "DELETE", nil) }
+            catch { unregisterFailed = true }
+            do {
+                let next = self.desktops.filter { $0.id != desktop.id }
+                try Credentials.save(next); self.desktops = next
+                if unregisterFailed { self.error = "已从本机移除。无法取消推送登记，请在该桌面的已配对设备中移除此设备。" }
+            } catch { self.error = "移除失败：\(error.localizedDescription)" }
+        }
     }
     func setPushToken(_ data: Data) async {
         pushToken = data.map { String(format: "%02x", $0) }.joined()
         await registerPush()
     }
     func registerPush() async {
+        await serializePush {
+            await self.registerCurrentPush()
+        }
+    }
+    // Keep POST and DELETE ordered even when URLSession suspends the main actor.
+    private func serializePush(_ operation: @escaping @MainActor () async -> Void) async {
+        let previous = pushOperation
+        let next = Task { await previous?.value; await operation() }
+        pushOperation = next
+        await next.value
+    }
+    private func registerCurrentPush() async {
         guard let pushToken else { return }
         #if DEBUG
         let environment = "sandbox"
@@ -64,8 +86,7 @@ struct Destination: Identifiable {
         #endif
         for desktop in desktops {
             do {
-                _ = try await Gateway.request(origin: desktop.origin, path: "api/push", method: "POST", token: desktop.token,
-                    body: ["token": pushToken, "environment": environment])
+                try await pushRequest(desktop, "POST", ["token": pushToken, "environment": environment])
                 if let i = desktops.firstIndex(where: { $0.id == desktop.id }) { desktops[i].pushError = nil }
             } catch {
                 if let i = desktops.firstIndex(where: { $0.id == desktop.id }) { desktops[i].pushError = "推送登记失败" }

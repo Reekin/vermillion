@@ -29,6 +29,13 @@ export class RemoteDevices {
   async registerPush(deviceId: string, push?: PushRegistration): Promise<void> {
     const device = this.devices.find((d) => d.deviceId === deviceId);
     if (!device) throw new Error("设备已移除，请重新配对");
+    // A re-paired installation still has the same APNs token; only its current credential owns delivery.
+    if (push) for (const other of this.devices) {
+      if (other.deviceId !== deviceId && other.push?.token === push.token && other.push.environment === push.environment) {
+        other.push = undefined;
+        other.pushAvailable = false;
+      }
+    }
     device.push = push;
     device.pushAvailable = Boolean(push);
     await this.save();

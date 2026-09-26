@@ -53,6 +53,7 @@ enum RemotePolicy {
         return (try origin(address), code, field("name") ?? "")
     }
     static func target(_ value: String) -> Bool {
+        if value == "#/inbox" { return true }
         let parts = value.split(separator: "/", omittingEmptySubsequences: false)
         return parts.first == "#" && ((parts.count == 3 && parts[1] == "session")
             || (parts.count == 4 && parts[1] == "inbox"))

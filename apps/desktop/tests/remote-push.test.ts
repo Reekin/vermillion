@@ -3,14 +3,15 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http2";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { zRemoteConfig } from "@vermillion/workbench";
 import { ApnsSender, sendApnsRequest, shouldPush, type ApnsRequest } from "../src/electron/remote/push.js";
 import { RemoteDevices } from "../src/electron/remote/devices.js";
 import { startRemoteGateway } from "../src/electron/remote/gateway.js";
+import { RemoteAccessService } from "../src/electron/remote/service.js";
 
 const directories: string[] = [];
-afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 async function temporary() { const directory = await mkdtemp(join(tmpdir(), "vermillion-push-")); directories.push(directory); return directory; }
 const base = { enabled: true, serverAddr: "localhost", frpToken: "test", publicUrl: "https://localhost:9443", desktopName: "测试桌面", frpcPath: "" };
 
@@ -73,6 +74,28 @@ it("only pushes in background or after five minutes idle", () => {
   expect(shouldPush(true, 0)).toBe(true);
 });
 
+it("reports missing credentials and invalidates rejected tokens through the CLI service", async () => {
+  const directory = await temporary();
+  const service = new RemoteAccessService(directory, { assetsDir: directory,
+    createRouter: () => ({ handleRequest: async () => ({}), dispose: async () => {} }),
+    workbenchRequest: async () => ({}), subscribeWorkbench: () => () => {}, summary: async () => ({}) });
+  try {
+    await service.initialize();
+    await service.handleRequest({ method: "remote.configure", params: { patch: { ...base, frpcPath: join(directory, "missing") } } });
+    const pairing = service.devices.pair(base.publicUrl, base.desktopName);
+    const device = await service.devices.exchange(pairing.code, "test phone");
+    await service.devices.registerPush(device.device.deviceId, { token: "aa".repeat(32), environment: "sandbox" });
+    const request = { method: "remote.push.test", params: { deviceId: device.device.deviceId } };
+    expect(await service.handleRequest(request)).toMatchObject({ ok: false, error: expect.stringContaining("请配置 APNs") });
+    const sender = vi.spyOn(ApnsSender.prototype, "send").mockResolvedValue({ status: 200, apnsId: "test-acceptance" });
+    expect(await service.handleRequest(request)).toEqual({ ok: true, result: { accepted: true, apnsId: "test-acceptance" } });
+    sender.mockResolvedValue({ status: 410, apnsId: "test-invalid", reason: "Unregistered" });
+    expect(await service.handleRequest(request)).toMatchObject({ ok: false, error: "APNs 410: Unregistered" });
+    expect(service.devices.list()[0]?.pushAvailable).toBe(false);
+    expect(service.status().pushError).toBe("APNs 410: Unregistered");
+  } finally { await service.dispose(); }
+});
+
 it("authenticates APNs registration and persists it without exposing the token in device lists", async () => {
   const directory = await temporary();
   const devices = new RemoteDevices(directory);
@@ -95,6 +118,12 @@ it("authenticates APNs registration and persists it without exposing the token i
     await devices.invalidatePush(exchange.device.deviceId, { ...registration, token: "old" });
     expect(devices.list()[0]?.pushAvailable).toBe(true);
     await devices.invalidatePush(exchange.device.deviceId, registration);
+    expect(devices.list()[0]?.pushAvailable).toBe(false);
+    await devices.registerPush(exchange.device.deviceId, registration);
+    const nextPair = devices.pair(base.publicUrl, base.desktopName);
+    const nextDevice = await devices.exchange(nextPair.code, "phone re-paired");
+    await devices.registerPush(nextDevice.device.deviceId, registration);
+    expect(devices.pushTargets()).toEqual([{ deviceId: nextDevice.device.deviceId, push: registration }]);
     expect(devices.list()[0]?.pushAvailable).toBe(false);
     expect((await fetch(url, { method: "DELETE", headers })).status).toBe(200);
     await devices.revoke(exchange.device.deviceId);
