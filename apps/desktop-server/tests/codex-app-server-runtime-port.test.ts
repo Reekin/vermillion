@@ -1046,6 +1046,44 @@ describe("Codex app-server runtime port", () => {
     );
   });
 
+  it("sends the model default explicitly after an xhigh turn and on a fresh thread", async () => {
+    const port = createCodexAppServerRuntimePort({
+      resolveConversationIdBySessionId: () => "conversation-1"
+    });
+    vi.spyOn(port, "start").mockResolvedValue();
+    const catalog = vi.spyOn(port, "listModelCatalog").mockResolvedValue({
+      engineId: "codex",
+      models: [{ modelId: "opus-5", displayName: "Opus", isDefault: false,
+        reasoningOptions: [{ optionId: "high", displayName: "High" }],
+        defaultReasoningOptionId: "high", serviceTiers: [] }]
+    });
+    const rpc = vi
+      .spyOn(port as unknown as { rpc: (...args: unknown[]) => Promise<unknown> }, "rpc")
+      .mockImplementation(async (method) => {
+        if (method === "thread/resume") return { thread: { id: "existing-thread" } };
+        if (method === "thread/start") return { thread: { id: "fresh-thread" } };
+        if (method === "turn/start") return { turn: { id: "turn-options" } };
+        throw new Error(`Unexpected RPC method: ${String(method)}`);
+      });
+
+    await port.request({ id: "explicit", method: "turn/start", params: {
+      sessionId: "existing", providerSessionId: "existing-thread", content: "explicit",
+      execution: { modelId: "opus-5", reasoningOptionId: "xhigh" }
+    } });
+    expect(catalog).not.toHaveBeenCalled();
+    for (const sessionId of ["existing", "fresh"]) {
+      await port.request({ id: sessionId, method: "turn/start", params: {
+        sessionId, content: "default", execution: { modelId: "opus-5" }
+      } });
+    }
+    expect(rpc.mock.calls.filter(([method]) => method === "turn/start").map(([, params]) => params))
+      .toEqual([
+        expect.objectContaining({ threadId: "existing-thread", effort: "xhigh" }),
+        expect.objectContaining({ threadId: "existing-thread", model: "opus-5", effort: "high" }),
+        expect.objectContaining({ threadId: "fresh-thread", model: "opus-5", effort: "high" })
+      ]);
+  });
+
   it("associates confirmed settings with the canonical turn and tracks model reroutes", async () => {
     const port = createCodexAppServerRuntimePort({
       resolveConversationIdBySessionId: () => "conversation-1"
@@ -1161,6 +1199,9 @@ describe("Codex app-server runtime port", () => {
       .mockImplementation(async (method) => {
         if (method === "thread/resume") {
           return { thread: { id: "provider-thread-standard" } };
+        }
+        if (method === "model/list") {
+          return { data: [], nextCursor: null };
         }
         if (method === "turn/start") {
           return { turn: { id: "turn-standard" } };

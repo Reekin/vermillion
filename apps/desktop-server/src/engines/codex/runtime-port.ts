@@ -1805,11 +1805,16 @@ export class CodexAppServerRuntimePort
       typeof execution?.modelId === "string" && execution.modelId.trim()
         ? execution.modelId
         : undefined;
-    const effort =
+    let effort =
       typeof execution?.reasoningOptionId === "string" &&
       execution.reasoningOptionId.trim()
         ? execution.reasoningOptionId
         : undefined;
+    if (model && !effort) {
+      // Omitting effort preserves the thread's previous setting in Codex.
+      const catalog = await this.listModelCatalog();
+      effort = catalog.models.find((entry) => entry.modelId === model)?.defaultReasoningOptionId;
+    }
     const serviceTier =
       execution?.serviceTierId === null
         ? null
