@@ -41,7 +41,6 @@ import {
   resolveEngineExecutionPreference,
   writeEngineExecutionPreference
 } from "@vermillion/shared";
-import "xterm/css/xterm.css";
 import type { RendererStore } from "../../store/store.js";
 import type {
   DesktopTransport,

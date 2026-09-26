@@ -141,14 +141,14 @@ const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
     hitLineRef.current?.scrollIntoView({ block: "center" });
   }, [hit?.id]);
   if (!hit) return <EmptyState title="选择一个命中位置" hint="右侧显示该位置附近的原文上下文。" />;
-  if (hit.kind === "session") {
+  if (hit.kind !== "doc") {
     return (
-      <section aria-label="命中消息预览" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <section aria-label={hit.kind === "session" ? "命中消息预览" : "命中内容预览"} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="shrink-0 border-b border-border px-4 py-3">
           <p className="truncate text-label font-medium text-strong" title={hit.treeTitle ?? hit.title}>
             {hit.treeTitle ?? hit.title}
           </p>
-          <p className="mt-1 truncate text-caption text-muted-foreground">{sessionMeta(hit)}</p>
+          <p className="mt-1 truncate text-caption text-muted-foreground">{hit.kind === "session" ? sessionMeta(hit) : hit.workspaceLabel}</p>
         </header>
         <div className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {hit.context.map((line) => {
@@ -156,7 +156,7 @@ const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
             return (
               <div key={line.line} ref={current ? hitLineRef : undefined} data-current={current || undefined}
                 className="vm-search-message">
-                {line.source && <p className="text-micro text-muted-foreground">{sourceLabel[line.source]}</p>}
+                {(line.source || line.label) && <p className="text-micro text-muted-foreground">{line.source ? sourceLabel[line.source] : line.label}</p>}
                 <p className="mt-1 whitespace-pre-wrap break-words text-label">{contextLineText(line)}</p>
               </div>
             );
@@ -214,12 +214,12 @@ const SearchResultRow = ({
           ? <SourceMark hit={hit} />
           : <Icon size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
         title={
-          <span className={session ? undefined : "font-mono"}>
+          <span className={hit.kind === "doc" ? "font-mono" : undefined}>
             {shortLine ? contextLineText(shortLine) : hit.title}
           </span>
         }
         titleClassName="vm-search-result-title"
-        meta={session ? sessionMeta(hit) : hit.workspaceLabel + " · 第 " + hit.line + " 行"}
+        meta={session ? sessionMeta(hit) : hit.workspaceLabel + " · " + (line?.label ?? "第 " + hit.line + " 行")}
         trailing={session ? undefined : <Badge>{kindLabel[hit.kind]}</Badge>}
         hoverActions={<IconButton icon={ArrowUpRight} label="打开" size={13} onClick={onOpen} />}
         selected={selected}

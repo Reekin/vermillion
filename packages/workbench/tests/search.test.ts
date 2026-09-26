@@ -74,7 +74,12 @@ describe("workbench search", () => {
       });
       try {
         const result = await service.search({ query: "NEEDLE" });
-        expect(result.hits[0]).toMatchObject({ kind: "workItem", workItemId: item.workItemId });
+        // Work item hits are the shown parts of the detail, labelled by place.
+        const workItemHits = result.hits.filter((hit) => hit.kind === "workItem");
+        expect(workItemHits.map((hit) => hit.context.find((line) => line.line === hit.line)!.label)).toEqual(["目标", "验收 1"]);
+        expect(workItemHits[0]).toMatchObject({ workItemId: item.workItemId });
+        expect(workItemHits[0]!.context.map((line) => line.label)).toEqual(["标题", "目标", "验收 1"]);
+        expect((await service.search({ query: "contractRevision" })).hits).toEqual([]);
         const sessionHits = result.hits.filter((hit) => hit.kind === "session");
         // The command whose output alone mentions the query, and the raw response record, add nothing.
         expect(sessionHits.map((hit) => [hit.source, hit.toolKind])).toEqual([
@@ -102,9 +107,12 @@ describe("workbench search", () => {
         expect(metadataOnly.hits.filter((hit) => hit.kind === "session")).toEqual([]);
         const secondTurn = await service.search({ query: "anything else" });
         expect(secondTurn.hits).toMatchObject([{ kind: "session", source: "agent", turnId: "turn-2", turnNumber: 2 }]);
-        // Step words and escaped characters exist only in the shown text, not in the raw record.
-        const stepQuery = await service.search({ query: "读取 needle.md · 2 行" });
-        expect(stepQuery.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "tool", toolKind: "read" }]);
+        // A tool step matches on its object; the generated verb and result are not searched.
+        expect(toolHit!.context.find((line) => line.line === toolHit!.line)!.matches).toEqual([{ start: 3, end: 9 }]);
+        for (const generated of ["读取", "2 行", "目录", "条目"]) {
+          const found = await service.search({ query: generated });
+          expect(found.hits.filter((hit) => hit.kind === "session")).toEqual([]);
+        }
         const quoted = await service.search({ query: "\"quoted-term\" in C:\\temp" });
         expect(quoted.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "agent" }]);
         // Emphasis is gone from the shown text; code keeps its characters.
@@ -112,16 +120,6 @@ describe("workbench search", () => {
         expect(bold.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "agent" }]);
         const literal = await service.search({ query: "**literal**" });
         expect(literal.hits.filter((hit) => hit.kind === "session")).toMatchObject([{ source: "agent" }]);
-        // Step words alone look at every tool step.
-        const stepWord = await service.search({ query: "读取" });
-        expect(stepWord.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["read", "read"]);
-        const stepResult = await service.search({ query: "2 行" });
-        expect(stepResult.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["read"]);
-        // Parts of generated words count too: "列目录 当前目录 · 2 个条目".
-        for (const part of ["目录", "条目"]) {
-          const listed = await service.search({ query: part });
-          expect(listed.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["list"]);
-        }
       } finally {
         await service.dispose();
       }

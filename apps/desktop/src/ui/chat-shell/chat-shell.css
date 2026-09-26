@@ -1638,8 +1638,6 @@ label.awb-configuration-control > span {
   background: var(--awb-panel);
 }
 
-.awb-tool-timeline,
-.awb-terminal-list,
 .awb-approval-list {
   display: grid;
   gap: 8px;
@@ -1886,42 +1884,6 @@ summary.awb-process-step__row:hover {
 .awb-process-step__message {
   padding: 4px 8px;
   color: var(--awb-ink);
-}
-
-.awb-terminal-output {
-  margin-top: 8px;
-  min-height: 100px;
-  overflow: hidden;
-  border-radius: 6px;
-  border: 1px solid var(--awb-rule-strong);
-  background: #151617;
-  color: #dfdfdb;
-}
-
-.awb-terminal-output .xterm {
-  padding: 9px 10px;
-}
-
-.awb-terminal-output .xterm-viewport {
-  overflow-y: auto !important;
-}
-
-.awb-terminal-output .xterm-char-measure-element {
-  position: absolute !important;
-  left: -9999em !important;
-  visibility: hidden !important;
-}
-
-.awb-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: pre-wrap;
-  border: 0;
 }
 
 .awb-approval-item__kind {

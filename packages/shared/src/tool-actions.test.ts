@@ -103,6 +103,12 @@ describe("tool actions", () => {
       { text: "Get-Content: Cannot find path 'C:\\p\\AGENTS.md' because it does not exist.", exitCode: 1 }
     );
     expect(missing).toMatchObject({ kind: "read", object: "AGENTS.md", result: "不存在", failed: true });
+    // A localized message may arrive garbled; the PowerShell error id still identifies it.
+    const garbled = describeToolStep(
+      call({ inputSummary: pwsh("Get-Content -Raw missing.txt") }),
+      { text: "Get-Content : \uFFFD\uFFFD\uFFFD C:\\p\\missing.txt\n    + CategoryInfo : ObjectNotFound: (C:\\p\\missing.txt:String) [Get-Content], ItemNotFoundException", exitCode: 1 }
+    );
+    expect(garbled).toMatchObject({ kind: "read", result: "不存在", failed: true });
     expect(describeToolStep(call({ inputSummary: "pnpm build" }), { text: "error TS2322", exitCode: 2 }))
       .toMatchObject({ failed: true, result: "失败 · 退出码 2" });
   });
