@@ -24,7 +24,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: fromHere("./index.html")
+        main: fromHere("./index.html"),
+        mobile: fromHere("./mobile.html")
       }
     }
   }

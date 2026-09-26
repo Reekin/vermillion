@@ -5,10 +5,10 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../src", import.meta.url));
-const scanned = ["ui/app", "features"].map((dir) => join(root, dir));
+const scanned = ["ui/app", "ui/mobile", "features"].map((dir) => join(root, dir));
 // Interface copy lives in the language dictionaries (src/i18n/messages); these directories may not
 // contain Chinese text outside comments.
-const copyScanned = ["ui/app", "ui/chat-shell", "features"].map((dir) => join(root, dir));
+const copyScanned = ["ui/app", "ui/chat-shell", "ui/mobile", "features"].map((dir) => join(root, dir));
 
 // Files that define the primitives and may use raw controls.
 const primitives = new Set(["ui/app/components/ui.tsx", "ui/app/components/ContextMenu.tsx", "ui/app/components/Modal.tsx"]);

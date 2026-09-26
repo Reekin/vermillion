@@ -177,7 +177,7 @@ const IntegrationCard = ({ store, item }: { store: WorkbenchStore; item: Extract
   </>;
 };
 
-const technicalDetails = (item: WorkItem): string => {
+export const technicalDetails = (item: WorkItem): string => {
   const { merge, evidence, verify } = item;
   return [
     merge && [t("work.inbox.merge"), "commit: " + (merge.commit ?? t("work.inbox.noCodeChanges")), t("work.inbox.time", { time: merge.mergedAt }), t("work.inbox.diffSummary"), merge.diffStat || t("work.inbox.noFileChanges")].join("\n"),

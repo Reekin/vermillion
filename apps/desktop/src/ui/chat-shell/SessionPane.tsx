@@ -148,6 +148,7 @@ export type SessionPaneProps = {
 };
 
 type TranscriptPaneProps = {
+  compactProcess?: boolean;
   renderTurnNavigation?: SessionPaneProps["renderTurnNavigation"];
   pendingSend?: ChatTreeSendOperation;
   onRetrySend: (operationId: string) => Promise<void>;
@@ -414,8 +415,9 @@ const summarizeTurnProcess = (row: TranscriptRow, hiddenMessageCount: number): s
   })) || t("session.viewProcess");
 };
 
-const TranscriptPane = memo(
+export const TranscriptPane = memo(
   ({
+    compactProcess = false,
     transcriptRef,
     transcriptContentRef,
     renderedTranscriptRows,
@@ -508,7 +510,7 @@ const TranscriptPane = memo(
             !isUserTurn &&
             !isInlineProcessRow &&
             (visibleRow.hasProcessDetails || hasCollapsedContent);
-          const defaultExpanded = hasCollapsedContent
+          const defaultExpanded = compactProcess || hasCollapsedContent
             ? false
             : visibleRow.defaultProcessExpanded;
           const isProcessExpanded =
@@ -537,7 +539,7 @@ const TranscriptPane = memo(
                 })()
               ].filter(Boolean).join(" · ") || undefined
             : undefined;
-          const shouldRenderExtensions = isFinalDisplayedAssistantRow;
+          const shouldRenderExtensions = !compactProcess && isFinalDisplayedAssistantRow;
           return (
             <article
               key={visibleRow.rowId}
@@ -584,6 +586,7 @@ const TranscriptPane = memo(
                   <TurnProcessPanel
                     row={visibleRow}
                     hiddenRows={[]}
+                    collapseActivity={compactProcess}
                     participantDirectory={participantDirectory}
                     onPreviewImage={onPreviewImage}
                     renderFileLinkContextMenu={renderFileLinkContextMenu}

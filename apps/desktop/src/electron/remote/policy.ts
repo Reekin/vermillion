@@ -6,7 +6,7 @@ const sessionReads = new Set([
   "events.subscribe", "events.replay", "events.unsubscribe", "domain.snapshot", "workspace.list",
   "engine.list", "engine.getSurface", "chat.getCapabilities"
 ]);
-const workbenchMethods = new Set(["workspace.list", "inbox.list", "decision.answer", "inbox.acknowledge"]);
+const workbenchMethods = new Set(["workspace.list", "workItem.get", "inbox.list", "decision.answer", "inbox.acknowledge"]);
 
 export function allowRemoteRequest(channel: string, raw: unknown): boolean {
   if (!raw || typeof raw !== "object") return false;
