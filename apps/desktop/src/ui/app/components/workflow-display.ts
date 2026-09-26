@@ -193,7 +193,13 @@ export const executionDuration = (runs: AgentRun[], now = Date.now()) => {
   return total > 0 ? total : undefined;
 };
 
-const clock = (value?: string) => value ? new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }) : undefined;
+/** Stage time: HH:MM today, otherwise prefixed with M/D so stages across days read in order. */
+const clock = (value?: string, now = new Date()) => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  const hm = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return date.toDateString() === now.toDateString() ? hm : (date.getMonth() + 1) + "/" + date.getDate() + " " + hm;
+};
 const earliest = (values: Array<string | undefined>) => values.filter((value): value is string => Boolean(value)).sort()[0];
 
 /** Lifecycle for the detail header: queued → executing → merging → closed, with times of passed stages. */

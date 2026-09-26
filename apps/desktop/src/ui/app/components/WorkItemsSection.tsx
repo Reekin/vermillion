@@ -308,7 +308,7 @@ export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler,
   return (
     <div ref={board} className="vm-board">
       <PageHeader title="工作"
-        summary={(["attention", "active", "ended"] as const).map((section) => <button key={section} type="button" className="vm-count-chip" data-tone={countTone[section]}
+        summary={(["attention", "active", "ended"] as const).map((section) => <button key={section} type="button" className="vm-count-chip" data-tone={counts[section] ? countTone[section] : "neutral"}
           aria-pressed={filter === section} onClick={() => setFilter(filter === section ? "open" : section)}>{counts[section]} {section === "attention" ? "需要处理" : boardSectionLabel[section]}</button>)}
         actions={<>
           <Toggle label="自动推进" checked={scheduler.enabled} disabled={busy} onChange={(enabled) => setScheduler({ enabled })} />
