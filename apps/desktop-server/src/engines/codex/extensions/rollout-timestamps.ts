@@ -125,6 +125,9 @@ const resolveRolloutContentKey = (
 };
 
 const resolveThreadItemContentKey = (item: ThreadItem): string | undefined => {
+  if (item.type === "commandExecution") {
+    return item.id;
+  }
   if (item.type === "agentMessage") {
     return normalizeContentKey(item.text);
   }
@@ -211,6 +214,19 @@ export const readCodexRolloutTimestampGroups = async (
       }
       if (entry.type === "event_msg" && payload.type === "task_complete") {
         currentGroup.completedAt = timestamp;
+        continue;
+      }
+      // Newer rollouts record commands as completed items that carry their real start time.
+      if (entry.type === "event_msg" && payload.type === "item_completed") {
+        const item = isRecord(payload.item) ? payload.item : undefined;
+        if (item?.type === "CommandExecution") {
+          const startedAtMs = typeof payload.started_at_ms === "number" ? payload.started_at_ms : undefined;
+          pushRolloutTimestamp(currentGroup, {
+            type: "commandExecution",
+            timestamp: startedAtMs !== undefined ? new Date(startedAtMs).toISOString() : timestamp,
+            ...(readString(item.id) ? { contentKey: readString(item.id)! } : {})
+          });
+        }
         continue;
       }
       const itemType = resolveRolloutTimestampedItemType(entry.type, payload);

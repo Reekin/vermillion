@@ -445,6 +445,14 @@ button:disabled {
   min-width: 0;
 }
 
+.awb-chat-entry.is-continuing-turn {
+  padding-top: 0;
+}
+
+.awb-chat-entry.is-followed-by-same-turn:not(.is-user) {
+  padding-bottom: 0;
+}
+
 .awb-chat-entry.is-followed-by-same-turn {
   border-bottom-color: transparent;
 }

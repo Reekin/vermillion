@@ -3500,3 +3500,32 @@ describe("Session discovery and reconciliation", () => {
       .toEqual(["codex-thread:thread-main"]);
   });
 });
+
+describe("Codex rollout timestamps", () => {
+  it("dates commands recorded as completed items by their real start time", async () => {
+    const dir = await createTempDir();
+    const rolloutPath = join(dir, "rollout.jsonl");
+    const lines = [
+      { timestamp: "2026-09-26T12:17:38.000Z", type: "event_msg", payload: { type: "task_started", turn_id: "turn-1" } },
+      {
+        timestamp: "2026-09-26T12:17:54.686Z",
+        type: "event_msg",
+        payload: {
+          type: "item_completed",
+          item: { type: "CommandExecution", id: "exec-1" },
+          started_at_ms: Date.parse("2026-09-26T12:17:54.488Z")
+        }
+      }
+    ];
+    await writeFile(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"));
+
+    const [group] = await readCodexRolloutTimestampGroups(rolloutPath);
+    const timestamps = [...group!.items];
+    expect(
+      consumeCodexRolloutTimestampForItem(timestamps, {
+        type: "commandExecution",
+        id: "exec-1"
+      } as Parameters<typeof consumeCodexRolloutTimestampForItem>[1])
+    ).toBe("2026-09-26T12:17:54.488Z");
+  });
+});

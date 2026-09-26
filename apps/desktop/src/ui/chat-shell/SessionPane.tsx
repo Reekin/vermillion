@@ -514,6 +514,12 @@ const TranscriptPane = memo(
           const nextGroup = groups[index + 1];
           const isFollowedBySameTurn =
             nextGroup?.visibleRow.turn.turnId === visibleRow.turn.turnId;
+          const previousGroup = groups[index - 1];
+          // Rows of one running turn read as one block: messages and steps without entry spacing between them.
+          const continuesTurn =
+            !isUserTurn &&
+            previousGroup?.visibleRow.turn.turnId === visibleRow.turn.turnId &&
+            previousGroup.visibleRow.messageRole !== "user";
           const hiddenMessageCount = countHiddenMessages(hiddenRows);
           const hasCollapsedContent = hiddenRows.length > 0;
           const hasExpandableDetails =
@@ -554,7 +560,7 @@ const TranscriptPane = memo(
               data-final-response-row={visibleRow.isFinalResponseRow ? "true" : "false"}
               className={`awb-chat-entry ${isUserTurn ? "is-user" : "is-assistant"} ${
                 isFollowedBySameTurn ? "is-followed-by-same-turn" : ""
-              }`}
+              }${continuesTurn ? " is-continuing-turn" : ""}`}
             >
               {hasExpandableDetails && (
                 <div
