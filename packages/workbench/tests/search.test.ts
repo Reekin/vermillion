@@ -95,7 +95,7 @@ describe("workbench search", () => {
           expect(hit.column).toBe(shown.matches[0]!.start + 1);
         }
         const [userHit, toolHit, agentHit] = sessionHits;
-        expect(toolHit!.context.find((line) => line.line === toolHit!.line)!.text).toBe("读取 needle.md · 2 行");
+        expect(toolHit!.context.find((line) => line.line === toolHit!.line)!.text).toBe("读取 needle.md · 输出 2 行");
         // Two matches in one reply still make one hit; neighbours are the shown messages around it.
         expect(agentHit!.context.find((line) => line.line === agentHit!.line)!.matches).toHaveLength(2);
         expect(agentHit!.context.map((line) => line.source)).toEqual(["tool", "agent", "agent"]);

@@ -1,8 +1,10 @@
 import type { ToolAction, ToolCall } from "./domain.js";
 
 /**
- * Engine-neutral translation of tool calls into readable steps ("读取 README.md · 3 行") and a
- * per-turn summary ("读取 2 个文件 · 运行 1 条命令 · 1 分 27 秒"). Raw commands stay in details.
+ * Engine-neutral wording of tool calls as steps ("读取 README.md · 输出 3 行") and a per-turn summary.
+ * Only meaning the engine states is translated: its classified command actions, its tool types and
+ * the summaries the adapters write. Commands the engine did not classify read as "运行 <command>";
+ * tools without a known type keep their name. Results report output and exit codes as they are.
  */
 
 export type ToolStepKind =
@@ -59,40 +61,9 @@ const firstLine = (value: string | undefined): string | undefined =>
     .map((line) => line.trim())
     .find((line) => line.length > 0);
 
-/** Web steps are summarized as "Open page\nurl: …"; the query or address is what they act on. */
-const webTarget = (summary: string | undefined): string | undefined => {
-  const field = /^(?:query|url|pattern):\s*(.+)$/m.exec(summary ?? "")?.[1]?.trim();
-  if (field) return field;
-  const listed = /^-\s*(.+)$/m.exec(summary ?? "")?.[1]?.trim();
-  return listed ?? (summary && !/^(Search|Open page|Find in page|Web search)$/.test(summary.trim()) ? firstLine(summary) : undefined);
-};
-
-const countLines = (value: string | undefined): number =>
-  value ? value.split(/\r?\n/).filter((line) => line.trim().length > 0).length : 0;
-
-/** File lines as written, blank lines included, without the trailing newline. */
-const countRawLines = (value: string | undefined): number =>
-  value ? value.replace(/(\r?\n)+$/, "").split(/\r?\n/).length : 0;
-
-/**
- * Directory entries without table headers (any header line followed by a dashed rule, as pwsh
- * prints for Get-ChildItem and Select-Object), the localized "Directory: C:\path" caption,
- * `ls -la` totals or dot entries.
- */
-const countListEntries = (value: string | undefined): number => {
-  const lines = (value ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  return lines.filter((line, index) => {
-    const next = lines[index + 1];
-    const isHeader = next !== undefined && /^-[-\s]*$/.test(next);
-    return (
-      !isHeader &&
-      !/^-[-\s]*$/.test(line) &&
-      !/^[^\s:：]+\s*[:：]\s*(?:[A-Za-z]:[\\/]|\/)/.test(line) &&
-      !/^total \d+$/.test(line) &&
-      !/(^|\s)\.{1,2}$/.test(line)
-    );
-  }).length;
-};
+/** Output lines as printed, without the trailing newline. */
+const outputLines = (value: string | undefined): number =>
+  value?.trim() ? value.replace(/(\r?\n)+$/, "").split(/\r?\n/).length : 0;
 
 const stripQuotes = (value: string): string => {
   const trimmed = value.trim();
@@ -118,104 +89,16 @@ export const unwrapShellCommand = (command: string): string => {
   return inner.replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
 };
 
-/** First meaningful fragment of a command, without the shell wrapper. */
+/** First line of a command, without the shell wrapper. */
 export const commandHead = (command: string): string =>
   truncate(firstLine(unwrapShellCommand(command)) ?? command.trim());
 
-const tokenize = (segment: string): string[] => {
-  const tokens: string[] = [];
-  const pattern = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g;
-  for (const match of segment.matchAll(pattern)) {
-    tokens.push(match[1] ?? match[2] ?? match[3] ?? "");
-  }
-  return tokens;
-};
-
-const trivialCommands = new Set([
-  "get-location", "pwd", "cd", "set-location", "echo", "write-output", "write-host", "chcp", "clear"
-]);
-const readCommands = new Set(["get-content", "gc", "cat", "type", "head", "tail", "less", "more", "bat", "nl"]);
-const listCommands = new Set(["ls", "dir", "get-childitem", "gci", "tree", "find"]);
-const searchCommands = new Set(["rg", "grep", "select-string", "sls", "findstr", "ag"]);
-/** Flags whose next token is a value, not a positional argument. */
-const valueFlags = new Set([
-  "-g", "--glob", "-t", "--type", "-m", "--max-count", "-A", "-B", "-C", "--context", "-e",
-  "-totalcount", "-tail", "-first", "-last", "-encoding", "-filter", "-include", "-exclude",
-  "-depth", "--lines", "-maxdepth", "-name", "-pattern", "-path", "-literalpath"
-]);
-
-const positionals = (tokens: string[]): { values: string[]; flags: Map<string, string> } => {
-  const values: string[] = [];
-  const flags = new Map<string, string>();
-  for (let index = 1; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
-    if (token.startsWith("-") && token.length > 1) {
-      // Single-letter flags are case-sensitive (rg -C vs -c); long ones follow PowerShell casing rules.
-      const flag = token.length === 2 ? token : token.toLowerCase();
-      if (valueFlags.has(flag) && index + 1 < tokens.length) {
-        flags.set(flag, tokens[index + 1]!);
-        index += 1;
-      }
-      continue;
-    }
-    values.push(token);
-  }
-  return { values, flags };
-};
-
-const commandName = (token: string): string =>
-  token.replace(/^.*[\\/]/, "").replace(/\.exe$/i, "").toLowerCase();
-
-const classifySegment = (segment: string): ToolAction | undefined => {
-  const tokens = tokenize(segment.split("|")[0] ?? "");
-  if (tokens.length === 0) {
-    return undefined;
-  }
-  const name = commandName(tokens[0]!);
-  if (trivialCommands.has(name) || /^\$\w+\s*=/.test(segment.trim())) {
-    return undefined;
-  }
-  const { values, flags } = positionals(tokens);
-  const pathFlag = flags.get("-path") ?? flags.get("-literalpath");
-  if (name === "sed" && tokens.includes("-n")) {
-    const file = values.filter((value) => !/^\d+(,\d+)?p$/.test(value)).at(-1);
-    return { kind: "read", ...(file ? { target: file } : {}) };
-  }
-  if (readCommands.has(name)) {
-    const file = pathFlag ?? values.filter((value) => !/^\d+$/.test(value)).at(-1);
-    return { kind: "read", ...(file ? { target: file } : {}) };
-  }
-  if (listCommands.has(name) || (name === "rg" && tokens.includes("--files"))) {
-    const dir = pathFlag ?? values[0];
-    return { kind: "list", ...(dir ? { target: dir } : {}) };
-  }
-  if (searchCommands.has(name)) {
-    const query = flags.get("-e") ?? flags.get("-pattern") ?? values[0];
-    const path = pathFlag ?? (flags.has("-e") || flags.has("-pattern") ? values[0] : values[1]);
-    return { kind: "search", ...(query ? { target: query } : {}), ...(path ? { path } : {}) };
-  }
-  return { kind: "run", target: segment.trim() };
-};
-
-const commandSegments = (command: string): string[] =>
-  unwrapShellCommand(command).split(/;|&&|\|\||\r?\n/).map((segment) => segment.trim()).filter(Boolean);
-
-/** The first segment that does real work, skipping cd, echo and variable setup. */
-const meaningfulCommand = (command: string): string => {
-  const segments = commandSegments(command);
-  return segments.find((segment) => classifySegment(segment)) ?? segments[0] ?? command.trim();
-};
-
-/** Best-effort reading of a shell command when the engine gives no structured actions. */
-export const actionsFromCommand = (command: string): ToolAction[] => {
-  const actions = commandSegments(command)
-    .map(classifySegment)
-    .filter((action): action is ToolAction => Boolean(action));
-  const firstRun = actions.find((action) => action.kind === "run");
-  if (firstRun) {
-    return [firstRun];
-  }
-  return actions.length > 0 ? actions : [{ kind: "run", target: meaningfulCommand(command) }];
+/** Web steps are summarized as "Open page\nurl: …"; the query or address is what they act on. */
+const webTarget = (summary: string | undefined): string | undefined => {
+  const field = /^(?:query|url|pattern):\s*(.+)$/m.exec(summary ?? "")?.[1]?.trim();
+  if (field) return field;
+  const listed = /^-\s*(.+)$/m.exec(summary ?? "")?.[1]?.trim();
+  return listed ?? (summary && !/^(Search|Open page|Find in page|Web search)$/.test(summary.trim()) ? firstLine(summary) : undefined);
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -252,21 +135,10 @@ export const actionsFromNamedTool = (toolName: string, args: unknown): ToolActio
       return [{ kind: "edit", ...(path ? { target: path } : {}) }];
     case "bash": {
       const command = stringField(record, "command");
-      return command ? actionsFromCommand(command) : undefined;
+      return command ? [{ kind: "run", target: command }] : undefined;
     }
     default:
       return undefined;
-  }
-};
-
-const parseJson = (value: string | undefined): unknown => {
-  if (!value) {
-    return undefined;
-  }
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
   }
 };
 
@@ -292,38 +164,20 @@ const joinTargets = (targets: string[]): string | undefined => {
   return names.length > 3 ? `${names.slice(0, 3).join("、")} 等 ${names.length} 个文件` : names.join("、");
 };
 
-const commandToolNames = new Set(["commandExecution", "bash", "shell", "exec_command"]);
-
-const resolveActions = (toolCall: ToolCall): ToolAction[] | undefined => {
-  const reported = toolCall.actions?.filter((action) => action.kind !== "run");
-  if (reported && reported.length > 0 && reported.length === toolCall.actions!.length) {
-    return toolCall.actions;
-  }
-  if (toolCall.toolName === "commandExecution") {
-    return toolCall.inputSummary ? actionsFromCommand(toolCall.inputSummary) : undefined;
-  }
-  return toolCall.actions ?? actionsFromNamedTool(toolCall.toolName, parseJson(toolCall.inputSummary));
-};
-
 /**
- * Localized shells print the message in the system code page, which can arrive garbled; PowerShell's
- * error ids (ObjectNotFound, UnauthorizedAccess…) stay ASCII, so they are checked alongside the text.
+ * The engine's actions when they name one kind of work; a command it left unclassified, or one
+ * mixing kinds, is shown as the command itself.
  */
-const failureReason = (output: string | undefined, exitCode: number | undefined): string => {
-  const text = output ?? "";
-  if (/cannot find path|no such file|cannot find the (file|path)|does not exist|ObjectNotFound|ItemNotFound|PathNotFound|不存在|找不到/i.test(text)) {
-    return "不存在";
+const resolveActions = (toolCall: ToolCall): ToolAction[] | undefined => {
+  const actions = toolCall.actions ?? [];
+  const kinds = new Set(actions.map((action) => action.kind));
+  if (kinds.size === 1 && !kinds.has("run")) {
+    return actions;
   }
-  if (/permission denied|access is denied|UnauthorizedAccess|PermissionDenied|拒绝访问/i.test(text)) {
-    return "无权限";
-  }
-  if (/is not recognized as|command not found|not found in path|CommandNotFoundException/i.test(text)) {
-    return "命令不存在";
-  }
-  if (/timed out|timeout/i.test(text)) {
-    return "超时";
-  }
-  return typeof exitCode === "number" ? `失败 · 退出码 ${exitCode}` : "失败";
+  const command = toolCall.toolName === "commandExecution"
+    ? toolCall.inputSummary
+    : actions.find((action) => action.kind === "run")?.target;
+  return command ? [{ kind: "run", target: command }] : undefined;
 };
 
 const kindForTool = (toolName: string): ToolStepKind | undefined => {
@@ -383,6 +237,9 @@ const describeAgentStep = (toolCall: ToolCall, running: boolean): ToolStep => {
   };
 };
 
+const failureResult = (exitCode: number | undefined): string =>
+  typeof exitCode === "number" ? `失败 · 退出码 ${exitCode}` : "失败";
+
 /** One readable step for a tool call: verb, object and result. */
 export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}): ToolStep => {
   const running = toolCall.status === "running";
@@ -413,23 +270,14 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
     };
   }
 
-  let actions = resolveActions(toolCall);
-  // A step names one kind of action; a command mixing kinds (list then read) reads as a command.
-  if (actions && new Set(actions.map((action) => action.kind)).size > 1) {
-    const command =
-      toolCall.toolName === "commandExecution"
-        ? toolCall.inputSummary
-        : stringField(asRecord(parseJson(toolCall.inputSummary)) ?? {}, "command") ?? toolCall.inputSummary;
-    actions = [{ kind: "run", target: meaningfulCommand(command ?? "") }];
-  }
-  if (!actions || actions.length === 0) {
-    const input = firstLine(toolCall.inputSummary);
-    const failed = toolCall.status === "failed";
+  const failed = toolCall.status === "failed" || (typeof output.exitCode === "number" && output.exitCode !== 0);
+  const actions = resolveActions(toolCall);
+  if (!actions) {
     return {
       kind: "other",
       verb: verbs.other,
-      object: truncate(input && !input.startsWith("{") ? input : toolCall.toolName),
-      ...(running ? { result: "进行中" } : failed ? { result: failureReason(text, output.exitCode) } : {}),
+      object: toolCall.toolName,
+      ...(running ? { result: "进行中" } : failed ? { result: failureResult(output.exitCode) } : {}),
       failed,
       running,
       targets: []
@@ -438,10 +286,6 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
 
   const kind = actions[0]!.kind;
   const targets = actions.map((action) => action.target).filter((target): target is string => Boolean(target));
-  const noMatches = kind === "search" && output.exitCode === 1 && countLines(text) === 0;
-  const failed =
-    !noMatches &&
-    (toolCall.status === "failed" || (typeof output.exitCode === "number" && output.exitCode !== 0));
   let object: string | undefined;
   if (kind === "read" || kind === "edit") {
     object = joinTargets(targets);
@@ -451,37 +295,14 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
     const first = actions[0]!;
     object = first.target ? `“${stripQuotes(first.target)}”${first.path ? ` · ${shortPath(first.path)}` : ""}` : undefined;
   } else {
-    object = commandToolNames.has(toolCall.toolName)
-      ? commandHead(actions[0]!.target ?? toolCall.inputSummary ?? "")
-      : toolCall.toolName;
+    object = commandHead(actions[0]!.target ?? "");
   }
 
-  let result: string | undefined;
-  if (running) {
-    result = "进行中";
-  } else if (failed) {
-    result = failureReason(text, output.exitCode);
-  } else if (noMatches) {
-    result = "无匹配";
-  } else {
-    const lines = countLines(text);
-    switch (kind) {
-      case "read":
-        result = `${countRawLines(text)} 行`;
-        break;
-      case "list":
-        result = `${countListEntries(text)} 个条目`;
-        break;
-      case "search":
-        result = lines > 0 ? `${lines} 处匹配` : "无匹配";
-        break;
-      case "edit":
-        result = undefined;
-        break;
-      default:
-        result = lines > 0 ? `输出 ${lines} 行` : "无输出";
-    }
-  }
+  const lines = outputLines(text);
+  const result = running ? "进行中"
+    : failed ? failureResult(output.exitCode)
+      : kind === "edit" ? undefined
+        : lines > 0 ? `输出 ${lines} 行` : "无输出";
 
   return {
     kind,
@@ -490,7 +311,7 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
     ...(result ? { result } : {}),
     failed,
     running,
-    targets
+    targets: kind === "read" || kind === "edit" ? targets : []
   };
 };
 
@@ -549,7 +370,6 @@ export const summarizeToolSteps = (
   options: { messageCount?: number; durationMs?: number } = {}
 ): string => {
   const parts: string[] = [];
-  const hasFailure = steps.some((step) => step.failed);
   for (const kind of summaryOrder) {
     const matching = steps.filter((step) => step.kind === kind);
     if (matching.length === 0) {
@@ -562,8 +382,9 @@ export const summarizeToolSteps = (
   if (parts.length === 0 && options.messageCount) {
     parts.push(`${options.messageCount} 条过程消息`);
   }
-  if (hasFailure) {
-    parts.push(`${steps.filter((step) => step.failed).length} 步失败`);
+  const failures = steps.filter((step) => step.failed).length;
+  if (failures > 0) {
+    parts.push(`${failures} 步失败`);
   }
   if (typeof options.durationMs === "number" && options.durationMs > 0) {
     parts.push(formatDurationZh(options.durationMs));

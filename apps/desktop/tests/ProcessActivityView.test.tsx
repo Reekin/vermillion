@@ -58,10 +58,10 @@ describe("ProcessActivityView", () => {
     expect(details.querySelector(".awb-process-step__output")?.textContent).toContain("M src/app.ts");
   });
 
-  it("marks a failed read with a readable reason", () => {
+  it("marks a failed command with its exit code", () => {
     const { container } = render(
       <ProcessActivityView
-        toolCalls={[tool({ status: "failed", inputSummary: pwsh("Get-Content AGENTS.md") })]}
+        toolCalls={[tool({ status: "failed", actions: [{ kind: "read", target: "AGENTS.md" }], inputSummary: pwsh("Get-Content AGENTS.md") })]}
         terminalStreams={[
           stream({ status: "failed", exitCode: 1, outputText: "Get-Content: Cannot find path 'C:\\p\\AGENTS.md' because it does not exist." })
         ]}
@@ -72,7 +72,7 @@ describe("ProcessActivityView", () => {
     expect(step.getAttribute("data-failed")).toBe("true");
     expect(step.querySelector(".awb-process-step__verb")?.textContent).toBe("读取");
     expect(step.querySelector(".awb-process-step__object")?.textContent).toBe("AGENTS.md");
-    expect(step.querySelector(".awb-process-step__result")?.textContent).toBe("不存在");
+    expect(step.querySelector(".awb-process-step__result")?.textContent).toBe("失败 · 退出码 1");
   });
 
   it("uses structured actions and shows running steps as in progress", () => {
@@ -87,7 +87,7 @@ describe("ProcessActivityView", () => {
     );
 
     const rows = [...container.querySelectorAll(".awb-process-step__row")].map((row) => row.textContent);
-    expect(rows).toEqual(["列目录src2 个条目", "压缩上下文进行中"]);
+    expect(rows).toEqual(["列目录src输出 2 行", "压缩上下文进行中"]);
   });
 
   it("shows image output as a preview with the cache-busted URL", async () => {
