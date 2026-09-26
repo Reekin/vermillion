@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { WorkbenchService } from "../src/workbench-service.js";
-import { buildRolloutIndex, readRolloutMessage } from "../src/search.js";
+import { buildRolloutIndex, markdownToPlainText, readRolloutMessage } from "../src/search.js";
 import { setup } from "./workflow-fixture.js";
 import type { WorkbenchEvent } from "../src/contracts.js";
 
@@ -123,6 +123,20 @@ describe("workbench search", () => {
     ]);
     expect(index.turnNumbers.get("legacy-2")).toBe(2);
     expect(readRolloutMessage(lines[3]!, index.messages[1]!)).toEqual({ text: "second answer" });
+  });
+
+  it("reads agent replies as the rendered text a reader sees", () => {
+    expect(markdownToPlainText([
+      "## 结论",
+      "项目只有 **`README.md`** 一个文件，见 [说明](docs/a.md)。",
+      "> *注意* ~~旧~~ 内容",
+      "```ts",
+      "const snake_case_name = 1;",
+      "```"
+    ].join("\n"))).toBe("结论\n项目只有 README.md 一个文件，见 说明。\n注意 旧 内容\nconst snake_case_name = 1;");
+    const record = { line: 1, start: 0, source: "agent" as const, at: "2026-09-26T10:00:00.000Z" };
+    const line = agent("t", "md", "I read **README.md**.");
+    expect(readRolloutMessage(line, record)).toEqual({ id: "md", text: "I read README.md." });
   });
 
   it("searches only entries supplied by Vermillion without truncating later matches", async () => {

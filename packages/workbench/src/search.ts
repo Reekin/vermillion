@@ -623,6 +623,27 @@ export type RolloutMessage = {
   toolKind?: string;
 };
 
+/**
+ * Agent replies render as Markdown; search matches and previews the words a reader sees, so markup
+ * (emphasis, inline-code backticks, heading and quote markers, link syntax, fence lines) is removed.
+ * Underscores are left alone so snake_case names stay intact.
+ */
+export const markdownToPlainText = (markdown: string): string =>
+  markdown
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(```|~~~)/.test(line))
+    .map((line) => line
+      .replace(/^\s{0,3}#{1,6}\s+/, "")
+      .replace(/^\s{0,3}>\s?/, "")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, "$2")
+      .replace(/(?<![\w*])\*(?=\S)([^*]+?)(?<=\S)\*(?![\w*])/g, "$1")
+      .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, "$1")
+      .replace(/`([^`]+)`/g, "$1"))
+    .join("\n")
+    .trim();
+
 /** The text a rollout record shows in the session, or undefined for records that show nothing. */
 export const readRolloutMessage = (lineText: string, message: RolloutMessageRecord): RolloutMessage | undefined => {
   let value: unknown;
@@ -634,7 +655,8 @@ export const readRolloutMessage = (lineText: string, message: RolloutMessageReco
   const payload = isRecord(value) && isRecord(value.payload) ? value.payload : undefined;
   if (!payload) return undefined;
   if (payload.type === "user_message" || payload.type === "agent_message") {
-    const text = asNonEmptyString(payload.message);
+    const raw = asNonEmptyString(payload.message);
+    const text = raw && payload.type === "agent_message" ? markdownToPlainText(raw) : raw;
     return text ? { text } : undefined;
   }
   const item = isRecord(payload.item) ? payload.item : undefined;
@@ -642,7 +664,8 @@ export const readRolloutMessage = (lineText: string, message: RolloutMessageReco
   const id = asNonEmptyString(item.id);
   const withId = (rest: Omit<RolloutMessage, "id">): RolloutMessage => ({ ...(id ? { id } : {}), ...rest });
   if (item.type === "UserMessage" || item.type === "AgentMessage") {
-    const text = textParts(item.content, item.type === "UserMessage" ? "text" : "Text").trim();
+    const raw = textParts(item.content, item.type === "UserMessage" ? "text" : "Text").trim();
+    const text = item.type === "AgentMessage" ? markdownToPlainText(raw) : raw;
     return text ? withId({ text }) : undefined;
   }
   const input = toolInput(item);
