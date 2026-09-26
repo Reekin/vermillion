@@ -5,8 +5,10 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import type { DocFile, WorkItem } from "./contracts.js";
 import { zSearchResult } from "./search-contract.js";
-import type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchStats } from "./search-contract.js";
-export type { SearchContextLine, SearchHit, SearchQuery, SearchResult } from "./search-contract.js";
+import type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchSource, SearchStats } from "./search-contract.js";
+import type { ToolAction, ToolCall } from "@vermillion/shared";
+import { describeToolStep } from "@vermillion/shared/tool-actions";
+export type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchSource } from "./search-contract.js";
 
 export type SearchSessionEntry = {
   sessionId: string;
@@ -59,12 +61,13 @@ const MAX_CONTEXT_LINE_CHARS = 4_000;
 const MAX_BATCH_ARGV_CHARS = 24_000;
 /** Keeps incremental search events small enough for the UI to stay responsive on dense matches. */
 const HIT_EVENT_BATCH_SIZE = 100;
-/** Bytes read around a hit to rebuild its context without loading a multi-megabyte rollout line. */
-const CONTEXT_WINDOW_BYTES = 32_768;
 /** A session_meta header carries the originator; this covers it without reading the whole file. */
 const HEADER_PROBE_BYTES = 262_144;
-/** Prefix decoded to place a hit that sits beyond the context window of an oversized line. */
-const COLUMN_PREFIX_LIMIT = 4_194_304;
+/** Message lines longer than this are skipped; only tool output makes a rollout line this large. */
+const MAX_MESSAGE_LINE_BYTES = 4_194_304;
+const LINE_READ_CHUNK_BYTES = 65_536;
+/** Neighbouring messages in the preview are cut to this many characters. */
+const NEIGHBOUR_TEXT_CHARS = 600;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -170,49 +173,6 @@ const searchTextDocument = (
   return true;
 };
 
-const turnIdPattern = /"(?:turn_id|node_id)":"([^"]+)"/;
-const positionIdPattern = /"(?:node_id|id)":"([^"]+)"/;
-
-const scanTurnId = (text: string): string | undefined => turnIdPattern.exec(text)?.[1];
-const scanPositionId = (text: string): string | undefined => positionIdPattern.exec(text)?.[1];
-
-const extractRolloutIdentity = (line: string): { turnId?: string; positionId?: string } => {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return {};
-  }
-  if (!isRecord(value)) return {};
-  const payload = isRecord(value.payload) ? value.payload : undefined;
-  const item = payload && isRecord(payload.item) ? payload.item : undefined;
-  const metadata = isRecord(value.internal_chat_message_metadata_passthrough)
-    ? value.internal_chat_message_metadata_passthrough
-    : isRecord(payload?.internal_chat_message_metadata_passthrough)
-      ? payload.internal_chat_message_metadata_passthrough
-      : undefined;
-  const turnId =
-    asNonEmptyString(value.turn_id) ??
-    asNonEmptyString(payload?.turn_id) ??
-    asNonEmptyString(payload?.turnId) ??
-    asNonEmptyString(item?.turn_id) ??
-    asNonEmptyString(item?.turnId) ??
-    asNonEmptyString(metadata?.turn_id) ??
-    asNonEmptyString(value.node_id) ??
-    asNonEmptyString(payload?.node_id) ??
-    asNonEmptyString(item?.node_id);
-  const positionId =
-    asNonEmptyString(payload?.node_id) ??
-    asNonEmptyString(item?.id) ??
-    asNonEmptyString(payload?.id) ??
-    asNonEmptyString(value.id) ??
-    asNonEmptyString(item?.node_id);
-  return {
-    ...(turnId ? { turnId } : {}),
-    ...(positionId ? { positionId } : {})
-  };
-};
-
 const isVermillionRollout = (header: string): boolean => {
   let value: unknown;
   try {
@@ -289,7 +249,7 @@ const batchPaths = (paths: string[]): string[][] => {
   return batches;
 };
 
-type RolloutMatch = { path: string; line: number; byteOffset: number };
+type RolloutMatch = { path: string; line: number; byteOffset: number; text: string };
 type RipgrepRun = { filesSearched: number; bytesSearched: number };
 
 /**
@@ -303,13 +263,14 @@ const runRipgrepBatch = async (input: {
   query: string;
   /** False runs the pattern as a regex; the line index uses `^` to report every line start. */
   literal?: boolean;
+  caseSensitive?: boolean;
   signal?: AbortSignal;
   onMatch: (match: RolloutMatch) => void;
 }): Promise<RipgrepRun> => {
   const child = spawn(input.executable, [
     "--null", "--with-filename", "--no-heading", "--no-config", "--no-messages",
     "--only-matching", "--line-number", "--byte-offset",
-    ...(input.literal === false ? [] : ["--fixed-strings"]), "--ignore-case", "--stats",
+    ...(input.literal === false ? [] : ["--fixed-strings"]), ...(input.caseSensitive ? [] : ["--ignore-case"]), "--stats",
     "-e", input.query, "--", ...input.paths
   ], { stdio: ["ignore", "pipe", "pipe"] });
 
@@ -350,7 +311,7 @@ const runRipgrepBatch = async (input: {
     const lineNumber = Number(line.slice(separator + 1, firstColon));
     const byteOffset = Number(line.slice(firstColon + 1, secondColon));
     if (!Number.isInteger(lineNumber) || !Number.isInteger(byteOffset)) return;
-    input.onMatch({ path: line.slice(0, separator), line: lineNumber, byteOffset });
+    input.onMatch({ path: line.slice(0, separator), line: lineNumber, byteOffset, text: line.slice(secondColon + 1) });
   };
 
   child.stdout.setEncoding("utf8");
@@ -385,144 +346,308 @@ const runRipgrepBatch = async (input: {
   return run;
 };
 
-type HitWindow = {
-  text: string;
-  matchCharIndex: number;
-  startPartial: boolean;
-  endPartial: boolean;
+// ---- rollout messages ----
+
+/**
+ * Heads of the rollout records that make up what a session shows: completed items (user messages,
+ * agent replies, tool calls), legacy user/agent message events, and the turn markers that number
+ * turns. Only the fixed-width head is matched, so a pass over a huge rollout outputs a few hundred
+ * bytes per record.
+ */
+const ROLLOUT_INDEX_PATTERN =
+  String.raw`^\{"timestamp":"[^"]*",(?:"ordinal":\d+,)?"type":"event_msg","payload":\{"type":"(?:` +
+  String.raw`item_completed","thread_id":"[^"]*","turn_id":"[^"]*","item":\{"type":"[A-Za-z]+"` +
+  String.raw`|user_message"|agent_message"|task_started","turn_id":"[^"]*"` +
+  String.raw`|chat_tree_node_started","revision":\d+,"node_id":"[^"]*","parent_node_id":(?:null|"[^"]*"),"turn_id":"[^"]*","order":\d+)`;
+
+const toolItemTypes = new Set([
+  "CommandExecution", "McpToolCall", "DynamicToolCall", "CollabAgentToolCall", "WebSearch",
+  "ImageView", "ImageGeneration", "Reasoning", "Extension"
+]);
+
+export type RolloutMessageRecord = {
+  line: number;
+  /** Byte offset of the line start. */
+  start: number;
+  source: SearchSource;
+  turnId?: string;
+  at: string;
 };
 
-const readHitWindow = async (path: string, byteOffset: number): Promise<HitWindow> => {
-  const windowStart = Math.max(0, byteOffset - CONTEXT_WINDOW_BYTES);
-  const handle = await open(path, "r");
-  const buffer = Buffer.alloc(CONTEXT_WINDOW_BYTES * 2);
-  let bytesRead: number;
-  try {
-    ({ bytesRead } = await handle.read(buffer, 0, buffer.length, windowStart));
-  } finally {
-    await handle.close();
-  }
-  const window = buffer.subarray(0, bytesRead);
-  const matchAt = Math.min(Math.max(0, byteOffset - windowStart), bytesRead);
-  return {
-    text: window.toString("utf8"),
-    matchCharIndex: window.subarray(0, matchAt).toString("utf8").length,
-    startPartial: windowStart > 0,
-    endPartial: bytesRead === buffer.length
-  };
+export type RolloutIndex = {
+  messages: RolloutMessageRecord[];
+  indexByLine: Map<number, number>;
+  turnNumbers: Map<string, number>;
 };
 
-type HitContext = {
-  context: SearchContextLine[];
-  column: number;
-  hitText: string;
-  /** False when the window cut the matching line, so its ends must be read separately. */
-  hitComplete: boolean;
-};
-
-const buildHitContext = (
-  window: HitWindow,
-  line: number,
-  query: string,
-  contextLines: number
-): HitContext => {
-  const segments = window.text.split("\n");
-  const starts: number[] = [];
-  let cursor = 0;
-  for (const segment of segments) {
-    starts.push(cursor);
-    cursor += segment.length + 1;
-  }
-  let hitIndex = segments.length - 1;
-  for (let index = 0; index < segments.length; index += 1) {
-    if (window.matchCharIndex <= starts[index]! + segments[index]!.length) {
-      hitIndex = index;
-      break;
+/** Builds the message list of one rollout from the heads reported by the index pattern, in file order. */
+export const buildRolloutIndex = (heads: Array<{ line: number; byteOffset: number; text: string }>): RolloutIndex => {
+  const messages: RolloutMessageRecord[] = [];
+  const nodeOrders = new Map<string, number>();
+  const startedTurns: string[] = [];
+  let currentTurnId: string | undefined;
+  for (const head of [...heads].sort((left, right) => left.line - right.line)) {
+    const at = /^\{"timestamp":"([^"]*)"/.exec(head.text)?.[1] ?? "";
+    const item = /"turn_id":"([^"]*)","item":\{"type":"([A-Za-z]+)"/.exec(head.text);
+    if (item) {
+      const [, turnId, itemType] = item;
+      const source: SearchSource | undefined = itemType === "UserMessage"
+        ? "user"
+        : itemType === "AgentMessage" ? "agent" : toolItemTypes.has(itemType!) ? "tool" : undefined;
+      if (source) messages.push({ line: head.line, start: head.byteOffset, source, at, ...(turnId ? { turnId } : {}) });
+      continue;
+    }
+    const node = /"turn_id":"([^"]*)","order":(\d+)/.exec(head.text);
+    if (node) {
+      nodeOrders.set(node[1]!, Number(node[2]));
+      continue;
+    }
+    const started = /"task_started","turn_id":"([^"]*)"/.exec(head.text);
+    if (started) {
+      currentTurnId = started[1]!;
+      if (!startedTurns.includes(currentTurnId)) startedTurns.push(currentTurnId);
+      continue;
+    }
+    const legacy = /"type":"(user_message|agent_message)"/.exec(head.text);
+    if (legacy) {
+      messages.push({
+        line: head.line,
+        start: head.byteOffset,
+        source: legacy[1] === "user_message" ? "user" : "agent",
+        at,
+        ...(currentTurnId ? { turnId: currentTurnId } : {})
+      });
     }
   }
-  const from = Math.max(0, hitIndex - contextLines);
-  const to = Math.min(segments.length - 1, hitIndex + contextLines);
-  const context: SearchContextLine[] = [];
-  for (let index = from; index <= to; index += 1) {
-    const leading = index === 0 && window.startPartial;
-    const trailing = index === segments.length - 1 && window.endPartial;
-    const body = segments[index]!.replace(/\r$/, "");
-    const text = (leading ? "…" : "") + body + (trailing ? "…" : "");
-    const focus = index === hitIndex
-      ? window.matchCharIndex - starts[index]! + (leading ? 1 : 0)
-      : 0;
-    context.push(toContextLine(line + (index - hitIndex), text, query, focus));
-  }
+  // Vermillion records each turn's depth on its session path; older rollouts only number by order.
+  const turnNumbers = new Map<string, number>(
+    nodeOrders.size > 0
+      ? [...nodeOrders].map(([turnId, order]) => [turnId, order + 1])
+      : startedTurns.map((turnId, index) => [turnId, index + 1])
+  );
   return {
-    context,
-    column: window.matchCharIndex - starts[hitIndex]! + 1,
-    hitText: segments[hitIndex]!,
-    hitComplete: !(hitIndex === 0 && window.startPartial) &&
-      !(hitIndex === segments.length - 1 && window.endPartial)
+    messages,
+    indexByLine: new Map(messages.map((message, index) => [message.line, index])),
+    turnNumbers
   };
 };
 
-/**
- * Line start offsets for one rollout, taken from a ripgrep pass that reports every line. Only files
- * holding a hit on an oversized line need this, so normal results never pay for it.
- */
-const readLineStarts = async (
+/** One ripgrep pass per argv batch indexes every candidate rollout, instead of one process per file. */
+const readRolloutIndexes = async (
   executable: string,
-  path: string,
+  paths: string[],
   signal: AbortSignal | undefined
-): Promise<number[]> => {
-  const starts: number[] = [];
-  await runRipgrepBatch({
-    executable,
-    paths: [path],
-    query: "^",
-    literal: false,
-    ...(signal ? { signal } : {}),
-    onMatch: (match) => { starts[match.line] = match.byteOffset; }
-  });
-  return starts;
+): Promise<Map<string, RolloutIndex>> => {
+  const heads = new Map<string, Array<{ line: number; byteOffset: number; text: string }>>(paths.map((path) => [path, []]));
+  for (const batch of batchPaths(paths)) {
+    if (signal?.aborted) break;
+    await runRipgrepBatch({
+      executable,
+      paths: batch,
+      query: ROLLOUT_INDEX_PATTERN,
+      literal: false,
+      caseSensitive: true,
+      ...(signal ? { signal } : {}),
+      onMatch: (match) => { heads.get(match.path)?.push(match); }
+    });
+  }
+  return new Map([...heads].map(([path, pathHeads]) => [path, buildRolloutIndex(pathHeads)]));
 };
 
-const readChunk = async (path: string, position: number, length: number): Promise<string> => {
-  if (length <= 0) return "";
+/** Reads one rollout line from its start; undefined when it exceeds the message size limit. */
+const readRolloutLine = async (path: string, start: number): Promise<string | undefined> => {
   const handle = await open(path, "r");
-  const buffer = Buffer.alloc(length);
-  let bytesRead: number;
   try {
-    ({ bytesRead } = await handle.read(buffer, 0, length, position));
+    const chunks: Buffer[] = [];
+    let position = start;
+    let total = 0;
+    for (;;) {
+      const buffer = Buffer.alloc(LINE_READ_CHUNK_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
+      const chunk = buffer.subarray(0, newline >= 0 ? newline : bytesRead);
+      chunks.push(chunk);
+      total += chunk.length;
+      if (total > MAX_MESSAGE_LINE_BYTES) return undefined;
+      if (newline >= 0) break;
+      position += bytesRead;
+    }
+    return Buffer.concat(chunks).toString("utf8").replace(/\r$/, "");
   } finally {
     await handle.close();
   }
-  return buffer.subarray(0, bytesRead).toString("utf8");
 };
 
-/** Rollout lines carry their turn id near one end, so both ends are probed within a fixed budget. */
-const readTurnIdOnLine = async (path: string, start: number, end: number): Promise<string | undefined> => {
-  const length = Math.max(0, end - start);
-  const head = await readChunk(path, start, Math.min(length, CONTEXT_WINDOW_BYTES));
-  const fromHead = scanTurnId(head);
-  if (fromHead || length <= CONTEXT_WINDOW_BYTES * 2) return fromHead;
-  return scanTurnId(await readChunk(path, end - CONTEXT_WINDOW_BYTES, CONTEXT_WINDOW_BYTES));
+const textParts = (content: unknown, type: string): string =>
+  Array.isArray(content)
+    ? content
+      .filter((part): part is Record<string, unknown> => isRecord(part) && part.type === type && typeof part.text === "string")
+      .map((part) => part.text as string)
+      .join("\n")
+    : "";
+
+const compactJson = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
 };
 
-const readPositionIdOnLine = async (path: string, start: number, end: number): Promise<string | undefined> => {
-  const length = Math.max(0, end - start);
-  const head = await readChunk(path, start, Math.min(length, CONTEXT_WINDOW_BYTES));
-  const fromHead = scanPositionId(head);
-  if (fromHead || length <= CONTEXT_WINDOW_BYTES * 2) return fromHead;
-  return scanPositionId(await readChunk(path, end - CONTEXT_WINDOW_BYTES, CONTEXT_WINDOW_BYTES));
+const shellFlags = new Set(["-lc", "-c", "-command", "/c"]);
+
+/** Codex records `[shell, -lc, script]`; the script is what the message area reads as the command. */
+const commandText = (command: unknown): string =>
+  Array.isArray(command)
+    ? command.length >= 3 && shellFlags.has(String(command[command.length - 2]).toLowerCase())
+      ? String(command[command.length - 1])
+      : command.map(String).join(" ")
+    : typeof command === "string" ? command : "";
+
+/** Same reading of Codex's parsed command as the message area: omitted when no part is classified. */
+const parsedCommandActions = (parsed: unknown): ToolAction[] | undefined => {
+  if (!Array.isArray(parsed)) return undefined;
+  const actions = parsed.filter(isRecord).map((action): ToolAction => {
+    const path = asNonEmptyString(action.path);
+    switch (action.type) {
+      case "read":
+        return { kind: "read", ...(path ?? asNonEmptyString(action.name) ? { target: path ?? asNonEmptyString(action.name)! } : {}) };
+      case "list_files":
+        return { kind: "list", ...(path ? { target: path } : {}) };
+      case "search": {
+        const query = asNonEmptyString(action.query);
+        return { kind: "search", ...(query ? { target: query } : {}), ...(path ? { path } : {}) };
+      }
+      default:
+        return { kind: "run", target: String(action.cmd ?? "") };
+    }
+  });
+  return actions.some((action) => action.kind !== "run") ? actions : undefined;
 };
 
-/**
- * Column of a hit whose line reaches past the context window. The window alone cannot tell how far
- * the match sits from the line start, so the prefix is decoded; past the limit the byte distance is
- * reported rather than reading megabytes for a number nobody can act on.
- */
-const columnInLine = async (path: string, lineStart: number, byteOffset: number): Promise<number> => {
-  const length = byteOffset - lineStart;
-  if (length <= 0) return 1;
-  if (length > COLUMN_PREFIX_LIMIT) return length + 1;
-  return (await readChunk(path, lineStart, length)).length + 1;
+const collabToolNames: Record<string, string> = {
+  spawn_agent: "subagent.spawn",
+  send_input: "subagent.message",
+  resume_agent: "subagent.resume",
+  wait: "subagent.wait",
+  close_agent: "subagent.close"
+};
+
+type ToolInput = Pick<ToolCall, "toolName" | "status" | "inputSummary" | "outputSummary" | "actions"> & { exitCode?: number };
+
+const toolInput = (item: Record<string, unknown>): ToolInput | undefined => {
+  const status: ToolCall["status"] = item.status === "failed" ? "failed" : item.status === "inProgress" ? "running" : "completed";
+  switch (item.type) {
+    case "CommandExecution": {
+      const actions = parsedCommandActions(item.parsed_cmd);
+      const output = asNonEmptyString(item.aggregated_output) ?? asNonEmptyString(item.stdout);
+      return {
+        toolName: "commandExecution",
+        status,
+        inputSummary: commandText(item.command),
+        ...(output ? { outputSummary: output } : {}),
+        ...(actions ? { actions } : {}),
+        ...(typeof item.exit_code === "number" ? { exitCode: item.exit_code } : {})
+      };
+    }
+    case "McpToolCall":
+    case "DynamicToolCall": {
+      const toolName = item.type === "McpToolCall"
+        ? `mcp.${String(item.server)}.${String(item.tool)}`
+        : item.namespace ? `${String(item.namespace)}.${String(item.tool)}` : String(item.tool);
+      const args = compactJson(item.arguments);
+      const result = isRecord(item.result) ? item.result : undefined;
+      const output = textParts(result?.content ?? item.content_items, result ? "text" : "inputText");
+      return {
+        toolName,
+        status: result?.isError === true || item.success === false ? "failed" : status,
+        inputSummary: args ? `${toolName} ${args}` : toolName,
+        ...(output ? { outputSummary: output } : {})
+      };
+    }
+    case "CollabAgentToolCall": {
+      const prompt = asNonEmptyString(item.prompt);
+      return {
+        toolName: collabToolNames[String(item.tool)] ?? `subagent.${String(item.tool)}`,
+        status,
+        ...(prompt ? { inputSummary: prompt } : {})
+      };
+    }
+    case "WebSearch":
+    case "Extension": {
+      const action = isRecord(item.action) ? item.action : undefined;
+      const queries = Array.isArray(action?.queries) ? action.queries.filter((query): query is string => typeof query === "string") : [];
+      const query = asNonEmptyString(item.query) ?? asNonEmptyString(action?.query) ?? (queries.join("\n") || undefined);
+      if (item.type === "Extension" && item.kind !== "web.search") return undefined;
+      return { toolName: "webSearch", status, ...(query ? { inputSummary: query } : {}) };
+    }
+    case "ImageView": {
+      const path = asNonEmptyString(item.path)?.replace(/^file:\/\/\/?/, "");
+      return { toolName: "imageView", status, ...(path ? { inputSummary: path } : {}) };
+    }
+    case "ImageGeneration": {
+      const prompt = asNonEmptyString(item.revised_prompt) ?? asNonEmptyString(item.prompt);
+      return { toolName: "imageGeneration", status, ...(prompt ? { inputSummary: prompt } : {}) };
+    }
+    case "Reasoning": {
+      const summary = [
+        ...(Array.isArray(item.summary_text) ? item.summary_text : []),
+        ...(Array.isArray(item.raw_content) ? item.raw_content : [])
+      ].filter((part): part is string => typeof part === "string" && part.trim().length > 0).join("\n\n");
+      return summary ? { toolName: "reasoning", status: "completed", outputSummary: summary } : undefined;
+    }
+    default:
+      return undefined;
+  }
+};
+
+/** "读取 README.md · 3 行": the step exactly as the message area lists it. */
+const toolStepText = (input: ToolInput, message: RolloutMessageRecord, id: string): { text: string; kind: string } => {
+  const { exitCode, ...call } = input;
+  const step = describeToolStep(
+    { ...call, toolCallId: id, sessionId: "search", turnId: message.turnId ?? "search", startedAt: message.at },
+    { ...(call.outputSummary ? { text: call.outputSummary } : {}), ...(exitCode !== undefined ? { exitCode } : {}) }
+  );
+  const head = [step.verb, step.object].filter(Boolean).join(" ");
+  return { text: step.result ? `${head} · ${step.result}` : head, kind: step.kind };
+};
+
+export type RolloutMessage = {
+  /** Item id when the rollout records one; shared ancestors in forks carry the same id. */
+  id?: string;
+  text: string;
+  toolKind?: string;
+};
+
+/** The text a rollout record shows in the session, or undefined for records that show nothing. */
+export const readRolloutMessage = (lineText: string, message: RolloutMessageRecord): RolloutMessage | undefined => {
+  let value: unknown;
+  try {
+    value = JSON.parse(lineText);
+  } catch {
+    return undefined;
+  }
+  const payload = isRecord(value) && isRecord(value.payload) ? value.payload : undefined;
+  if (!payload) return undefined;
+  if (payload.type === "user_message" || payload.type === "agent_message") {
+    const text = asNonEmptyString(payload.message);
+    return text ? { text } : undefined;
+  }
+  const item = isRecord(payload.item) ? payload.item : undefined;
+  if (!item) return undefined;
+  const id = asNonEmptyString(item.id);
+  const withId = (rest: Omit<RolloutMessage, "id">): RolloutMessage => ({ ...(id ? { id } : {}), ...rest });
+  if (item.type === "UserMessage" || item.type === "AgentMessage") {
+    const text = textParts(item.content, item.type === "UserMessage" ? "text" : "Text").trim();
+    return text ? withId({ text }) : undefined;
+  }
+  const input = toolInput(item);
+  if (!input) return undefined;
+  const step = toolStepText(input, message, id ?? String(message.line));
+  return step.text ? withId({ text: step.text, toolKind: step.kind }) : undefined;
 };
 
 const listRolloutFiles = async (root: string): Promise<string[]> => {
@@ -624,26 +749,11 @@ const searchRollouts = async (input: {
   });
   const executable = await resolveRipgrepPath();
   const vermillionByPath = new Map<string, boolean>();
-  const lineStartsByPath = new Map<string, Promise<number[]>>();
-  const sharedPositionKeys = new Set<string>();
-
-  const cutLineBounds = async (path: string, line: number): Promise<{ start: number; end: number } | undefined> => {
-    let starts = lineStartsByPath.get(path);
-    if (!starts) {
-      starts = readLineStarts(executable, path, input.signal);
-      lineStartsByPath.set(path, starts);
-    }
-    const offsets = await starts;
-    const start = offsets[line];
-    if (start === undefined) return undefined;
-    const next = offsets[line + 1];
-    const end = next === undefined ? (await stat(path).catch(() => undefined))?.size ?? start : next - 1;
-    return { start, end };
-  };
+  const sharedMessageKeys = new Set<string>();
 
   for (const batch of batchPaths(paths)) {
     if (input.signal?.aborted || input.accumulator.truncated) return;
-    const found = new Map<string, Map<number, number>>();
+    const found = new Map<string, Set<number>>();
     const run = await runRipgrepBatch({
       executable,
       paths: batch,
@@ -652,58 +762,86 @@ const searchRollouts = async (input: {
       onMatch: (match) => {
         let lines = found.get(match.path);
         if (!lines) {
-          lines = new Map();
+          lines = new Set();
           found.set(match.path, lines);
         }
-        if (lines.has(match.line)) return;
-        lines.set(match.line, match.byteOffset);
+        lines.add(match.line);
       }
     });
     input.stats.sourcesScanned += run.filesSearched || batch.length;
     input.stats.bytesScanned += run.bytesSearched;
 
+    const candidates: string[] = [];
     for (const path of batch) {
       if (input.signal?.aborted) return;
-      const lines = found.get(path);
-      if (!lines) continue;
+      if (!found.has(path)) continue;
       let vermillion = vermillionByPath.get(path);
       if (vermillion === undefined) {
         vermillion = isVermillionRollout(await readRolloutHeader(path).catch(() => ""));
         vermillionByPath.set(path, vermillion);
       }
-      if (!vermillion) continue;
+      if (vermillion) candidates.push(path);
+    }
+    if (candidates.length === 0) continue;
+    const indexes = await readRolloutIndexes(executable, candidates, input.signal);
+
+    for (const path of candidates) {
+      if (input.signal?.aborted) return;
+      const lines = found.get(path)!;
+      // Candidate lines only say the bytes contain the query; the hit is confirmed on the text the
+      // message shows, so matches in field names, escapes or tool output are dropped here.
+      const rolloutIndex = indexes.get(path)!;
+      const messageIndexes = [...lines]
+        .map((line) => rolloutIndex.indexByLine.get(line))
+        .filter((value): value is number => value !== undefined)
+        .sort((left, right) => left - right);
+      if (messageIndexes.length === 0) continue;
       const entry = entryByPath.get(path)!;
       const workspaceLabel = input.workspaceLabelById.get(entry.workspaceId)!;
-      for (const [line, byteOffset] of [...lines].sort((a, b) => a[0] - b[0])) {
-        if (input.signal?.aborted) return;
-        const window = await readHitWindow(path, byteOffset);
-        const built = buildHitContext(window, line, input.query, input.contextLines);
-        let column = built.column;
-        let turnId: string | undefined;
-        let positionId: string | undefined;
-        if (built.hitComplete) {
-          const identity = extractRolloutIdentity(built.hitText);
-          turnId = identity.turnId;
-          positionId = identity.positionId;
-        } else {
-          // The window holds only part of this line, so its start is needed for both the turn and
-          // the column; one ripgrep pass over the file provides every line start.
-          const bounds = await cutLineBounds(path, line);
-          if (bounds) {
-            turnId = await readTurnIdOnLine(path, bounds.start, bounds.end);
-            positionId = await readPositionIdOnLine(path, bounds.start, bounds.end);
-            column = await columnInLine(path, bounds.start, byteOffset);
-          }
+      const treeId = entry.treeId ?? entry.sessionId;
+      const treeTitle = displaySessionTitle(entry.treeTitle);
+      const shown = new Map<number, Promise<RolloutMessage | undefined>>();
+      const messageAt = (position: number): Promise<RolloutMessage | undefined> => {
+        let cached = shown.get(position);
+        if (!cached) {
+          const record = rolloutIndex.messages[position]!;
+          cached = readRolloutLine(path, record.start)
+            .then((text) => text === undefined ? undefined : readRolloutMessage(text, record))
+            .catch(() => undefined);
+          shown.set(position, cached);
         }
-        const treeId = entry.treeId ?? entry.sessionId;
-        const treeTitle = displaySessionTitle(entry.treeTitle);
-        const sharedPositionKey = positionId
-          ? [treeId, turnId ?? "", positionId].join(":")
-          : undefined;
-        if (sharedPositionKey && sharedPositionKeys.has(sharedPositionKey)) continue;
-        if (sharedPositionKey) sharedPositionKeys.add(sharedPositionKey);
+        return cached;
+      };
+      const neighbour = async (position: number, step: -1 | 1): Promise<SearchContextLine | undefined> => {
+        // A few steps cover records that show nothing (empty reasoning) between two messages.
+        for (let next = position + step, tries = 0; next >= 0 && next < rolloutIndex.messages.length && tries < 4; next += step, tries += 1) {
+          const shownMessage = await messageAt(next);
+          if (!shownMessage) continue;
+          const record = rolloutIndex.messages[next]!;
+          const text = shownMessage.text.length > NEIGHBOUR_TEXT_CHARS
+            ? (step < 0 ? "…" + shownMessage.text.slice(-NEIGHBOUR_TEXT_CHARS) : shownMessage.text.slice(0, NEIGHBOUR_TEXT_CHARS) + "…")
+            : shownMessage.text;
+          return { line: record.line, text, matches: findMatches(text, input.query), source: record.source };
+        }
+        return undefined;
+      };
+      for (const position of messageIndexes) {
+        if (input.signal?.aborted) return;
+        const record = rolloutIndex.messages[position]!;
+        const shownMessage = await messageAt(position);
+        if (!shownMessage) continue;
+        const matches = findMatches(shownMessage.text, input.query);
+        if (matches.length === 0) continue;
+        // Forked sessions copy their ancestors' records; a shared message is listed once per tree.
+        const messageKey = [treeId, record.turnId ?? "", shownMessage.id ?? `${record.source}:${shownMessage.text}`].join(":");
+        if (sharedMessageKeys.has(messageKey)) continue;
+        sharedMessageKeys.add(messageKey);
+        const before = await neighbour(position, -1);
+        const after = await neighbour(position, 1);
+        const hitLine = { ...toContextLine(record.line, shownMessage.text, input.query, matches[0]!.start), source: record.source };
+        const turnNumber = record.turnId ? rolloutIndex.turnNumbers.get(record.turnId) : undefined;
         const hit = {
-          id: `session:${entry.workspaceId}:${entry.sessionId}:${line}`,
+          id: `session:${entry.workspaceId}:${entry.sessionId}:${record.line}`,
           kind: "session" as const,
           workspaceId: entry.workspaceId,
           workspaceLabel,
@@ -713,11 +851,15 @@ const searchRollouts = async (input: {
           ...(entry.treeActivityAt ? { treeActivityAt: entry.treeActivityAt } : {}),
           ...(entry.activityAt ? { sessionActivityAt: entry.activityAt } : {}),
           path,
-          line,
-          column,
-          context: built.context,
+          line: record.line,
+          column: matches[0]!.start + 1,
+          context: [before, hitLine, after].filter((line): line is SearchContextLine => Boolean(line)),
           sessionId: entry.sessionId,
-          ...(turnId ? { turnId } : {})
+          ...(record.turnId ? { turnId: record.turnId } : {}),
+          source: record.source,
+          ...(shownMessage.toolKind ? { toolKind: shownMessage.toolKind } : {}),
+          ...(turnNumber ? { turnNumber } : {}),
+          ...(record.at ? { messageAt: record.at } : {})
         } satisfies SearchHit;
         if (!addHit(input.accumulator, hit)) break;
         if (input.accumulator.pending.length >= HIT_EVENT_BATCH_SIZE) flushHits(input.accumulator);

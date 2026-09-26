@@ -19,6 +19,7 @@
     "lint": "pnpm exec tsc -b tsconfig.json --pretty false"
   },
   "dependencies": {
+    "@vermillion/shared": "workspace:*",
     "@vscode/ripgrep": "^1.15.14",
     "zod": "^3.25.76"
   },

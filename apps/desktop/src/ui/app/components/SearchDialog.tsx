@@ -1,7 +1,11 @@
-import { ArrowUpRight, ChevronDown, ChevronRight, FileText, ListTodo, MessageSquare } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import {
+  Archive, ArrowUpRight, ChevronDown, ChevronRight, Eye, FileText, Globe, Image as ImageIcon, ImagePlus, Lightbulb,
+  List, ListTodo, MessageSquare, Pencil, Search, Terminal, Wrench, type LucideIcon
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SearchHit, SearchResult, WorkbenchClient } from "@vermillion/workbench/client";
+import { formatMessageTime } from "../../chat-shell/index.js";
 import { Modal } from "./Modal.js";
 import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, SectionLabel } from "./ui.js";
 
@@ -26,6 +30,49 @@ const kindIcon: Record<SearchHit["kind"], typeof FileText> = {
   workItem: ListTodo,
   session: MessageSquare,
   doc: FileText
+};
+
+/** Same icons as the process steps in the message area. */
+const toolIcons: Record<string, LucideIcon> = {
+  think: Lightbulb,
+  read: Eye,
+  list: List,
+  search: Search,
+  edit: Pencil,
+  run: Terminal,
+  web: Globe,
+  view: ImageIcon,
+  generate: ImagePlus,
+  compact: Archive,
+  other: Wrench
+};
+
+type SearchSource = NonNullable<SearchHit["source"]>;
+
+const sourceLabel: Record<SearchSource, string> = {
+  user: "你",
+  agent: "agent 回复",
+  tool: "工具调用"
+};
+
+/** "你 · 第 3 轮 · 昨天 14:42" */
+const sessionMeta = (hit: SearchHit): string =>
+  [
+    hit.source ? sourceLabel[hit.source] : undefined,
+    hit.turnNumber ? "第 " + hit.turnNumber + " 轮" : undefined,
+    formatMessageTime(hit.messageAt)
+  ].filter(Boolean).join(" · ");
+
+const SourceMark = ({ hit }: { hit: SearchHit }) => {
+  if (hit.source === "user") {
+    return <span aria-label="你" className="vm-search-source">你</span>;
+  }
+  const Icon = hit.source === "tool" ? toolIcons[hit.toolKind ?? "other"] ?? Wrench : MessageSquare;
+  return (
+    <span aria-label={hit.source ? sourceLabel[hit.source] : "会话"} className="vm-search-source" data-source={hit.source}>
+      <Icon size={12} aria-hidden="true" />
+    </span>
+  );
 };
 
 const formatBytes = (bytes: number): string => {
@@ -94,6 +141,30 @@ const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
     hitLineRef.current?.scrollIntoView({ block: "center" });
   }, [hit?.id]);
   if (!hit) return <EmptyState title="选择一个命中位置" hint="右侧显示该位置附近的原文上下文。" />;
+  if (hit.kind === "session") {
+    return (
+      <section aria-label="命中消息预览" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="shrink-0 border-b border-border px-4 py-3">
+          <p className="truncate text-label font-medium text-strong" title={hit.treeTitle ?? hit.title}>
+            {hit.treeTitle ?? hit.title}
+          </p>
+          <p className="mt-1 truncate text-caption text-muted-foreground">{sessionMeta(hit)}</p>
+        </header>
+        <div className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {hit.context.map((line) => {
+            const current = line.line === hit.line;
+            return (
+              <div key={line.line} ref={current ? hitLineRef : undefined} data-current={current || undefined}
+                className="vm-search-message">
+                {line.source && <p className="text-micro text-muted-foreground">{sourceLabel[line.source]}</p>}
+                <p className="mt-1 whitespace-pre-wrap break-words text-label">{contextLineText(line)}</p>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
   return (
     <section aria-label="命中位置预览" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="shrink-0 border-b border-border px-4 py-3">
@@ -130,6 +201,7 @@ const SearchResultRow = ({
   const Icon = kindIcon[hit.kind];
   const line = matchingLine(hit);
   const shortLine = line ? snippetLine(line) : undefined;
+  const session = hit.kind === "session";
   return (
     <div
       onDoubleClick={onOpen}
@@ -138,15 +210,17 @@ const SearchResultRow = ({
       title="单击预览，双击打开"
     >
       <ListRow
-        leading={<Icon size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
+        leading={session
+          ? <SourceMark hit={hit} />
+          : <Icon size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
         title={
-          <span className="font-mono">
+          <span className={session ? undefined : "font-mono"}>
             {shortLine ? contextLineText(shortLine) : hit.title}
           </span>
         }
         titleClassName="vm-search-result-title"
-        meta={hit.workspaceLabel + " · 第 " + hit.line + " 行"}
-        trailing={<Badge>{kindLabel[hit.kind]}</Badge>}
+        meta={session ? sessionMeta(hit) : hit.workspaceLabel + " · 第 " + hit.line + " 行"}
+        trailing={session ? undefined : <Badge>{kindLabel[hit.kind]}</Badge>}
         hoverActions={<IconButton icon={ArrowUpRight} label="打开" size={13} onClick={onOpen} />}
         selected={selected}
         onClick={onSelect}
@@ -187,6 +261,11 @@ const SearchResults = ({ rows, selectedId, onSelect, onOpen, onToggleTree, onExp
     estimateSize: (index) => rows[index]!.type === "hit" ? 80 : 36,
     overscan: 6
   });
+  // Keyboard selection moves past the viewport; keep the selected row visible.
+  useEffect(() => {
+    const index = rows.findIndex((row) => row.type === "hit" && row.hit.id === selectedId);
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: "auto" });
+  }, [rows, selectedId, virtualizer]);
   return (
     <div ref={scrollRef} className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto" aria-label="搜索结果">
       <ul className="relative" style={{ height: virtualizer.getTotalSize() }}>
@@ -367,9 +446,29 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
     return result;
   }, [flatGroups, sessionTrees, expandedKinds, collapsedTrees]);
 
+  /** ↑↓ walk the listed matches, Enter opens the selected one; the IME keeps its own Enter. */
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (composing || event.nativeEvent.isComposing) return;
+    const visible = rows.flatMap((row) => row.type === "hit" ? [row.hit] : []);
+    if (event.key === "Enter") {
+      if (!selected) return;
+      event.preventDefault();
+      openHit(selected);
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (visible.length === 0) return;
+    event.preventDefault();
+    const current = visible.findIndex((hit) => hit.id === selected?.id);
+    const next = event.key === "ArrowDown"
+      ? Math.min(visible.length - 1, current + 1)
+      : Math.max(0, current < 0 ? 0 : current - 1);
+    setSelectedId(visible[next]!.id);
+  };
+
   return (
     <Modal title="搜索" onClose={onClose} width={980} height="74vh" contentClassName="overflow-hidden">
-      <div className="flex h-full min-h-[480px] min-w-0 flex-col">
+      <div className="flex h-full min-h-[480px] min-w-0 flex-col" onKeyDown={handleKeyDown}>
         <div className="shrink-0 border-b border-border px-4 py-3">
           <Field
             aria-label="搜索工单、会话和文档"
@@ -401,12 +500,17 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
           </div>
           <SearchPreview hit={selected} />
         </div>
-        <footer className="shrink-0 border-t border-border px-4 py-2 text-caption text-muted-foreground">
-          {stats
-            ? "扫描 " + stats.sourcesScanned + " 项 · " + formatBytes(stats.bytesScanned) + " · " + stats.durationMs + " ms" + (stats.truncated ? " · 结果已截断" : "")
-            : scanning
-              ? "已找到 " + hits.length + " 条"
-              : "搜索结果将在这里显示。"}
+        <footer className="flex shrink-0 items-center gap-4 border-t border-border px-4 py-2 text-caption text-muted-foreground">
+          <span><kbd className="vm-kbd">↑↓</kbd> 选择</span>
+          <span><kbd className="vm-kbd">Enter</kbd> 打开并定位</span>
+          <span><kbd className="vm-kbd">Esc</kbd> 关闭</span>
+          <span className="ml-auto truncate">
+            {stats
+              ? hits.length + " 条结果 · 扫描 " + stats.sourcesScanned + " 项 · " + formatBytes(stats.bytesScanned) + " · " + stats.durationMs + " ms" + (stats.truncated ? " · 结果已截断" : "")
+              : scanning
+                ? "已找到 " + hits.length + " 条"
+                : ""}
+          </span>
         </footer>
       </div>
     </Modal>

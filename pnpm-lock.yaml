@@ -189,6 +189,9 @@ importers:
 
   packages/workbench:
     dependencies:
+      '@vermillion/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@vscode/ripgrep':
         specifier: ^1.15.14
         version: 1.18.0

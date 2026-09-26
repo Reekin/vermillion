@@ -11,6 +11,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      "@vermillion/shared/tool-actions": fromHere("../../packages/shared/src/tool-actions.ts"),
       "@vermillion/shared": fromHere("../../packages/shared/src/index.ts"),
       "@vermillion/core": fromHere("../../packages/core/src/index.ts"),
       "@vermillion/adapters": fromHere("../../packages/adapters/src/index.ts"),
