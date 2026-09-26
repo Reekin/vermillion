@@ -143,7 +143,8 @@ try {
   conversationUrl.hash = `/session/${encodeURIComponent(args["session-id"])}`;
   await browser("open", conversationUrl.href);
   await visible("document.querySelector('textarea[aria-label=\"消息\"]') && !document.querySelector('textarea[aria-label=\"消息\"]').disabled");
-  await browser("find", "label", "消息", "fill", prompt);
+  await browser("fill", 'textarea[aria-label="消息"]', prompt);
+  await visible(`document.querySelector('textarea[aria-label="消息"]').value === ${JSON.stringify(prompt)}`);
   await capture("before-send");
   await visible("document.querySelector('.awb-mobile-composer button[type=submit]:not(:disabled)') !== null");
   await browser("find", "role", "button", "click", "--name", "发送", "--exact");
