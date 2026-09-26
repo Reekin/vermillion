@@ -47,8 +47,8 @@ type ItemHandlers = {
 };
 
 /** One work item: state, risk, title, stage or wait reason, time; controls appear on hover in fixed slots. */
-const WorkItemRow = ({ item, run, actions, waitingFor, attention, handlers }: {
-  item: WorkItem; run?: AgentRun; actions: WorkflowAction[]; waitingFor: string[]; attention?: Attention; handlers: ItemHandlers;
+const WorkItemRow = ({ item, run, actions, waitingFor, attention, handlers, depth = 0 }: {
+  item: WorkItem; run?: AgentRun; actions: WorkflowAction[]; waitingFor: string[]; attention?: Attention; handlers: ItemHandlers; depth?: number;
 }) => {
   const open = isOpenWorkItem(item);
   const progress = workItemProgress(item, actions, run, waitingFor);
@@ -61,7 +61,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, attention, handlers }: {
   const sessionId = item.run.sessionId ?? run?.sessionId;
   const stopped = item.run.paused || item.run.userStopped;
   return <div data-task-id={item.workItemId}>
-    <ListRow title={item.title} onClick={() => handlers.onOpen(item.workItemId)} cells={{
+    <ListRow title={item.title} depth={depth} onClick={() => handlers.onOpen(item.workItemId)} cells={{
       state: <StatusIcon tone={state.tone} icon={state.icon} label={stage} />,
       tag: <Badge>{item.risk}</Badge>, stage, muted: !open, timeTitle: fullTime(item.updatedAt),
       time: running && run ? "已运行 " + formatDuration(Date.now() - Date.parse(run.startedAt)) : relativeTime(item.updatedAt),
@@ -109,7 +109,7 @@ const AttentionAlert = ({ entry, attention, subject, handlers, sessionId, contro
 
 type RowContext = { runsFor: (item: WorkItem) => AgentRun | undefined; waitingFor: (item: WorkItem) => string[]; actions: WorkflowAction[]; attentionOf: (item: WorkItem) => Attention | undefined };
 
-const itemRow = (item: WorkItem, context: RowContext, handlers: ItemHandlers) => <WorkItemRow key={item.workItemId} item={item} run={context.runsFor(item)}
+const itemRow = (item: WorkItem, context: RowContext, handlers: ItemHandlers, depth = 0) => <WorkItemRow key={item.workItemId} item={item} run={context.runsFor(item)} depth={depth}
   actions={context.actions} waitingFor={context.waitingFor(item)} attention={context.attentionOf(item)} handlers={handlers} />;
 
 /** An unfinished work: name, source and timing, state and merge progress, the attention alert and its items. */
@@ -182,7 +182,7 @@ const EndedRow = ({ entry, title, expanded, onToggle, context, handlers }: {
         controls: [null, sessionId && <IconButton icon={MessageSquare} label={"打开会话：" + title} onClick={() => handlers.onOpenSession(sessionId)} />, null]
       }} />
     </div>
-    {multi && expanded && <div className="vm-board-nested">{items.map((item) => itemRow(item, context, handlers))}</div>}
+    {multi && expanded && <div className="vm-board-nested">{items.map((item) => itemRow(item, context, handlers, 1))}</div>}
   </>;
 };
 

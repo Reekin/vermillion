@@ -124,8 +124,6 @@ export const readableFailure = (text: string): ReadableFailure => {
   return { title: "执行遇到问题", next: "打开详情查看原始原因。" };
 };
 
-/** What the user can do right from the board: resume, retry, answer or inspect in detail, or open the session. */
-
 /** A rejected board action as one readable sentence: drops the RPC method prefix and the CLI's "下一步" hint. */
 export const readableActionError = (caught: unknown) => {
   const message = caught instanceof Error ? caught.message : String(caught);
@@ -133,6 +131,7 @@ export const readableActionError = (caught: unknown) => {
   return text || "操作没有完成，请稍后重试。";
 };
 
+/** What the user can do right from the board: resume, retry, answer or inspect in detail, or open the session. */
 export type AttentionAction = "resume" | "retry" | "decision" | "detail" | "session";
 export type Attention = ReadableFailure & { action?: AttentionAction; raw?: string };
 
