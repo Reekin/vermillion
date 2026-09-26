@@ -5,7 +5,7 @@
  * primitives own layout, states and typography. See .vermillion/docs/Foundation/UIUX/Standards.md.
  *
  * Buttons       Button, IconButton
- * Text          Badge, StatusPill, SectionLabel, InlineNotice, Alert, StatusDot, Progress, Steps
+ * Text          Badge, StatusPill, StatusIcon, SectionLabel, InlineNotice, Alert, StatusDot, Progress, Steps
  * Fields        Field (input / textarea / number), Select, SegmentedControl, Toggle, Checkbox, Stepper, SettingRow
  * Structure     PageHeader, PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
@@ -96,6 +96,16 @@ export const StatusPill = ({ tone, icon, children }: { tone: StatusTone; icon?: 
     <span className="vm-pill" data-tone={tone === "waiting" ? "neutral" : tone}>
       <Icon size={12} aria-hidden="true" className={cn(tone === "running" && !icon && "vm-spin")} />
       <span>{children}</span>
+    </span>
+  );
+};
+
+/** Row-leading 18px state icon for list rows; `label` names the state for assistive tech. */
+export const StatusIcon = ({ tone, icon, label }: { tone: StatusTone; icon?: LucideIcon; label: string }) => {
+  const Icon = icon ?? statusIcons[tone];
+  return (
+    <span className="vm-state-icon" data-tone={tone} role="img" aria-label={label}>
+      <Icon size={12} aria-hidden="true" className={cn(tone === "running" && !icon && "vm-spin")} />
     </span>
   );
 };

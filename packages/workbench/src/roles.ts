@@ -90,10 +90,9 @@ export class RoleService {
       if (retiredRoles.has(roleId)) continue;
       const { content, source } = await this.read(workspaceRoot, roleId);
       const mode = source === "global" ? "global" : parsePrompt(content).mode;
-      const { modelConfig } = await this.resolve(workspaceRoot, roleId);
-      const globalContent = source === "workspace" && mode === "append" ? await this.readGlobal(roleId) : undefined;
-      const title = titleOf(content) || (globalContent === undefined ? "" : titleOf(globalContent)) || roleId;
-      out.push({ roleId, source, mode, title, ...(modelConfig ? { modelConfig } : {}) });
+      const resolved = await this.resolve(workspaceRoot, roleId);
+      const { modelConfig } = resolved;
+      out.push({ roleId, source, mode, title: titleOf(resolved.content) || roleId, ...(modelConfig ? { modelConfig } : {}) });
     }
     return out;
   }

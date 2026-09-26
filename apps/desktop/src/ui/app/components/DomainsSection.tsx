@@ -1,7 +1,7 @@
-import { Ban, Check, CircleAlert, FileText, LoaderCircle, Plus, RefreshCw, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import { Ban, FileText, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DomainConfig, DomainDefinition, Issue, PatrolRun, WorkbenchClient } from "@vermillion/workbench/client";
-import { Button, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, MarkdownPreview, OverflowMenu, PanelHeader, Select, SettingRow, StatusPill, Toggle, type StatusTone } from "./ui.js";
+import { Button, Card, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, MarkdownPreview, OverflowMenu, PanelHeader, Select, SettingRow, StatusIcon, StatusPill, Toggle, type StatusTone } from "./ui.js";
 import { Modal } from "./Modal.js";
 
 const DOMAINS_DIR = ".vermillion/docs/domains/";
@@ -195,17 +195,15 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
         </header>
         {error && <InlineNotice tone="error" className="px-0">{error}</InlineNotice>}
         <div className="vm-domain-grid">
-          <section className="vm-domain-card" aria-label="领域定义">
-            <h3 className="vm-domain-card__title">领域定义</h3>
+          <Card header={<h3 className="vm-card-title">领域定义</h3>}>
             {definition === undefined ? <p className="text-caption text-muted-foreground">正在读取领域定义…</p>
               : <div className="vm-domain-definition"><MarkdownPreview content={definitionBody(definition)} documentUrl={documentUrl} onOpenLink={(href) => {
                 const path = resolveDocLink(selected.path, href);
                 if (path) onOpenDoc(path);
-                return Boolean(path) || !/^[a-z][a-z\d+.-]*:/i.test(href);
+                return Boolean(path);
               }} /></div>}
-          </section>
-          {config && <section className="vm-domain-card" aria-label="巡检">
-            <h3 className="vm-domain-card__title">巡检</h3>
+          </Card>
+          {config && <Card header={<h3 className="vm-card-title">巡检</h3>}>
             <SettingRow label="自动巡检" state={config.enabled ? `已开启 · 下次检查 ${clockTime(config.nextRunAt)}` : "当前关闭"}
               control={<Toggle labelHidden label="自动巡检" checked={config.enabled} onChange={(enabled) => void updateConfig({ enabled })} />} />
             <SettingRow label="目录变更后巡检" state={`${onOff(config.changeTrigger)} · ${config.triggerPaths.length} 个触发目录`}
@@ -217,32 +215,30 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
             <SettingRow label="允许自动开单" state={`${onOff(config.autoWorkEnabled)} · 授权范围 ${config.authorizationScope.length} 项`}
               actions={<Button size="sm" variant="ghost" onClick={() => setEditingAuthorization(true)}>编辑范围</Button>}
               control={<Toggle labelHidden label="允许自动开单" checked={config.autoWorkEnabled} onChange={(autoWorkEnabled) => void updateConfig({ autoWorkEnabled })} />} />
-          </section>}
+          </Card>}
         </div>
-        <section className="vm-domain-card" aria-label="规范与指令">
-          <h3 className="vm-domain-card__title">规范与指令 <span className="vm-domain-card__count">{selected.standards.length + 2}</span></h3>
+        <Card header={<h3 className="vm-card-title">规范与指令 <span className="vm-card-title__count">{selected.standards.length + 2}</span></h3>}>
           <ul>
             <li><FileRow icon={<FileText size={14} />} name="领域定义" path={selected.path} onOpen={() => onOpenDoc(selected.path)} /></li>
             {selected.standards.map((path) => <li key={path}><FileRow icon={<ShieldCheck size={14} />} name={fileTitle(path)} path={path} onOpen={() => onOpenDoc(path)} /></li>)}
             <li><FileRow icon={<RefreshCw size={14} />} name="巡检指令" path={instructionPath} onOpen={() => onOpenInstruction(selected.domainId)} /></li>
           </ul>
-        </section>
-        <section className="vm-domain-card" aria-label="巡检记录">
-          <h3 className="vm-domain-card__title">巡检记录 {runs.length > 0 && <span className="vm-domain-card__count">最近 {recent.length} 次</span>}
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onOpenIssues(selected.domainId)}>相关 Issues</Button></h3>
+        </Card>
+        <Card header={<h3 className="vm-card-title">巡检记录 {runs.length > 0 && <span className="vm-card-title__count">最近 {recent.length} 次</span>}
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onOpenIssues(selected.domainId)}>相关 Issues</Button></h3>}>
           {runs.length ? <>
             <div className="vm-patrol-strip" aria-label="最近巡检结果">
               {[...recent].reverse().map((patrol) => <i key={patrol.patrolRunId} data-tone={patrolTone(patrol)} title={`${patrolTime(patrol.startedAt)} · ${patrol.summary ?? ""}`} />)}
             </div>
             <ul>{groupPatrolRuns(runs).map((entry) => entry.kind === "skipped"
               ? <li key={entry.runs[0]!.patrolRunId} className="vm-patrol-entry">
-                <PatrolIcon tone="skipped" />
+                <StatusIcon tone="neutral" icon={Ban} label="已跳过" />
                 <span className="vm-patrol-entry__text">{skippedSummary(entry.runs)}</span>
                 <span className="vm-patrol-entry__time">{patrolTime(entry.runs[0]!.startedAt)}</span>
               </li>
               : <PatrolRow key={entry.run.patrolRunId} run={entry.run} onOpenSession={onOpenSession} onOpenIssues={() => onOpenIssues(selected.domainId)} />)}</ul>
           </> : <p className="text-caption text-muted-foreground">暂无巡检记录。</p>}
-        </section>
+        </Card>
       </div>
     </div>
     {target && <Modal title={"删除 " + target.title} onClose={() => setRemoving(undefined)} width={460}>
@@ -269,15 +265,9 @@ const FileRow = ({ icon, name, path, onOpen }: { icon: ReactNode; name: string; 
   </button>
 );
 
-const patrolIcons: Record<PatrolTone | "skipped", { icon: LucideIcon; label: string }> = {
-  clean: { icon: Check, label: "无问题" }, issue: { icon: CircleAlert, label: "发现问题" },
-  failed: { icon: X, label: "失败" }, running: { icon: LoaderCircle, label: "巡检中" }, skipped: { icon: Ban, label: "已跳过" }
-};
-
-/** Row-leading 18px state icon, coloured by the patrol result. */
-const PatrolIcon = ({ tone }: { tone: PatrolTone | "skipped" }) => {
-  const { icon: Icon, label } = patrolIcons[tone];
-  return <span className="vm-patrol-icon" data-tone={tone} role="img" aria-label={label}><Icon size={12} aria-hidden="true" className={tone === "running" ? "vm-spin" : undefined} /></span>;
+const patrolIcons: Record<PatrolTone, { tone: StatusTone; label: string }> = {
+  clean: { tone: "done", label: "无问题" }, issue: { tone: "attention", label: "发现问题" },
+  failed: { tone: "failed", label: "失败" }, running: { tone: "running", label: "巡检中" }
 };
 
 const PatrolRow = ({ run, onOpenSession, onOpenIssues }: { run: PatrolRun; onOpenSession: (sessionId: string) => void; onOpenIssues: () => void }) => {
@@ -285,7 +275,7 @@ const PatrolRow = ({ run, onOpenSession, onOpenIssues }: { run: PatrolRun; onOpe
   const title = run.summary || (run.status === "queued" ? "等待巡检" : tone === "issue" ? `发现 ${run.issueIds.length} 个问题` : patrolIcons[tone].label);
   const meta = [patrolTrigger[run.trigger], run.changedPaths.length ? `${run.changedPaths.length} 个文件变更` : undefined].filter(Boolean).join(" · ");
   return <li className="vm-patrol-entry">
-    <PatrolIcon tone={tone} />
+    <StatusIcon tone={patrolIcons[tone].tone} label={patrolIcons[tone].label} />
     <span className="vm-patrol-entry__text">{title}<small>{meta}</small></span>
     <span className="vm-patrol-entry__actions">
       {run.issueIds.length > 0 && <Button size="sm" variant="ghost" onClick={onOpenIssues}>{run.issueIds.length} 个 Issue</Button>}
