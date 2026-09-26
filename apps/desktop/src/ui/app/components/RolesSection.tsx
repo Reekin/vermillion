@@ -69,7 +69,7 @@ export const RolesSection = ({ client, transport, workspaceId, roles, onEdit }: 
           <button type="button" className="vm-role-row__main" onClick={() => onEdit(role.roleId)} aria-label={"编辑角色：" + role.name}>
             <span className="vm-role-row__name"><b>{role.name}</b><span>{role.roleId}</span></span>
             <span className="vm-role-row__duty">{role.duty}</span>
-            <span className="vm-role-row__model">{label.model}{label.reasoning && <span> · {label.reasoning}</span>}</span>
+            <span className="vm-role-row__model" data-inherited={role.modelConfig?.modelId ? undefined : true}>{label.model}{label.reasoning && <span> · {label.reasoning}</span>}</span>
             <span className="vm-role-mode" data-mode={role.mode}>{roleModeLabel[role.mode]}</span>
           </button>
           <OverflowMenu label={"更多操作：" + role.name} items={[

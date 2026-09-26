@@ -223,6 +223,7 @@
 .vm-role-row__duty { font-size: var(--text-caption); color: var(--color-muted-foreground); }
 .vm-role-row__model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-label); color: var(--color-foreground); }
 .vm-role-row__model > span { color: var(--color-muted-foreground); }
+.vm-role-row__model[data-inherited] { color: var(--color-muted-foreground); }
 .vm-role-mode { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--text-caption); color: var(--color-foreground); }
 .vm-role-mode::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--color-faint-foreground); }
 .vm-role-mode[data-mode="global"] { color: var(--color-muted-foreground); }
