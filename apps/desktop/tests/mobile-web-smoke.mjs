@@ -48,6 +48,8 @@ const replyText = `MOBILE_SMOKE_REPLY_${nonce}`;
 const prompt = `This is a connection check. Do not use tools, read files, run commands, or change anything. Reply with exactly this plain text and nothing else: ${replyText}`;
 const checks = [];
 const cleanupErrors = [];
+const secrets = [];
+const redact = (value) => secrets.reduce((text, secret) => text.replaceAll(secret, "[redacted]"), String(value));
 let interrupted = false;
 let browserStarted = false;
 let pairingAttempted = false;
@@ -70,7 +72,7 @@ let browserConfigured = false;
 async function run(program, argv, label, env = process.env, timeout = 135_000) {
   try {
     return (await execute(program, argv, { cwd: repository, env, timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true })).stdout;
-  } catch { throw new Error(`${label} failed (subprocess output withheld to protect credentials)`); }
+  } catch (error) { throw new Error(`${label} failed: ${redact(error.stderr || error.message).slice(0, 4000)}`); }
 }
 async function cli(method, params = {}) {
   const stdout = await run(process.execPath, [cliPath, "--target", args.target, method, JSON.stringify(params)], `Bound CLI ${method}`);
@@ -83,7 +85,7 @@ async function browser(...argv) {
   const stdout = await run(args.browser, [...launchFlags, ...browserFlags, ...argv], `Browser ${argv[0]}`, browserEnv);
   let result;
   try { result = JSON.parse(stdout); } catch { throw new Error(`Invalid browser response: ${argv[0]}`); }
-  if (result.success === false) throw new Error(`Browser ${argv[0]} failed (details withheld)`);
+  if (result.success === false) throw new Error(`Browser ${argv[0]} failed: ${redact(JSON.stringify(result.error)).slice(0, 4000)}`);
   return result.data;
 }
 async function until(label, predicate, timeout = 120_000) {
@@ -121,6 +123,7 @@ try {
   await capture("pairing");
   const pairing = await cli("remote.pair");
   assert.ok(typeof pairing.code === "string", "Pairing code missing");
+  secrets.push(pairing.code);
   const pairingUrl = new URL(pairing.qrContent);
   assert.equal(new URL(pairingUrl.searchParams.get("url")).origin, url.origin, "--url must match the bound desktop public URL");
   pairingAttempted = true;
@@ -141,6 +144,7 @@ try {
   await browser("open", conversationUrl.href);
   await visible("document.querySelector('textarea[aria-label=\"消息\"]') && !document.querySelector('textarea[aria-label=\"消息\"]').disabled");
   await browser("find", "label", "消息", "fill", prompt);
+  await capture("before-send");
   await visible("document.querySelector('.awb-mobile-composer button[type=submit]:not(:disabled)') !== null");
   await browser("find", "role", "button", "click", "--name", "发送", "--exact");
   check("Unique pure-text prompt submitted through the mobile composer");
