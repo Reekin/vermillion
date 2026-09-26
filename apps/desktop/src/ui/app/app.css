@@ -130,12 +130,13 @@
 .vm-button-outlined { border: 1px solid var(--color-control-border); color: var(--color-foreground); }
 .vm-button-outlined:hover { border-color: var(--color-control-border-hover); }
 .vm-field-compact { height: 28px; padding-inline: 8px; font-size: var(--text-label); }
+:root { --vm-status-width: 128px; }
 /* StatusPill: state icon + short text on the state colour's light fill. */
 .vm-pill { display: inline-flex; flex-shrink: 0; max-width: 100%; overflow: hidden; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--text-micro); font-weight: 500; white-space: nowrap; background: var(--color-surface-selected); color: var(--color-foreground); }
 .vm-pill > svg { flex: none; }
 .vm-pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* In list status columns every pill fills the fixed column so icons and edges line up row to row. */
-.vm-list-status > .vm-pill { width: 100%; }
+.vm-list-status > .vm-pill { width: var(--vm-status-width); max-width: 100%; }
 .vm-pill[data-tone="running"] { background: var(--color-state-running-soft); color: var(--color-state-running); }
 .vm-pill[data-tone="done"] { background: var(--color-state-done-soft); color: var(--color-state-done); }
 .vm-pill[data-tone="failed"] { background: var(--color-state-failed-soft); color: var(--color-state-failed); }
@@ -219,7 +220,7 @@
 .vm-tab-count { display: inline-flex; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; align-items: center; justify-content: center; border-radius: 999px; background: var(--color-state-attention-soft); font-family: var(--font-mono); font-size: var(--text-micro); font-weight: 600; color: var(--color-state-attention); }
 .vm-scrollbar-hidden { scrollbar-width: none; -ms-overflow-style: none; }
 .vm-scrollbar-hidden::-webkit-scrollbar { display: none; }
-.vm-list-columns { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) 128px 22px 48px; align-items: center; gap: 8px; min-height: 36px; padding-inline: 12px; }
+.vm-list-columns { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) var(--vm-status-width) 22px 48px; align-items: center; gap: 8px; min-height: 36px; padding-inline: 12px; }
 .vm-list-columns:hover { background: var(--color-surface-hover); }
 .vm-list-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem; font-family: var(--font-mono); font-size: var(--text-caption); color: var(--color-muted-foreground); }
 .vm-list-status { display: flex; }
@@ -230,7 +231,7 @@
 .vm-list-action > button { width: 48px; min-height: 24px; padding: 0 6px; }
 .vm-list-leading { display: flex; align-items: center; }
 .vm-list-control { display: flex; justify-content: flex-end; }
-.vm-list-columns-controls { grid-template-columns: 30px minmax(0, 1fr) 148px 128px 96px 22px 48px; padding-block: 5px; }
+.vm-list-columns-controls { grid-template-columns: 30px minmax(0, 1fr) 148px var(--vm-status-width) 96px 22px 48px; padding-block: 5px; }
 .vm-list-columns-controls .vm-list-info { text-align: right; font-size: var(--text-micro); }
 .vm-list-columns-controls .vm-list-main > div { overflow-wrap: anywhere; }
 .vm-card-compact { background: var(--color-surface-raised); overflow: hidden; }
@@ -261,7 +262,7 @@
   .vm-disclosure-body { padding-left: 24px; padding-right: 12px; }
 }
 @media (max-width: 900px) {
-  .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) 76px 22px 48px; row-gap: 0; }
+  .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) var(--vm-status-width) 22px 48px; row-gap: 0; }
   .vm-list-columns > :not(.vm-list-info) { grid-row: 1; }
   .vm-list-info { grid-column: 2 / -1; grid-row: 2; max-width: none; white-space: normal; overflow-wrap: anywhere; padding-bottom: 4px; }
   .vm-list-info:empty { display: none; }
@@ -334,11 +335,11 @@
 .vm-output-list > li + li { margin-top: 24px; }
 
 @media (max-width: 640px) {
-  .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) 76px 22px 48px; gap: 4px; padding-inline: 8px; }
+  .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) var(--vm-status-width) 22px 48px; gap: 4px; padding-inline: 8px; }
   .vm-tabs { overflow-x: auto; }
 }
 @container (max-width: 960px) {
-  .vm-list-columns-controls { grid-template-columns: 30px minmax(0, 1fr) 128px 96px 22px 48px; row-gap: 0; }
+  .vm-list-columns-controls { grid-template-columns: 30px minmax(0, 1fr) var(--vm-status-width) 96px 22px 48px; row-gap: 0; }
   .vm-list-columns-controls > :not(.vm-list-info) { grid-row: 1; }
   .vm-list-columns-controls .vm-list-info { grid-column: 2 / -1; grid-row: 2; text-align: left; max-width: none; padding-bottom: 4px; }
 }
