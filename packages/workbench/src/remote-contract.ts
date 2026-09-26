@@ -8,6 +8,7 @@ export const zRemoteConfig = z.object({
   serverPort: zPort.default(7000),
   frpToken: z.string(),
   remotePort: zPort.default(18080),
+  publicPort: zPort.default(443),
   publicUrl: z.string(),
   desktopName: z.string(),
   frpcPath: z.string(),

@@ -48,7 +48,7 @@ export function RemoteAccessSettings() {
   const pairDeviceIds = useRef(new Set<string>());
   const serverHost = config?.serverAddr.includes(":") && !config.serverAddr.startsWith("[")
     ? `[${config.serverAddr}]` : config?.serverAddr;
-  const defaultPublicUrl = serverHost ? `https://${serverHost}:${config?.remotePort}` : "";
+  const defaultPublicUrl = serverHost ? `https://${serverHost}:${config?.publicPort}` : "";
   const publicUrl = config?.publicUrl || defaultPublicUrl;
 
   // Settings remains mounted while its modal is hidden. Only visible settings request updates.
@@ -128,7 +128,7 @@ export function RemoteAccessSettings() {
     void pending.finally(() => { if (saveQueue.current === pending) setSaving(false); });
   }, [client]);
 
-  const savePort = (key: "serverPort" | "remotePort", value: string) => {
+  const savePort = (key: "serverPort" | "remotePort" | "publicPort", value: string) => {
     const port = Number(value);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       setError("端口须为 1 到 65535 之间的整数。");
@@ -184,6 +184,7 @@ export function RemoteAccessSettings() {
         <ConfigField label="frp 服务端口" type="number" value={config.serverPort} onSave={(value) => savePort("serverPort", value)} />
         <ConfigField label="frp token" type="password" value={config.frpToken} onSave={(frpToken) => save({ frpToken })} />
         <ConfigField label="桌面在 VPS 上的端口" type="number" value={config.remotePort} onSave={(value) => savePort("remotePort", value)} />
+        <ConfigField label="公网 HTTPS 端口" type="number" value={config.publicPort} onSave={(value) => savePort("publicPort", value)} />
         <ConfigField label="公网地址" value={config.publicUrl} placeholder={defaultPublicUrl} onSave={(publicUrl) => save({ publicUrl: publicUrl.trim() })} />
         <ConfigField label="桌面名称" value={config.desktopName} onSave={(desktopName) => save({ desktopName: desktopName.trim() })} />
       </div>

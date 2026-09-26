@@ -79,7 +79,7 @@ scp YOUR_SSH_HOST:/etc/vermillion-remote/frp-ca.crt ./frp-ca.crt
 
 在桌面选择此文件的绝对路径作为 frp 可信 CA。`serverAddr` 应与安装时的 `--host` 一致；若使用另一连接地址，`transport.tls.serverName` 必须明确设为证书对应的原地址。CA 文件本身不是秘密，但必须通过可信通道取得，不能从未认证的 HTTP 链接下载。不要把 CA 私钥复制到桌面。应用未提供可信 CA 字段的版本不能安全使用此部署，应先更新应用。
 
-**端口对应关系：** Mac 的 frpc `remotePort` 填 **18001**，公网地址填 `https://YOUR_PUBLIC_IP:8443`；PC 填 **18002** 与 `https://YOUR_PUBLIC_IP:8444`。公网 HTTPS 端口不能填入 frpc `remotePort`。桌面网关 `localIP` 为 `127.0.0.1`，本地端口由桌面网关状态确定。
+**端口对应关系：** Mac 的后端端口 `remotePort` 填 **18001**，公网 HTTPS 端口 `publicPort` 填 **8443**；PC 分别填 **18002** 与 **8444**。`publicPort` 默认 443，需按部署映射修改。公网地址 `publicUrl` 可留空，由 VPS 地址和 `publicPort` 自动组成（Mac 为 `https://YOUR_PUBLIC_IP:8443`）；需要使用其他公网地址时再填写覆盖值。公网 HTTPS 端口不能填入 frpc `remotePort`。桌面网关 `localIP` 为 `127.0.0.1`，本地端口由桌面网关状态确定。
 
 macOS：Apple Silicon 下载 `frp_0.71.0_darwin_arm64.tar.gz`，Intel 下载 `darwin_amd64`。以下以 Apple Silicon 为例，在下载目录执行：
 

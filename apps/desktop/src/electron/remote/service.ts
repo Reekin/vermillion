@@ -8,7 +8,7 @@ import { RemoteTunnel } from "./tunnel.js";
 
 export class RemoteAccessService {
   readonly devices: RemoteDevices;
-  private config: RemoteConfig = { enabled: false, serverAddr: "", serverPort: 7000, frpToken: "", remotePort: 18080, publicUrl: "", desktopName: hostname(), frpcPath: "", trustedCaFile: "" };
+  private config: RemoteConfig = { enabled: false, serverAddr: "", serverPort: 7000, frpToken: "", remotePort: 18080, publicPort: 443, publicUrl: "", desktopName: hostname(), frpcPath: "", trustedCaFile: "" };
   private gateway?: Awaited<ReturnType<typeof startRemoteGateway>>;
   private tunnel: RemoteTunnel;
   private error?: string;
@@ -30,7 +30,7 @@ export class RemoteAccessService {
   getConfig(): RemoteConfig { return { ...this.config }; }
   private publicUrl(): string {
     const host = this.config.serverAddr.includes(":") ? `[${this.config.serverAddr}]` : this.config.serverAddr;
-    return this.config.publicUrl || `https://${host}:${this.config.remotePort}`;
+    return this.config.publicUrl || `https://${host}:${this.config.publicPort}`;
   }
   private async restart(): Promise<void> {
     await this.stop();
