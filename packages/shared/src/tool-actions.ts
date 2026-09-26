@@ -66,7 +66,8 @@ const countRawLines = (value: string | undefined): number =>
 
 /**
  * Directory entries without table headers (any header line followed by a dashed rule, as pwsh
- * prints for Get-ChildItem and Select-Object), `Directory:` captions, `ls -la` totals or dot entries.
+ * prints for Get-ChildItem and Select-Object), the localized "Directory: C:\path" caption,
+ * `ls -la` totals or dot entries.
  */
 const countListEntries = (value: string | undefined): number => {
   const lines = (value ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -76,7 +77,7 @@ const countListEntries = (value: string | undefined): number => {
     return (
       !isHeader &&
       !/^-[-\s]*$/.test(line) &&
-      !/^Directory:/i.test(line) &&
+      !/^[^\s:：]+\s*[:：]\s*(?:[A-Za-z]:[\\/]|\/)/.test(line) &&
       !/^total \d+$/.test(line) &&
       !/(^|\s)\.{1,2}$/.test(line)
     );

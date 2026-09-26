@@ -58,7 +58,7 @@ describe("tool actions", () => {
   it("counts listing entries without pwsh headers", () => {
     const listing = [
       "",
-      "    Directory: C:\p",
+      "    Directory: C:\\p",
       "",
       "Mode                 LastWriteTime         Length Name",
       "----                 -------------         ------ ----",
@@ -75,6 +75,19 @@ describe("tool actions", () => {
       text: selected.join(String.fromCharCode(10)),
       exitCode: 0
     }).result).toBe("3 个条目");
+    const localized = [
+      "",
+      "    目录: C:\\project",
+      "",
+      "Mode                 LastWriteTime         Length Name",
+      "----                 -------------         ------ ----",
+      "d--h--          2026/9/26    20:00                .git",
+      "-a----          2026/9/26    20:00             27 README.md"
+    ];
+    expect(describeToolStep(call({ inputSummary: pwsh("Get-ChildItem -Force") }), {
+      text: localized.join(String.fromCharCode(10)),
+      exitCode: 0
+    }).result).toBe("2 个条目");
   });
 
   it("shows commands mixing action kinds, or with setup first, by their first real command", () => {
