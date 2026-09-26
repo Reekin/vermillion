@@ -14,6 +14,7 @@ vi.mock("xterm", () => ({
 }));
 
 import {
+  formatMessageTime,
   SessionPane,
   formatRelativeActivityAge,
   truncateSessionHeading
@@ -185,5 +186,12 @@ describe("SessionPane", () => {
     expect(formatRelativeActivityAge(at(2025, 11, 30, 8, 0), now)).toBe("2025年12月30日");
     expect(formatRelativeActivityAge(undefined, now)).toBeUndefined();
     expect(formatRelativeActivityAge("not-a-date", now)).toBeUndefined();
+  });
+
+  it("formats message times to the second", () => {
+    const now = new Date(2026, 4, 4, 12, 0, 0);
+    expect(formatMessageTime(new Date(2026, 4, 4, 9, 5, 7).toISOString(), now)).toBe("09:05:07");
+    expect(formatMessageTime(new Date(2026, 4, 3, 22, 10, 5).toISOString(), now)).toBe("昨天 22:10:05");
+    expect(formatMessageTime(new Date(2026, 3, 11, 7, 18, 50).toISOString(), now)).toBe("4月11日 07:18:50");
   });
 });

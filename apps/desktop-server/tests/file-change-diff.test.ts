@@ -27,33 +27,28 @@ describe("file change diff normalization", () => {
 +第三行内容`);
   });
 
-  it("wraps added files with /dev/null as the old side", () => {
+  it("turns the full content Codex reports for added files into one hunk", () => {
     expect(
       normalizeFileChangeDiff({
         path: "apps/desktop/abc.txt",
-        kind: {
-          type: "add"
-        },
-        diff: `@@ -0,0 +1 @@
-+
-`
+        kind: { type: "add" },
+        diff: "import numpy\r\n\nprint(1)\n"
       })
     ).toBe(`diff --git a/apps/desktop/abc.txt b/apps/desktop/abc.txt
 --- /dev/null
 +++ b/apps/desktop/abc.txt
-@@ -0,0 +1 @@
-+`);
+@@ -0,0 +1,3 @@
++import numpy
++
++print(1)`);
   });
 
-  it("preserves an already complete diff and merges multiple changes", () => {
+  it("preserves an already complete diff and merges it with a deleted file's content", () => {
     expect(
       mergeFileChangeDiffs([
         {
           path: "src/foo.ts",
-          kind: {
-            type: "update",
-            move_path: null
-          },
+          kind: { type: "update", move_path: null },
           diff: `diff --git a/src/foo.ts b/src/foo.ts
 --- a/src/foo.ts
 +++ b/src/foo.ts
@@ -61,14 +56,7 @@ describe("file change diff normalization", () => {
 -old
 +new`
         },
-        {
-          path: "src/bar.ts",
-          kind: {
-            type: "delete"
-          },
-          diff: `@@ -1 +0,0 @@
--gone`
-        }
+        { path: "src/bar.ts", kind: { type: "delete" }, diff: "gone\n" }
       ])
     ).toBe(`diff --git a/src/foo.ts b/src/foo.ts
 --- a/src/foo.ts
@@ -79,7 +67,7 @@ describe("file change diff normalization", () => {
 diff --git a/src/bar.ts b/src/bar.ts
 --- a/src/bar.ts
 +++ /dev/null
-@@ -1 +0,0 @@
+@@ -1,1 +0,0 @@
 -gone`);
   });
 });

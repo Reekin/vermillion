@@ -228,7 +228,7 @@ const isSameDay = (left: Date, right: Date): boolean =>
   left.getMonth() === right.getMonth() &&
   left.getDate() === right.getDate();
 
-/** "14:42" today, "昨天 22:10", "9月11日 07:18", with the year when it differs. */
+/** "14:42:24" today, "昨天 22:10:05", "9月11日 07:18:50", with the year when it differs. */
 export const formatMessageTime = (iso: string | undefined, now = new Date()): string | undefined => {
   if (!iso) {
     return undefined;
@@ -237,7 +237,7 @@ export const formatMessageTime = (iso: string | undefined, now = new Date()): st
   if (Number.isNaN(date.getTime())) {
     return undefined;
   }
-  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
   if (isSameDay(date, now)) {
     return clock;
   }
@@ -546,8 +546,11 @@ const TranscriptPane = memo(
             ? [
                 describeTurnExecution(visibleRow.turn.executionProfile, modelCatalog),
                 (() => {
+                  // Completion time, with how long the turn took in parentheses.
+                  const completed = formatMessageTime(visibleRow.turn.completedAt);
                   const durationMs = turnDurationMs(visibleRow.turn);
-                  return durationMs !== undefined ? formatDurationZh(durationMs) : undefined;
+                  const duration = durationMs !== undefined ? formatDurationZh(durationMs) : undefined;
+                  return completed && duration ? `${completed}（${duration}）` : completed ?? duration;
                 })()
               ].filter(Boolean).join(" · ") || undefined
             : undefined;

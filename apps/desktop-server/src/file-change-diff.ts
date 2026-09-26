@@ -21,12 +21,29 @@ const headerPath = (value: string | undefined, side: "a" | "b"): string =>
 const looksLikeUnifiedDiff = (diff: string): boolean =>
   /^diff --git /m.test(diff) || /^--- /m.test(diff) || /^\+\+\+ /m.test(diff);
 
+/** Codex reports added and deleted files by their full content; this turns it into one hunk. */
+const contentHunk = (content: string, kind: "add" | "delete"): string | undefined => {
+  const body = content.replace(/\r?\n$/, "");
+  if (!body) {
+    return undefined;
+  }
+  const lines = body.split(/\r?\n/);
+  const range = `1,${lines.length}`;
+  const marker = kind === "add" ? "+" : "-";
+  return [
+    kind === "add" ? `@@ -0,0 +${range} @@` : `@@ -${range} +0,0 @@`,
+    ...lines.map((line) => marker + line)
+  ].join("\n");
+};
+
 export const normalizeFileChangeDiff = (change: FileChangeDiffLike): string | undefined => {
-  const diff = trimOuterNewlines(change.diff);
+  const diff = change.kind.type === "update"
+    ? trimOuterNewlines(change.diff)
+    : contentHunk(change.diff, change.kind.type);
   if (!diff) {
     return undefined;
   }
-  if (looksLikeUnifiedDiff(diff)) {
+  if (change.kind.type === "update" && looksLikeUnifiedDiff(diff)) {
     return diff;
   }
 
