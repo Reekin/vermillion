@@ -36,7 +36,7 @@ const DetailCode = ({ text }: { text: string }) => (
       const match = /^(\s*)"([^"]+)": (.*)$/.exec(line);
       return (
         <span key={index}>
-          {match ? <>{match[1]}<span className="vm-output-code__key">{match[2]}</span>{": "}
+          {match ? <>{match[1]}<span className="vm-output-code__key">"{match[2]}"</span>{": "}
             <span className={/^"/.test(match[3]!) ? "vm-output-code__string" : undefined}>{match[3]}</span></> : line}
           {"\n"}
         </span>
