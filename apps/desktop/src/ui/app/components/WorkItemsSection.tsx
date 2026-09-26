@@ -6,7 +6,7 @@ import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { Modal } from "./Modal.js";
 import { SupervisorDetails } from "./SupervisorDetails.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { currentWorkStatus, statusTone, workItemBoardLabel, workRequestStatus, workSessionLabel } from "./task-labels.js";
+import { currentWorkStatus, currentWorkTone, statusTone, workItemBoardLabel, workRequestStatus, workSessionLabel } from "./task-labels.js";
 import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, StatusPill, Stepper, Toggle } from "./ui.js";
 
 import { roleLabel, workItemProgress } from "./workflow-display.js";
@@ -93,7 +93,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, hasDecision,
         columns={{
           controls: true,
           info: <span title={[new Date(item.updatedAt).toLocaleString("zh-CN"), run && roleLabel[run.role]].filter(Boolean).join(" · ")}>{info}</span>,
-          status: <StatusPill tone={statusTone(!open ? item.status : state.kind === "running" ? "running" : paused || retryable || hasDecision ? "decision" : "queued")}>{label}</StatusPill>,
+          status: <StatusPill tone={statusTone(!open ? item.status : currentWorkTone(state.kind))}>{label}</StatusPill>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
           control: isOpenWorkItem(item) && (paused || item.run.userStopped ? <Button size="sm" variant="ghost" disabled={busy} onClick={onResume}>恢复</Button>
               : retryable ? <Button size="sm" variant="ghost" disabled={busy} onClick={onRetry}>重试</Button>

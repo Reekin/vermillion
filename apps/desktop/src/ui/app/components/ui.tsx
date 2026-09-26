@@ -95,7 +95,7 @@ export const StatusPill = ({ tone, icon, children }: { tone: StatusTone; icon?: 
   return (
     <span className="vm-pill" data-tone={tone === "waiting" ? "neutral" : tone}>
       <Icon size={12} aria-hidden="true" className={cn(tone === "running" && !icon && "vm-spin")} />
-      {children}
+      <span>{children}</span>
     </span>
   );
 };
@@ -214,7 +214,7 @@ export type SelectOption = { value: string; label: string; hint?: string; disabl
 
 /**
  * Single-choice dropdown drawn by the app (never the native <select>): trigger, popup list with optional
- * second-line hints, keyboard navigation. `plain` is the borderless-fill trigger used in toolbars.
+ * second-line hints, keyboard navigation. `plain` is the transparent, hairline-bordered trigger used in toolbars.
  */
 export const Select = ({ value, options, onChange, label, hint, placeholder, disabled, compact, plain, className, "aria-label": ariaLabel }: {
   value: string;

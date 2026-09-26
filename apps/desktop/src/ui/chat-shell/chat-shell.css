@@ -27,8 +27,8 @@
   /* Severity marks only (icons, counters, level tags, selection bars); never body text or large fills. */
   --awb-severity-error: #d48a86;
   --awb-severity-error-soft: rgba(212, 138, 134, 0.14);
-  --awb-severity-warning: #d49a62;
-  --awb-severity-warning-soft: rgba(212, 154, 98, 0.14);
+  --awb-severity-warning: #dc8a4e;
+  --awb-severity-warning-soft: rgba(220, 138, 78, 0.14);
   --awb-severity-info: #8fa9c4;
   --awb-severity-info-soft: rgba(143, 169, 196, 0.12);
   /* State colours for status icons, pills, progress, counters and alert fills; never body text.

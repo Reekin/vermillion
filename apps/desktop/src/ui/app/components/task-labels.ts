@@ -56,6 +56,10 @@ export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { la
 export const statusTone = (status: WorkItem["status"] | "decision"): StatusTone =>
   status === "running" ? "running" : status === "decision" ? "attention" : status === "closed" ? "done" : status === "cancelled" ? "neutral" : "waiting";
 
+/** Board status for an open item's current state: anything the user must resolve reads as needing attention. */
+export const currentWorkTone = (kind: CurrentWorkState): WorkItem["status"] | "decision" =>
+  kind === "running" ? "running" : kind === "queued" ? "queued" : kind === "finished" ? "closed" : "decision";
+
 export const workItemBoardLabel = (item: WorkItem, progressLabel: string) => {
   if (item.status === "closed" || item.status === "cancelled") return statusLabel[item.status];
   const state = currentWorkStatus(item);
