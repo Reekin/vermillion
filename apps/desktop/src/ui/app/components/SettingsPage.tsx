@@ -10,7 +10,7 @@ import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { RendererStore } from "../../../store/store.js";
 import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-signal.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
-import { Alert, Button, CollapsibleDetails, Field, InlineNotice } from "./ui.js";
+import { Alert, Button, CollapsibleDetails, Field, InlineNotice, Select } from "./ui.js";
 import { engineWarningDetails, engineWarningReason } from "../output-log.js";
 
 type SettingsPageProps = {
@@ -126,45 +126,29 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
   return (
     <div className="flex flex-col gap-4 p-5">
       {error && <InlineNotice tone="error">{error}</InlineNotice>}
-      <Field
-        kind="select"
+      <Select
         label="新会话引擎"
         className="max-w-md"
         value={settings?.defaultNewSessionEngineId ?? engines[0]?.engineId ?? ""}
         disabled={!settings}
         hint="之后新建的会话使用该引擎；已有会话树保持创建时的引擎。"
-        onChange={(event) => {
-          if (event.target.value) void save({ defaultNewSessionEngineId: event.target.value });
-        }}
-      >
-        {engines.map((engine) => (
-          <option key={engine.engineId} value={engine.engineId}>
-            {engine.displayName}
-          </option>
-        ))}
-      </Field>
-      <Field
-        kind="select"
+        onChange={(value) => { if (value) void save({ defaultNewSessionEngineId: value }); }}
+        options={engines.map((engine) => ({ value: engine.engineId, label: engine.displayName }))}
+      />
+      <Select
         label="标题模型"
         className="max-w-md"
         value={titleGenerationModelId ?? ""}
         disabled={!settings}
         hint="会话首条消息用它生成标题；选项来自新会话引擎，留空用内置默认模型。"
-        onChange={(event) =>
-          void save({ titleGenerationModelId: event.target.value || null })
-        }
-      >
-        <option value="">{`默认（${DEFAULT_SESSION_TITLE_MODEL_ID}）`}</option>
-        {titleGenerationModelId &&
-          !titleModels.some((model) => model.modelId === titleGenerationModelId) && (
-            <option value={titleGenerationModelId}>{`${titleGenerationModelId}（不在模型列表中）`}</option>
-          )}
-        {titleModels.map((model) => (
-          <option key={model.modelId} value={model.modelId}>
-            {model.displayName}
-          </option>
-        ))}
-      </Field>
+        onChange={(value) => void save({ titleGenerationModelId: value || null })}
+        options={[
+          { value: "", label: `默认（${DEFAULT_SESSION_TITLE_MODEL_ID}）` },
+          ...(titleGenerationModelId && !titleModels.some((model) => model.modelId === titleGenerationModelId)
+            ? [{ value: titleGenerationModelId, label: `${titleGenerationModelId}（不在模型列表中）` }] : []),
+          ...titleModels.map((model) => ({ value: model.modelId, label: model.displayName }))
+        ]}
+      />
       {modelCatalogError && (
         <InlineNotice tone="error">{`模型选项加载失败：${modelCatalogError}`}</InlineNotice>
       )}

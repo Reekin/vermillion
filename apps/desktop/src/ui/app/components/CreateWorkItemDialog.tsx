@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Issue, WorkbenchClient } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
-import { Button, Field, InlineNotice } from "./ui.js";
+import { Button, Field, InlineNotice, Select } from "./ui.js";
 
 export const CreateWorkItemDialog = ({ client, workspaceId, issue, onClose }: {
   client: WorkbenchClient; workspaceId: string; issue?: Issue; onClose: () => void;
@@ -38,9 +38,8 @@ export const CreateWorkItemDialog = ({ client, workspaceId, issue, onClose }: {
       {refs.trim() && <Field label="引用版本（commit）" value={commit} onChange={(event) => setCommit(event.target.value)} />}
       <Field kind="textarea" label="允许路径（每行一个）" value={paths} onChange={(event) => setPaths(event.target.value)} rows={2} />
       <Field kind="textarea" label="验收条目（每行一项）" value={acceptance} onChange={(event) => setAcceptance(event.target.value)} rows={3} />
-      <Field kind="select" label="风险" value={risk} onChange={(event) => setRisk(event.target.value as typeof risk)}>
-        <option value="R0">R0 · 只读</option><option value="R1">R1 · 可丢弃制品</option><option value="R2">R2 · 项目内可回滚</option>
-      </Field>
+      <Select label="风险" value={risk} onChange={(value) => setRisk(value as typeof risk)}
+        options={[{ value: "R0", label: "R0 · 只读" }, { value: "R1", label: "R1 · 可丢弃制品" }, { value: "R2", label: "R2 · 项目内可回滚" }]} />
       {error && <InlineNotice tone="error">{error}</InlineNotice>}
       <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" type="submit" disabled={busy || !title.trim() || (!!refs.trim() && !commit.trim())}>{busy ? "创建中…" : "创建工单"}</Button></div>
     </form>

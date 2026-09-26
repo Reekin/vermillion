@@ -8,8 +8,8 @@ import { projectChatTreeWorkers } from "../chat-tree-workers.js";
 import type { SessionMenu } from "../use-session-actions.js";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { ContextMenu } from "./ContextMenu.js";
-import { statusLabel } from "./task-labels.js";
-import { Badge, InlineNotice, ListRow, SectionLabel, Toggle } from "./ui.js";
+import { statusLabel, statusTone } from "./task-labels.js";
+import { Badge, InlineNotice, ListRow, SectionLabel, StatusPill, Toggle } from "./ui.js";
 
 type Props = ChatTreePanelProps & {
   client: WorkbenchClient;
@@ -115,7 +115,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
       {current?.error && <InlineNotice tone="error">{current.error}</InlineNotice>}
       <ul>{activeWorkers.map((worker) => <li key={worker.key}>
         <ListRow title={worker.title} meta={[worker.activity, worker.failure].filter(Boolean).join(" · ")} selected={worker.sessionId === props.chatTree?.currentSessionId}
-          trailing={<Badge status={worker.status === "failed" ? "decision" : worker.active ? "running" : "queued"}>{worker.status === "failed" ? "准备受阻" : statusLabel[worker.status]}</Badge>}
+          trailing={<StatusPill tone={statusTone(worker.status === "failed" ? "decision" : worker.active ? "running" : "queued")}>{worker.status === "failed" ? "准备受阻" : statusLabel[worker.status]}</StatusPill>}
           onClick={worker.sessionId ? () => worker.nodeId ? props.onJump?.(worker.nodeId) : onSelectSession(worker.sessionId!) : undefined} />
       </li>)}</ul>
     </div>} />

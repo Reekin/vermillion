@@ -5,7 +5,7 @@ import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import { resolveComposerExecutionSelection, resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { Modal } from "./Modal.js";
-import { Button, Field, InlineNotice } from "./ui.js";
+import { Button, Field, InlineNotice, Select } from "./ui.js";
 
 const inheritInputLabel = "沿用输入器配置";
 const inheritGlobalValue = "__inherit_global__";
@@ -151,29 +151,32 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
         <div className="min-h-0 flex-1 overflow-auto p-4">
           {document ? (
             <div className="space-y-4">
-              <Field kind="select" label="本 workspace 定制方式" value={document.mode} disabled={saving} onChange={(event) => changeMode(event.target.value as RoleDocument["mode"])}>
-                <option value="global">global</option>
-                <option value="override">override</option>
-                <option value="append">append</option>
-              </Field>
+              <Select label="本 workspace 定制方式" value={document.mode} disabled={saving} onChange={(value) => changeMode(value as RoleDocument["mode"])}
+                options={[{ value: "global", label: "global" }, { value: "override", label: "override" }, { value: "append", label: "append" }]} />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Field kind="select" label="模型" value={isAppend ? document.model ?? inheritGlobalValue : document.model ?? ""} disabled={fieldDisabled} onChange={(event) => update({ model: event.target.value === inheritGlobalValue ? undefined : event.target.value || undefined })}>
-                  <option value={isAppend ? inheritGlobalValue : ""}>{isAppend ? `沿用全局（${globalModelLabel}）` : inheritInputLabel}</option>
-                  {document.model && !models.some((model) => model.modelId === document.model) && <option value={document.model}>{document.model}（当前文件）</option>}
-                  {models.map((model) => <option key={model.modelId} value={model.modelId}>{model.displayName}</option>)}
-                </Field>
-                <Field kind="select" label="推理档位" value={isAppend ? appendSelectionValue(document.reasoningOptionId) : selectionValue(document.reasoningOptionId)} disabled={fieldDisabled} onChange={(event) => update({ reasoningOptionId: settingValue(event.target.value) })}>
-                  <option value={isAppend ? inheritGlobalValue : ""}>{isAppend ? `沿用全局（${globalReasoningLabel}）` : inheritInputLabel}</option>
-                  <option value={defaultValue}>{defaultReasoning ? `Default (${defaultReasoning})` : "Default"}</option>
-                  {document.reasoningOptionId && !reasoningOptions.some((option) => option.optionId === document.reasoningOptionId) && <option value={document.reasoningOptionId}>{document.reasoningOptionId}（当前文件）</option>}
-                  {reasoningOptions.map((option) => <option key={option.optionId} value={option.optionId}>{option.displayName}</option>)}
-                </Field>
-                <Field kind="select" label="速度" value={isAppend ? appendSelectionValue(document.serviceTierId) : selectionValue(document.serviceTierId)} disabled={fieldDisabled} onChange={(event) => update({ serviceTierId: settingValue(event.target.value) })}>
-                  <option value={isAppend ? inheritGlobalValue : ""}>{isAppend ? `沿用全局（${globalServiceTierLabel}）` : inheritInputLabel}</option>
-                  <option value={defaultValue}>Standard</option>
-                  {document.serviceTierId && !serviceTiers.some((tier) => tier.tierId === document.serviceTierId) && <option value={document.serviceTierId}>{document.serviceTierId}（当前文件）</option>}
-                  {serviceTiers.map((tier) => <option key={tier.tierId} value={tier.tierId} title={tier.description}>{tier.displayName}</option>)}
-                </Field>
+                <Select label="模型" value={isAppend ? document.model ?? inheritGlobalValue : document.model ?? ""} disabled={fieldDisabled}
+                  onChange={(value) => update({ model: value === inheritGlobalValue ? undefined : value || undefined })}
+                  options={[
+                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? `沿用全局（${globalModelLabel}）` : inheritInputLabel },
+                    ...(document.model && !models.some((model) => model.modelId === document.model) ? [{ value: document.model, label: `${document.model}（当前文件）` }] : []),
+                    ...models.map((model) => ({ value: model.modelId, label: model.displayName }))
+                  ]} />
+                <Select label="推理档位" value={isAppend ? appendSelectionValue(document.reasoningOptionId) : selectionValue(document.reasoningOptionId)} disabled={fieldDisabled}
+                  onChange={(value) => update({ reasoningOptionId: settingValue(value) })}
+                  options={[
+                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? `沿用全局（${globalReasoningLabel}）` : inheritInputLabel },
+                    { value: defaultValue, label: defaultReasoning ? `Default (${defaultReasoning})` : "Default" },
+                    ...(document.reasoningOptionId && !reasoningOptions.some((option) => option.optionId === document.reasoningOptionId) ? [{ value: document.reasoningOptionId, label: `${document.reasoningOptionId}（当前文件）` }] : []),
+                    ...reasoningOptions.map((option) => ({ value: option.optionId, label: option.displayName }))
+                  ]} />
+                <Select label="速度" value={isAppend ? appendSelectionValue(document.serviceTierId) : selectionValue(document.serviceTierId)} disabled={fieldDisabled}
+                  onChange={(value) => update({ serviceTierId: settingValue(value) })}
+                  options={[
+                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? `沿用全局（${globalServiceTierLabel}）` : inheritInputLabel },
+                    { value: defaultValue, label: "Standard" },
+                    ...(document.serviceTierId && !serviceTiers.some((tier) => tier.tierId === document.serviceTierId) ? [{ value: document.serviceTierId, label: `${document.serviceTierId}（当前文件）` }] : []),
+                    ...serviceTiers.map((tier) => ({ value: tier.tierId, label: tier.displayName, hint: tier.description }))
+                  ]} />
               </div>
               {roleId === "supervisor" && <Field kind="input" type="number" label="检查间隔（分钟）" min={1} step={1}
                 value={document.checkIntervalMinutes ?? (isGlobal ? 5 : "")} disabled={fieldDisabled}

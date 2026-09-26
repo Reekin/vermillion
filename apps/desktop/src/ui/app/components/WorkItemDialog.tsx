@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { AgentRun, DecisionCard, WorkbenchClient, WorkItem, WorkflowAction } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
-import { Badge, Button, CollapsibleDetails, DetailSection, DisclosureCard, EmptyState, InlineNotice } from "./ui.js";
+import { Badge, Button, CollapsibleDetails, DetailSection, DisclosureCard, EmptyState, InlineNotice, StatusPill } from "./ui.js";
 import { WorkflowDetails } from "./WorkflowDetails.js";
 import { IntegrationControls } from "./IntegrationControls.js";
 import { workItemEvents, workItemProgress } from "./workflow-display.js";
-import { currentWorkStatus, workPhaseLabel, workSessionLabel } from "./task-labels.js";
+import { currentWorkStatus, currentWorkTone, statusTone, workPhaseLabel, workSessionLabel } from "./task-labels.js";
 
 type WorkItemDialogProps = {
   client: WorkbenchClient;
@@ -36,7 +36,7 @@ const ProgressPanel = ({ item, progress, pendingDecisions, onResume, resuming, o
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          <Badge status={currentWorkStatus(item).kind === "running" ? "running" : undefined}>{workPhaseLabel(item)}</Badge>
+          <StatusPill tone={statusTone(item.status === "closed" || item.status === "cancelled" ? item.status : currentWorkTone(currentWorkStatus(item).kind))}>{workPhaseLabel(item)}</StatusPill>
           <span className="text-caption text-muted-foreground">{workSessionLabel(item)}</span>
           <span className="text-caption text-muted-foreground">{progress.handler}</span>
         </div>
