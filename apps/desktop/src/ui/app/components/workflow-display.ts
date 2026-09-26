@@ -212,7 +212,7 @@ const workItemMilestones = (item: WorkItem, actions: WorkflowAction[], runs: Age
     queued: item.createdAt,
     running: earliest([
       ...runs.filter((run) => run.workItemId === item.workItemId).map((run) => run.startedAt),
-      ...own.filter((action) => action.kind === "execute").map((action) => action.createdAt)
+      ...own.flatMap((action) => action.kind === "execute" ? [action.startedAt] : [])
     ]),
     merging: earliest(integrations),
     lastSubmitted: latest(integrations),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowAction } from "@vermillion/workbench/client";
-import { actionRoleLabel, actionStatusText, formatDuration, integrationFailureSummary, integrationProgress, integrationShortStatus, readableFailure, waitingActions, workItemEvents, workItemProgress, workItemSteps } from "../src/ui/app/components/workflow-display.js";
+import { actionRoleLabel, actionStatusText, executionDuration, formatDuration, integrationFailureSummary, integrationProgress, integrationShortStatus, readableFailure, waitingActions, workItemEvents, workItemProgress, workItemSteps } from "../src/ui/app/components/workflow-display.js";
 import { agentRun, execution, integration, workItem } from "./workbench-fixtures.js";
 
 describe("execution and integration presentation", () => {
@@ -105,7 +105,7 @@ describe("execution and integration presentation", () => {
   });
 
   it("draws the lifecycle with passed-stage times and the current wait on the current stage", () => {
-    const actions = [execution({ actionId: "exec", workItemId: "one", createdAt: "2026-01-01T01:00:00.000Z" }), integration({ actionId: "merge", workItemId: "one", createdAt: "2026-01-01T02:00:00.000Z" })];
+    const actions = [execution({ actionId: "exec", workItemId: "one", createdAt: "2026-01-01T01:00:00.000Z", startedAt: "2026-01-01T01:00:00.000Z" }), integration({ actionId: "merge", workItemId: "one", createdAt: "2026-01-01T02:00:00.000Z" })];
     const closed = workItemSteps(workItem({ workItemId: "one", status: "closed", merge: { diffStat: "", mergedAt: "2026-01-01T03:00:00.000Z" } }), actions, []);
     expect(closed.map((step) => [step.label, step.state])).toEqual([["排队", "done"], ["执行", "done"], ["待合入", "done"], ["已关闭", "done"]]);
     expect(closed.every((step) => step.time)).toBe(true);
@@ -117,6 +117,19 @@ describe("execution and integration presentation", () => {
     expect(workItemSteps(workItem({ workItemId: "one", status: "queued" }), [], [], undefined, "等待前置工单")[0]!.note).toBe("等待前置工单");
     const cancelled = workItemSteps(workItem({ workItemId: "one", status: "cancelled" }), actions.slice(0, 1), []);
     expect(cancelled[1]).toMatchObject({ state: "current", tone: "failed", note: "已取消" });
+  });
+
+  it("times execution from the first accepted delivery to the last submission, without the queue wait", () => {
+    const actions = [
+      execution({ actionId: "exec", workItemId: "one", createdAt: "2026-01-01T00:00:00.000Z", startedAt: "2026-01-01T01:00:00.000Z", deliveredAt: "2026-01-01T01:50:00.000Z" }),
+      integration({ actionId: "merge-1", workItemId: "one", createdAt: "2026-01-01T01:30:00.000Z" }),
+      integration({ actionId: "merge-2", workItemId: "one", createdAt: "2026-01-01T02:00:00.000Z" })
+    ];
+    const closed = workItem({ workItemId: "one", status: "closed", merge: { diffStat: "", mergedAt: "2026-01-01T02:05:00.000Z" } });
+    expect(executionDuration(closed, actions, [])).toBe(60 * 60 * 1000);
+    const running = workItem({ workItemId: "one", status: "running" });
+    expect(executionDuration(running, actions.slice(0, 1), [], Date.parse("2026-01-01T01:10:00.000Z"))).toBe(10 * 60 * 1000);
+    expect(executionDuration(workItem({ workItemId: "one", status: "queued" }), [], [])).toBeUndefined();
   });
 
   it("writes durations in readable Chinese units", () => {

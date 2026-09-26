@@ -1510,7 +1510,7 @@ export class WorkbenchService {
       if (stopped && turnId) interruptSessionId = execution.sessionId;
       return { ...record, execution: { ...execution, pendingMessageId: undefined, pendingNoticeCount: undefined,
         notices: execution.notices.slice(execution.pendingNoticeCount ?? 0),
-        activeTurnId: turnId ?? execution.activeTurnId, deliveredAt: this.now(),
+        activeTurnId: turnId ?? execution.activeTurnId, startedAt: execution.startedAt ?? this.now(), deliveredAt: this.now(),
         status: !stopped && execution.status === "pending" ? "running" : execution.status,
         stage: !stopped ? "execute" : execution.stage,
         failure: undefined, updatedAt: this.now() } };

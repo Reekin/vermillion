@@ -188,6 +188,13 @@ it("acknowledges only the dispatched notice prefix and interrupts a late accepte
   expect((await service.listActions(workspaceId))[0]).toMatchObject({ paused: true, activeTurnId: "accepted", notices: [{ text: "arrived later" }] });
   expect((await service.listActions(workspaceId))[0]).not.toHaveProperty("pendingNoticeCount");
   expect(interrupt).toHaveBeenCalledExactlyOnceWith("worker", "accepted");
+  // Execution time starts at the first accepted delivery; later deliveries keep it.
+  const [delivered] = await service.listActions(workspaceId);
+  const startedAt = delivered!.kind === "execute" ? delivered!.startedAt : undefined;
+  expect(startedAt).toEqual(expect.any(String));
+  await service.updateAction(workspaceId, action, (current) => current.kind === "execute" ? { ...current, pendingMessageId: "later" } : current);
+  await service.acknowledgeWorkerDispatch(workspaceId, item.workItemId, "later", "accepted-later");
+  expect((await service.listActions(workspaceId))[0]).toMatchObject({ startedAt });
 });
 
 it("keeps an idle preparation answer pending while Worker capacity is occupied", async () => {
