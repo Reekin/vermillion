@@ -27,12 +27,12 @@ describe("tool actions", () => {
       call({ actions: [{ kind: "read", target: "C:\\project\\README.md" }], inputSummary: pwsh("Get-Content README.md") }),
       { text: "# Title\n\nbody\nmore\n", exitCode: 0 }
     );
-    expect(step).toMatchObject({ kind: "read", verb: "读取", object: "README.md", result: "3 行", failed: false });
+    expect(step).toMatchObject({ kind: "read", verb: "读取", object: "README.md", result: "4 行", failed: false });
   });
 
   it("maps each structured kind", () => {
     expect(describeToolStep(call({ actions: [{ kind: "list", target: "src" }] }), { text: "a\nb" }))
-      .toMatchObject({ kind: "list", object: "src", result: "2 项" });
+      .toMatchObject({ kind: "list", object: "src", result: "2 个条目" });
     expect(describeToolStep(call({ actions: [{ kind: "search", target: "TODO", path: "src" }] }), { text: "a:1\nb:2", exitCode: 0 }))
       .toMatchObject({ kind: "search", object: "“TODO” · src", result: "2 处匹配" });
     expect(describeToolStep(call({ actions: [{ kind: "search", target: "nothing" }] }), { text: "", exitCode: 1 }))
@@ -53,6 +53,30 @@ describe("tool actions", () => {
     expect(step).toMatchObject({ kind: "run", verb: "运行", object: "git status --short", result: "无输出" });
     expect(step.object).not.toContain("pwsh");
     expect(commandHead("bash -lc 'pnpm test\nsecond line'")).toBe("pnpm test");
+  });
+
+  it("counts listing entries without pwsh headers", () => {
+    const listing = [
+      "",
+      "    Directory: C:\p",
+      "",
+      "Mode                 LastWriteTime         Length Name",
+      "----                 -------------         ------ ----",
+      "d----          2026/9/26    20:00                .vermillion",
+      "-a---          2026/9/26    20:00             27 README.md",
+      ""
+    ].join(String.fromCharCode(10));
+    expect(describeToolStep(call({ inputSummary: pwsh("Get-ChildItem") }), { text: listing, exitCode: 0 }))
+      .toMatchObject({ kind: "list", result: "2 个条目" });
+    expect(describeToolStep(call({ inputSummary: "ls -la" }), { text: ["total 8", ".", "..", "a.ts"].join(String.fromCharCode(10)), exitCode: 0 }).result)
+      .toBe("1 个条目");
+  });
+
+  it("shows commands mixing action kinds, or with setup first, by their first real command", () => {
+    const mixed = describeToolStep(call({ inputSummary: pwsh("Get-ChildItem; Get-Content README.md") }), { text: "x", exitCode: 0 });
+    expect(mixed).toMatchObject({ kind: "run", object: "Get-ChildItem" });
+    expect(describeToolStep(call({ inputSummary: "Set-Location src; $x = 1; git status" }), { text: "", exitCode: 0 }))
+      .toMatchObject({ kind: "run", object: "git status" });
   });
 
   it("reports failures with a readable reason", () => {

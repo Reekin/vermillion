@@ -795,10 +795,10 @@ button:disabled {
   display: inline-flex;
   justify-self: start;
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
+  gap: 8px;
+  min-height: 32px;
   margin-left: -8px;
-  padding: 0 10px 0 8px;
+  padding: 0 12px 0 8px;
   border: none;
   border-radius: var(--awb-radius-soft);
   background: transparent;
@@ -810,7 +810,7 @@ button:disabled {
 }
 
 .awb-turn__process-toggle:hover {
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--awb-panel-soft);
   color: var(--awb-ink);
 }
 
@@ -1736,8 +1736,8 @@ label.awb-configuration-control > span {
 .awb-process-steps {
   display: grid;
   gap: 2px;
-  margin: 2px 0 4px 6px;
-  padding-left: 14px;
+  margin: 4px 0 4px 8px;
+  padding-left: 12px;
   border-left: 1px solid var(--awb-rule-strong);
 }
 
@@ -1746,8 +1746,8 @@ label.awb-configuration-control > span {
   grid-template-columns: 16px auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  min-height: 28px;
-  padding: 0 6px;
+  min-height: 32px;
+  padding: 0 8px;
   border-radius: var(--awb-radius-soft);
   list-style: none;
   font-size: var(--awb-text-caption);
@@ -1764,7 +1764,7 @@ summary.awb-process-step__row::-webkit-details-marker {
 }
 
 summary.awb-process-step__row:hover {
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--awb-panel-soft);
 }
 
 .awb-process-step__icon {
@@ -1801,7 +1801,7 @@ summary.awb-process-step__row:hover {
 .awb-process-step__spinner {
   width: 10px;
   height: 10px;
-  border: 1.5px solid rgba(207, 183, 106, 0.25);
+  border: 1.5px solid var(--awb-rule-strong);
   border-top-color: var(--awb-status-running);
   border-radius: 50%;
   animation: awb-process-spin 900ms linear infinite;
@@ -1822,7 +1822,7 @@ summary.awb-process-step__row:hover {
 .awb-process-step__body {
   display: grid;
   gap: 8px;
-  padding: 4px 0 10px 30px;
+  padding: 4px 0 8px 32px;
 }
 
 .awb-process-step__input {
@@ -1837,10 +1837,10 @@ summary.awb-process-step__row:hover {
 .awb-process-step__output {
   max-height: 280px;
   margin: 0;
-  padding: 9px 10px;
+  padding: 8px 12px;
   overflow: auto;
   border-radius: 6px;
-  background: #151617;
+  background: var(--awb-input);
   color: var(--awb-ink);
   font-family: var(--awb-font-mono);
   font-weight: 400;
@@ -1871,7 +1871,7 @@ summary.awb-process-step__row:hover {
 }
 
 .awb-process-step__message {
-  padding: 4px 6px 6px;
+  padding: 4px 8px 8px;
   color: var(--awb-ink);
 }
 
@@ -2332,7 +2332,7 @@ summary.awb-process-step__row:hover {
 }
 
 .awb-execution-config__option {
-  height: 28px;
+  height: 32px;
   padding: 0 8px;
   border: none;
   border-radius: var(--awb-radius-soft);
@@ -2345,7 +2345,7 @@ summary.awb-process-step__row:hover {
 }
 
 .awb-execution-config__option:hover {
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--awb-panel-soft);
 }
 
 .awb-execution-config__option[aria-pressed="true"] {

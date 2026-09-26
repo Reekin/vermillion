@@ -60,6 +60,25 @@ const firstLine = (value: string | undefined): string | undefined =>
 const countLines = (value: string | undefined): number =>
   value ? value.split(/\r?\n/).filter((line) => line.trim().length > 0).length : 0;
 
+/** File lines as written, blank lines included, without the trailing newline. */
+const countRawLines = (value: string | undefined): number =>
+  value ? value.replace(/(\r?\n)+$/, "").split(/\r?\n/).length : 0;
+
+/** Directory entries without pwsh table headers or `ls -la` totals and dot entries. */
+const countListEntries = (value: string | undefined): number =>
+  (value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line.length > 0 &&
+        !/^Directory:/i.test(line) &&
+        !/^Mode\s+LastWriteTime/i.test(line) &&
+        !/^[-\s]+$/.test(line) &&
+        !/^total \d+$/.test(line) &&
+        !/(^|\s)\.{1,2}$/.test(line)
+    ).length;
+
 const stripQuotes = (value: string): string => {
   const trimmed = value.trim();
   if (trimmed.length >= 2) {
@@ -163,15 +182,25 @@ const classifySegment = (segment: string): ToolAction | undefined => {
   return { kind: "run", target: segment.trim() };
 };
 
+const commandSegments = (command: string): string[] =>
+  unwrapShellCommand(command).split(/;|&&|\|\||\r?\n/).map((segment) => segment.trim()).filter(Boolean);
+
+/** The first segment that does real work, skipping cd, echo and variable setup. */
+const meaningfulCommand = (command: string): string => {
+  const segments = commandSegments(command);
+  return segments.find((segment) => classifySegment(segment)) ?? segments[0] ?? command.trim();
+};
+
 /** Best-effort reading of a shell command when the engine gives no structured actions. */
 export const actionsFromCommand = (command: string): ToolAction[] => {
-  const inner = unwrapShellCommand(command);
-  const segments = inner.split(/;|&&|\|\||\r?\n/).map((segment) => segment.trim()).filter(Boolean);
-  const actions = segments.map(classifySegment).filter((action): action is ToolAction => Boolean(action));
-  if (actions.length === 0 || actions.some((action) => action.kind === "run")) {
-    return [{ kind: "run", target: inner }];
+  const actions = commandSegments(command)
+    .map(classifySegment)
+    .filter((action): action is ToolAction => Boolean(action));
+  const firstRun = actions.find((action) => action.kind === "run");
+  if (firstRun) {
+    return [firstRun];
   }
-  return actions;
+  return actions.length > 0 ? actions : [{ kind: "run", target: meaningfulCommand(command) }];
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -320,7 +349,15 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
     };
   }
 
-  const actions = resolveActions(toolCall);
+  let actions = resolveActions(toolCall);
+  // A step names one kind of action; a command mixing kinds (list then read) reads as a command.
+  if (actions && new Set(actions.map((action) => action.kind)).size > 1) {
+    const command =
+      toolCall.toolName === "commandExecution"
+        ? toolCall.inputSummary
+        : stringField(asRecord(parseJson(toolCall.inputSummary)) ?? {}, "command") ?? toolCall.inputSummary;
+    actions = [{ kind: "run", target: meaningfulCommand(command ?? "") }];
+  }
   if (!actions || actions.length === 0) {
     const input = firstLine(toolCall.inputSummary);
     const failed = toolCall.status === "failed";
@@ -366,10 +403,10 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
     const lines = countLines(text);
     switch (kind) {
       case "read":
-        result = `${lines} 行`;
+        result = `${countRawLines(text)} 行`;
         break;
       case "list":
-        result = `${lines} 项`;
+        result = `${countListEntries(text)} 个条目`;
         break;
       case "search":
         result = lines > 0 ? `${lines} 处匹配` : "无匹配";

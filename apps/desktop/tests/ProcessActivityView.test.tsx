@@ -87,7 +87,7 @@ describe("ProcessActivityView", () => {
     );
 
     const rows = [...container.querySelectorAll(".awb-process-step__row")].map((row) => row.textContent);
-    expect(rows).toEqual(["列目录src2 项", "压缩上下文进行中"]);
+    expect(rows).toEqual(["列目录src2 个条目", "压缩上下文进行中"]);
   });
 
   it("shows image output as a preview with the cache-busted URL", async () => {
