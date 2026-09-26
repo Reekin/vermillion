@@ -173,10 +173,10 @@ export const goalCommandBlockedReason = (
   threadGoal?: ThreadGoal
 ): string | undefined => {
   if (command?.kind === "set" && threadGoal) {
-    return "A goal is already set. Use /goal clear before setting a new goal.";
+    return "已有目标，先用 /goal clear 清除再设置新目标";
   }
   if (command?.kind === "edit") {
-    return "Goal editing is not available here yet. Use /goal clear before setting a new goal.";
+    return "暂不支持编辑目标，先用 /goal clear 清除再设置新目标";
   }
   return undefined;
 };
@@ -507,7 +507,7 @@ export const useComposerController = (
         setDraftProfileReady(true);
       }).catch((error: unknown) => {
         if (!cancelled) input.onStatusNotice({
-          message: `Failed to load draft configuration: ${String(error)}`,
+          message: "读取草稿配置失败", detail: String(error),
           source: "send"
         });
       });
@@ -702,7 +702,7 @@ export const useComposerController = (
           setModelCatalog(undefined);
           setIsExecutionLoading(false);
           input.onStatusNotice({
-            message: `Model catalog failed: ${(error as Error).message}`,
+            message: "读取模型列表失败", detail: (error as Error).message,
             source: "settings",
             ...statusNoticeErrorDetails(error)
           });
@@ -743,7 +743,7 @@ export const useComposerController = (
             slashSuggestions: []
           });
           input.onStatusNotice({
-            message: `Capability lookup failed: ${(error as Error).message}`,
+            message: "读取会话能力失败", detail: (error as Error).message,
             source: "send",
             ...statusNoticeErrorDetails(error)
           });
@@ -775,7 +775,7 @@ export const useComposerController = (
         setAvailableSkills([]);
         setIsSkillsLoading(false);
         input.onStatusNotice({
-          message: `Skills lookup failed: ${(error as Error).message}`,
+          message: "读取技能列表失败", detail: (error as Error).message,
           persistent: true,
           source: "send",
           ...statusNoticeErrorDetails(error)
@@ -1028,7 +1028,7 @@ export const useComposerController = (
     }
     onDraftChange("");
     reportSendNotice({
-      message: "Queued follow-up.",
+      message: "已加入发送队列",
       source: "send"
     });
   };
@@ -1052,7 +1052,7 @@ export const useComposerController = (
     setIsDispatching(true);
     reportSendNotice({
       message:
-        payload.mode === "steer" ? "Steering active turn…" : "Sending…",
+        payload.mode === "steer" ? "正在引导当前回合…" : "正在发送…",
       persistent: true,
       source: "send"
     });
@@ -1092,14 +1092,14 @@ export const useComposerController = (
         }
       }
       reportSendNotice({
-        message: payload.mode === "steer" ? "Steer sent." : "Message sent.",
+        message: payload.mode === "steer" ? "已发送引导" : "已发送",
         source: "send"
       });
       input.onRequestTranscriptBottom?.(sessionId);
       return true;
     } catch (error) {
       reportSendNotice({
-        message: `Send failed: ${(error as Error).message}`,
+        message: "发送失败，查看详情后重试", detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1122,12 +1122,12 @@ export const useComposerController = (
     }
     const actionLabel =
       command.kind === "clear"
-        ? "Clearing goal"
+        ? "正在清除目标"
         : command.kind === "pause"
-          ? "Pausing goal"
+          ? "正在暂停目标"
           : command.kind === "resume"
-            ? "Resuming goal"
-            : "Setting goal";
+            ? "正在恢复目标"
+            : "正在设置目标";
     setIsDispatching(true);
     reportSendNotice({
       message: `${actionLabel}…`,
@@ -1156,18 +1156,18 @@ export const useComposerController = (
       reportSendNotice({
         message:
           command.kind === "clear"
-            ? "Goal cleared."
+            ? "目标已清除"
             : command.kind === "pause"
-              ? "Goal paused."
+              ? "目标已暂停"
               : command.kind === "resume"
-                ? "Goal resumed."
-                : "Goal set.",
+                ? "目标已恢复"
+                : "目标已设置",
         source: "send"
       });
       return true;
     } catch (error) {
       reportSendNotice({
-        message: `Goal failed: ${(error as Error).message}`,
+        message: "目标操作失败", detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1192,7 +1192,7 @@ export const useComposerController = (
     const goalCommand = parseGoalSlashCommand(draft);
     if (goalCommand?.kind === "empty") {
       reportSendNotice({
-        message: "Add a goal after /goal.",
+        message: "在 /goal 后写上目标内容",
         source: "send"
       });
       return;
@@ -1214,7 +1214,7 @@ export const useComposerController = (
         getAttachmentsForSession().length > 0
       ) {
         reportSendNotice({
-          message: "Goal commands only use the text after /goal.",
+          message: "/goal 命令只使用其后的文字",
           source: "send"
         });
         return;
@@ -1294,7 +1294,7 @@ export const useComposerController = (
         await input.onCancelBranchSend?.(cancellableBranchSend.operationId);
       } catch (error) {
         reportSendNotice({
-          message: `Cancel send failed: ${(error as Error).message}`,
+          message: "取消发送失败", detail: (error as Error).message,
           persistent: true,
           source: "send",
           ...statusNoticeErrorDetails(error)
@@ -1312,12 +1312,12 @@ export const useComposerController = (
         turnId: interruptTurnId
       });
       reportSendNotice({
-        message: "Interrupt requested.",
+        message: "已请求停止",
         source: "send"
       });
     } catch (error) {
       reportSendNotice({
-        message: `Stop failed: ${(error as Error).message}`,
+        message: "停止失败", detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1421,7 +1421,7 @@ export const useComposerController = (
     }
     if (!capabilities.supportsAttachments) {
       reportSendNotice({
-        message: "Attachments are unavailable for this session.",
+        message: "当前会话不支持附件",
         source: "send"
       });
       return;
@@ -1466,7 +1466,7 @@ export const useComposerController = (
     }
     void appendComposerAttachments(files, "paste").catch((error) => {
       reportSendNotice({
-        message: `Paste attachment failed: ${(error as Error).message}`,
+        message: "粘贴附件失败", detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1516,7 +1516,7 @@ export const useComposerController = (
     }
     void appendComposerAttachments(files, "drop").catch((error) => {
       reportSendNotice({
-        message: `Drop attachment failed: ${(error as Error).message}`,
+        message: "拖入附件失败", detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)

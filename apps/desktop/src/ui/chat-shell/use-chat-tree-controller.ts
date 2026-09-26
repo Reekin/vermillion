@@ -323,7 +323,7 @@ export const useChatTreeController = (input: {
         outcome = "error";
         if (!isCurrent()) return;
         setFailedEntry(entry);
-        setTreeFailure({ entry, message: `Chat tree refresh failed: ${(error as Error).message}` });
+        setTreeFailure({ entry, message: `刷新会话树失败：${(error as Error).message}` });
         throw error;
       } finally {
         if (isCurrent() && entry.loadingStage && entry.loadingTimeline?.[entry.loadingStage]) {
@@ -360,9 +360,9 @@ export const useChatTreeController = (input: {
     void refresh.catch((error) => {
       if (entryRef.current !== entry) return;
       setFailedEntry(entry);
-      setTreeFailure({ entry: entry!, message: `Chat tree refresh failed: ${(error as Error).message}` });
+      setTreeFailure({ entry: entry!, message: `刷新会话树失败：${(error as Error).message}` });
       onStatusNotice({
-        message: `Chat tree refresh failed: ${(error as Error).message}`,
+        message: "刷新会话树失败", detail: (error as Error).message,
         source: "chat-tree",
         ...statusNoticeErrorDetails(error)
       });
@@ -444,7 +444,7 @@ export const useChatTreeController = (input: {
       } catch (error) {
         if (sessionIdRef.current !== sessionId) return;
         onStatusNotice({
-          message: `Chat tree jump failed: ${(error as Error).message}`,
+          message: "跳转节点失败", detail: (error as Error).message,
           persistent: true,
           source: "chat-tree",
           ...statusNoticeErrorDetails(error)

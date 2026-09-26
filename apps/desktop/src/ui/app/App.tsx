@@ -380,6 +380,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
       </div>
       {navigationError && <InlineNotice tone="error">{navigationError}</InlineNotice>}
       <TaskStatusBar store={store} trailing={<OutputStatus store={outputStore} sessionStore={sessionStore} transport={transport}
+        sessionTitle={(id) => sidebar.findSession(id)?.title}
         onOpenSession={(id) => { const session = sidebar.findSession(id); if (!session) return false; void openSessionTarget(session.workspaceId, session.sessionId); return true; }} />} />
       <TextEditor store={store} />
       <RoleEditor store={store} transport={transport} />

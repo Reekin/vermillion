@@ -11,6 +11,7 @@ import {
   countOutput,
   engineWarningDetails,
   matchesOutputFilter,
+  outputEntryConfigPath,
   outputEntryDetails,
   severityLabels,
   sourceLabels,
@@ -28,17 +29,24 @@ const SeverityIcon = ({ severity, className, size = 14 }: { severity: OutputSeve
   return <Icon size={size} aria-label={severityLabels[severity]} className={cn("vm-output-icon", className)} data-severity={severity} />;
 };
 
+/** Paths show the file name first with its folder after it; the full path is in the tooltip. */
+const fileName = (path: string): string => {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length > 1 ? `${parts.at(-1)} · ${parts.at(-2)}` : path;
+};
+
 const formatTime = (at: string): string => new Date(at).toLocaleTimeString([], { hour12: false });
 
-/** Monospace details with JSON keys and string values set apart. */
+/** Monospace details: section titles and labels muted, values in the body colour; text matches what is copied. */
 const DetailCode = ({ text }: { text: string }) => (
   <pre className="vm-output-code">
     {text.split("\n").map((line, index) => {
-      const match = /^(\s*)"([^"]+)": (.*)$/.exec(line);
+      const labelled = /^(\S+?)  (.*)$/.exec(line);
       return (
         <span key={index}>
-          {match ? <>{match[1]}<span className="vm-output-code__key">"{match[2]}"</span>{": "}
-            <span className={/^"/.test(match[3]!) ? "vm-output-code__string" : undefined}>{match[3]}</span></> : line}
+          {line.startsWith("//") ? <span className="vm-output-code__section">{line}</span>
+            : labelled ? <><span className="vm-output-code__key">{labelled[1]}</span>{"  "}<span className="vm-output-code__value">{labelled[2]}</span></>
+            : line}
           {"\n"}
         </span>
       );
@@ -65,10 +73,11 @@ export type OutputStatusProps = {
   sessionStore: RendererStore;
   transport: DesktopTransport;
   onOpenSession?: (sessionId: string) => boolean;
+  sessionTitle?: (sessionId: string) => string | undefined;
 };
 
 /** Status bar summary of the output (latest notice and problem counts) and the output panel it opens. */
-export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: OutputStatusProps) => {
+export const OutputStatus = ({ store, sessionStore, transport, onOpenSession, sessionTitle }: OutputStatusProps) => {
   const entries = store((state) => state.entries);
   const warnings = store((state) => state.warnings);
   const latestId = store((state) => state.latestId);
@@ -118,7 +127,7 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: 
       <Popover.Portal>
         <Popover.Positioner side="top" align="end" sideOffset={6} className="z-50">
           <Popover.Popup aria-label="输出" className="vm-output-panel" initialFocus={searchRef}>
-            <OutputPanel store={store} engineLabels={engineLabels} searchRef={searchRef} onOpenSession={onOpenSession} onClose={() => setOpen(false)} />
+            <OutputPanel store={store} engineLabels={engineLabels} searchRef={searchRef} onOpenSession={onOpenSession} sessionTitle={sessionTitle} onClose={() => setOpen(false)} />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -126,11 +135,12 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession }: 
   );
 };
 
-const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }: {
+const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTitle, onClose }: {
   store: OutputStore;
   engineLabels: Record<string, string>;
   searchRef: RefObject<HTMLInputElement | null>;
   onOpenSession?: (sessionId: string) => boolean;
+  sessionTitle?: (sessionId: string) => string | undefined;
   onClose: () => void;
 }) => {
   const entries = store((state) => state.entries);
@@ -146,16 +156,20 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, onClose }:
     const problems = warnings.map((warning, index): Row => ({
       key: `problem-${warning.engineId}-${index}`, group: "problems", severity: "warning", at: warning.at, firstAt: warning.at,
       source: `${warning.engineLabel} 配置`, message: warning.summary, count: 1, details: engineWarningDetails(warning),
-      meta: [<span key="engine">引擎 {warning.engineLabel}</span>, ...(warning.path ? [<span key="path">配置 {warning.path}</span>] : [])]
+      meta: [<span key="engine">引擎 {warning.engineLabel}</span>, ...(warning.path ? [<span key="path" title={warning.path}>配置 {fileName(warning.path)}</span>] : [])]
     }));
     const events = entries.map((entry): Row => ({
       key: entry.id, group: "events", severity: entry.severity, at: entry.at, firstAt: entry.firstAt,
       source: entry.source ? sourceLabels[entry.source] : "应用", message: entry.message, count: entry.count,
       details: outputEntryDetails(entry), sessionId: entry.sessionId,
-      meta: entry.engineId ? [<span key="engine">引擎 {engineLabels[entry.engineId] ?? entry.engineId}</span>] : []
+      meta: [
+        ...(entry.sessionId ? [<span key="session">会话 {sessionTitle?.(entry.sessionId) ?? entry.sessionId}</span>] : []),
+        ...(entry.engineId ? [<span key="engine">引擎 {engineLabels[entry.engineId] ?? entry.engineId}</span>] : []),
+        ...(outputEntryConfigPath(entry) ? [<span key="path" title={outputEntryConfigPath(entry)}>配置 {fileName(outputEntryConfigPath(entry)!)}</span>] : [])
+      ]
     }));
     return [...problems, ...events].filter((row) => matchesOutputFilter(filter, row.severity, [row.message, row.source, row.details]));
-  }, [engineLabels, entries, severities, text, warnings]);
+  }, [engineLabels, entries, sessionTitle, severities, text, warnings]);
 
   // Without a choice, show the newest error: it is usually why the panel was opened.
   const selected = rows.find((row) => row.key === selectedKey)

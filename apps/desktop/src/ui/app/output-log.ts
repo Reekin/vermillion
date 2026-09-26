@@ -12,6 +12,7 @@ export type OutputEntry = {
   severity: OutputSeverity;
   source?: ComposerStatusNotice["source"];
   message: string;
+  detail?: string;
   stack?: string;
   context?: Record<string, unknown>;
   sessionId?: string;
@@ -33,8 +34,8 @@ export const OUTPUT_LOG_LIMIT = 200;
 
 const severityOf = (notice: ComposerStatusNotice): OutputSeverity => notice.severity ?? "info";
 export const needsAttention = (severity: OutputSeverity): boolean => severity !== "info";
-const identity = (entry: { severity: OutputSeverity; source?: string; message: string }): string =>
-  JSON.stringify([entry.severity, entry.source ?? "", entry.message]);
+const identity = (entry: { severity: OutputSeverity; source?: string; message: string; detail?: string }): string =>
+  JSON.stringify([entry.severity, entry.source ?? "", entry.message, entry.detail ?? ""]);
 
 /** Newest first; a repeat of an existing notice moves it to the top and increases its count. */
 export const appendOutputEntry = (
@@ -44,7 +45,7 @@ export const appendOutputEntry = (
   id: string
 ): OutputEntry[] => {
   const severity = severityOf(notice);
-  const key = identity({ severity, source: notice.source, message: notice.message });
+  const key = identity({ severity, source: notice.source, message: notice.message, detail: notice.detail });
   const previous = log.find((entry) => identity(entry) === key);
   const entry: OutputEntry = {
     id: previous?.id ?? id,
@@ -53,6 +54,7 @@ export const appendOutputEntry = (
     severity,
     source: notice.source,
     message: notice.message,
+    detail: notice.detail,
     stack: notice.stack,
     context: notice.context,
     sessionId: notice.sessionId,
@@ -86,19 +88,50 @@ export const matchesOutputFilter = (
 export const statusBarDismissDelayMs = (entry: OutputEntry): number | undefined =>
   needsAttention(entry.severity) ? undefined : 4_000;
 
-/** Technical details shown in the detail pane and included when copying. */
+type WarningContext = { engineId?: string; summary?: string; details?: string; path?: string };
+
+const contextLabels: Record<string, string> = {
+  persistent: "",
+  executionRecoverySessionId: "会话",
+  chatTreeRefreshSessionId: "会话",
+  sessionId: "会话"
+};
+
+const readableValue = (value: unknown): string =>
+  typeof value === "string" ? value : JSON.stringify(value);
+
+/**
+ * Technical details in readable sections (original text, engine warnings, context, stack), shown in the
+ * detail pane and copied verbatim. Labels and values sit on "label  value" lines; section titles start with "//".
+ */
 export const outputEntryDetails = (entry: OutputEntry): string | undefined => {
-  const parts = [
-    entry.context && Object.keys(entry.context).length ? JSON.stringify(entry.context, null, 2) : undefined,
-    entry.stack
-  ].filter((part): part is string => Boolean(part));
-  return parts.length ? parts.join("\n\n") : undefined;
+  const sections: string[] = [];
+  if (entry.detail) sections.push("// 原始信息\n" + entry.detail);
+  const { engineConfigWarnings, ...rest } = entry.context ?? {};
+  for (const warning of Array.isArray(engineConfigWarnings) ? engineConfigWarnings as WarningContext[] : []) {
+    sections.push(["// 引擎配置警告",
+      warning.summary && "摘要  " + warning.summary,
+      warning.details && "详情  " + warning.details,
+      warning.path && "配置  " + warning.path].filter(Boolean).join("\n"));
+  }
+  const context = Object.entries(rest)
+    .filter(([key, value]) => contextLabels[key] !== "" && value !== undefined)
+    .map(([key, value]) => (contextLabels[key] ?? key) + "  " + readableValue(value));
+  if (context.length) sections.push(["// 上下文", ...context].join("\n"));
+  if (entry.stack) sections.push("// 调用栈\n" + entry.stack);
+  return sections.length ? sections.join("\n\n") : undefined;
+};
+
+/** Configuration file named by the engine warnings attached to an entry. */
+export const outputEntryConfigPath = (entry: OutputEntry): string | undefined => {
+  const warnings = entry.context?.engineConfigWarnings;
+  return Array.isArray(warnings) ? (warnings as WarningContext[]).find((warning) => warning.path)?.path : undefined;
 };
 
 export const engineWarningDetails = (warning: { details?: string; path?: string }): string | undefined => {
-  const parts = [warning.details, warning.path ? `配置文件：${warning.path}` : undefined]
-    .filter((part): part is string => Boolean(part));
-  return parts.length ? parts.join("\n\n") : undefined;
+  const lines = [warning.details && "详情  " + warning.details, warning.path && "配置  " + warning.path]
+    .filter((line): line is string => Boolean(line));
+  return lines.length ? ["// 引擎配置警告", ...lines].join("\n") : undefined;
 };
 
 /** Keeps the first receipt time of warnings that are still reported; new ones are stamped with now. */

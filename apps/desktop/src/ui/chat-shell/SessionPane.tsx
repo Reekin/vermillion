@@ -763,7 +763,7 @@ export const SessionPane = ({
         })
         .catch((error) => {
           setStatusNotice({
-            message: `Execution preference save failed: ${(error as Error).message}`,
+            message: "保存执行偏好失败", detail: (error as Error).message,
             source: "settings",
             ...statusNoticeErrorDetails(error)
           });
@@ -846,7 +846,7 @@ export const SessionPane = ({
   useEffect(() => {
     if (!isVisible || !windowVisible || !sessionId || !readNodeId || !unreadVisibleKey) return;
     void transport.chatTree.markRead({ sessionId, nodeId: readNodeId }).catch((error: Error) => {
-      setStatusNotice({ source: "chat-tree", message: "更新已读状态失败：" + error.message });
+      setStatusNotice({ source: "chat-tree", message: "更新已读状态失败", detail: error.message });
     });
   }, [readNodeId, unreadVisibleKey, isVisible, windowVisible, sessionId, transport, setStatusNotice]);
   useEffect(() => {
@@ -965,7 +965,7 @@ export const SessionPane = ({
     void transport.sessionBrowser.open(viewSessionId, { forceProviderHydration: true, includeWindow: false })
       .then(() => refreshChatTree())
       .catch((error) => setStatusNotice({
-        message: `Session refresh failed: ${(error as Error).message}`,
+        message: "刷新会话失败", detail: (error as Error).message,
         source: "session-browser",
         ...statusNoticeErrorDetails(error)
       }));
@@ -1039,7 +1039,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: `Engine list failed: ${(error as Error).message}`,
+            message: "读取引擎列表失败", detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1081,7 +1081,7 @@ export const SessionPane = ({
         if (!disposed) {
           setSettingsHydrated(true);
           setStatusNotice({
-            message: `Settings load failed: ${(error as Error).message}`,
+            message: "读取设置失败", detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1115,7 +1115,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: `Engine surface failed: ${(error as Error).message}`,
+            message: "读取引擎能力失败", detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1146,7 +1146,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: `Event subscribe failed: ${(error as Error).message}`,
+            message: "订阅会话事件失败，界面可能不会实时更新", detail: (error as Error).message,
             persistent: true,
             source: "subscription",
             ...statusNoticeErrorDetails(error)

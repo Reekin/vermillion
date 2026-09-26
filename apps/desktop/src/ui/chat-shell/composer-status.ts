@@ -2,6 +2,8 @@ import type { ApprovalRequest, ChatSession } from "@vermillion/shared";
 
 export type ComposerStatusNotice = {
   message: string;
+  /** Original text from the engine or system; shown in the technical details, not in the message. */
+  detail?: string;
   /** Engine that ran the operation; used to attribute engine configuration warnings. */
   engineId?: string;
   /** Session the notice concerns; the output offers to open it. */
@@ -44,24 +46,23 @@ export const resolveRecoveryNotice = (
       value: executionRecovery,
       source: "session-browser",
       key: "executionRecoverySessionId",
-      prefix: "Session reconnect failed: ",
-      suffix: ". Use Resume to retry."
+      summary: "会话重新连接失败，点「恢复」重试"
     },
     {
       value: chatTreeRefresh,
       source: "chat-tree",
       key: "chatTreeRefreshSessionId",
-      prefix: "Chat tree refresh failed: ",
-      suffix: ""
+      summary: "刷新会话树失败"
     }
   ] as const;
-  for (const { value, source, key, prefix, suffix } of recoveries) {
+  for (const { value, source, key, summary } of recoveries) {
     if (!value || typeof value !== "object" || !("status" in value)) continue;
     if (value.status === "failed" && (!current || current.source === source)) {
       const message = "message" in value && typeof value.message === "string"
         ? value.message : "Unknown error";
       current = {
-        message: `${prefix}${message}${suffix}`,
+        message: summary,
+        detail: message,
         persistent: true,
         source,
         severity: "error",

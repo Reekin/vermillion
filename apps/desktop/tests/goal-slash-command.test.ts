@@ -44,7 +44,7 @@ describe("parseGoalSlashCommand", () => {
 
     expect(
       goalCommandBlockedReason(command, existingGoal)
-    ).toBe("A goal is already set. Use /goal clear before setting a new goal.");
+    ).toBe("已有目标，先用 /goal clear 清除再设置新目标");
     expect(goalCommandBlockedReason(command, undefined)).toBeUndefined();
     expect(
       goalCommandBlockedReason(parseGoalSlashCommand("/goal pause"), existingGoal)
@@ -53,7 +53,7 @@ describe("parseGoalSlashCommand", () => {
 
   it("keeps edit as a non-mutating command until an editor exists", () => {
     expect(goalCommandBlockedReason(parseGoalSlashCommand("/goal edit"))).toBe(
-      "Goal editing is not available here yet. Use /goal clear before setting a new goal."
+      "暂不支持编辑目标，先用 /goal clear 清除再设置新目标"
     );
   });
 });

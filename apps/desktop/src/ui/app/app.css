@@ -250,8 +250,10 @@
 .vm-output-detail__message { margin: 0; padding: 8px 16px 12px; font-size: var(--text-label); line-height: 1.5; color: var(--awb-ink-strong); overflow-wrap: anywhere; }
 .vm-output-detail__meta { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 0 16px 12px; font-size: var(--text-caption); color: var(--awb-ink-muted); overflow-wrap: anywhere; }
 .vm-output-code { flex: 1; min-height: 0; margin: 0 16px 16px; padding: 8px 12px; overflow: auto; border: 1px solid var(--awb-rule); border-radius: var(--awb-control-radius); background: var(--awb-input); font-family: var(--awb-font-mono); font-size: var(--text-micro); line-height: 1.6; color: var(--awb-ink); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.vm-output-code__section { color: var(--awb-ink-faint); }
 .vm-output-code__key { color: var(--awb-ink-muted); }
-.vm-output-code__string { color: var(--awb-accent-strong); }
+.vm-output-code__value { color: var(--awb-ink-strong); }
+.vm-output-list > li + li { margin-top: 24px; }
 
 @media (max-width: 640px) {
   .vm-list-columns { grid-template-columns: auto minmax(0, 1fr) 76px 22px 48px; gap: 4px; padding-inline: 8px; }
