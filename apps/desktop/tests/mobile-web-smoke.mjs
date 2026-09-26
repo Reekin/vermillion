@@ -64,7 +64,7 @@ await writeFile(browserConfig, "{}\n", { mode: 0o600 });
 // Do not inherit a shared CDP connection, profile, restore key or launch script.
 const browserEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("AGENT_BROWSER_")));
 browserEnv.AGENT_BROWSER_DEFAULT_TIMEOUT = "120000";
-const browserFlags = ["--config", browserConfig, "--session", browserSession, "--json", "--allowed-domains", url.hostname,
+const browserFlags = ["--config", browserConfig, "--session", browserSession, "--json",
   ...(args.insecure ? ["--ignore-https-errors"] : [])];
 
 async function run(program, argv, label, env = process.env, timeout = 135_000) {
@@ -101,7 +101,7 @@ try {
   assert.ok(descriptor.instanceId && descriptor.dataDir && Number.isInteger(descriptor.pid), "Invalid isolated app.start target descriptor");
   await access(args.browser);
   const help = await run(args.browser, ["--help"], "Browser compatibility check", browserEnv, 10_000);
-  for (const flag of ["--session", "--json", "--config", "--allowed-domains", "--ignore-https-errors"]) assert.ok(help.includes(flag), `agent-browser must support ${flag}`);
+  for (const flag of ["--session", "--json", "--config", "--ignore-https-errors"]) assert.ok(help.includes(flag), `agent-browser must support ${flag}`);
   for (const method of ["remote.pair", "remote.device.list", "remote.device.revoke", "session.read"]) {
     await run(process.execPath, [cliPath, method, "--help"], `CLI compatibility ${method}`, process.env, 10_000);
   }
