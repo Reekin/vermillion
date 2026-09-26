@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>界面参考样张</title>
+<style>
+/* Tokens follow the current app palette (chat-shell.css / app.css) so the mocks differ only in information design. */
+:root {
+  --canvas: #141416;
+  --panel: #1b1b1e;
+  --panel-alt: #17171a;
+  --raised: #232327;
+  --hover: rgba(255, 255, 255, 0.035);
+  --selected: rgba(140, 143, 141, 0.14);
+  --rule: rgba(255, 255, 255, 0.06);
+  --rule-strong: rgba(255, 255, 255, 0.1);
+  --control: rgba(255, 255, 255, 0.14);
+  --strong: #f0f0ee;
+  --ink: #cdcdc9;
+  --muted: #9a9a96;
+  --faint: #6f6f6b;
+  --run: #cfb76a;
+  --run-soft: rgba(207, 183, 106, 0.12);
+  --ok: #8fbc98;
+  --ok-soft: rgba(143, 188, 152, 0.12);
+  --err: #c98a94;
+  --err-soft: rgba(201, 138, 148, 0.12);
+  --info: #8ea3bd;
+  --warn: #d99a62;
+  --warn-soft: rgba(217, 154, 98, 0.13);
+  --info-soft: rgba(142, 163, 189, 0.12);
+  --sans: "IBM Plex Sans", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Code", "Microsoft YaHei UI", monospace;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0c0c0e; color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+svg.i { width: 14px; height: 14px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.sm { width: 12px; height: 12px; }
+svg.i.lg { width: 16px; height: 16px; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.strong { color: var(--strong); }
+.grow { flex: 1; min-width: 0; }
+.row { display: flex; align-items: center; gap: 8px; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Gallery chrome ---------- */
+.gallery { max-width: 1360px; margin: 0 auto; padding: 48px 32px 120px; }
+.gallery > header h1 { font-size: 26px; font-weight: 600; color: var(--strong); letter-spacing: -0.01em; }
+.gallery > header p { margin-top: 10px; max-width: 820px; color: var(--muted); font-size: 15px; line-height: 1.7; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.toc a { padding: 5px 12px; border: 1px solid var(--rule-strong); border-radius: 999px; color: var(--ink); text-decoration: none; font-size: 13px; }
+.toc a:hover { background: var(--hover); color: var(--strong); }
+.case { margin-top: 72px; scroll-margin-top: 24px; }
+.case-head { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 32px; align-items: start; }
+.case-head h2 { font-size: 20px; font-weight: 600; color: var(--strong); }
+.case-head h2 span { margin-right: 10px; color: var(--faint); font-family: var(--mono); font-size: 15px; font-weight: 500; }
+.case-head ul { margin-top: 14px; list-style: none; display: grid; gap: 8px; }
+.case-head li { position: relative; padding-left: 16px; color: var(--ink); font-size: 14px; line-height: 1.65; }
+.case-head li::before { content: ""; position: absolute; left: 2px; top: 10px; width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+.case-head li b { color: var(--strong); font-weight: 500; }
+.before { display: block; border: 1px solid var(--rule-strong); border-radius: var(--r-lg); overflow: hidden; position: relative; }
+.before img { display: block; width: 100%; }
+.before::after { content: "现状（点击看原图）"; position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.7); color: var(--ink); font-size: 12px; }
+.before + .before { margin-top: 10px; }
+.stage-label { margin: 22px 0 10px; font-size: 12px; font-weight: 500; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.stage-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.stage { border: 1px solid var(--rule-strong); border-radius: 10px; overflow: hidden; background: var(--panel); box-shadow: 0 24px 60px rgba(0,0,0,.45); }
+.why { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.why div { padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--panel-alt); font-size: 13px; line-height: 1.6; color: var(--muted); }
+.why b { display: block; margin-bottom: 2px; color: var(--strong); font-weight: 500; font-size: 13.5px; }
+
+/* ---------- Shared app primitives used by the mocks ---------- */
+.tabs { display: flex; align-items: center; gap: 2px; height: 42px; padding: 0 10px; border-bottom: 1px solid var(--rule); background: var(--panel); }
+.tabs > button { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 42px; padding: 0 9px; color: var(--muted); font-weight: 500; }
+.tabs > button:hover { color: var(--ink); }
+.tabs > button[aria-current] { color: var(--strong); }
+.tabs > button[aria-current]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--strong); }
+.tabs .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.ws-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border: 1px solid var(--rule-strong); border-radius: var(--r-md); color: var(--strong); font-weight: 500; }
+.ws-chip .dot { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #b35a4a, #7d3a33); color: #fff; font-size: 11px; display: grid; place-items: center; font-weight: 600; }
+.ws-chip .path { color: var(--faint); font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--r-md); font-weight: 500; font-size: 13.5px; white-space: nowrap; }
+.btn.primary { background: var(--strong); color: #18181a; }
+.btn.secondary { border: 1px solid var(--control); color: var(--strong); }
+.btn.secondary:hover, .btn.ghost:hover { background: var(--hover); }
+.btn.ghost { color: var(--ink); }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 13px; }
+.btn[disabled] { opacity: .45; cursor: default; }
+.icon-btn { width: 28px; height: 28px; border-radius: var(--r-md); display: inline-grid; place-items: center; color: var(--muted); }
+.icon-btn:hover { background: var(--hover); color: var(--strong); }
+.kbd { padding: 0 5px; border: 1px solid var(--rule-strong); border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+.pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.pill.run { background: var(--run-soft); color: var(--run); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.err { background: var(--err-soft); color: var(--err); }
+.pill.info { background: var(--info-soft); color: var(--info); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.neutral { background: rgba(255,255,255,.06); color: var(--ink); }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; background: rgba(255,255,255,.06); color: var(--ink); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.tag.mono { font-family: var(--mono); font-size: 11.5px; font-weight: 400; color: var(--muted); }
+
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--run-soft); border-top-color: var(--run); animation: spin 1s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.state-icon { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; flex-shrink: 0; }
+.state-icon.ok { background: var(--ok-soft); color: var(--ok); }
+.state-icon.err { background: var(--err-soft); color: var(--err); }
+.state-icon.wait { border: 1.5px dashed var(--faint); }
+.state-icon.pause { background: var(--warn-soft); color: var(--warn); }
+
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.switch .track { width: 30px; height: 18px; border-radius: 999px; background: rgba(255,255,255,.1); position: relative; transition: background .15s; }
+.switch .track::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.switch.on .track { background: var(--ok); }
+.switch.on .track::after { transform: translateX(12px); background: #fff; }
+
+.segmented { display: inline-flex; padding: 2px; border-radius: var(--r-md); background: rgba(255,255,255,.05); }
+.segmented button { height: 26px; padding: 0 11px; border-radius: 5px; color: var(--muted); font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.segmented button[aria-pressed="true"] { background: var(--raised); color: var(--strong); box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.segmented .n { color: var(--faint); font-weight: 400; }
+
+.progress { display: flex; gap: 3px; height: 4px; }
+.progress i { flex: 1; border-radius: 2px; background: rgba(255,255,255,.08); }
+.progress i.ok { background: var(--ok); }
+.progress i.run { background: var(--run); }
+.progress i.err { background: var(--err); }
+
+.field { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--rule-strong); border-radius: var(--r-md); background: rgba(0,0,0,.2); color: var(--faint); font-size: 13px; }
+
+/* ---------- Mock: work board ---------- */
+.board { height: 760px; display: flex; flex-direction: column; }
+.page-head { display: flex; align-items: center; gap: 16px; padding: 18px 28px 14px; }
+.page-head h3 { font-size: 18px; font-weight: 600; color: var(--strong); }
+.stats { display: flex; gap: 6px; }
+.board-body { flex: 1; overflow: auto; padding: 4px 28px 28px; }
+.toolbar { display: flex; align-items: center; gap: 12px; padding: 0 28px 14px; border-bottom: 1px solid var(--rule); }
+.group-title { display: flex; align-items: center; gap: 8px; margin: 22px 0 10px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.group-title .n { color: var(--faint); font-weight: 400; }
+.work { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--panel-alt); overflow: hidden; }
+.work + .work { margin-top: 10px; }
+.work.attention { border-color: rgba(217, 154, 98, .3); }
+.work-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 14px 16px 12px; }
+.work-title { font-size: 15px; font-weight: 500; color: var(--strong); }
+.work-meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; }
+.work-meta a { color: var(--ink); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.work-meta a:hover { color: var(--strong); text-decoration: underline; }
+.work-side { grid-row: span 2; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.work-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.work-progress .progress { width: 120px; }
+.alert { display: flex; align-items: flex-start; gap: 10px; margin: 0 16px 14px; padding: 10px 12px; border-radius: var(--r-md); background: var(--warn-soft); color: var(--ink); font-size: 13px; }
+.alert svg { color: var(--warn); margin-top: 2px; }
+.alert .actions { margin-left: auto; display: flex; gap: 6px; }
+.items { border-top: 1px solid var(--rule); }
+.item { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px 120px 64px; align-items: center; gap: 12px; height: 44px; padding: 0 16px; }
+.item + .item { border-top: 1px solid var(--rule); }
+.item:hover { background: var(--hover); }
+.item .t { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .t b { color: var(--strong); font-weight: 500; }
+.item .when { color: var(--muted); font-size: 12.5px; text-align: right; }
+.item .acts { display: flex; justify-content: flex-end; gap: 2px; opacity: 0; transition: opacity .1s; }
+.item:hover .acts { opacity: 1; }
+.item .tag { justify-self: start; }
+.done-list .item { grid-template-columns: 22px minmax(0, 1fr) 110px 110px 64px; height: 40px; }
+.done-list { border: 1px solid var(--rule); border-radius: var(--r-lg); overflow: hidden; }
+
+/* ---------- Mock: session ---------- */
+.session { height: 800px; display: grid; grid-template-columns: 260px minmax(0, 1fr) 280px; }
+.session > * { min-height: 0; }
+.side { border-right: 1px solid var(--rule); background: var(--panel-alt); display: flex; flex-direction: column; min-width: 0; }
+.side-head { display: flex; align-items: center; gap: 4px; padding: 12px 10px 8px 14px; }
+.side-head h4 { font-size: 13px; font-weight: 600; color: var(--strong); margin-right: auto; }
+.side .field { margin: 0 10px 8px; }
+.side-group { padding: 10px 14px 4px; font-size: 12px; color: var(--faint); font-weight: 500; }
+.srow { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 0 6px; padding: 7px 8px; border-radius: var(--r-md); }
+.srow:hover { background: var(--hover); }
+.srow.sel { background: var(--selected); }
+.srow .title { color: var(--ink); font-weight: 500; font-size: 13.5px; }
+.srow.sel .title { color: var(--strong); }
+.srow .sub { grid-column: 2 / 4; margin-top: -4px; font-size: 12px; color: var(--faint); display: flex; gap: 6px; }
+.srow .time { font-size: 12px; color: var(--faint); }
+.srow.child { margin-left: 24px; }
+.sdot { width: 7px; height: 7px; border-radius: 50%; }
+.sdot.run { background: var(--run); box-shadow: 0 0 0 3px var(--run-soft); }
+.sdot.unread { background: var(--ok); }
+.wbadge { width: 16px; height: 16px; border-radius: 4px; background: var(--info-soft); color: var(--info); font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; }
+.main { display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+.main-head { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px 0 24px; border-bottom: 1px solid var(--rule); }
+.main-head h4 { font-size: 15px; font-weight: 600; color: var(--strong); }
+.crumbs { color: var(--faint); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+.transcript { flex: 1; min-height: 0; overflow: auto; padding: 24px 0 12px; }
+.col { max-width: 720px; margin: 0 auto; padding: 0 28px; }
+.msg-user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 20px; }
+.msg-user .bubble { max-width: 82%; padding: 10px 14px; border-radius: 12px 12px 4px 12px; background: var(--raised); color: var(--strong); font-size: 15px; line-height: 1.6; }
+.msg-user .meta { margin-top: 4px; font-size: 11.5px; color: var(--faint); }
+.process { margin-bottom: 14px; }
+.process-summary { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px 0 8px; margin-left: -8px; border-radius: var(--r-md); color: var(--muted); font-size: 13px; }
+.process-summary:hover { background: var(--hover); color: var(--ink); }
+.process-summary .sep { color: var(--faint); }
+.steps { margin: 6px 0 4px 3px; padding-left: 16px; border-left: 1px solid var(--rule-strong); display: grid; gap: 2px; }
+.step { display: grid; grid-template-columns: 18px 64px minmax(0, 1fr) auto; align-items: center; gap: 8px; height: 30px; font-size: 13px; }
+.step .verb { color: var(--ink); font-weight: 500; }
+.step .obj { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step .obj code { font-family: var(--mono); font-size: 12px; color: var(--ink); background: rgba(255,255,255,.05); padding: 1px 5px; border-radius: 4px; }
+.step .res { font-size: 12px; color: var(--faint); }
+.step .ic { color: var(--muted); }
+.step.fail .res { color: var(--err); }
+.answer { font-size: 15px; line-height: 1.7; color: var(--ink); }
+.answer p + * , .answer * + p { margin-top: 12px; }
+.answer code { font-family: var(--mono); font-size: 12.5px; padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,.06); color: var(--strong); }
+.answer table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13.5px; }
+.answer th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--rule-strong); }
+.answer td { padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.answer ol { margin-top: 10px; padding-left: 20px; }
+.answer li + li { margin-top: 6px; }
+.answer li b { color: var(--strong); font-weight: 500; }
+.answer-foot { display: flex; align-items: center; gap: 4px; margin-top: 12px; color: var(--faint); font-size: 12px; }
+.composer-wrap { padding: 8px 0 16px; }
+.composer { border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--panel-alt); }
+.composer .input { padding: 12px 14px 4px; min-height: 58px; color: var(--faint); font-size: 14.5px; }
+.composer .bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: var(--r-md); color: var(--ink); font-size: 13px; font-weight: 500; }
+.chip:hover { background: var(--hover); }
+.chip .sub { color: var(--muted); font-weight: 400; }
+.send { width: 30px; height: 30px; border-radius: 8px; background: var(--strong); color: #18181a; display: grid; place-items: center; margin-left: 4px; }
+.rpanel { border-left: 1px solid var(--rule); background: var(--panel-alt); display: flex; flex-direction: column; }
+.rpanel-head { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 16px; border-bottom: 1px solid var(--rule); font-weight: 600; color: var(--strong); font-size: 13.5px; }
+.change { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 16px; font-size: 13px; }
+.change:hover { background: var(--hover); }
+.change .st { font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+.change .st.m { color: var(--run); }
+.change .st.a { color: var(--ok); }
+.change .p { overflow: hidden; }
+.change .p .name { color: var(--strong); }
+.change .p .dir { color: var(--faint); font-size: 12px; }
+.diffstat { font-family: var(--mono); font-size: 11.5px; }
+.diffstat .add { color: var(--ok); }
+.diffstat .del { color: var(--err); }
+.rpanel-foot { margin-top: auto; padding: 14px 16px; border-top: 1px solid var(--rule); display: grid; gap: 8px; }
+.rpanel-foot .btn { justify-content: center; height: 34px; }
+.hint { font-size: 12px; color: var(--faint); line-height: 1.5; }
+
+/* ---------- Mock: dialog ---------- */
+.backdrop { padding: 36px; background: radial-gradient(ellipse at 50% 0%, rgba(255,255,255,.03), transparent 60%), #0f0f11; display: flex; justify-content: center; }
+.dialog { width: 820px; border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--panel); box-shadow: 0 30px 80px rgba(0,0,0,.6); overflow: hidden; }
+.dlg-head { padding: 20px 24px 0; }
+.dlg-title { display: flex; align-items: flex-start; gap: 12px; }
+.dlg-title h4 { font-size: 18px; font-weight: 600; color: var(--strong); line-height: 1.4; }
+.meta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+.meta-line span { display: inline-flex; align-items: center; gap: 5px; }
+.meta-line .copy { color: var(--ink); font-family: var(--mono); font-size: 12px; }
+.flow { display: grid; grid-template-columns: repeat(5, 1fr); margin: 20px 0 0; }
+.flow .s { position: relative; padding-top: 22px; font-size: 12.5px; }
+.flow .s::before { content: ""; position: absolute; top: 6px; left: 0; right: 0; height: 2px; background: var(--ok); }
+.flow .s:first-child::before { left: 7px; }
+.flow .s:last-child::before { right: calc(100% - 7px); }
+.flow .s::after { content: ""; position: absolute; top: 1px; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--panel); }
+.flow .s b { display: block; color: var(--strong); font-weight: 500; }
+.flow .s span { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+.dlg-tabs { display: flex; gap: 2px; margin-top: 18px; border-bottom: 1px solid var(--rule); }
+.dlg-tabs button { position: relative; height: 38px; padding: 0 10px; color: var(--muted); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.dlg-tabs button[aria-current] { color: var(--strong); }
+.dlg-tabs button[aria-current]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: var(--strong); border-radius: 2px; }
+.dlg-tabs .n { font-size: 11.5px; color: var(--faint); font-weight: 400; }
+.dlg-body { padding: 18px 24px 8px; max-height: 420px; overflow: auto; }
+.result-box { padding: 14px 16px; border-radius: var(--r-lg); background: var(--ok-soft); border: 1px solid rgba(143,188,152,.18); font-size: 14px; line-height: 1.7; color: var(--ink); }
+.result-box code { font-family: var(--mono); font-size: 12.5px; padding: 1px 5px; border-radius: 4px; background: rgba(0,0,0,.25); color: var(--strong); }
+.checks { margin-top: 0; display: grid; gap: 2px; }
+.check { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--rule); }
+.check .c { color: var(--ink); font-size: 14px; line-height: 1.6; }
+.check .ev { margin-top: 4px; font-size: 12.5px; color: var(--muted); line-height: 1.55; display: none; }
+.check.open .ev { display: block; }
+.check .toggle { font-size: 12px; color: var(--faint); align-self: start; padding-top: 3px; }
+.sec-title { display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: 13px; font-weight: 600; color: var(--strong); }
+.sec-title .n { font-weight: 400; color: var(--faint); font-size: 12.5px; }
+.dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 24px; border-top: 1px solid var(--rule); }
+
+/* ---------- Mock: docs ---------- */
+.docs { height: 720px; display: grid; grid-template-columns: 290px minmax(0, 1fr); }
+.tree { border-right: 1px solid var(--rule); background: var(--panel-alt); overflow: auto; padding-bottom: 12px; }
+.tree .field { margin: 12px 10px 8px; }
+.tnode { display: flex; align-items: center; gap: 6px; height: 28px; padding-right: 10px; margin: 0 6px; border-radius: 5px; font-size: 13px; color: var(--ink); }
+.tnode:hover { background: var(--hover); }
+.tnode.sel { background: var(--selected); color: var(--strong); }
+.tnode .chev { color: var(--faint); }
+.tnode .fi { color: var(--muted); }
+.tnode.dir { color: var(--strong); font-weight: 500; }
+.tnode .gs { margin-left: auto; font-family: var(--mono); font-size: 11px; font-weight: 600; }
+.tnode .gs.m { color: var(--run); }
+.tnode .gs.a { color: var(--ok); }
+.tnode .cnt { margin-left: auto; font-size: 11.5px; color: var(--faint); }
+.doc-main { display: flex; flex-direction: column; min-width: 0; }
+.doc-bar { display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 16px 0 28px; border-bottom: 1px solid var(--rule); }
+.doc-bar .crumbs b { color: var(--strong); font-weight: 500; }
+.doc-scroll { flex: 1; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 32px; padding: 28px 28px 40px 40px; }
+.doc { max-width: 700px; font-size: 15px; line-height: 1.75; color: var(--ink); }
+.doc h1 { font-size: 24px; font-weight: 600; color: var(--strong); line-height: 1.35; }
+.doc .lead { margin-top: 10px; color: var(--muted); }
+.doc h2 { margin-top: 30px; font-size: 17px; font-weight: 600; color: var(--strong); }
+.doc table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13.5px; }
+.doc th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--rule-strong); white-space: nowrap; }
+.doc td { padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.doc td:first-child { color: var(--strong); font-weight: 500; white-space: nowrap; }
+.doc a { color: var(--strong); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
+.outline { position: sticky; top: 0; align-self: start; font-size: 12.5px; }
+.outline h5 { font-size: 12px; font-weight: 500; color: var(--faint); margin-bottom: 8px; }
+.outline a { display: block; padding: 4px 0 4px 10px; border-left: 1px solid var(--rule-strong); color: var(--muted); text-decoration: none; }
+.outline a.on { color: var(--strong); border-left-color: var(--strong); }
+.backlinks { margin-top: 20px; }
+.backlinks a { border: 0; padding-left: 0; display: flex; gap: 6px; align-items: center; }
+
+/* ---------- Mock: roles ---------- */
+.roles { padding: 22px 28px 28px; min-height: 560px; }
+.rtable { margin-top: 16px; border: 1px solid var(--rule); border-radius: var(--r-lg); overflow: hidden; }
+.rrow { display: grid; grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1.6fr) 170px 190px 40px; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--rule); }
+.rrow:last-child { border-bottom: 0; }
+.rrow:not(.rhead):hover { background: var(--hover); }
+.rhead { padding: 8px 16px; background: var(--panel-alt); font-size: 12px; color: var(--faint); font-weight: 500; }
+.avatar { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+.rname b { display: block; color: var(--strong); font-weight: 500; }
+.rname span { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+.rdesc { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.model { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+.model .lvl { color: var(--muted); }
+.scope { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.scope .d { width: 6px; height: 6px; border-radius: 50%; }
+
+/* ---------- Mock: domain ---------- */
+.domain { height: 760px; display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+.dlist { border-right: 1px solid var(--rule); background: var(--panel-alt); padding: 12px 6px; }
+.ditem { padding: 9px 10px; border-radius: var(--r-md); }
+.ditem.sel { background: var(--selected); }
+.ditem b { display: flex; align-items: center; gap: 8px; color: var(--strong); font-weight: 500; font-size: 13.5px; }
+.ditem span { display: block; margin-top: 2px; font-size: 12px; color: var(--faint); }
+.ddetail { overflow: auto; padding: 24px 32px 40px; }
+.ddetail-inner { max-width: 820px; }
+.cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+.card { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--panel-alt); }
+.card-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; font-size: 13px; font-weight: 600; color: var(--strong); }
+.card-h .muted { font-weight: 400; font-size: 12.5px; }
+.card-b { padding: 0 14px 12px; }
+.cover li { list-style: none; position: relative; padding: 3px 0 3px 14px; font-size: 13.5px; color: var(--ink); }
+.cover li::before { content: ""; position: absolute; left: 2px; top: 11px; width: 4px; height: 4px; border-radius: 50%; background: var(--muted); }
+.cover .not::before { background: none; border: 1px solid var(--faint); }
+.cover .not { color: var(--muted); }
+.setting { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--rule); font-size: 13.5px; }
+.setting:first-child { border-top: 0; }
+.setting .l { flex: 1; }
+.setting .l small { display: block; font-size: 12px; color: var(--faint); }
+.select { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 1px solid var(--rule-strong); border-radius: 5px; font-size: 12.5px; color: var(--strong); }
+.file { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--rule); font-size: 13px; }
+.file:first-child { border-top: 0; }
+.file .n { color: var(--strong); }
+.file .p { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+.timeline { margin-top: 4px; }
+.tl { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; padding: 9px 0; border-top: 1px solid var(--rule); font-size: 13.5px; align-items: start; }
+.tl:first-child { border-top: 0; }
+.tl .w { color: var(--faint); font-size: 12px; white-space: nowrap; }
+.tl small { display: block; color: var(--muted); font-size: 12.5px; }
+.tl.collapsed { color: var(--muted); }
+.dots { display: flex; gap: 3px; margin-top: 6px; }
+.dots i { width: 8px; height: 8px; border-radius: 2px; background: rgba(255,255,255,.1); }
+.dots i.ok { background: rgba(143,188,152,.55); }
+.dots i.issue { background: var(--warn); }
+
+/* ---------- Mock: search ---------- */
+.search { width: 980px; }
+.search-input { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 18px; border-bottom: 1px solid var(--rule); color: var(--strong); font-size: 15px; }
+.search-input .scope { margin-left: auto; }
+.search-body { display: grid; grid-template-columns: 400px minmax(0, 1fr); height: 470px; }
+.results { border-right: 1px solid var(--rule); overflow: auto; padding: 8px 0; }
+.rgroup { padding: 10px 16px 4px; font-size: 12px; color: var(--faint); font-weight: 500; display: flex; gap: 6px; align-items: center; }
+.hit { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; margin: 0 6px; padding: 8px 10px; border-radius: var(--r-md); }
+.hit.sel { background: var(--selected); }
+.hit .who { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 600; margin-top: 1px; }
+.hit .who.u { background: rgba(255,255,255,.08); color: var(--ink); }
+.hit .who.a { background: var(--info-soft); color: var(--info); }
+.hit .who.t { background: rgba(255,255,255,.04); color: var(--muted); }
+.hit .txt { font-size: 13.5px; color: var(--ink); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hit .txt mark, .preview mark { background: rgba(207,183,106,.22); color: var(--strong); border-radius: 2px; padding: 0 1px; }
+.hit .m { margin-top: 3px; font-size: 12px; color: var(--faint); }
+.preview { overflow: auto; padding: 20px 26px; }
+.preview .ctx { color: var(--faint); font-size: 12.5px; display: flex; gap: 6px; align-items: center; margin-bottom: 14px; }
+.preview .dim { opacity: .45; }
+.focus-ring { margin: 8px -12px; padding: 10px 12px; border-radius: var(--r-md); background: rgba(255,255,255,.03); border: 1px solid var(--rule-strong); }
+.search-foot { display: flex; gap: 16px; align-items: center; padding: 10px 18px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--faint); }
+
+/* ---------- Standards section ---------- */
+.std { margin-top: 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.std div { padding: 16px 18px; border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--panel-alt); }
+.std h4 { font-size: 14.5px; color: var(--strong); font-weight: 600; }
+.std p { margin-top: 6px; font-size: 13.5px; color: var(--muted); line-height: 1.65; }
+.std .tagline { display: inline-block; margin-bottom: 8px; font-size: 11.5px; padding: 1px 7px; border-radius: 999px; }
+.std .tagline.gap { background: var(--run-soft); color: var(--run); }
+.std .tagline.broken { background: var(--err-soft); color: var(--err); }
+.std .tagline.tune { background: var(--info-soft); color: var(--info); }
+
+.sample-title { font-size: 18px; font-weight: 600; color: var(--strong); margin-bottom: 14px; }
+.gallery > header a { color: var(--strong); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="term" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+  <symbol id="eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="list" viewBox="0 0 24 24"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></symbol>
+  <symbol id="pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+  <symbol id="branch" viewBox="0 0 24 24"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+  <symbol id="msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+  <symbol id="play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+  <symbol id="up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+  <symbol id="bulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></symbol>
+  <symbol id="ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3"/></symbol>
+  <symbol id="refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+</svg>
+
+<main class="gallery">
+  <header>
+    <h1>界面参考样张</h1>
+    <p>各主要页面的参考形态，配套 <a href="Standards.md">UI/UX 规范</a>。数据仅为示意。</p>
+    <nav class="toc"><a href="#work">工作看板</a><a href="#session">会话</a><a href="#item">工单详情</a><a href="#roles">角色</a><a href="#domain">领域</a><a href="#search">搜索</a></nav>
+  </header>
+
+  <!-- 01 WORK BOARD -->
+  <section class="case" id="work">
+    <h2 class="sample-title">工作看板</h2>
+    <div class="stage board">
+      <div class="tabs">
+        <button>会话</button><button aria-current="page">工作 <span class="count">1</span></button><button>领域</button><button>角色</button><button>Issues</button><button>自动化</button><button>管理</button>
+        <span class="ws-chip"><span class="dot">V</span>vermillion <svg class="i sm faint"><use href="#chev-d"/></svg></span>
+      </div>
+      <div class="page-head">
+        <h3>工作</h3>
+        <div class="stats"><span class="pill warn">1 需要处理</span><span class="pill run">1 进行中</span><span class="pill neutral">153 已结束</span></div>
+        <div class="grow"></div>
+        <label class="switch on"><span class="track"></span>自动推进</label>
+        <span class="muted" style="font-size:13px">并发 <b class="strong">2</b></span>
+        <button class="btn secondary sm"><svg class="i"><use href="#plus"/></svg>新建工单</button>
+      </div>
+      <div class="toolbar">
+        <div class="segmented"><button aria-pressed="true">进行中 <span class="n">2</span></button><button>已结束 <span class="n">153</span></button><button>全部</button></div>
+        <div class="field" style="width:240px"><svg class="i"><use href="#search"/></svg>筛选标题</div>
+      </div>
+      <div class="board-body">
+        <div class="group-title">需要你处理 <span class="n">1</span></div>
+        <div class="work attention">
+          <div class="work-head">
+            <div class="work-title">修改 Worker 行为规范中“文档与合同变更”要求</div>
+            <div class="work-side"><span class="pill warn"><svg class="i sm"><use href="#pause"/></svg>已暂停</span></div>
+            <div class="work-meta"><a href="#"><svg class="i sm"><use href="#msg"/></svg>Worker 规范讨论</a><span>·</span><span>9月11日开工</span><span>·</span><span>还没有工单</span></div>
+          </div>
+          <div class="alert"><svg class="i"><use href="#alert"/></svg><div>准备会话已被 Codex 归档，无法继续整理文档。<div class="muted" style="margin-top:2px">取消归档后点恢复即可继续。</div></div><div class="actions"><button class="btn ghost sm"><svg class="i"><use href="#copy"/></svg>复制取消归档命令</button><button class="btn secondary sm"><svg class="i"><use href="#play"/></svg>恢复</button></div></div>
+        </div>
+
+        <div class="group-title">进行中 <span class="n">1</span></div>
+        <div class="work">
+          <div class="work-head">
+            <div class="work-title">引擎配置警告与输入器提示记录</div>
+            <div class="work-side">
+              <div class="work-progress"><div class="progress"><i class="run"></i></div>0 / 1 已合入</div>
+            </div>
+            <div class="work-meta"><a href="#"><svg class="i sm"><use href="#msg"/></svg>通知与警告整理</a><span>·</span><span>6 分钟前开工</span></div>
+          </div>
+          <div class="items">
+            <div class="item">
+              <span class="spin"></span>
+              <span class="t"><b>显示引擎配置警告并提供输入器提示记录</b></span>
+              <span class="muted" style="font-size:12.5px">Worker 执行 · 第 2 轮</span>
+              <span class="when">已运行 31 分钟</span>
+              <span class="acts"><button class="icon-btn" title="暂停"><svg class="i"><use href="#pause"/></svg></button><button class="icon-btn" title="打开会话"><svg class="i"><use href="#msg"/></svg></button></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="group-title">已结束 <span class="n">153</span><span class="grow"></span><a class="muted" style="font-size:12.5px;text-decoration:none" href="#">查看全部</a></div>
+        <div class="done-list">
+          <div class="item"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><span class="t">一步准备可直接操作的隔离会话树实例</span><span class="tag mono">5cb9327</span><span class="when">9月11日</span><span class="acts"><button class="icon-btn"><svg class="i"><use href="#msg"/></svg></button></span></div>
+          <div class="item"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><span class="t">worktree 回收中途失败后续删，根目录执行不产生回收项</span><span class="tag mono">a41e0c2</span><span class="when">昨天</span><span class="acts"><button class="icon-btn"><svg class="i"><use href="#msg"/></svg></button></span></div>
+          <div class="item"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><span class="t">验收实例目录由工作台分配并在停止时删除</span><span class="tag mono">9d2b7f1</span><span class="when">昨天</span><span class="acts"><button class="icon-btn"><svg class="i"><use href="#msg"/></svg></button></span></div>
+          <div class="item"><span class="state-icon err"><svg class="i sm"><use href="#x"/></svg></span><span class="t muted">为设置弹窗补充引擎路径校验</span><span class="muted" style="font-size:12.5px">已取消</span><span class="when">9月24日</span><span class="acts"><button class="icon-btn"><svg class="i"><use href="#msg"/></svg></button></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 SESSION -->
+  <section class="case" id="session">
+    <h2 class="sample-title">会话</h2>
+    <div class="stage session">
+      <aside class="side">
+        <div class="side-head" style="gap:8px"><button class="btn secondary sm"><svg class="i"><use href="#plus"/></svg>新建会话</button><span class="select grow" style="justify-content:space-between">全部<svg class="i sm"><use href="#chev-d"/></svg></span></div>
+        <button class="btn ghost sm" style="margin:0 10px 8px;justify-content:center"><svg class="i"><use href="#search"/></svg>搜索</button>
+        <div class="srow sel"><span class="sdot"></span><span class="title ellipsis">梳理项目文件并提出改进建议</span><span class="time">刚刚</span><span class="sub">vermillion</span></div>
+        <div class="srow"><span class="sdot run"></span><span class="title ellipsis">通知与警告整理</span><span class="time">6 分钟前</span><span class="sub">vermillion</span></div>
+        <div class="srow"><span class="sdot unread"></span><span class="title ellipsis">CPA 管理页 TLS 配置</span><span class="time">2 小时前</span><span class="sub">CLIProxyAPI</span></div>
+        <div class="srow"><span class="sdot"></span><span class="title ellipsis">Worker 规范讨论</span><span class="time">周二</span><span class="sub">vermillion</span></div>
+        <div class="srow"><span class="sdot"></span><span class="title ellipsis">会话树展开折叠行为</span><span class="time">周一</span><span class="sub">vermillion</span></div>
+      </aside>
+      <section class="main">
+        <div class="main-head">
+          <h4>梳理项目文件并提出改进建议</h4>
+          <span class="crumbs">vermillion</span>
+          <div class="grow"></div>
+          <button class="icon-btn" title="从这里分叉"><svg class="i"><use href="#branch"/></svg></button>
+          <button class="icon-btn" title="更多"><svg class="i"><use href="#more"/></svg></button>
+        </div>
+        <div class="transcript">
+          <div class="col">
+            <div class="msg-user"><div class="bubble">请看一下这个项目里有哪些文件，读一两个关键文件，然后：1）用一个表格总结每个文件的作用；2）给出三条改进建议，带一小段示例代码。不要修改任何文件。</div><div class="meta">14:42</div></div>
+            <div class="process">
+              <button class="process-summary"><svg class="i sm"><use href="#chev-d"/></svg>列目录 1 次<span class="sep">·</span>读取 2 个文件<span class="sep">·</span>运行 1 条命令<span class="sep">·</span>1 分 27 秒</button>
+              <div class="steps">
+                <div class="step"><svg class="i ic"><use href="#bulb"/></svg><span class="verb">思考</span><span class="obj">先确认项目结构和是否有 AGENTS.md</span><span class="res">4 秒</span></div>
+                <div class="step"><svg class="i ic"><use href="#list"/></svg><span class="verb">列目录</span><span class="obj">项目根目录 · 排除 node_modules、dist</span><span class="res">1 个文件</span></div>
+                <div class="step fail"><svg class="i ic"><use href="#eye"/></svg><span class="verb">读取</span><span class="obj"><code>AGENTS.md</code></span><span class="res">不存在</span></div>
+                <div class="step"><svg class="i ic"><use href="#eye"/></svg><span class="verb">读取</span><span class="obj"><code>README.md</code></span><span class="res">3 行</span></div>
+                <div class="step"><svg class="i ic"><use href="#term"/></svg><span class="verb">运行</span><span class="obj"><code>git status --short</code></span><span class="res">无改动</span></div>
+              </div>
+            </div>
+            <div class="answer">
+              <p>项目目前除 Git 内部文件外只有一个文件：<code>README.md</code>。内容只有标题“Real acceptance fixture”，没有源代码、配置或测试文件，所以建议主要针对补足项目说明和验收契约。</p>
+              <table><thead><tr><th>文件</th><th>作用</th></tr></thead><tbody><tr><td><code>README.md</code></td><td>项目说明入口；目前仅标明这是一个真实会话验收 fixture。</td></tr></tbody></table>
+              <ol>
+                <li><b>说明这个 fixture 验证什么。</b>加上适用场景、验收目标和成功时应观察到的结果。</li>
+                <li><b>补充复现步骤。</b>写明前置条件、运行命令和预期输出。</li>
+                <li><b>定义一个可执行的验收契约。</b>选定实际行为后，再配一条烟雾测试。</li>
+              </ol>
+              <div class="answer-foot"><button class="icon-btn" title="复制"><svg class="i"><use href="#copy"/></svg></button><span style="margin-left:6px">GPT-5.6-Luna · Max · 1 分 41 秒</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col composer-wrap" style="width:100%">
+          <div class="composer">
+            <div class="input">继续交谈，或补充工作要求…</div>
+            <div class="bar">
+              <span class="tag" style="margin:0 6px 0 4px">就绪</span><span class="chip"><svg class="i sm"><use href="#folder"/></svg>vermillion</span>
+              <span class="chip">GPT-5.6-Luna <span class="sub">Max · 标准</span><svg class="i sm faint"><use href="#chev-d"/></svg></span>
+              <div class="grow"></div>
+              <span class="kbd">Enter</span><span class="faint" style="font-size:12px;margin-left:4px">发送</span>
+              <button class="send"><svg class="i"><use href="#up"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <aside class="rpanel">
+        <div class="rpanel-head">文档</div>
+        <div style="padding:6px 0">
+          <div class="tnode dir"><svg class="i sm chev"><use href="#chev-d"/></svg><svg class="i sm fi"><use href="#folder"/></svg>Foundation</div>
+          <div class="tnode" style="padding-left:30px"><svg class="i sm chev"><use href="#chev-d"/></svg>UIUX</div>
+          <div class="tnode" style="padding-left:52px"><svg class="i sm fi"><use href="#file"/></svg>Standards.md<span class="gs m">M</span></div>
+          <div class="tnode" style="padding-left:52px"><svg class="i sm fi"><use href="#file"/></svg>UI-Sample.html<span class="gs a">A</span></div>
+          <div class="tnode dir"><svg class="i sm chev"><use href="#chev-d"/></svg><svg class="i sm fi"><use href="#folder"/></svg>Workbench</div>
+          <div class="tnode" style="padding-left:30px"><svg class="i sm chev"><use href="#chev-r"/></svg>Missions</div>
+          <div class="tnode" style="padding-left:30px"><svg class="i sm chev"><use href="#chev-d"/></svg>Think</div>
+          <div class="tnode" style="padding-left:52px"><svg class="i sm fi"><use href="#file"/></svg>PRD.md<span class="gs m">M</span></div>
+          <div class="tnode dir"><svg class="i sm chev"><use href="#chev-r"/></svg><svg class="i sm fi"><use href="#folder"/></svg>domains</div>
+        </div>
+        <div class="rpanel-foot"><button class="btn primary"><svg class="i"><use href="#branch"/></svg>开工</button></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 03 WORK ITEM -->
+  <section class="case" id="item">
+    <h2 class="sample-title">工单详情</h2>
+    <div class="stage backdrop">
+      <div class="dialog">
+        <div class="dlg-head">
+          <div class="dlg-title"><h4 class="grow">一步准备可直接操作的隔离会话树实例</h4><span class="pill ok"><svg class="i sm"><use href="#merge"/></svg>已合入</span><button class="icon-btn"><svg class="i"><use href="#x"/></svg></button></div>
+          <div class="meta-line">
+            <span class="tag">R2</span>
+            <span><svg class="i sm"><use href="#msg"/></svg>源自 <a class="strong" href="#" style="text-decoration:none">隔离实例讨论</a></span>
+            <span><svg class="i sm"><use href="#clock"/></svg>执行用时 52 分钟</span>
+            <span><svg class="i sm"><use href="#merge"/></svg><span class="copy">5cb9327</span><svg class="i sm faint"><use href="#copy"/></svg></span>
+          </div>
+          <div class="flow" style="grid-template-columns:repeat(4,1fr)">
+            <div class="s"><b>排队</b><span>06:20</span></div>
+            <div class="s"><b>执行</b><span>06:27</span></div>
+            <div class="s"><b>待合入</b><span>07:18</span></div>
+            <div class="s"><b>已关闭</b><span>07:19</span></div>
+          </div>
+          <div class="dlg-tabs"><button>进展</button><button>任务要求</button><button aria-current="page">验收 <span class="n">4/4</span></button><button>审阅 <span class="n">2</span></button><button>检查与附件</button></div>
+        </div>
+        <div class="dlg-body">
+          <div class="checks">
+            <div class="check open"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><div><div class="c">从 worktree 构建的 CLI 调用 app.start(fixture=session-tree)，单次返回可连接实例，无需额外准备或重启。</div><div class="ev">证据：真实 CLI 单次返回 pid、CDP、dataDir、projectPath 和 workspaceId；连接后首屏已显示独立测试 workspace 的父会话和普通会话。</div></div><span class="toggle">收起</span></div>
+            <div class="check"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><div class="c">实例内可展开、折叠父会话；子会话和普通会话都能打开固定历史。</div><span class="toggle">证据</span></div>
+            <div class="check"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><div class="c">实例目录与测试项目独立，不复制用户真实运行记录，不启动模型或 Worker。</div><span class="toggle">证据</span></div>
+            <div class="check"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><div class="c">无 fixture 的 app.start 行为不变；app.stop 停止实例并释放 CDP 端口。</div><span class="toggle">证据</span></div>
+          </div>
+        </div>
+        <div class="dlg-foot"><span class="mono faint">wi-mtw3l3dw-5yk2f9</span><div class="grow"></div><button class="btn ghost sm" style="border:1px solid var(--rule-strong)"><svg class="i"><use href="#msg"/></svg>会话</button><button class="btn ghost sm" style="border:1px solid var(--rule-strong)"><svg class="i"><use href="#branch"/></svg>来源</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 DOCS -->
+    </div>
+  </section>
+
+  <!-- 05 ROLES -->
+  <section class="case" id="roles">
+    <h2 class="sample-title">角色</h2>
+    <div class="stage roles">
+      <div class="row"><h3 style="font-size:18px;font-weight:600;color:var(--strong)">角色</h3><span class="muted" style="font-size:13px;margin-left:8px">8 个角色 · 6 个在本 workspace 有定制</span></div>
+      <div class="rtable">
+        <div class="rrow rhead"><span></span><span>角色</span><span>职责</span><span>模型</span><span>本 workspace</span><span></span></div>
+        <div class="rrow"><span class="avatar" style="background:rgba(179,90,74,.18);color:#d9937f">设</span><div class="rname"><b>设计伙伴</b><span>design-partner</span></div><div class="rdesc">讨论需求，整理文档，发起开工</div><span class="model">GPT-6-Astra <span class="lvl">· Medium</span></span><span class="scope"><span class="d" style="background:var(--info)"></span>追加正文</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="rrow"><span class="avatar" style="background:rgba(255,255,255,.07);color:var(--ink)">准</span><div class="rname"><b>开工准备</b><span>work-preparation</span></div><div class="rdesc">整理文档、建立工单并登记交接</div><span class="model">GPT-6-Astra <span class="lvl">· Medium</span></span><span class="scope muted"><span class="d" style="background:var(--faint)"></span>沿用全局</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="rrow"><span class="avatar" style="background:var(--info-soft);color:var(--info)">W</span><div class="rname"><b>Worker</b><span>worker</span></div><div class="rdesc">按工单实现、自测并提交证据</div><span class="model">Opus 5 <span class="lvl">· Medium</span></span><span class="scope"><span class="d" style="background:var(--info)"></span>追加正文</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="rrow"><span class="avatar" style="background:rgba(255,255,255,.07);color:var(--ink)">R</span><div class="rname"><b>Reviewer</b><span>reviewer</span></div><div class="rdesc">审阅 Worker 的候选改动</div><span class="model">GPT-5.6-Sol <span class="lvl">· Xhigh</span></span><span class="scope"><span class="d" style="background:var(--info)"></span>追加正文</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="rrow"><span class="avatar" style="background:var(--ok-soft);color:var(--ok)">V</span><div class="rname"><b>Verifier</b><span>verifier</span></div><div class="rdesc">按验收条目独立验收</div><span class="model">GPT-5.6-Luna <span class="lvl">· Max</span></span><span class="scope"><span class="d" style="background:var(--run)"></span>覆盖正文</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="rrow"><span class="avatar" style="background:rgba(255,255,255,.07);color:var(--ink)">监</span><div class="rname"><b>监工</b><span>supervisor</span></div><div class="rdesc">检查工作进展与异常处置</div><span class="model">GPT-6-Astra <span class="lvl">· Medium</span></span><span class="scope"><span class="d" style="background:var(--info)"></span>追加正文</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="rrow"><span class="avatar" style="background:rgba(255,255,255,.07);color:var(--ink)">M</span><div class="rname"><b>Maintainer</b><span>maintainer</span></div><div class="rdesc">领域巡检、Issue 分诊与授权内开单</div><span class="model">GPT-6-Astra <span class="lvl">· Medium</span></span><span class="scope"><span class="d" style="background:var(--info)"></span>追加正文</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="rrow"><span class="avatar" style="background:rgba(255,255,255,.07);color:var(--ink)">L</span><div class="rname"><b>Liaison</b><span>liaison</span></div><div class="rdesc">IM 反馈收集</div><span class="model">GPT-6-Astra <span class="lvl">· Medium</span></span><span class="scope muted"><span class="d" style="background:var(--faint)"></span>沿用全局</span><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+      </div>
+      <div class="row" style="margin-top:12px;font-size:12.5px" ><span class="faint">沿用全局：使用全局正文 · 追加正文：全局正文后接本项目内容 · 覆盖正文：只用本项目内容</span></div>
+    </div>
+  </section>
+
+  <!-- 06 DOMAIN -->
+  <section class="case" id="domain">
+    <h2 class="sample-title">领域</h2>
+    <div class="stage domain">
+      <aside class="dlist">
+        <div class="ditem sel"><b>工单执行与恢复<span class="sdot run" style="margin-left:auto;box-shadow:none;width:6px;height:6px" title="有待复查问题"></span></b><span>work-execution · 3 个规范</span></div>
+        <div class="ditem"><b>界面响应与诊断</b><span>ui-performance · 1 个规范</span></div>
+        <div class="ditem"><b>UI/UX</b><span>ui-ux · 1 个规范</span></div>
+        <button class="btn ghost sm" style="margin:8px 4px"><svg class="i"><use href="#plus"/></svg>新建领域</button>
+      </aside>
+      <section class="ddetail"><div class="ddetail-inner">
+        <div class="row"><h3 style="font-size:19px;font-weight:600;color:var(--strong)">工单执行与恢复</h3><span class="tag mono">work-execution</span><div class="grow"></div><span class="pill neutral"><svg class="i sm"><use href="#pause"/></svg>巡检已暂停</span><button class="btn secondary sm"><svg class="i"><use href="#refresh"/></svg>立即巡检</button><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div>
+        <div class="cards2" style="margin-top:14px">
+          <div class="card"><div class="card-h">领域定义</div><div class="card-b"><ul class="cover">
+            <li>开工、工单调度、依赖与执行资源声明</li>
+            <li>Worker 向 Reviewer、Verifier 交接成果</li>
+            <li>主分支合入与后台 worktree 回收</li>
+            <li>中断后的恢复与监工检查周期</li>
+            <li><a class="strong" href="#">worktree 开发依赖准备</a>、<a class="strong" href="#">隔离实例准备</a></li>
+            <li class="not">单纯修改工单所实现的业务功能</li>
+          </ul></div></div>
+          <div class="card"><div class="card-h">巡检</div><div class="card-b">
+            <div class="setting"><div class="l">自动巡检<small>当前关闭</small></div><label class="switch"><span class="track"></span></label></div>
+            <div class="setting"><div class="l">目录变更后巡检<small>0 个触发目录</small></div><button class="btn ghost sm">选择目录</button><label class="switch on"><span class="track"></span></label></div>
+            <div class="setting"><div class="l">定时巡检</div><span class="select">每 6 小时<svg class="i sm"><use href="#chev-d"/></svg></span></div>
+            <div class="setting"><div class="l">允许自动开单<small>授权范围 0 项</small></div><button class="btn ghost sm">编辑范围</button><label class="switch"><span class="track"></span></label></div>
+          </div></div>
+        </div>
+        <div class="card" style="margin-top:12px"><div class="card-h">规范与指令 <span class="muted">3</span></div><div class="card-b">
+          <div class="file"><svg class="i muted"><use href="#file"/></svg><span class="n">领域定义</span><span class="p">domains/work-execution.md</span></div>
+          <div class="file"><svg class="i muted"><use href="#shield"/></svg><span class="n">执行循环规范</span><span class="p">Workbench/Missions/Standards.md</span></div>
+          <div class="file"><svg class="i muted"><use href="#refresh"/></svg><span class="n">巡检指令</span><span class="p">roles/maintainer/work-execution.md</span></div>
+        </div></div>
+        <div class="card" style="margin-top:12px"><div class="card-h">巡检记录 <span class="muted">最近 14 次</span><div class="grow"></div><button class="btn ghost sm">相关 Issues</button></div><div class="card-b">
+          <div class="dots"><i class="ok"></i><i class="ok"></i><i class="issue"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="issue"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i></div>
+          <div class="timeline" style="margin-top:10px">
+            <div class="tl collapsed"><span class="state-icon ok"><svg class="i sm"><use href="#check"/></svg></span><div>9月14日 至 9月15日 连续 4 次无新变更，已跳过</div><span class="w">9月15日</span></div>
+            <div class="tl"><span class="state-icon pause"><svg class="i sm"><use href="#alert"/></svg></span><div>发现 2 个问题，已提交 Issue<small>worktree 回收失败后残留目录；验收实例未释放端口</small></div><span class="w">9月13日</span></div>
+          </div>
+        </div></div>
+      </div></section>
+    </div>
+  </section>
+
+  <!-- 07 SEARCH -->
+  <section class="case" id="search">
+    <h2 class="sample-title">搜索</h2>
+    <div class="stage backdrop">
+      <div class="dialog search">
+        <div class="search-input"><svg class="i lg muted"><use href="#search"/></svg>README</div>
+        <div class="search-body">
+          <div class="results">
+            <div class="rgroup"><svg class="i sm"><use href="#msg"/></svg>梳理项目文件并提出改进建议 <span class="faint">· 3</span></div>
+            <div class="hit sel"><span class="who a"><svg class="i sm"><use href="#msg"/></svg></span><div><div class="txt">项目目前除 Git 内部文件外只有一个文件：<mark>README</mark>.md。我读了它；内容只有标题“Real acceptance fixture”…</div><div class="m">agent 回复 · 第 1 轮 · 今天 14:43</div></div></div>
+            <div class="hit"><span class="who t"><svg class="i sm"><use href="#eye"/></svg></span><div><div class="txt">读取 <mark>README</mark>.md · 3 行</div><div class="m">工具调用 · 第 1 轮 · 今天 14:43</div></div></div>
+            <div class="hit"><span class="who u">你</span><div><div class="txt">…读一两个关键文件，然后用一个表格总结每个文件的作用（比如 <mark>README</mark>）…</div><div class="m">你 · 第 1 轮 · 今天 14:42</div></div></div>
+            <div class="rgroup"><svg class="i sm"><use href="#file"/></svg>文档 <span class="faint">· 2</span></div>
+            <div class="hit"><span class="who t"><svg class="i sm"><use href="#file"/></svg></span><div><div class="txt">新 worktree 第一次运行检查前…参见 <mark>README</mark> 中的准备步骤</div><div class="m">Foundation/Acceptance/PRD.md · 隔离实例准备</div></div></div>
+            <div class="hit"><span class="who t"><svg class="i sm"><use href="#file"/></svg></span><div><div class="txt">打包产物包含 <mark>README</mark> 与启动脚本</div><div class="m">Foundation/Development/PRD.md</div></div></div>
+          </div>
+          <div class="preview">
+            <div class="ctx"><svg class="i sm"><use href="#msg"/></svg>梳理项目文件并提出改进建议 · 第 1 轮</div>
+            <div class="answer dim" style="font-size:14px"><p>请看一下这个项目里有哪些文件，读一两个关键文件，然后：1）用一个表格总结每个文件的作用；2）给出三条改进建议…</p></div>
+            <div class="focus-ring answer" style="font-size:14px"><p>项目目前除 Git 内部文件外只有一个文件：<code><mark>README</mark>.md</code>。我读了它；内容只有标题“Real acceptance fixture”，没有源代码、配置或测试文件，因此下面的建议主要针对补足项目说明和验收契约。</p></div>
+            <div class="answer dim" style="font-size:14px"><p>三条改进建议：1. 说明这个 fixture 验证什么…</p></div>
+          </div>
+        </div>
+        <div class="search-foot"><span><span class="kbd">↑↓</span> 选择</span><span><span class="kbd">Enter</span> 打开并定位</span><span><span class="kbd">Esc</span> 关闭</span><span class="grow"></span><span>5 条结果 · 101 ms</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 STANDARDS -->
+</main>
+</body>
+</html>

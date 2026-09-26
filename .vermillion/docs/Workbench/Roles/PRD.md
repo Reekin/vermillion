@@ -10,6 +10,8 @@
 
 - **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/design-partner.md)。
 - **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/worker.md)。
+- **Reviewer**：审阅 Worker 的候选改动，由 Worker 拉起，指令见 [reviewer.md](../../../../packages/workbench/roles/reviewer.md)。
+- **Verifier**：按验收条目独立验收，由 Worker 拉起，指令见 [verifier.md](../../../../packages/workbench/roles/verifier.md)。
 - **监工**：工作进展检查与异常处置，指令见 [supervisor.md](../../../../packages/workbench/roles/supervisor.md)。
 - **Maintainer（领域 Owner）**：领域巡检、Issue 分诊与授权范围内自动开单，指令见 [maintainer.md](../../../../packages/workbench/roles/maintainer.md)。
 - **Liaison**：IM 反馈收集，指令见 [liaison.md](../../../../packages/workbench/roles/liaison.md)。
@@ -44,8 +46,10 @@ Reviewer 和 Verifier 是 Worker 拉起的 subagent，创建时使用各自角�
 
 角色列表与编辑操作作用于标题栏 workspace 选择器指定的项目。
 
+工作台 → 角色 以表格列出全部角色，页头显示角色总数和本 workspace 已定制的数量。每行依次是：角色名与等宽的文件名 id、一句职责、生效的模型与推理档位、本 workspace 的定制方式，行尾为更多操作。角色名使用设计伙伴、开工准备、Worker、Reviewer、Verifier、监工、Maintainer、Liaison；职责取本文对各角色的描述。定制方式显示为「沿用全局」「追加正文」「覆盖正文」，分别对应 global、append、override，用不同颜色的圆点区分，三者的含义以表格下方一行图例说明。点击行打开该角色的编辑器。
+
 工作台 → 角色 打开一个角色时，编辑器上方是设置控件，下方是 prompt 正文的文本框；frontmatter 只是存储格式，不在文本框里出现，也不让用户手写。
-- 定制方式：global / override / append 三档，作用于当前 workspace。
+- 定制方式：global / override / append 三档，界面显示为「沿用全局」「覆盖正文」「追加正文」，作用于当前 workspace。
 - global 沿用全局角色，展示全局 prompt 和模型配置，prompt 与各模型参数只读；模式选择仍可操作。选择 global 并保存后，当前项目恢复沿用全局。
 - override 的 prompt 与各模型参数可编辑；从 global 进入时以全局内容为初值，保存后使用项目 prompt。
 - 切换到 append 时，prompt 文本框清空，用于填写追加正文；生效 prompt 为全局正文加项目追加正文。重新打开已保存的 append 角色时显示已有追加正文。
