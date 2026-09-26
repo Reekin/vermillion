@@ -6,7 +6,7 @@ import type { SessionMenu, SessionRenameController } from "../use-session-action
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { SessionRenameDialog } from "./SessionRenameDialog.js";
-import { Badge, Button, Field, IconButton, ListRow, StatusDot } from "./ui.js";
+import { Badge, Button, IconButton, ListRow, Select, StatusDot } from "./ui.js";
 import { roleLabel } from "./workflow-display.js";
 
 type SessionSidebarProps = {
@@ -151,10 +151,8 @@ export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, 
         <Button variant={isDraft ? "secondary" : "accent"} size="sm" className="shrink-0" onClick={onNewChat}>
           <Plus size={13} /> 新建会话
         </Button>
-        <Field kind="select" compact aria-label="筛选 workspace" className="min-w-0 flex-1" value={workspaceFilterId ?? ""} onChange={(event) => onWorkspaceFilter(event.target.value || undefined)}>
-          <option value="">全部</option>
-          {[...workspaceLabelById].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-        </Field>
+        <Select compact aria-label="筛选 workspace" className="min-w-0 flex-1" value={workspaceFilterId ?? ""} onChange={(value) => onWorkspaceFilter(value || undefined)}
+          options={[{ value: "", label: "全部" }, ...[...workspaceLabelById].map(([id, label]) => ({ value: id, label }))]} />
       </div>
       <div className="px-3 pb-2">
         <Button variant="ghost" size="sm" className="w-full justify-start" onClick={onSearch}>

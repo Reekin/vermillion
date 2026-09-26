@@ -1,5 +1,6 @@
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
 import { isOpenWorkItem, isOpenWorkRequest, isPreparingWork } from "./work-board-display.js";
+import type { StatusTone } from "./ui.js";
 
 export const statusLabel: Record<WorkItem["status"], string> = { preparing: "准备", queued: "排队", running: "执行", merging: "待合入", closed: "已关闭", cancelled: "已取消" };
 export type CurrentWorkState = "running" | "queued" | "paused" | "stopped" | "interrupted" | "confirmation" | "decision" | "finished";
@@ -50,6 +51,10 @@ export const workRequestStatus = (request: WorkRequest, items: WorkItem[]): { la
   return { label: state.label, status: state.kind === "finished" ? request.status === "cancelled" ? "cancelled" : "closed"
     : state.kind === "running" ? "running" : state.kind === "queued" ? "queued" : "decision" };
 };
+
+/** State colour for a board status: needing the user is attention, finished work is done or neutral. */
+export const statusTone = (status: WorkItem["status"] | "decision"): StatusTone =>
+  status === "running" ? "running" : status === "decision" ? "attention" : status === "closed" ? "done" : status === "cancelled" ? "neutral" : "waiting";
 
 export const workItemBoardLabel = (item: WorkItem, progressLabel: string) => {
   if (item.status === "closed" || item.status === "cancelled") return statusLabel[item.status];

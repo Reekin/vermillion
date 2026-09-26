@@ -6,8 +6,8 @@ import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { Modal } from "./Modal.js";
 import { SupervisorDetails } from "./SupervisorDetails.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
-import { currentWorkStatus, workItemBoardLabel, workRequestStatus, workSessionLabel } from "./task-labels.js";
-import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, Stepper, Toggle } from "./ui.js";
+import { currentWorkStatus, statusTone, workItemBoardLabel, workRequestStatus, workSessionLabel } from "./task-labels.js";
+import { Badge, Button, DisclosureCard, EmptyState, IconButton, InlineNotice, ListRow, StatusPill, Stepper, Toggle } from "./ui.js";
 
 import { roleLabel, workItemProgress } from "./workflow-display.js";
 import { isOpenWorkItem, workBoardGroups, workBoardCounts, workExpansionKey, type BoardEntry } from "./work-board-display.js";
@@ -48,7 +48,7 @@ const WorkRequestRow = ({ entry, sourceTitle, open, onToggle, busy, onOpenSessio
       titleClassName={finished ? "text-muted-foreground" : "text-strong"}
       meta={!finished && !items.length ? request.failure ?? request.waitReason : undefined}
       columns={{ controls: true, info: <span title={new Date(entry.updatedAt).toLocaleString("zh-CN")}><span className="block">{items.length} 工单</span>{relativeTime(entry.updatedAt)}</span>,
-        status: <Badge status={state.status} muted={finished}>{state.label}</Badge>,
+        status: <StatusPill tone={statusTone(state.status)}>{state.label}</StatusPill>,
         hoverAction: !finished && <IconButton icon={X} size={12} label={"取消工作：" + title} disabled={busy} onClick={() => action("work.cancel")} />,
         action: <Button size="sm" variant="ghost" outlined onClick={() => setDetail(true)}>详情</Button>,
         control: finished ? null : paused || request.userStopped ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => action("work.resume")}>恢复</Button>
@@ -93,7 +93,7 @@ const WorkItemRow = ({ item, run, actions, waitingFor, depth, busy, hasDecision,
         columns={{
           controls: true,
           info: <span title={[new Date(item.updatedAt).toLocaleString("zh-CN"), run && roleLabel[run.role]].filter(Boolean).join(" · ")}>{info}</span>,
-          status: <Badge status={!open ? item.status : state.kind === "running" ? "running" : paused || retryable || hasDecision ? "decision" : "queued"} muted={!open}>{label}</Badge>,
+          status: <StatusPill tone={statusTone(!open ? item.status : state.kind === "running" ? "running" : paused || retryable || hasDecision ? "decision" : "queued")}>{label}</StatusPill>,
           hoverAction: isOpenWorkItem(item) && <IconButton icon={X} size={12} label={"取消工单：" + item.title} disabled={busy} onClick={onCancel} />,
           control: isOpenWorkItem(item) && (paused || item.run.userStopped ? <Button size="sm" variant="ghost" disabled={busy} onClick={onResume}>恢复</Button>
               : retryable ? <Button size="sm" variant="ghost" disabled={busy} onClick={onRetry}>重试</Button>

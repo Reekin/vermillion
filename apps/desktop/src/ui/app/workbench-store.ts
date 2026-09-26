@@ -5,7 +5,7 @@ import type { AgentRun, DecisionCard, DocChange, DocFile, DomainDefinition, Inbo
 export type Panel = "workbench" | "inbox";
 /** Entries that open over the current panel instead of replacing it. */
 export type Overlay = "inbox" | "settings";
-export type WorkspaceSection = "workItems" | "sessions" | "domains" | "docs" | "roles" | "issues" | "automation" | "manage";
+export type WorkspaceSection = "workItems" | "sessions" | "domains" | "roles" | "issues" | "automation" | "manage";
 
 export type CommitOutcome =
   | { kind: "commit"; commit: string; message: string }

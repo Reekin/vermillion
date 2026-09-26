@@ -5,9 +5,9 @@
  * primitives own layout, states and typography. See .vermillion/docs/Foundation/UIUX/Standards.md.
  *
  * Buttons       Button, IconButton
- * Text          Badge, SectionLabel, InlineNotice, Alert, StatusDot
- * Fields        Field (input / textarea / select / number), Toggle, Checkbox, Stepper
- * Structure     PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
+ * Text          Badge, StatusPill, SectionLabel, InlineNotice, Alert, StatusDot, Progress, Steps
+ * Fields        Field (input / textarea / number), Select, SegmentedControl, Toggle, Checkbox, Stepper
+ * Structure     PageHeader, PanelHeader, Tabs, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
  */
 import type {
@@ -15,12 +15,12 @@ import type {
   InputHTMLAttributes,
   MouseEvent,
   ReactNode,
-  SelectHTMLAttributes,
   TextareaHTMLAttributes
 } from "react";
 import { useState } from "react";
-import { ChevronDown, ChevronRight, CircleX, Minus, MoreHorizontal, Plus, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Ban, Check, ChevronDown, ChevronRight, CircleAlert, CircleDashed, CircleX, Info, LoaderCircle, Minus, MoreHorizontal, Plus, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
+import { Select as BaseSelect } from "@base-ui/react/select";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
@@ -69,19 +69,61 @@ export const IconButton = ({ icon: Icon, label, size = 14, active, className, ..
 
 // ---- Text ----
 
-export const Badge = ({ children, tone = "neutral", status, muted }: { children: ReactNode; tone?: "neutral" | "accent"; status?: "preparing" | "decision" | "running" | "queued" | "merging" | "closed" | "cancelled"; muted?: boolean }) => (
+/** Short label or risk level. Object states use `StatusPill`. */
+export const Badge = ({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" }) => (
   <span
-    data-status={status === "merging" || status === "preparing" ? "queued" : status}
     className={cn(
-      status ? "vm-status" : "inline-flex shrink-0 items-center whitespace-nowrap min-h-5 rounded-sm border px-1.5 py-0.5 font-sans text-micro font-medium",
-      !status && tone === "neutral" && "border-border-strong text-foreground",
-      !status && tone === "accent" && "border-control-border-hover bg-accent-soft text-strong",
-      muted && "vm-status-muted"
+      "inline-flex shrink-0 items-center whitespace-nowrap min-h-5 rounded-sm border px-1.5 py-0.5 font-sans text-micro font-medium",
+      tone === "neutral" && "border-border-strong text-foreground",
+      tone === "accent" && "border-control-border-hover bg-accent-soft text-strong"
     )}
   >
-    {status && status !== "closed" && status !== "cancelled" && <span className="vm-status-marker" aria-hidden="true" />}
     {children}
   </span>
+);
+
+/** The five state colours plus neutral, shared by pills, step dots and progress segments. */
+export type StatusTone = "running" | "done" | "failed" | "attention" | "waiting" | "info" | "neutral";
+
+const statusIcons: Record<StatusTone, LucideIcon> = {
+  running: LoaderCircle, done: Check, failed: X, attention: CircleAlert, waiting: CircleDashed, info: Info, neutral: Ban
+};
+
+/** Object state: state icon + short text on the state colour's light fill. `icon` overrides the tone's default. */
+export const StatusPill = ({ tone, icon, children }: { tone: StatusTone; icon?: LucideIcon; children: ReactNode }) => {
+  const Icon = icon ?? statusIcons[tone];
+  return (
+    <span className="vm-pill" data-tone={tone === "waiting" ? "neutral" : tone}>
+      <Icon size={12} aria-hidden="true" className={cn(tone === "running" && !icon && "vm-spin")} />
+      {children}
+    </span>
+  );
+};
+
+/** Counted progress as a segmented bar plus the numbers, e.g. "0 / 1 已合入". */
+export const Progress = ({ segments, label }: { segments: Array<"done" | "running" | "failed" | "pending">; label: ReactNode }) => (
+  <span className="vm-progress">
+    <span className="vm-progress__bar" role="presentation">
+      {segments.map((tone, index) => <i key={index} data-tone={tone} />)}
+    </span>
+    <span>{label}</span>
+  </span>
+);
+
+export type Step = { label: string; time?: string; state: "done" | "current" | "pending"; tone?: "running" | "attention" | "failed"; note?: ReactNode };
+
+/** Fixed lifecycle stages: passed stages carry their time, the current one stands out and may carry the wait reason. */
+export const Steps = ({ steps, label }: { steps: Step[]; label: string }) => (
+  <ol className="vm-steps" aria-label={label}>
+    {steps.map((step) => (
+      <li key={step.label} className="vm-step" data-state={step.state} data-tone={step.tone} aria-current={step.state === "current" ? "step" : undefined}>
+        <span className="vm-step__dot" aria-hidden="true" />
+        <span className="vm-step__label">{step.label}</span>
+        {step.time && <span className="vm-step__time">{step.time}</span>}
+        {step.note && <span className="vm-step__note">{step.note}</span>}
+      </li>
+    ))}
+  </ol>
 );
 
 /** Short label that heads a panel section. */
@@ -141,8 +183,7 @@ export const fieldClass =
 type FieldBase = { label?: ReactNode; hint?: ReactNode; className?: string; compact?: boolean };
 type FieldProps =
   | (FieldBase & { kind?: "input" } & InputHTMLAttributes<HTMLInputElement>)
-  | (FieldBase & { kind: "textarea" } & TextareaHTMLAttributes<HTMLTextAreaElement>)
-  | (FieldBase & { kind: "select"; children: ReactNode } & SelectHTMLAttributes<HTMLSelectElement>);
+  | (FieldBase & { kind: "textarea" } & TextareaHTMLAttributes<HTMLTextAreaElement>);
 
 /** Labelled form control. The label is an eyebrow above; the hint sits below in caption text. */
 export const Field = (props: FieldProps) => {
@@ -151,8 +192,6 @@ export const Field = (props: FieldProps) => {
   const control =
     props.kind === "textarea" ? (
       <textarea spellCheck={false} {...omit(props)} className={cn(controlClass, "resize-none py-2")} />
-    ) : props.kind === "select" ? (
-      <select {...omit(props)} className={cn(controlClass, "h-8")} />
     ) : (
       <input spellCheck={false} {...omit(props)} className={cn(controlClass, "h-8")} />
     );
@@ -170,6 +209,84 @@ const omit = <T extends FieldBase & { kind?: string }>(props: T): Omit<T, keyof 
   const { label: _label, hint: _hint, className: _className, compact: _compact, kind: _kind, ...rest } = props;
   return rest;
 };
+
+export type SelectOption = { value: string; label: string; hint?: string; disabled?: boolean };
+
+/**
+ * Single-choice dropdown drawn by the app (never the native <select>): trigger, popup list with optional
+ * second-line hints, keyboard navigation. `plain` is the borderless-fill trigger used in toolbars.
+ */
+export const Select = ({ value, options, onChange, label, hint, placeholder, disabled, compact, plain, className, "aria-label": ariaLabel }: {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  label?: ReactNode;
+  hint?: ReactNode;
+  placeholder?: string;
+  disabled?: boolean;
+  compact?: boolean;
+  plain?: boolean;
+  className?: string;
+  "aria-label"?: string;
+}) => {
+  const selected = options.find((option) => option.value === value);
+  return (
+    <div className={cn("block min-w-0", className)}>
+      {label && <span className="eyebrow block">{label}</span>}
+      <BaseSelect.Root value={selected ? value : null} disabled={disabled}
+        onValueChange={(next) => { if (typeof next === "string" && next !== value) onChange(next); }}>
+        <BaseSelect.Trigger aria-label={ariaLabel ?? (typeof label === "string" ? label : undefined)}
+          className={cn("vm-select-trigger", label && "mt-1.5")} data-compact={compact || undefined} data-plain={plain || undefined}>
+          <span className="vm-select-value" data-placeholder={selected ? undefined : ""}>{selected?.label ?? placeholder ?? "请选择"}</span>
+          <ChevronDown size={14} aria-hidden="true" className="shrink-0 text-muted-foreground" />
+        </BaseSelect.Trigger>
+        <BaseSelect.Portal>
+          <BaseSelect.Positioner side="bottom" align="start" sideOffset={4} alignItemWithTrigger={false} className="z-[1100]">
+            <BaseSelect.Popup className="vm-select-popup">
+              <BaseSelect.List>
+                {options.map((option) => (
+                  <BaseSelect.Item key={option.value} value={option.value} label={option.label} disabled={option.disabled} className="vm-select-item">
+                    <BaseSelect.ItemIndicator className="flex items-center text-strong" keepMounted={false}><Check size={13} aria-hidden="true" /></BaseSelect.ItemIndicator>
+                    <BaseSelect.ItemText className="vm-select-item__text col-start-2">{option.label}</BaseSelect.ItemText>
+                    {option.hint && <span className="vm-select-item__hint">{option.hint}</span>}
+                  </BaseSelect.Item>
+                ))}
+              </BaseSelect.List>
+            </BaseSelect.Popup>
+          </BaseSelect.Positioner>
+        </BaseSelect.Portal>
+      </BaseSelect.Root>
+      {hint && <span className="mt-1 block text-caption text-muted-foreground">{hint}</span>}
+    </div>
+  );
+};
+
+/** Switches between views of one list, e.g. 进行中 / 已结束 / 全部, each with an optional count. */
+export const SegmentedControl = ({ items, value, onChange, label }: {
+  items: Array<{ value: string; label: string; count?: number }>;
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+}) => (
+  <div role="radiogroup" aria-label={label} className="vm-segmented"
+    onKeyDown={(event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+      const index = items.findIndex((item) => item.value === value);
+      const nextIndex = (index + (event.key === "ArrowRight" ? 1 : items.length - 1)) % items.length;
+      const next = items[nextIndex];
+      if (!next) return;
+      event.preventDefault();
+      onChange(next.value);
+      (event.currentTarget.children[nextIndex] as HTMLElement | undefined)?.focus();
+    }}>
+    {items.map((item) => (
+      <button key={item.value} type="button" role="radio" aria-checked={item.value === value}
+        tabIndex={item.value === value ? 0 : -1} onClick={() => onChange(item.value)}>
+        {item.label}{item.count !== undefined && <span className="vm-segmented-count">{item.count}</span>}
+      </button>
+    ))}
+  </div>
+);
 
 // ---- Structure ----
 
@@ -262,12 +379,13 @@ export const Stepper = ({ label, value, min, max, disabled, onChange }: { label:
   </span>
 );
 
+/** Page tabs. `count` marks items that need the user; zero is not shown. `children` sits at the bar's right end. */
 export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ id: string; label: string; count?: number }>; selected: string; onSelect: (id: string) => void; children?: ReactNode }) => (
   <nav className="vm-tabs" aria-label="工作台分页">
     {items.map((item) => <button key={item.id} type="button" aria-current={selected === item.id ? "page" : undefined} onClick={() => onSelect(item.id)}>
-      {item.label}{item.count !== undefined && <span className="vm-tab-count">{item.count}</span>}
+      {item.label}{item.count ? <span className="vm-tab-count" aria-label={`${item.count} 项需要处理`}>{item.count}</span> : null}
     </button>)}
-    {children}
+    {children && <div className="ml-auto flex shrink-0 items-center gap-2 pl-4">{children}</div>}
   </nav>
 );
 
@@ -286,6 +404,15 @@ export const HoverCard = ({ children, content }: { children: ReactNode; content:
       </Tooltip.Positioner>
     </Tooltip.Portal>
   </Tooltip.Root>
+);
+
+/** Page body header: title, overview counts (which may act as filters), then page settings and the one primary action. */
+export const PageHeader = ({ title, summary, actions }: { title: ReactNode; summary?: ReactNode; actions?: ReactNode }) => (
+  <header className="vm-page-header">
+    <h2 className="vm-page-header__title">{title}</h2>
+    {summary && <div className="vm-page-header__summary">{summary}</div>}
+    {actions && <div className="vm-page-header__actions">{actions}</div>}
+  </header>
 );
 
 /** Panel top line: section label plus optional actions, pushed right unless `align="start"` keeps them adjacent. */

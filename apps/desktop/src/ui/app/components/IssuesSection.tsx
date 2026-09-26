@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Issue, WorkbenchClient, WorkItem } from "@vermillion/workbench/client";
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { Modal } from "./Modal.js";
-import { Badge, Button, Card, DetailSection, EmptyState, Field, InlineNotice, ListRow } from "./ui.js";
+import { Badge, Button, Card, DetailSection, EmptyState, Field, InlineNotice, ListRow, Select } from "./ui.js";
 
 const statusLabel: Record<Issue["status"], string> = {
   open: "待处理", investigating: "调查中", decision: "待决策", started: "已开工", closed: "关闭", duplicate: "重复"
@@ -57,14 +57,12 @@ export const IssuesSection = ({ client, workspaceId, issues, workItems, domainId
   return <div>
     <div className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
       <Field compact aria-label="搜索 Issue" placeholder="搜索 Issue" className="min-w-48 flex-1" value={search} onChange={(event) => setSearch(event.target.value)} />
-      <Field kind="select" compact aria-label="Issue 状态" className="w-32" value={filter} onChange={(event) => setFilter(event.target.value)}>
-        <option value="decision">待决策</option><option value="all">全部 Issue</option><option value="open">待处理</option>
-        <option value="investigating">调查中</option><option value="started">已开工</option><option value="suggestion">建议</option>
-        <option value="closed">关闭</option><option value="duplicate">重复</option>
-      </Field>
-      <Field kind="select" compact aria-label="Issue 领域" className="w-40" value={domainId} onChange={(event) => setDomainId(event.target.value)}>
-        <option value="">全部领域</option>{availableDomainIds.map((id) => <option key={id} value={id}>{id}</option>)}
-      </Field>
+      <Select compact aria-label="Issue 状态" className="w-32" value={filter} onChange={setFilter} options={[
+        { value: "decision", label: "待决策" }, { value: "all", label: "全部 Issue" }, { value: "open", label: "待处理" },
+        { value: "investigating", label: "调查中" }, { value: "started", label: "已开工" }, { value: "suggestion", label: "建议" },
+        { value: "closed", label: "关闭" }, { value: "duplicate", label: "重复" }]} />
+      <Select compact aria-label="Issue 领域" className="w-40" value={domainId} onChange={setDomainId}
+        options={[{ value: "", label: "全部领域" }, ...availableDomainIds.map((id) => ({ value: id, label: id }))]} />
       <Button size="sm" onClick={() => setCreating(true)}>新建 Issue</Button>
     </div>
     {visible.length ? <ul className="max-w-6xl px-4">
@@ -92,8 +90,8 @@ const CreateIssueDialog = ({ client, workspaceId, domainIds, onCreated, onClose 
   return <Modal title="新建 Issue" onClose={onClose} width={560}><form className="space-y-3 p-4" onSubmit={(event) => { event.preventDefault(); if (title.trim() && !busy) void create(); }}>
     <Field label="标题" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} />
     <Field kind="textarea" label="问题与影响" rows={4} value={summary} onChange={(event) => setSummary(event.target.value)} />
-    <Field kind="select" label="领域" value={domainId} onChange={(event) => setDomainId(event.target.value)}>{domainIds.map((id) => <option key={id}>{id}</option>)}</Field>
-    <Field kind="select" label="类型" value={type} onChange={(event) => setType(event.target.value as Issue["type"])}><option value="problem">问题</option><option value="suggestion">建议</option></Field>
+    <Select label="领域" value={domainId} onChange={setDomainId} options={domainIds.map((id) => ({ value: id, label: id }))} />
+    <Select label="类型" value={type} onChange={(value) => setType(value as Issue["type"])} options={[{ value: "problem", label: "问题" }, { value: "suggestion", label: "建议" }]} />
     {error && <InlineNotice tone="error">{error}</InlineNotice>}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" type="submit" disabled={busy || !title.trim()}>创建</Button></div>
   </form></Modal>;
 };
@@ -212,14 +210,10 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
           </div>
         </DetailSection>
         {handling && <div className="mt-3 space-y-3 border-t border-border pt-3">
-          <Field kind="select" label="处理方式" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}>
-            <option value="closed">关闭</option>
-            <option value="duplicate">重复</option>
-          </Field>
-          {resolution === "duplicate" && <Field kind="select" label="原 Issue" value={duplicateOf} onChange={(event) => setDuplicateOf(event.target.value)}>
-            <option value="">选择原 Issue</option>
-            {issues.filter((entry) => entry.issueId !== issue.issueId).map((entry) => <option key={entry.issueId} value={entry.issueId}>{entry.title}</option>)}
-          </Field>}
+          <Select label="处理方式" value={resolution} onChange={(value) => setResolution(value as typeof resolution)}
+            options={[{ value: "closed", label: "关闭" }, { value: "duplicate", label: "重复" }]} />
+          {resolution === "duplicate" && <Select label="原 Issue" value={duplicateOf} onChange={setDuplicateOf} placeholder="选择原 Issue"
+            options={issues.filter((entry) => entry.issueId !== issue.issueId).map((entry) => ({ value: entry.issueId, label: entry.title }))} />}
           <Field kind="textarea" label="处理原因" rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setHandling(false)}>取消</Button>

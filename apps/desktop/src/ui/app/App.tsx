@@ -26,7 +26,7 @@ import { createOutputStore } from "./output-log.js";
 import { WorkspacePicker } from "./components/WorkspacePicker.js";
 import { CurrentWorkBar } from "./components/CurrentWorkBar.js";
 import { currentWorkContext, decisionsForWork } from "./current-work-context.js";
-import { Button, Field, InlineNotice, Tabs } from "./components/ui.js";
+import { Button, InlineNotice, Select, Tabs } from "./components/ui.js";
 import { WorkspacePages, WorkspaceSwitcher } from "./components/WorkspacePages.js";
 import { useSessionSidebar } from "./use-session-sidebar.js";
 import { useSessionActions } from "./use-session-actions.js";
@@ -45,7 +45,6 @@ type AppProps = {
 const tabs: Array<{ id: WorkspaceSection; label: string }> = [
   { id: "sessions", label: "会话" },
   { id: "workItems", label: "工作" },
-  { id: "docs", label: "文档" },
   { id: "domains", label: "领域" },
   { id: "roles", label: "角色" },
   { id: "issues", label: "Issues" },
@@ -127,7 +126,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     if (!hit.path) return;
     setSearchOpen(false);
     store.getState().browseWorkspace(hit.workspaceId);
-    store.setState({ panel: "workbench", overlay: undefined, workspaceSection: "docs" });
+    store.setState({ panel: "workbench", overlay: undefined });
     store.getState().openEditor({ kind: "doc", path: hit.path, line: hit.line, column: hit.column, nonce: Date.now() });
   }, [store]);
   const openSearchSession = useCallback((hit: SearchHit) => {
@@ -294,10 +293,11 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex min-w-0 shrink-0 items-center">
-              <div className="min-w-0 flex-1"><Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)} /></div>
-              {section === "sessions" && <Button className="vm-docs-toggle" size="sm" variant="ghost" aria-expanded={docsExplorerOpen} onClick={() => setDocsExplorerOpen((open) => !open)}>文档栏</Button>}
-            </div>
+            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)}>
+              {section === "sessions"
+                ? <Button className="vm-docs-toggle" size="sm" variant="ghost" aria-expanded={docsExplorerOpen} onClick={() => setDocsExplorerOpen((open) => !open)}>文档栏</Button>
+                : <WorkspaceSwitcher store={store} />}
+            </Tabs>
             <div className={section === "sessions" ? "vm-conversation-layout" : "hidden"}>
               <main className="relative min-w-0 flex-1">
                 <SessionPane
@@ -325,11 +325,9 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                       onOpenSession={(id) => void openSessionTarget(sessionWorkspaceId, id)}
                       onOpenWorkItem={currentWorkItem ? () => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: currentWorkItem.workItemId }) : undefined} />}
                     {currentDecisions.length > 0 && <section className="vm-decision-context" aria-label="决策回复">
-                      {currentDecisions.length > 1 ? <Field kind="select" aria-label="选择待回复决策" compact value={currentDecision?.decisionId ?? ""}
-                        onChange={(event) => setDecisionMode({ sessionId: workSessionId, decisionId: event.target.value, ordinary: true })}>
-                        <option value="">选择要回复的决策</option>
-                        {currentDecisions.map((card) => <option key={card.decisionId} value={card.decisionId}>{card.question}</option>)}
-                      </Field> : <p className="vm-decision-context__question">{currentDecision?.question}</p>}
+                      {currentDecisions.length > 1 ? <Select aria-label="选择待回复决策" compact value={currentDecision?.decisionId ?? ""} placeholder="选择要回复的决策"
+                        options={currentDecisions.map((card) => ({ value: card.decisionId, label: card.question }))}
+                        onChange={(decisionId) => setDecisionMode({ sessionId: workSessionId, decisionId, ordinary: true })} /> : <p className="vm-decision-context__question">{currentDecision?.question}</p>}
                       <div className="vm-decision-context__modes">
                         <Button size="sm" variant="ghost" disabled={!currentDecision} aria-pressed={answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: false })}>回复此决策</Button>
                         <Button size="sm" variant="ghost" aria-pressed={!answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: true })}>普通消息</Button>
@@ -363,7 +361,6 @@ export const App = ({ sessionStore, transport }: AppProps) => {
               </aside>
             </div>
             <div className={section !== "sessions" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-              <div className="flex shrink-0 items-center border-b border-border px-4 py-2"><WorkspaceSwitcher store={store} /></div>
               <WorkspacePages store={store} transport={transport} pickDirectory={pickDirectory} workItemTarget={searchWorkItemTarget} onWorkItemTargetConsumed={clearSearchWorkItemTarget} />
             </div>
           </div>

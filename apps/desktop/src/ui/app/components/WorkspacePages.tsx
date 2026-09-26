@@ -1,9 +1,9 @@
 import { Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { type DecisionCard, type DomainConfig, type DomainDefinition, type PatrolRun, type RoleFile, type WorkbenchClient, type WorkItem, type Workspace } from "@vermillion/workbench/client";
+import { type DomainConfig, type DomainDefinition, type PatrolRun, type RoleFile, type WorkbenchClient, type WorkItem, type Workspace } from "@vermillion/workbench/client";
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { WorkbenchStore } from "../workbench-store.js";
-import { Badge, Button, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, Toggle } from "./ui.js";
+import { Badge, Button, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, PanelHeader, SectionLabel, Select, Toggle } from "./ui.js";
 import { WorkItemsSection } from "./WorkItemsSection.js";
 import { IssuesSection } from "./IssuesSection.js";
 import { Modal } from "./Modal.js";
@@ -18,16 +18,13 @@ type WorkspacePagesProps = {
 
 const DOMAINS_DIR = ".vermillion/docs/domains/";
 
+/** Compact editing-scope picker at the tab bar's right end: the name shows, the path is the option's second line. */
 export const WorkspaceSwitcher = ({ store }: { store: WorkbenchStore }) => {
   const workspaces = store((s) => s.workspaces);
   const selected = store((s) => s.browsingWorkspaceId);
   const browseWorkspace = store((s) => s.browseWorkspace);
-  return <div className="flex min-w-0 max-w-md flex-1 items-center">
-    <Field kind="select" compact aria-label="切换 workspace" className="min-w-0 flex-1" value={selected ?? ""} onChange={(e) => browseWorkspace(e.target.value)}>
-      {!selected && <option value="">选择 workspace</option>}
-      {workspaces.map((item) => <option key={item.workspaceId} value={item.workspaceId}>{item.label} · {item.rootPath}</option>)}
-    </Field>
-  </div>;
+  return <Select plain compact aria-label="切换 workspace" className="max-w-60" value={selected ?? ""} placeholder="选择 workspace"
+    options={workspaces.map((item) => ({ value: item.workspaceId, label: item.label, hint: item.rootPath }))} onChange={browseWorkspace} />;
 };
 
 export const loadSourceTreeTitles = async (
@@ -106,9 +103,6 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
           <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} workRequests={view.workRequests} decisions={view.decisions} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} compact={false} onExpand={showTaskBoard} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} detailTarget={(linkedWorkItemTarget ?? workItemTarget)?.workspaceId === activeWorkspaceId ? linkedWorkItemTarget ?? workItemTarget : undefined} onDetailTargetConsumed={() => { setLinkedWorkItemTarget(undefined); onWorkItemTargetConsumed?.(); }} onOpenIssue={(issueId) => store.getState().showIssue({ workspaceId: activeWorkspaceId, issueId })} />
         )}
       </div>}
-      <div hidden={section !== "docs"}>
-        <DocsSection docs={view?.docs.map((d) => d.path) ?? []} decisions={view?.decisions ?? []} onOpen={(path) => openEditor({ kind: "doc", path })} />
-      </div>
       <div hidden={section !== "domains"}>
         <DomainsSection key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} domains={view?.domains ?? []} patrolRuns={view?.patrolRuns ?? []}
           onOpenDoc={(path) => openEditor({ kind: "doc", path })}
@@ -286,9 +280,8 @@ const DomainsSection = ({ client, workspaceId, domains, patrolRuns, onOpenDoc, o
             <Toggle label="目录变更后巡检" checked={config.changeTrigger} onChange={(changeTrigger) => void updateConfig({ changeTrigger })} />
             <span className="inline-flex items-center gap-2">
               <span className="text-muted-foreground">定时巡检</span>
-              <Field kind="select" compact aria-label="定时巡检间隔" className="w-24" value={String(config.intervalHours)} onChange={(event) => void updateConfig({ intervalHours: Number(event.target.value) })}>
-                {[3, 6, 12, 24, 48, 168].map((hours) => <option key={hours} value={hours}>每 {hours} 小时</option>)}
-              </Field>
+              <Select compact aria-label="定时巡检间隔" className="w-28" value={String(config.intervalHours)} onChange={(value) => void updateConfig({ intervalHours: Number(value) })}
+                options={[3, 6, 12, 24, 48, 168].map((hours) => ({ value: String(hours), label: `每 ${hours} 小时` }))} />
             </span>
             <span className="inline-flex items-center gap-2">
               <span className="text-muted-foreground">触发目录</span>
@@ -442,34 +435,5 @@ const RolesSection = ({ client, workspaceId, roles, onEdit }: { client: Workbenc
         </li>
       ))}
     </ul>
-  </div>
-);
-
-const DocsSection = ({ docs, decisions, onOpen }: { docs: string[]; decisions: DecisionCard[]; onOpen: (path: string) => void }) => (
-  <div>
-    <SectionLabel>文档</SectionLabel>
-    {docs.length === 0 ? (
-      <InlineNotice>.vermillion/docs 下还没有文件。</InlineNotice>
-    ) : (
-      <ul>
-        {docs.map((path) => (
-          <li key={path}>
-            <ListRow title={path.replace(/^\.vermillion\/docs\//, "")} titleClassName="font-normal text-foreground" onClick={() => onOpen(path)} className="py-1" />
-          </li>
-        ))}
-      </ul>
-    )}
-    <SectionLabel>决策记录</SectionLabel>
-    {decisions.length === 0 ? (
-      <InlineNotice>还没有决策卡。</InlineNotice>
-    ) : (
-      <ul>
-        {decisions.map((card) => (
-          <li key={card.decisionId}>
-            <ListRow title={card.question} titleClassName="font-normal text-foreground" trailing={card.withdrawn ? "已撤回：" + card.withdrawn.reason : card.answer ? "→ " + (card.options.find((o) => o.key === card.answer!.key)?.label ?? card.answer.note ?? "已答复") : "待回答"} />
-          </li>
-        ))}
-      </ul>
-    )}
   </div>
 );

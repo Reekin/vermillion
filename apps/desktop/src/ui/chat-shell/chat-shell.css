@@ -31,6 +31,18 @@
   --awb-severity-warning-soft: rgba(212, 154, 98, 0.14);
   --awb-severity-info: #8fa9c4;
   --awb-severity-info-soft: rgba(143, 169, 196, 0.12);
+  /* State colours for status icons, pills, progress, counters and alert fills; never body text.
+     Running yellow and attention amber stay clearly apart. Severity marks reuse the same values. */
+  --awb-state-running: var(--awb-status-running);
+  --awb-state-running-soft: rgba(207, 183, 106, 0.14);
+  --awb-state-done: var(--awb-status-unread);
+  --awb-state-done-soft: rgba(143, 188, 152, 0.14);
+  --awb-state-failed: var(--awb-severity-error);
+  --awb-state-failed-soft: var(--awb-severity-error-soft);
+  --awb-state-attention: var(--awb-severity-warning);
+  --awb-state-attention-soft: var(--awb-severity-warning-soft);
+  --awb-state-info: var(--awb-severity-info);
+  --awb-state-info-soft: var(--awb-severity-info-soft);
   --awb-warm: #8c8987;
   --awb-radius-soft: 4px;
   --awb-radius-tight: 3px;
