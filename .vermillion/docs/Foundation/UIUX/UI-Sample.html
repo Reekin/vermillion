@@ -535,10 +535,10 @@ svg.i.lg { width: 16px; height: 16px; }
               <button class="process-summary"><svg class="i sm"><use href="#chev-d"/></svg>列目录 1 次<span class="sep">·</span>读取 2 个文件<span class="sep">·</span>运行 1 条命令<span class="sep">·</span>1 分 27 秒</button>
               <div class="steps">
                 <div class="step"><svg class="i ic"><use href="#bulb"/></svg><span class="verb">思考</span><span class="obj">先确认项目结构和是否有 AGENTS.md</span><span class="res">4 秒</span></div>
-                <div class="step"><svg class="i ic"><use href="#list"/></svg><span class="verb">列目录</span><span class="obj">项目根目录 · 排除 node_modules、dist</span><span class="res">1 个文件</span></div>
-                <div class="step fail"><svg class="i ic"><use href="#eye"/></svg><span class="verb">读取</span><span class="obj"><code>AGENTS.md</code></span><span class="res">不存在</span></div>
-                <div class="step"><svg class="i ic"><use href="#eye"/></svg><span class="verb">读取</span><span class="obj"><code>README.md</code></span><span class="res">3 行</span></div>
-                <div class="step"><svg class="i ic"><use href="#term"/></svg><span class="verb">运行</span><span class="obj"><code>git status --short</code></span><span class="res">无改动</span></div>
+                <div class="step"><svg class="i ic"><use href="#list"/></svg><span class="verb">列目录</span><span class="obj">当前目录</span><span class="res">输出 1 行</span></div>
+                <div class="step fail"><svg class="i ic"><use href="#eye"/></svg><span class="verb">读取</span><span class="obj"><code>AGENTS.md</code></span><span class="res">失败 · 退出码 1</span></div>
+                <div class="step"><svg class="i ic"><use href="#eye"/></svg><span class="verb">读取</span><span class="obj"><code>README.md</code></span><span class="res">输出 3 行</span></div>
+                <div class="step"><svg class="i ic"><use href="#term"/></svg><span class="verb">运行</span><span class="obj"><code>git status --short</code></span><span class="res">无输出</span></div>
               </div>
             </div>
             <div class="answer">
@@ -696,7 +696,7 @@ svg.i.lg { width: 16px; height: 16px; }
           <div class="results">
             <div class="rgroup"><svg class="i sm"><use href="#msg"/></svg>梳理项目文件并提出改进建议 <span class="faint">· 3</span></div>
             <div class="hit sel"><span class="who a"><svg class="i sm"><use href="#msg"/></svg></span><div><div class="txt">项目目前除 Git 内部文件外只有一个文件：<mark>README</mark>.md。我读了它；内容只有标题“Real acceptance fixture”…</div><div class="m">agent 回复 · 第 1 轮 · 今天 14:43</div></div></div>
-            <div class="hit"><span class="who t"><svg class="i sm"><use href="#eye"/></svg></span><div><div class="txt">读取 <mark>README</mark>.md · 3 行</div><div class="m">工具调用 · 第 1 轮 · 今天 14:43</div></div></div>
+            <div class="hit"><span class="who t"><svg class="i sm"><use href="#eye"/></svg></span><div><div class="txt">读取 <mark>README</mark>.md · 输出 3 行</div><div class="m">工具调用 · 第 1 轮 · 今天 14:43</div></div></div>
             <div class="hit"><span class="who u">你</span><div><div class="txt">…读一两个关键文件，然后用一个表格总结每个文件的作用（比如 <mark>README</mark>）…</div><div class="m">你 · 第 1 轮 · 今天 14:42</div></div></div>
             <div class="rgroup"><svg class="i sm"><use href="#file"/></svg>文档 <span class="faint">· 2</span></div>
             <div class="hit"><span class="who t"><svg class="i sm"><use href="#file"/></svg></span><div><div class="txt">新 worktree 第一次运行检查前…参见 <mark>README</mark> 中的准备步骤</div><div class="m">Foundation/Acceptance/PRD.md · 隔离实例准备</div></div></div>
