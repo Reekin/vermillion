@@ -769,13 +769,21 @@ const storedTextPattern = (text: string): string =>
  */
 export const rolloutCandidatePatterns = (query: string): string[] => {
   const patterns = new Set([storedTextPattern(query)]);
-  if (STEP_WORDS.some((word) => query.includes(word))) {
-    let rest = query;
-    for (const word of STEP_WORDS) rest = rest.split(word).join(" ");
-    const tokens = rest.split(/[\s·“”"]+/).map((token) => token.replace(/^\d+$/, "")).filter(Boolean);
-    if (tokens.length === 0) patterns.add(TOOL_RECORD_PATTERN);
-    for (const token of tokens) patterns.add(storedTextPattern(token));
-  }
+  // Any part of a generated step word ("目录", "条目") counts, not only whole words.
+  let rest = query;
+  for (const word of STEP_WORDS) rest = rest.split(word).join(" ");
+  let generated = rest !== query;
+  const tokens = rest.split(/[\s·“”"]+/).filter((token) => {
+    if (!token) return false;
+    if (/^\d+$/.test(token) || STEP_WORDS.some((word) => word.includes(token))) {
+      generated = true;
+      return false;
+    }
+    return true;
+  });
+  if (!generated) return [...patterns];
+  if (tokens.length === 0) patterns.add(TOOL_RECORD_PATTERN);
+  for (const token of tokens) patterns.add(storedTextPattern(token));
   return [...patterns];
 };
 

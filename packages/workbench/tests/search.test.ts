@@ -48,6 +48,11 @@ describe("workbench search", () => {
         user("turn-1", "user-1", "please read the needle file"),
         readFile("turn-1", "cmd-read", "needle.md", "# Title\nbody\n"),
         readFile("turn-1", "cmd-other", "notes.txt", "the needle only lives in output\n"),
+        completed("turn-1", {
+          type: "CommandExecution", id: "cmd-ls", command: ["bash", "-lc", "ls"],
+          parsed_cmd: [{ type: "list_files", cmd: "ls", path: null }], status: "completed",
+          stdout: "a\nb\n", stderr: "", aggregated_output: "a\nb\n", exit_code: 0
+        }),
         agent("turn-1", "agent-1", "The needle file has a title; the needle is documented."),
         responseMessage("turn-1", "The needle file has a title; the needle is documented."),
         node("turn-2", 1),
@@ -112,6 +117,11 @@ describe("workbench search", () => {
         expect(stepWord.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["read", "read"]);
         const stepResult = await service.search({ query: "2 行" });
         expect(stepResult.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["read"]);
+        // Parts of generated words count too: "列目录 当前目录 · 2 个条目".
+        for (const part of ["目录", "条目"]) {
+          const listed = await service.search({ query: part });
+          expect(listed.hits.filter((hit) => hit.kind === "session").map((hit) => hit.toolKind)).toEqual(["list"]);
+        }
       } finally {
         await service.dispose();
       }
