@@ -64,20 +64,24 @@ const countLines = (value: string | undefined): number =>
 const countRawLines = (value: string | undefined): number =>
   value ? value.replace(/(\r?\n)+$/, "").split(/\r?\n/).length : 0;
 
-/** Directory entries without pwsh table headers or `ls -la` totals and dot entries. */
-const countListEntries = (value: string | undefined): number =>
-  (value ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(
-      (line) =>
-        line.length > 0 &&
-        !/^Directory:/i.test(line) &&
-        !/^Mode\s+LastWriteTime/i.test(line) &&
-        !/^[-\s]+$/.test(line) &&
-        !/^total \d+$/.test(line) &&
-        !/(^|\s)\.{1,2}$/.test(line)
-    ).length;
+/**
+ * Directory entries without table headers (any header line followed by a dashed rule, as pwsh
+ * prints for Get-ChildItem and Select-Object), `Directory:` captions, `ls -la` totals or dot entries.
+ */
+const countListEntries = (value: string | undefined): number => {
+  const lines = (value ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.filter((line, index) => {
+    const next = lines[index + 1];
+    const isHeader = next !== undefined && /^-[-\s]*$/.test(next);
+    return (
+      !isHeader &&
+      !/^-[-\s]*$/.test(line) &&
+      !/^Directory:/i.test(line) &&
+      !/^total \d+$/.test(line) &&
+      !/(^|\s)\.{1,2}$/.test(line)
+    );
+  }).length;
+};
 
 const stripQuotes = (value: string): string => {
   const trimmed = value.trim();

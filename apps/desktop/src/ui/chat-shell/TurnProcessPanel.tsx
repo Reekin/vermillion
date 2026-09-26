@@ -197,15 +197,10 @@ export const TurnProcessPanel = ({
               }
               return (
                 <div key={item.id} className="awb-process-step__message">
-                  {item.blocks.map((block, blockIndex) => (
+                  {item.blocks.map((block) => (
                     <MessageMarkdownView
                       key={block.blockId}
                       block={block}
-                      copyBlocks={
-                        blockIndex === item.blocks.length - 1
-                          ? item.blocks
-                          : undefined
-                      }
                       onPreviewImage={onPreviewImage}
                       renderFileLinkContextMenu={renderFileLinkContextMenu}
                     />

@@ -9,7 +9,7 @@ import {
   List,
   Pencil,
   Search,
-  SquareTerminal,
+  Terminal,
   Wrench,
   type LucideIcon
 } from "lucide-react";
@@ -44,7 +44,7 @@ const stepIcons: Record<ToolStepKind, LucideIcon> = {
   list: List,
   search: Search,
   edit: Pencil,
-  run: SquareTerminal,
+  run: Terminal,
   web: Globe,
   view: ImageIcon,
   generate: ImagePlus,

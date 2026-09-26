@@ -619,7 +619,9 @@ const TranscriptPane = memo(
                       key={block.blockId}
                       block={block}
                       copyBlocks={
-                        blockIndex === visibleRow.blocks.length - 1
+                        // Intermediate messages of a running turn stay compact; copy comes with the answer.
+                        blockIndex === visibleRow.blocks.length - 1 &&
+                        (isUserTurn || visibleRow.turn.status === "completed")
                           ? visibleRow.blocks
                           : undefined
                       }

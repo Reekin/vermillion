@@ -70,6 +70,11 @@ describe("tool actions", () => {
       .toMatchObject({ kind: "list", result: "2 个条目" });
     expect(describeToolStep(call({ inputSummary: "ls -la" }), { text: ["total 8", ".", "..", "a.ts"].join(String.fromCharCode(10)), exitCode: 0 }).result)
       .toBe("1 个条目");
+    const selected = ["", "Mode   Name", "----   ----", "d--h-- .git", "d----- .vermillion", "-a---- README.md", ""];
+    expect(describeToolStep(call({ inputSummary: pwsh("Get-ChildItem -Force | Select-Object Mode, Name") }), {
+      text: selected.join(String.fromCharCode(10)),
+      exitCode: 0
+    }).result).toBe("3 个条目");
   });
 
   it("shows commands mixing action kinds, or with setup first, by their first real command", () => {

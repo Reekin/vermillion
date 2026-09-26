@@ -1878,8 +1878,13 @@ summary.awb-process-step__row:hover {
   height: auto;
 }
 
+/* Intermediate messages read as short lines between steps: no copy row, no trailing paragraph margin. */
+.awb-process-step__message .awb-message__content > :last-child {
+  margin-bottom: 0;
+}
+
 .awb-process-step__message {
-  padding: 4px 8px 8px;
+  padding: 4px 8px;
   color: var(--awb-ink);
 }
 
