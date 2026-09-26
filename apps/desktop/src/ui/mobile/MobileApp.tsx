@@ -5,6 +5,7 @@ import { createDesktopTransport } from "../../transport/desktop-transport.js";
 import { createRemoteClient } from "../../transport/remote-client.js";
 import { connectDesktopTransportToStore } from "../../transport/store-bridge.js";
 import { MobileSessionPane } from "../chat-shell/MobileSessionPane.js";
+import { createCoalescedRefresh } from "../chat-shell/coalesced-refresh.js";
 import { formatRelativeActivityAge } from "../chat-shell/index.js";
 import { useSessionSidebar } from "../app/use-session-sidebar.js";
 import { roleLabel } from "../app/components/workflow-display.js";
@@ -68,22 +69,26 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const [inboxError, setInboxError] = useState<string>();
   const [inboxLoading, setInboxLoading] = useState(true);
   const [reloadSignal, setReloadSignal] = useState(0);
+  const [inboxRefresh] = useState(createCoalescedRefresh);
   const visibleScope = useRef({ turnIds: new Set<string>(), sessionId: "" });
   const onVisiblePathChange = useCallback((turnIds: string[], sessionId: string) => {
     visibleScope.current = { turnIds: new Set(turnIds), sessionId };
   }, []);
   const sidebar = useSessionSidebar({ transport, store, workspaceIds: workspaces.filter((w) => !workspaceFilter || w.workspaceId === workspaceFilter).map((w) => w.workspaceId) });
   const openSession = (id: string) => { location.hash = sessionHash(id); };
-  const refreshInbox = async () => {
-    try { setItems(await client.request("inbox.list", {})); setInboxError(undefined); }
-    catch (cause) { if (remote.getConnectionState() === "connected") setInboxError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setInboxLoading(false); }
-  };
+  const refreshInbox = () => inboxRefresh.request(async (signal) => {
+    try {
+      const next = await client.request("inbox.list", {});
+      if (!signal.aborted) { setItems(next); setInboxError(undefined); }
+    }
+    catch (cause) { if (!signal.aborted && remote.getConnectionState() === "connected") setInboxError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (!signal.aborted) setInboxLoading(false); }
+  });
   useEffect(() => {
     const changed = () => setRoute(parseMobileRoute(location.hash));
     window.addEventListener("hashchange", changed);
     void remote.connect().catch(() => undefined);
-    return () => { window.removeEventListener("hashchange", changed); remote.dispose(); };
+    return () => { window.removeEventListener("hashchange", changed); inboxRefresh.cancel(); remote.dispose(); };
   }, [remote]);
   useEffect(() => {
     if (connection !== "connected") return;

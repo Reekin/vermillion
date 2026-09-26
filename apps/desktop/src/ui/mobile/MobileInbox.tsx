@@ -29,7 +29,9 @@ function InboxCard({ item, client, refresh, openSession }: {
     setBusy(true); setError(undefined);
     try {
       if (item.kind === "decision") await client.request("decision.answer", {
-        workspaceId: item.workspaceId, decisionId: item.card.decisionId, key: choice, note: note.trim() || undefined
+        workspaceId: item.workspaceId, decisionId: item.card.decisionId,
+        key: item.card.answer ? item.card.answer.key : choice,
+        note: item.card.answer ? item.card.answer.note : note.trim() || undefined
       });
       else if (item.kind === "merged") await client.request("inbox.acknowledge", { workspaceId: item.workspaceId, workItemId: item.workItem.workItemId });
       await refresh();
@@ -45,7 +47,15 @@ function InboxCard({ item, client, refresh, openSession }: {
       <h2 className="break-words text-title-sm font-medium text-strong">{item.card.question}</h2>
       <p className="mt-2 whitespace-pre-wrap break-words text-body text-muted-foreground">{item.card.context}</p>
       {(item.card.adjustments ?? []).map((adjustment) => <p key={adjustment.at} className="mt-2 whitespace-pre-wrap text-body text-foreground">{adjustment.note}</p>)}
-      <form className="mt-4 space-y-3" onSubmit={(event) => { event.preventDefault(); if (choice || note.trim()) void run(); }}>
+      {item.card.answer ? <div className="mt-4 space-y-2">
+        <p className="whitespace-pre-wrap break-words text-body text-foreground">{[
+          item.card.options.find((option) => option.key === item.card.answer?.key)?.label,
+          item.card.answer.note
+        ].filter(Boolean).join(" · ")}</p>
+        <p className="text-caption text-muted-foreground">{item.card.deliveryPending ? "答复已登记，等待交付" : "答复已送达"}</p>
+        {item.card.deliveryFailure && <InlineNotice tone="error" className="px-0">{item.card.deliveryFailure}</InlineNotice>}
+        {item.card.deliveryPending && <Button disabled={busy} onClick={() => void run()}>重试送达</Button>}
+      </div> : <form className="mt-4 space-y-3" onSubmit={(event) => { event.preventDefault(); if (choice || note.trim()) void run(); }}>
         <div role="group" aria-label="决策选项" className="space-y-3">
           {item.card.options.map((option) => <div key={option.key}>
             <Button className="w-full justify-start whitespace-normal text-left" aria-pressed={choice === option.key} disabled={busy}
@@ -56,7 +66,7 @@ function InboxCard({ item, client, refresh, openSession }: {
         </div>
         <Field kind="textarea" label="答复说明" placeholder="也可以直接填写答复" rows={3} value={note} disabled={busy} onChange={(event) => setNote(event.target.value)} />
         <Button type="submit" variant="primary" disabled={busy || (!choice && !note.trim())}>{busy ? "正在提交" : "提交答复"}</Button>
-      </form>
+      </form>}
       {item.card.details && <CollapsibleDetails open={details} onToggle={() => setDetails(!details)}>{item.card.details}</CollapsibleDetails>}
     </> : <>
       <h2 className="break-words text-title-sm font-medium text-strong">{item.workItem.title}</h2>
