@@ -179,7 +179,7 @@ it("an active supervisor cannot bypass a disabled automatic-progression switch t
   const starter = vi.fn(async () => {});
   f.service.setExecutionStarter(starter);
   await f.service.setScheduler(f.workspaceId, { enabled: false, maxWorkers: 2 });
-  await expect(f.service.retryWorkItem(f.workspaceId, item.workItemId, "supervisor")).rejects.toThrow("自动推进未启用");
+  await expect(f.service.retryWorkItem(f.workspaceId, item.workItemId, "supervisor")).rejects.toThrow("Automatic progress is off");
   expect(starter).not.toHaveBeenCalled();
   await f.service.setScheduler(f.workspaceId, { enabled: true, maxWorkers: 2 });
   starter.mockImplementation(async (...args: unknown[]) => {

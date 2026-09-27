@@ -29,7 +29,7 @@ it("exposes node identifiers and forwards each node action to the owning desktop
     expect(await runCli(["clipboard.writeImage", JSON.stringify(imageInput)])).toBe(0);
     expect(handler).toHaveBeenLastCalledWith({ method: "clipboard.writeImage", params: imageInput });
     expect(await runCli(["clipboard.writeImage", "--help"])).toBe(0);
-    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining("系统剪贴板"));
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining("system clipboard"));
   } finally {
     await endpoint.close();
     vi.restoreAllMocks();

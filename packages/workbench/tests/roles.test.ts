@@ -101,7 +101,7 @@ describe("role prompt composition", () => {
       const { workspaceId } = await service.addWorkspace({ rootPath: root, label: "Roles" });
       const design = await service.resolveSessionInstructions(workspaceId, {});
       expect(design).toContain("Current design role.");
-      expect(design).toContain(`当前 workspaceId: ${workspaceId}`);
+      expect(design).toContain(`Current workspaceId: ${workspaceId}`);
       const worker = await service.resolveSessionInstructions(workspaceId, { role: "worker" });
       expect(worker).toContain("Global instructions.");
       expect(worker).toContain("## reviewer subagent prompt");

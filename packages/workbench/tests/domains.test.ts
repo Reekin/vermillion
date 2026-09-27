@@ -84,7 +84,7 @@ describe("domain owner patrols", () => {
 
     clock = "2026-09-12T07:00:00.000Z";
     const [skipped] = await fixture.client.request("domain.patrol.scan", { workspaceId: fixture.workspaceId });
-    expect(skipped).toMatchObject({ trigger: "scheduled", status: "skipped", summary: "无新变更或待复查问题，跳过。" });
+    expect(skipped).toMatchObject({ trigger: "scheduled", status: "skipped", summary: { code: "patrol.skipped" } });
   });
 
   it("only creates automatic work from the active authorized patrol with fixed requirements and evidence", async () => {
@@ -105,7 +105,7 @@ describe("domain owner patrols", () => {
       refs: [{ path: issue.requirement!.path!, section: issue.requirement!.section, commit: head }],
       scope: { inScope: ["Retain the current draft"], outOfScope: ["Cross-device drafts"], allowedPaths: ["apps/desktop/src/ui/"] },
       acceptance: [{ text: "Type a draft, switch tabs, and return; the draft remains." }], needs: [], dependsOn: [] };
-    await expect(fixture.client.request("domain.issue.workItem.create", work)).rejects.toThrow("未启用自动开单");
+    await expect(fixture.client.request("domain.issue.workItem.create", work)).rejects.toThrow("automatic work items off");
     await fixture.client.request("domain.config.set", { workspaceId: fixture.workspaceId, domainId: domain.domainId, value: {
       ...domain.config, autoWorkEnabled: true, authorizationScope: ["恢复规范已明确的草稿保留行为"]
     } });
@@ -113,7 +113,7 @@ describe("domain owner patrols", () => {
       domainId: domain.domainId, source: "maintainer", requirement: { text: "Keep the draft", path: issue.requirement!.path, commit: "HEAD" },
       evidence: [{ kind: "static", text: "Known mismatch" }] });
     await expect(fixture.client.request("domain.issue.workItem.create", { ...work, issueId: moving.issueId,
-      refs: [{ path: issue.requirement!.path!, commit: "HEAD" }] })).rejects.toThrow("不可漂移");
+      refs: [{ path: issue.requirement!.path!, commit: "HEAD" }] })).rejects.toThrow("full, fixed commits");
     const item = await fixture.client.request("domain.issue.workItem.create", work);
     expect(item).toMatchObject({ issueId: issue.issueId, sourceSessionId: "maintainer-session", status: "queued", owner: { domainId: domain.domainId, patrolRunId: run.patrolRunId,
       expectedBehavior: "Draft remains after switching tabs" } });

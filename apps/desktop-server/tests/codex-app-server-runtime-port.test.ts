@@ -350,7 +350,7 @@ describe("Codex app-server runtime port", () => {
         throw new Error(`Unexpected RPC method: ${String(method)}`);
       });
     const roleInjections = () => rpc.mock.calls.filter(([method, params]) =>
-      method === "thread/inject_items" && JSON.stringify(params).includes("以下开发者指令定义当前角色"));
+      method === "thread/inject_items" && JSON.stringify(params).includes("The following developer instructions define the current role"));
 
     await port.request({ id: "first", method: "turn/start", params: {
       sessionId: "new", content: "first", developerInstructions: "ROLE_V1"

@@ -5,6 +5,7 @@ import { WorkspaceStore } from "../src/workspace-store.js";
 import { WorkbenchService } from "../src/workbench-service.js";
 import { createWorkbenchClient, workbenchRpc } from "../src/rpc.js";
 import { createWorkbenchRpcHandler } from "../src/rpc-handler.js";
+import { renderServiceText } from "../src/service-text.js";
 import { contract, git, setup, submission as baseSubmission } from "./workflow-fixture.js";
 
 const submission = { ...baseSubmission, sessionId: "worker" };
@@ -77,8 +78,8 @@ it("registers optional isolation separately from allowedPaths and rejects generi
   expect(item.run.worktreePath).toBeUndefined();
   const updated = await client.request("workItem.update", { workspaceId, workItemId: item.workItemId, note: "Isolated execution", worktreePath: "C:/qa/work", branch: "work/result" });
   expect(updated.run).toMatchObject({ worktreePath: "C:/qa/work", branch: "work/result" });
-  await expect(service.createWorkItem(workspaceId, { ...contract, needs: ["browser"] })).rejects.toThrow("具体");
-  await expect(service.updateWorkItem(workspaceId, item.workItemId, { note: "invalid", needs: ["desktop"] })).rejects.toThrow("具体");
+  await expect(service.createWorkItem(workspaceId, { ...contract, needs: ["browser"] })).rejects.toThrow("specific shared instance");
+  await expect(service.updateWorkItem(workspaceId, item.workItemId, { note: "invalid", needs: ["desktop"] })).rejects.toThrow("specific shared instance");
 });
 
 it("retains the preparation session and records an explicit retry request", async () => {
@@ -122,7 +123,7 @@ it("enforces dependency cycles and shared resources while keeping cancelled depe
   const first = await service.createWorkItem(workspaceId, { ...contract, needs: ["browser:qa"] });
   const second = await service.createWorkItem(workspaceId, { ...contract, needs: ["browser:qa"] });
   await service.startWorkItem(workspaceId, first.workItemId, { sessionId: "one" });
-  await expect(service.startWorkItem(workspaceId, second.workItemId, { sessionId: "two" })).rejects.toThrow("资源");
+  await expect(service.startWorkItem(workspaceId, second.workItemId, { sessionId: "two" })).rejects.toThrow("shared resource");
   await service.updateWorkItem(workspaceId, second.workItemId, { note: "depends", dependsOn: [first.workItemId] });
   await expect(service.updateWorkItem(workspaceId, first.workItemId, { note: "cycle", dependsOn: [second.workItemId] })).rejects.toThrow();
   await service.cancelWorkItem(workspaceId, first.workItemId);
@@ -158,7 +159,7 @@ it("persists a user pause separately from failure decisions and resumes the same
   expect(paused).toMatchObject({ paused: true, workItem: { status: "running", run: { sessionId: "worker", paused: true } } });
   expect(await service.listDecisions(workspaceId)).toEqual([]);
   expect(await service.diagnoseWorkItem(workspaceId, item.workItemId)).toMatchObject({
-    waiting: expect.arrayContaining(["用户已暂停"]),
+    waiting: expect.arrayContaining([{ code: "diagnosis.userPaused" }]),
     availableActions: expect.arrayContaining([expect.objectContaining({ method: "workItem.resume" })])
   });
 
@@ -227,12 +228,14 @@ it("invalidates replaced acceptance results and retains their original meaning i
   try {
     expect((await restarted.getWorkItem(workspaceId, item.workItemId)).verify).toEqual(updated.verify);
     const history = (await restarted.listActions(workspaceId))[0]!.history.find((entry) => entry.event === "acceptance.updated")!;
-    expect(history.message).toContain('"text":"A"');
-    expect(history.message).toContain("Only A verified");
+    expect(history.message).toMatchObject({ code: "history.verifyRecord" });
+    const record = renderServiceText(history.message);
+    expect(record).toContain('"text":"A"');
+    expect(record).toContain("Only A verified");
   } finally { await restarted.dispose(); }
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   const stale = await service.submitWorkItem(workspaceId, item.workItemId, submission);
-  expect(stale.rejections.at(-1)?.reason).toContain("提交依据已过期");
+  expect(stale.rejections.at(-1)?.reason).toMatchObject({ code: "rejection.stale" });
   expect(stale.verify).toEqual(updated.verify);
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, contractRevision: updated.contractRevision,
@@ -292,7 +295,7 @@ it("rejects a submission based on an old contract revision while preserving prio
   expect(returned).toMatchObject({ status: "queued", contractRevision: 1 });
   expect(returned.evidence).toBeUndefined();
   expect(returned.verify).toBeUndefined();
-  expect(returned.rejections.at(-1)?.reason).toContain("提交依据已过期");
+  expect(returned.rejections.at(-1)?.reason).toMatchObject({ code: "rejection.stale" });
 });
 
 it("rejects unsupported historical state before dispatch and leaves every historical file unchanged", async () => {
@@ -427,7 +430,7 @@ it("surfaces a failed merge in Inbox and closes it after an explicit retry", asy
     kind: "integration", workItem: { workItemId: item.workItemId, status: "merging" },
     action: { actionId: action.actionId, status: "decision" }
   }]);
-  const closed = await client.request("workItem.integration.retry", { workspaceId, workItemId: item.workItemId });
+  const closed = await client.request("workItem.merge.retry", { workspaceId, workItemId: item.workItemId });
   expect(closed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
   expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done" });
 });
@@ -442,7 +445,7 @@ it("transfers a failed merge to the original worker and completes it through the
   }, (current) => ({ ...current, status: "merging" }));
   for (let attempt = 0; attempt < 5; attempt++) await service.failAction(workspaceId, action.actionId, "主工作区阻塞");
 
-  const delegated = await client.request("workItem.integration.takeover", { workspaceId, workItemId: item.workItemId, note: "请保留主目录修改，处理分支后合入" });
+  const delegated = await client.request("workItem.merge.takeover", { workspaceId, workItemId: item.workItemId, note: "请保留主目录修改，处理分支后合入" });
   const owned = (await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)!;
   expect(delegated).toMatchObject({ status: "merging", run: { sessionId: "worker", activeTurnId: "continued-turn" } });
   expect(owned).toMatchObject({ status: "decision", agent: { sessionId: "worker", note: "请保留主目录修改，处理分支后合入" } });
@@ -450,7 +453,7 @@ it("transfers a failed merge to the original worker and completes it through the
   expect((await service.listInbox()).find((entry) => entry.kind === "integration")).toMatchObject({ action: { agent: { sessionId: "worker" } } });
 
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
-  const completed = await client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
+  const completed = await client.request("workItem.merge.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
   expect(completed).toMatchObject({ status: "closed", merge: { diffStat: "" } });
   expect((await service.listActions(workspaceId)).find((entry) => entry.actionId === action.actionId)).toMatchObject({ status: "done" });
   expect((await service.listInbox()).some((entry) => entry.kind === "integration")).toBe(false);
@@ -470,7 +473,7 @@ it("pauses and resumes the original Worker handling a delegated merge", async ()
 
   const paused = await client.request("workItem.pause", { workspaceId, sessionId: "worker" });
   expect(paused).toMatchObject({ paused: true, workItem: { status: "merging", run: { paused: true } } });
-  await expect(client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" })).rejects.toThrow("先恢复工单");
+  await expect(client.request("workItem.merge.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" })).rejects.toThrow("Resume it first");
   await service.settleExecutionTurn(workspaceId, "worker", "continued-turn", "interrupted");
 
   const resumed = await client.request("workItem.resume", { workspaceId, workItemId: item.workItemId });
@@ -516,13 +519,13 @@ it("handles a real dirty-workspace merge through Worker takeover without losing 
   expect(action.failure).toContain("Your local changes");
   expect(await service.listInbox()).toMatchObject([{ kind: "integration", workItem: { workItemId: item.workItemId }, action: { status: "decision" } }]);
 
-  await client.request("workItem.integration.takeover", { workspaceId, workItemId: item.workItemId, note: "保留用户改动并合入 Worker 成果" });
+  await client.request("workItem.merge.takeover", { workspaceId, workItemId: item.workItemId, note: "保留用户改动并合入 Worker 成果" });
   await writeFile(join(worktreePath, "result.txt"), "worker rebased\n");
   await git(worktreePath, "add", "result.txt");
   await git(worktreePath, "commit", "-qm", "worker rebase result");
   await writeFile(join(root, "result.txt"), "base\n");
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
-  const completed = await client.request("workItem.integration.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
+  const completed = await client.request("workItem.merge.complete", { workspaceId, workItemId: item.workItemId, actionId: action.actionId, sessionId: "worker" });
   expect(completed).toMatchObject({ status: "closed", merge: { commit: expect.any(String) } });
   expect(completed.run.worktreePath).toBeUndefined();
   expect(completed.run.branch).toBeUndefined();
@@ -564,7 +567,7 @@ it("serializes root code writers on the actual shared directory while allowing a
   const readOnly = await service.createWorkItem(workspaceId, contract);
   await service.startWorkItem(workspaceId, first.workItemId, { sessionId: "writer" });
   expect((await service.diagnoseWorkItem(workspaceId, first.workItemId)).scheduler.running).toBe(1);
-  await expect(service.startWorkItem(workspaceId, second.workItemId, { sessionId: "other-writer" })).rejects.toThrow("资源");
+  await expect(service.startWorkItem(workspaceId, second.workItemId, { sessionId: "other-writer" })).rejects.toThrow("shared resource");
   expect((await service.diagnoseWorkItem(workspaceId, second.workItemId)).resources).toMatchObject([{ name: "workspace:root", workItemId: first.workItemId }]);
   expect((await service.startWorkItem(workspaceId, readOnly.workItemId, { sessionId: "reader" })).status).toBe("running");
 });
@@ -603,11 +606,11 @@ it("asks the worker to re-read an externally edited contract and leaves its own 
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
 
   const external = await service.updateWorkItem(workspaceId, item.workItemId, { objective: "Updated result", note: "Requirement moved" });
-  expect(external.run.resumeMessage).toContain("【合同调整】Requirement moved");
+  expect(external.run.resumeMessage).toContain("[Contract update] Requirement moved");
   expect(external.run.resumeMessage).toContain("workItem.get");
 
   const own = await service.updateWorkItem(workspaceId, item.workItemId, { sessionId: "worker", note: "Own adjustment", scope: { ...contract.scope, allowedPaths: ["src"] } });
   expect(own.contractRevision).toBe(2);
-  expect(own.decisions).toContain("工单调整：Own adjustment");
-  expect(own.run.resumeMessage).toBe("【合同调整】Requirement moved\n立即重新执行 vermillion workItem.get 读取最新合同，按新合同继续；已完成但不再需要的部分回退。");
+  expect(own.decisions).toContain("Contract change: Own adjustment");
+  expect(own.run.resumeMessage).toBe("[Contract update] Requirement moved\nRun vermillion workItem.get now to read the latest contract and continue under it; revert finished parts it no longer needs.");
 });

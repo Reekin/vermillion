@@ -1,6 +1,7 @@
 import { workbenchRpc, type WorkbenchRpcMethod, type WorkbenchRpcParams, type WorkbenchRpcRequest, type WorkbenchRpcResponse, type WorkbenchRpcResult } from "./rpc.js";
 import type { WorkbenchService } from "./workbench-service.js";
 import { parseRoleDocument, serializeRoleDocument } from "./role-document.js";
+import { ServiceError } from "./service-text.js";
 
 type Handlers = { [M in WorkbenchRpcMethod]: (params: WorkbenchRpcParams<M>) => Promise<WorkbenchRpcResult<M>> };
 
@@ -95,9 +96,9 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "workItem.pause": (p) => service.pauseWorkItem(p.workspaceId, p),
     "workItem.resume": (p) => service.resumeWorkItem(p.workspaceId, p.workItemId, p.originatorSessionId),
     "workItem.retry": (p) => service.retryWorkItem(p.workspaceId, p.workItemId, p.originatorSessionId),
-    "workItem.integration.retry": (p) => service.retryIntegration(p.workspaceId, p.workItemId, p.originatorSessionId),
-    "workItem.integration.takeover": (p) => service.takeoverIntegration(p.workspaceId, p.workItemId, p.note, p.originatorSessionId),
-    "workItem.integration.complete": (p) => service.completeIntegration(p.workspaceId, p.workItemId, p.actionId, p.sessionId),
+    "workItem.merge.retry": (p) => service.retryIntegration(p.workspaceId, p.workItemId, p.originatorSessionId),
+    "workItem.merge.takeover": (p) => service.takeoverIntegration(p.workspaceId, p.workItemId, p.note, p.originatorSessionId),
+    "workItem.merge.complete": (p) => service.completeIntegration(p.workspaceId, p.workItemId, p.actionId, p.sessionId),
     "action.list": (p) => service.listActions(p.workspaceId),
     "workItem.update": ({ workspaceId, workItemId, ...changes }) => service.updateWorkItem(workspaceId, workItemId, changes),
 
@@ -126,8 +127,12 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const params = raw.params as Record<string, unknown> | undefined;
-      const next = params?.workItemId ? "先调用 workItem.diagnose 查询等待原因与可用动作。" : params?.actionId ? "先调用 action.list 核对处理者、会话与当前动作。" : params?.decisionId ? "先调用 decision.list 核对是否已答复或撤回以及发起会话。" : "核对参数和对象的当前状态。";
-      return { ok: false, error: `${reason}\n下一步：${next} 参数与适用状态：vermillion ${raw.method} --help` };
+      const next = params?.workItemId ? "Call workItem.diagnose for waiting reasons and available operations."
+        : params?.actionId ? "Call action.list to check the handler, session and current action."
+        : params?.decisionId ? "Call decision.list to check whether it was answered or withdrawn, and which session raised it."
+        : "Check the parameters and the current state of the object.";
+      return { ok: false, error: `${reason}\nNext: ${next} Parameters and applicable states: vermillion ${raw.method} --help`,
+        ...(error instanceof ServiceError ? { text: error.text } : {}) };
     }
   };
 };

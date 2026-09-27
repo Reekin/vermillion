@@ -193,7 +193,7 @@ it("revokes the partial deletion claim when Git refuses to remove a dirty worktr
   await git(f.root, "worktree", "remove", "--force", f.worktreePath);
   await mkdir(f.worktreePath);
   await writeFile(join(f.worktreePath, "external.txt"), "keep");
-  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ removed: [], retained: [{ reason: expect.stringContaining("保留以待检查") }] });
+  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ removed: [], retained: [{ reason: expect.stringContaining("kept for inspection") }] });
   expect(await readFile(join(f.worktreePath, "external.txt"), "utf8")).toBe("keep");
 });
 
@@ -204,7 +204,7 @@ it("keeps a nonempty unregistered directory without a cleanup claim", async () =
   await git(f.root, "worktree", "remove", f.worktreePath);
   await mkdir(f.worktreePath);
   await writeFile(join(f.worktreePath, "external.txt"), "keep");
-  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ removed: [], retained: [{ reason: expect.stringContaining("保留以待检查") }] });
+  expect(await f.service.cleanupWorktrees(f.workspaceId)).toMatchObject({ removed: [], retained: [{ reason: expect.stringContaining("kept for inspection") }] });
   expect((await f.service.listWorktreeCleanup(f.workspaceId))[0]?.removalStarted).toBeUndefined();
   expect(await readFile(join(f.worktreePath, "external.txt"), "utf8")).toBe("keep");
 });

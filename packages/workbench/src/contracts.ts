@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { zSearchHit, zSearchStats } from "./search-contract.js";
+import { zServiceText, type ServiceText } from "./service-text.js";
 
 export const zWorkspace = z.object({
   workspaceId: z.string().min(1),
@@ -31,7 +32,7 @@ export const zIssueRequirement = z.object({
 export const zIssueEvidence = z.object({ kind: zIssueEvidenceKind, text: z.string().min(1), path: z.string().min(1).optional() });
 export const zIssueActivity = z.object({
   at: z.string(), kind: z.enum(["created", "updated", "evidence", "discussion", "workItem", "resolved"]),
-  message: z.string().min(1), sessionId: z.string().min(1).optional(), workItemId: z.string().min(1).optional(), issueId: z.string().min(1).optional()
+  message: zServiceText, sessionId: z.string().min(1).optional(), workItemId: z.string().min(1).optional(), issueId: z.string().min(1).optional()
 });
 export const zIssue = z.object({
   issueId: z.string().min(1), title: z.string().min(1), summary: z.string(), domainId: z.string().min(1),
@@ -83,7 +84,7 @@ export const zPatrolRun = z.object({
   turnId: z.string().min(1).optional(),
   issueIds: z.array(z.string().min(1)),
   workItemIds: z.array(z.string().min(1)),
-  summary: z.string().optional(),
+  summary: zServiceText.optional(),
   startedAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   endedAt: z.string().datetime().optional()
@@ -149,7 +150,7 @@ export const zVerifySubmission = z.object({
 });
 export type VerifySubmission = z.infer<typeof zVerifySubmission>;
 
-export const zRejection = z.object({ reason: z.string().min(1), at: z.string() });
+export const zRejection = z.object({ reason: zServiceText, at: z.string() });
 
 /** Read-only API projection of Execution; never stored on the work-item contract. */
 export const zRun = z.object({
@@ -163,11 +164,11 @@ export const zRun = z.object({
   worktreePath: z.string().optional(),
   branch: z.string().optional(),
   resumeMessage: z.string().optional(),
-  lastFailure: z.string().optional(),
+  lastFailure: zServiceText.optional(),
   paused: z.boolean().optional(),
   userStopped: z.boolean().optional(),
   activeTurnId: z.string().optional(),
-  waitReason: z.string().optional(),
+  waitReason: zServiceText.optional(),
   /** Receipt of a business dispatch, not a chat queue. */
   pendingMessageId: z.string().optional()
 });
@@ -244,7 +245,7 @@ export const zSupervisor = z.object({
   startedAt: z.string().optional(),
   lastCheckedAt: z.string().optional(),
   nextCheckAt: z.string().optional(),
-  failure: z.string().optional()
+  failure: zServiceText.optional()
 });
 
 export const zWorkRequest = z.object({
@@ -259,10 +260,10 @@ export const zWorkRequest = z.object({
   status: z.enum(["pending", "preparing", "ready", "failed", "cancelled"]),
   paused: z.boolean().optional(),
   userStopped: z.boolean().optional(),
-  failure: z.string().optional(),
+  failure: zServiceText.optional(),
   activeTurnId: z.string().optional(),
   turnStatus: z.enum(["active", "unknown"]).optional(),
-  waitReason: z.string().optional(),
+  waitReason: zServiceText.optional(),
   dispatchRequested: z.boolean().optional(),
   pendingMessageId: z.string().optional(),
   handoff: z.object({
@@ -278,7 +279,7 @@ export type WorkRequest = z.infer<typeof zWorkRequest>;
 
 export const zDecisionOption = z.object({
   key: z.string().min(1),
-  label: z.string().min(1),
+  label: zServiceText,
   /** What happens if this option is chosen; shown next to the label, never hidden in a tooltip. */
   detail: z.string().optional()
 });
@@ -292,13 +293,13 @@ export const zDecisionCard = z.object({
   withdrawn: z.object({ reason: z.string().min(1), at: z.string(), sessionId: z.string() }).optional(),
   deliveryPending: z.boolean().optional(),
   messageId: z.string().optional(),
-  deliveryFailure: z.string().optional(),
+  deliveryFailure: zServiceText.optional(),
   /** Business decisions may be raised by a Worker or the supervisor. */
   kind: z.enum(["worker", "supervisor"]).optional(),
   /** One plain sentence: what is blocked. */
-  question: z.string().min(1),
+  question: zServiceText,
   /** Two or three sentences: what happened and why the user has to decide. */
-  context: z.string(),
+  context: zServiceText,
   /** Source locations, logs, evidence paths. Collapsed by default. */
   details: z.string().optional(),
   options: z.array(zDecisionOption),
@@ -372,8 +373,8 @@ export const zWorkDiagnosis = z.object({
   request: zWorkRequest,
   workItems: z.array(zWorkItem),
   scheduler: zScheduler,
-  waiting: z.array(z.string()),
-  availableActions: z.array(z.object({ method: z.string(), condition: z.string() }))
+  waiting: z.array(zServiceText),
+  availableActions: z.array(z.object({ method: z.string(), condition: zServiceText }))
 });
 export type WorkDiagnosis = z.infer<typeof zWorkDiagnosis>;
 
@@ -401,8 +402,8 @@ const zProcess = z.object({
   actionId: z.string(),
   workItemId: z.string(),
   status: z.enum(["pending", "running", "decision", "done", "cancelled"]),
-  failure: z.string().optional(),
-  history: z.array(z.object({ at: z.string(), event: z.string(), message: z.string(), decisionId: z.string().optional() })),
+  failure: zServiceText.optional(),
+  history: z.array(z.object({ at: z.string(), event: z.string(), message: zServiceText, decisionId: z.string().optional() })),
   createdAt: z.string(),
   updatedAt: z.string()
 });
@@ -417,12 +418,12 @@ export const zExecutionNotice = z.object({
 export type ExecutionNotice = z.infer<typeof zExecutionNotice>;
 
 const executionNoticeLabels: Record<ExecutionNotice["kind"], string> = {
-  contract: "合同调整", docs: "文档合入", rejected: "提交退回", resumed: "恢复执行"
+  contract: "Contract update", docs: "Docs merged", rejected: "Submission returned", resumed: "Resume execution"
 };
 
 /** Every pending notice as the one message a worker receives, each labeled by why it arrived. */
 export const renderExecutionNotices = (notices: ExecutionNotice[]): string =>
-  notices.map((notice) => "【" + executionNoticeLabels[notice.kind] + "】" + notice.text).join("\n");
+  notices.map((notice) => "[" + executionNoticeLabels[notice.kind] + "] " + notice.text).join("\n");
 
 /** The sole owner of a worker's runtime state and pending delivery. */
 export const zExecution = zProcess.extend({
@@ -443,7 +444,7 @@ export type Execution = z.infer<typeof zExecution>;
 export const zIntegration = zProcess.extend({
   kind: z.literal("integration"),
   stage: z.enum(["merge", "rollback"]),
-  message: z.string(),
+  message: zServiceText,
   /** Present while the original Worker owns a failed or explicitly delegated merge. */
   agent: z.object({
     sessionId: z.string().min(1),
@@ -468,7 +469,7 @@ export type WorkflowAction = z.infer<typeof zWorkflowAction>;
 export const actionIsOpen = (action: WorkflowAction): boolean => action.status !== "done" && action.status !== "cancelled";
 export const isUserPaused = (action: WorkflowAction): boolean => action.kind === "execute" && action.paused === true;
 /** The pending state of whichever process this action runs. */
-export const actionNote = (action: WorkflowAction): string =>
+export const actionNote = (action: WorkflowAction): ServiceText =>
   action.kind === "integration" ? action.message : renderExecutionNotices(action.notices);
 
 export const zInboxItem = z.discriminatedUnion("kind", [

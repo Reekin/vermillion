@@ -38,7 +38,7 @@ it("keeps the worker session at workspace root while directing tools to its work
   await vi.waitFor(() => expect(f.runner.send).toHaveBeenCalledOnce());
   expect(f.runner.resume).toHaveBeenCalledWith("original", expect.objectContaining({ cwd: f.root }));
   const message = vi.mocked(f.runner.send).mock.calls[0]![1];
-  expect(message).toContain("工作目录: " + worktreePath);
+  expect(message).toContain("Working directory: " + worktreePath);
 });
 
 it("passes resolved reviewer and verifier model configuration separately from their prompts", async () => {

@@ -27,7 +27,7 @@ it("persists issue triage, evidence, resolutions and workspace isolation", async
     f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId,
       appendEvidence: [{ kind: "unverified", text: "Check local draft state" }] })
   ]);
-  await expect(f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "closed" })).rejects.toThrow("处理原因");
+  await expect(f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "closed" })).rejects.toThrow("resolutionReason");
   const closed = await f.client.request("issue.update", { workspaceId: f.workspaceId, issueId: issue.issueId, status: "closed", resolutionReason: "Fixed and verified" });
   expect(closed).toMatchObject({ status: "closed", resolutionReason: "Fixed and verified" });
   expect(closed.evidence.map((entry) => entry.text)).toEqual([
@@ -65,8 +65,8 @@ it("reuses an issue discussion and links work created from that session", async 
 it("does not infer an issue without a real source session or allow a fake started state", async () => {
   const f = await fixture();
   const issue = await f.service.createIssue(f.workspaceId, { title: "Unrelated", summary: "Open issue", domainId: "ui-ux" });
-  await expect(f.service.updateIssue(f.workspaceId, issue.issueId, { status: "started" })).rejects.toThrow("实际工单");
-  await expect(f.service.createIssue(f.workspaceId, { title: "Fake start", summary: "No work", domainId: "ui-ux", status: "started" })).rejects.toThrow("实际工单");
+  await expect(f.service.updateIssue(f.workspaceId, issue.issueId, { status: "started" })).rejects.toThrow("actual work items");
+  await expect(f.service.createIssue(f.workspaceId, { title: "Fake start", summary: "No work", domainId: "ui-ux", status: "started" })).rejects.toThrow("actual work items");
   const item = await f.service.createWorkItem(f.workspaceId, contract);
   expect(item.issueId).toBeUndefined();
   expect(await f.service.getIssue(f.workspaceId, issue.issueId)).toMatchObject({ status: "open", workItemIds: [] });

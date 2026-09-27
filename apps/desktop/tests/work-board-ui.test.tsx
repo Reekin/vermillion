@@ -117,11 +117,11 @@ describe("work board", () => {
   it("shows a rejected action as one readable sentence without the CLI hint", async () => {
     const test = setup();
     test.request.mockImplementation(async (method: string) => {
-      if (method === "work.resume") throw new Error("[workItem.resume] 工单仍有未解决的依赖或决策等待。下一步：先调用 workItem.diagnose 查看。");
+      if (method === "work.resume") throw new Error("[workItem.resume] The work item still waits on dependencies or decisions.\nNext: Call workItem.diagnose for waiting reasons and available operations.");
       return method === "decision.list" ? [] : {};
     });
     await test.user.click(within(screen.getByRole("region", { name: "需要你处理" })).getByRole("button", { name: "恢复" }));
-    expect(await screen.findByText("工单仍有未解决的依赖或决策等待。")).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/workItem\.(resume|diagnose)|下一步/);
+    expect(await screen.findByText("The work item still waits on dependencies or decisions.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/workItem\.(resume|diagnose)|Next:/);
   });
 });

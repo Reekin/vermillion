@@ -1,4 +1,5 @@
 export * from "./contracts.js";
+export * from "./service-text.js";
 export * from "./execution-runtime.js";
 export * from "./rpc.js";
 export * from "./rpc-handler.js";

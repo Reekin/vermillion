@@ -1,4 +1,5 @@
 import type { Locale } from "@vermillion/shared";
+import type { CodedText, ServiceText } from "@vermillion/workbench/client";
 import { catalog } from "./messages/index.js";
 
 export type { Locale };
@@ -37,5 +38,24 @@ export const translateDynamic = (key: string, params?: Record<string, unknown>):
   const message = catalog[current][key as MessageKey] as string | ((params: unknown) => string);
   return typeof message === "function" ? message(params ?? {}) : message;
 };
+
+/** A reason or event from the workbench in an explicit language: its codes translated, text written by agents or tools as written. */
+export const translateServiceText = (locale: Locale, value: ServiceText): string => {
+  if (typeof value === "string") return value;
+  const key = "service." + value.code;
+  if (!Object.hasOwn(catalog[locale], key)) return value.code;
+  const message = catalog[locale][key as MessageKey] as string | ((params: unknown) => string);
+  return typeof message === "function" ? message(value.params ?? {}) : message;
+};
+
+/** A workbench reason or event in the current interface language. */
+export function serviceText(value: ServiceText): string;
+export function serviceText(value: ServiceText | undefined): string | undefined;
+export function serviceText(value: ServiceText | undefined): string | undefined {
+  return value === undefined ? undefined : translateServiceText(current, value);
+}
+
+/** The wording of a workbench failure the desktop received with its code. */
+export const describeServiceError = (value: CodedText): string => translateServiceText(current, value);
 
 export const intlLocale = (locale: Locale = current): string => (locale === "zh" ? "zh-CN" : "en-US");

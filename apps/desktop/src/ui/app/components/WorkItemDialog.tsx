@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Ban, Check, CircleAlert, CircleDashed, Clock, Copy, GitBranch, GitMerge, MessageSquare, X, type LucideIcon } from "lucide-react";
 import type { AgentRun, DecisionCard, WorkbenchClient, WorkItem, WorkflowAction } from "@vermillion/workbench/client";
-import { t } from "../../../i18n/index.js";
+import { serviceText, t } from "../../../i18n/index.js";
 import { formatDateTime, formatDuration } from "../../../i18n/format.js";
 import { useT } from "../../../i18n/react.js";
 import { writeClipboardText } from "../../chat-shell/clipboard.js";
@@ -50,9 +50,9 @@ export const PendingDecision = ({ card, disabled, onAnswer }: { card: DecisionCa
   return (
   <div className="vm-detail-decision">
     <p className="text-caption font-medium text-muted-foreground">{t("work.attention.awaitingAnswer")}</p>
-    <div className="text-strong"><Markdown>{card.question}</Markdown></div>
+    <div className="text-strong"><Markdown>{serviceText(card.question)}</Markdown></div>
     <div className="mt-2 flex flex-wrap gap-2">
-      {card.options.map((option) => <Button key={option.key} size="sm" variant={option.key === card.recommended ? "primary" : "secondary"} disabled={disabled} title={option.detail} onClick={() => onAnswer(option.key)}>{option.label}</Button>)}
+      {card.options.map((option) => <Button key={option.key} size="sm" variant={option.key === card.recommended ? "primary" : "secondary"} disabled={disabled} title={option.detail} onClick={() => onAnswer(option.key)}>{serviceText(option.label)}</Button>)}
     </div>
   </div>
   );
@@ -210,9 +210,9 @@ const Decisions = ({ cards }: { cards: DecisionCard[] }) => {
     <div className="space-y-3">
       {cards.map((card) => <div key={card.decisionId}>
         <p className="text-caption text-muted-foreground">{card.withdrawn ? t("work.detail.withdrawn") : t("work.detail.answered")}</p>
-        <Markdown>{card.question}</Markdown>
-        {card.answer && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answer"), (card.options.find((option) => option.key === card.answer?.key)?.label ?? card.answer.key) + (card.answer.note ? " · " + card.answer.note : ""))}</p>}
-        {card.deliveryPending && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answerUndelivered"), card.deliveryFailure ?? t("work.detail.awaitingReceipt"))}</p>}
+        <Markdown>{serviceText(card.question)}</Markdown>
+        {card.answer && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answer"), (serviceText(card.options.find((option) => option.key === card.answer?.key)?.label) ?? card.answer.key) + (card.answer.note ? " · " + card.answer.note : ""))}</p>}
+        {card.deliveryPending && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answerUndelivered"), serviceText(card.deliveryFailure) ?? t("work.detail.awaitingReceipt"))}</p>}
       </div>)}
     </div>
   </section>;

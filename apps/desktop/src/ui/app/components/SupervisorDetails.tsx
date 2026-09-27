@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { WorkbenchClient, WorkbenchRpcResult, WorkRequest } from "@vermillion/workbench/client";
 import { formatDateTime } from "../../../i18n/format.js";
+import { serviceText } from "../../../i18n/index.js";
 import { useT } from "../../../i18n/react.js";
 import { Button, DetailSection, InlineNotice } from "./ui.js";
 
@@ -22,7 +23,7 @@ export const SupervisorDetails = ({ request, client, workspaceId, onOpenSession 
       {supervisor?.sessionId && <Button size="sm" variant="ghost" outlined onClick={() => onOpenSession(supervisor.sessionId!)}>{t("work.supervisor.session")}</Button>}
       <DetailSection title={t("work.supervisor.lastCheck")}>{supervisor?.lastCheckedAt ? formatDateTime(supervisor.lastCheckedAt) : t("work.supervisor.noRecord")}</DetailSection>
       <DetailSection title={t("work.supervisor.nextCheck")}>{supervisor?.nextCheckAt ? formatDateTime(supervisor.nextCheckAt) : t("work.supervisor.notScheduled")}</DetailSection>
-      {supervisor?.failure && <InlineNotice tone="error" className="px-0">{supervisor.failure}</InlineNotice>}
+      {supervisor?.failure && <InlineNotice tone="error" className="px-0">{serviceText(supervisor.failure)}</InlineNotice>}
       <Button size="sm" variant="ghost" outlined onClick={() => void readRuntime()}>{t("work.supervisor.runtime")}</Button>
       {runtime && <DetailSection title={t("work.supervisor.runtime")}><p>{runtime.schedulerOnline ? t("work.supervisor.schedulerOnline") : t("work.supervisor.schedulerOffline")}</p><p className="break-all font-mono text-caption">{runtime.buildId} · PID {runtime.pid}</p><p className="text-caption text-muted-foreground">{formatDateTime(runtime.startedAt)} · {workspaceId}</p></DetailSection>}
       {error && <InlineNotice tone="error" className="px-0">{error}</InlineNotice>}

@@ -31,7 +31,7 @@ describe("execution and integration presentation", () => {
   });
 
   it("explains the distinct returned-work stages from durable execution facts", () => {
-    const item = workItem({ workItemId: "one", status: "queued", rejections: [{ reason: "Worker must commit its worktree before integration.", at: "2026-01-01T00:00:00.000Z" }], run: { sessionId: "worker" } });
+    const item = workItem({ workItemId: "one", status: "queued", rejections: [{ reason: { code: "result.worktreeUncommitted" }, at: "2026-01-01T00:00:00.000Z" }], run: { sessionId: "worker" } });
     const execute = execution({ actionId: "worker", workItemId: "one", status: "pending", stage: "deliver", updatedAt: "2026-01-01T00:00:01.000Z" });
     const activeRun = agentRun({ runId: "run", sessionId: "worker", workItemId: "one", status: "running", turns: 1, startedAt: "2026-01-01T00:00:00.000Z" });
     const returned = workItemProgress(item, [execute], activeRun);
@@ -56,10 +56,10 @@ describe("execution and integration presentation", () => {
   });
 
   it("turns workflow history into readable events without internal stage names", () => {
-    const item = workItem({ workItemId: "one", status: "closed", rejections: [{ reason: "Worker must commit its worktree before integration.", at: "2026-01-01T00:00:02.000Z" }], merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:04.000Z" }, run: { sessionId: "worker" } });
+    const item = workItem({ workItemId: "one", status: "closed", rejections: [{ reason: { code: "result.worktreeUncommitted" }, at: "2026-01-01T00:00:02.000Z" }], merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:04.000Z" }, run: { sessionId: "worker" } });
     const actions = [integration({ actionId: "merge-old", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", history: [
       { at: "2026-01-01T00:00:01.000Z", event: "created", message: "验收通过" },
-      { at: "2026-01-01T00:00:02.000Z", event: "failed:merge", message: "Worker must commit its worktree before integration." }
+      { at: "2026-01-01T00:00:02.000Z", event: "failed:merge", message: { code: "result.worktreeUncommitted" } }
     ] }), integration({ actionId: "merge-new", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", history: [
       { at: "2026-01-01T00:00:03.000Z", event: "created", message: "重新提交，验收通过" }
     ] })];
@@ -71,18 +71,18 @@ describe("execution and integration presentation", () => {
   it("does not expose internal work-item stage messages in event details", () => {
     const item = workItem({ workItemId: "one", status: "closed" });
     const actions = [execution({ actionId: "worker", workItemId: "one", status: "done", stage: "execute", updatedAt: "2026-01-01T00:00:02.000Z", history: [
-      { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: "工单已进入 merging" }
+      { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: { code: "workItem.closedAs", params: { status: "merging" } } }
     ] })];
     expect(workItemEvents(item, actions, [])[0]?.detail).toBe("本轮执行已交接后续处理。");
-    expect(workItemEvents(item, [], [agentRun({ runId: "run", sessionId: "worker", workItemId: "one", status: "done", turns: 1, startedAt: "2026-01-01T00:00:00.000Z", endedAt: "2026-01-01T00:00:02.000Z", note: "工单已进入 merging" })])[0]?.detail).toBe("本轮执行已交接后续处理。");
   });
 
-  it("labels a resolved handoff caused by a merge failure as a failed check", () => {
+  it("labels a merge voided by a newer contract as a failed check", () => {
     const item = workItem({ workItemId: "one", status: "queued" });
     const actions = [integration({ actionId: "merge", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:02.000Z", history: [
-      { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: "转回原 Worker：Worker must commit its worktree before integration." }
+      { at: "2026-01-01T00:00:01.000Z", event: "resolved", message: { code: "merge.voided", params: { current: 2, basis: 1 } } }
     ] })];
     expect(workItemEvents(item, actions, [])[0]?.title).toBe("合入检查未通过");
+    expect(workItemEvents(item, actions, [])[0]?.detail).toContain("合入作废：合同已更新为修订 2");
   });
 
   it("puts the closed result, commit, and verification count in current progress", () => {
@@ -95,7 +95,7 @@ describe("execution and integration presentation", () => {
 
   it("maps raw failures to a cause and next step without engine wording", () => {
     expect(readableFailure("turn interrupted")).toEqual({ title: "本轮执行被中断", next: "重试后从原会话继续。" });
-    expect(readableFailure("进程重启，会话无法恢复").title).toBe("执行会话无法恢复");
+    expect(readableFailure({ code: "turn.executionFailed" })).toEqual({ title: "执行轮失败", next: "打开详情查看原始原因。" });
     expect(readableFailure('turn failed: {"error":{"type":"invalid_request_error","message":"The reasoning_content is missing"}}').title).toBe("模型请求失败：The reasoning_content is missing");
     expect(readableFailure("Command failed: git worktree remove x\n fatal: busy").title).toBe("Git 操作失败");
     expect(readableFailure("something odd")).toEqual({ title: "执行遇到问题", next: "打开详情查看原始原因。" });

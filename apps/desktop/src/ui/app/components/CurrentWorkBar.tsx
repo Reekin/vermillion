@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ClipboardList } from "lucide-react";
 import type { WorkRequest, WorkItem, WorkbenchClient } from "@vermillion/workbench/client";
+import { serviceText } from "../../../i18n/index.js";
 import { useT } from "../../../i18n/react.js";
 import { Button, DetailSection, InlineNotice, OverflowMenu } from "./ui.js";
 import { Modal } from "./Modal.js";
@@ -27,7 +28,7 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
   if (!request && !item) return null;
   const title = item?.title || request?.scope?.trim() || sourceTitle || t("work.preparation");
   const state = currentWorkStatus(item, request, hasDecision);
-  const reason = item?.run.lastFailure ?? request?.failure ?? item?.run.waitReason ?? request?.waitReason;
+  const reason = serviceText(item?.run.lastFailure ?? request?.failure ?? item?.run.waitReason ?? request?.waitReason);
   const phase = workPhaseLabel(item, request);
   const activity = workSessionLabel(item, request);
   const finished = state.kind === "finished";

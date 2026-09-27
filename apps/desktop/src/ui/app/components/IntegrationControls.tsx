@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type { WorkbenchClient, WorkflowAction, WorkItem } from "@vermillion/workbench/client";
+import { serviceText } from "../../../i18n/index.js";
 import { useT } from "../../../i18n/react.js";
 import { actionStatusText, integrationFailureSummary } from "./workflow-display.js";
 import { Badge, Button, Field, InlineNotice, OverflowMenu } from "./ui.js";
@@ -29,10 +30,10 @@ export const IntegrationControls = ({ client, workspaceId, workItemId, action, i
     finally { setBusy(false); }
   };
   const canAct = !action.agent && action.status === "decision";
-  const retry = () => void run(() => client.request("workItem.integration.retry", { workspaceId, workItemId }));
+  const retry = () => void run(() => client.request("workItem.merge.retry", { workspaceId, workItemId }));
   const takeover = (event: FormEvent) => {
     event.preventDefault();
-    void run(() => client.request("workItem.integration.takeover", { workspaceId, workItemId, note: note.trim() || undefined }));
+    void run(() => client.request("workItem.merge.takeover", { workspaceId, workItemId, note: note.trim() || undefined }));
   };
   return <div className="mt-3 space-y-2 border-t border-border pt-3">
     {showStatus && <div className="flex flex-wrap items-center gap-2">
@@ -40,7 +41,7 @@ export const IntegrationControls = ({ client, workspaceId, workItemId, action, i
     </div>}
     {integrationFailureSummary(action) && <InlineNotice tone="error" className="px-0">{t("work.labelValue", { label: t("work.merge.lastFailure"), value: integrationFailureSummary(action)! })}</InlineNotice>}
     {action.status === "decision" && <p className="text-caption text-muted-foreground">{t("work.merge.blockedHint")}</p>}
-    {action.agent && item?.run.lastFailure && <InlineNotice tone="error" className="px-0">{t("work.labelValue", { label: t("work.merge.executionFailed"), value: item.run.lastFailure })}</InlineNotice>}
+    {action.agent && item?.run.lastFailure && <InlineNotice tone="error" className="px-0">{t("work.labelValue", { label: t("work.merge.executionFailed"), value: serviceText(item.run.lastFailure) })}</InlineNotice>}
     {action.agent && <p className="whitespace-pre-wrap text-caption text-muted-foreground">{action.agent.note ? t("work.labelValue", { label: t("work.merge.userNote"), value: action.agent.note }) : t("work.merge.workerWillHandle")}</p>}
     {canAct && !takeoverOpen && <div className="flex flex-wrap gap-2">
       <Button size="sm" variant="primary" disabled={busy} onClick={retry}>{t("work.merge.retryNow")}</Button>

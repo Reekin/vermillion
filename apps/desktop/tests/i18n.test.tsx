@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describeToolStep, summarizeToolSteps, type ToolCall } from "@vermillion/shared";
+import { serviceMessages } from "@vermillion/workbench/client";
 import { catalog } from "../src/i18n/messages/index.js";
-import { setLocale, t, translate } from "../src/i18n/index.js";
+import { serviceText, setLocale, t, translate, translateServiceText } from "../src/i18n/index.js";
 import { useT } from "../src/i18n/react.js";
 import { formatDuration } from "../src/i18n/format.js";
 import { toolStepWords, toolSummaryText } from "../src/i18n/tool-steps.js";
@@ -19,6 +20,17 @@ const call = (patch: Partial<ToolCall>): ToolCall => ({
 });
 
 describe("interface language", () => {
+  it("shows workbench reasons in the interface language and written text as it is", () => {
+    for (const code of Object.keys(serviceMessages)) expect(Object.hasOwn(catalog.zh, "service." + code), code).toBe(true);
+    const waiting = { code: "waiting.concurrency", params: { occupied: 2, max: 2 } };
+    expect(serviceText(waiting)).toBe("等待 Worker 并发空位（2/2）。");
+    expect(translateServiceText("en", waiting)).toBe("Waiting for a free Worker slot (2/2).");
+    setLocale("en");
+    expect(serviceText({ code: "workItem.closedAs", params: { status: "merging" } })).toBe("The work item moved to merging.");
+    expect(serviceText("旧的中文记录")).toBe("旧的中文记录");
+    expect(serviceText({ code: "retired.code" })).toBe("retired.code");
+  });
+
   it("has the same keys in both languages, and English text without Chinese", () => {
     expect(Object.keys(catalog.en).sort()).toEqual(Object.keys(catalog.zh).sort());
     const params = new Proxy({}, { get: () => "1" });

@@ -11,6 +11,7 @@ import { WorkbenchService } from "./workbench-service.js";
 import { AppLauncher } from "./app-launcher.js";
 import { globalHelp, methodHelp } from "./cli-help.js";
 import { createFileSessionSearchSource, defaultCodexRolloutsDir } from "./search.js";
+import { renderServiceTexts } from "./service-text.js";
 
 const desktopSessionMethods = ["settings.get", "settings.update", "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.readProgress", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead", "clipboard.writeImage"];
 
@@ -31,7 +32,7 @@ export const runCli = async (argv: string[]): Promise<number> => {
   try {
     return await executeCli(argv);
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n下一步：检查 JSON 参数与运行端；使用 vermillion ${argv[0] ?? ""} --help 查询帮助。\n`);
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\nNext: check the JSON parameters and the runtime; see vermillion ${argv[0] ?? ""} --help.\n`);
     return 1;
   }
 };
@@ -49,7 +50,7 @@ const executeCli = async (argv: string[]): Promise<number> => {
   const helpMethod = method === "help" || method === "--help" || method === "-h" ? rawParams : rawParams === "--help" || rawParams === "-h" ? method : undefined;
   if (helpMethod) {
     const help = methodHelp(helpMethod);
-    if (!help) { process.stderr.write(`unknown method: ${helpMethod}\n下一步：vermillion --help 查看方法列表。\n`); return 1; }
+    if (!help) { process.stderr.write(`unknown method: ${helpMethod}\nNext: vermillion --help lists the methods.\n`); return 1; }
     process.stdout.write(help);
     return 0;
   }
@@ -72,7 +73,7 @@ const executeCli = async (argv: string[]): Promise<number> => {
   if (target && localAppMethod) throw new Error("--target is for RPC calls to a running instance; app.start/app.stop use their explicit target parameters");
   const remote = localAppMethod ? undefined : await connectLocalEndpoint(baseDir, target);
   if (desktopSessionMethod && !remote) {
-    process.stderr.write(method + " 需要运行 Vermillion 桌面应用。\n");
+    process.stderr.write(method + " requires the Vermillion desktop app to be running.\n");
     return 1;
   }
   const roles = new RoleService({ globalDir: join(baseDir, "roles"), defaultsDir: shippedRoleDefaultsDir() });
@@ -90,7 +91,7 @@ const executeCli = async (argv: string[]): Promise<number> => {
       process.stderr.write(response.error + "\n");
       return 1;
     }
-    process.stdout.write(JSON.stringify(response.result, null, 2) + "\n");
+    process.stdout.write(JSON.stringify(renderServiceTexts(response.result), null, 2) + "\n");
     return 0;
   } finally {
     await service?.dispose();

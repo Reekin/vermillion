@@ -87,7 +87,7 @@ it("removes only an empty residual directory after Git already unregistered a wo
   await mkdir(path, { recursive: true });
   await git(root, "branch", "work/residual");
   await writeFile(join(path, "keep.txt"), "unknown content");
-  await expect(docs.dropWorktree(path, "work/residual")).rejects.toThrow("仍有内容");
+  await expect(docs.dropWorktree(path, "work/residual")).rejects.toThrow("still has content");
   expect(await readFile(join(path, "keep.txt"), "utf8")).toBe("unknown content");
   const empty = join(root, ".vermillion", "worktrees", "empty");
   await mkdir(empty); await git(root, "branch", "work/empty");
@@ -155,7 +155,7 @@ it("checks repository paths in a mixed root scope while ignoring external artifa
 
   const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
   expect(pending).toMatchObject({ status: "running" });
-  expect(pending.rejections[0]?.reason).toContain("未提交");
+  expect(pending.rejections[0]?.reason).toEqual({ code: "result.rootUncommitted" });
   expect(pending.rejections[0]?.reason).not.toContain("outside repository");
   await git(root, "add", "owned.txt");
   await git(root, "commit", "-qm", "owned result");
@@ -188,7 +188,7 @@ it("rejects untracked scoped root code and reverts every owned commit while reta
   await writeFile(join(root, "result.txt"), "first\n");
   const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
   expect(pending.status).toBe("running");
-  expect(pending.rejections[0]?.reason).toContain("未提交");
+  expect(pending.rejections[0]?.reason).toEqual({ code: "result.rootUncommitted" });
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "implementation");
   const first = await git(root, "rev-parse", "HEAD");
   await service.writeDoc(workspaceId, ".vermillion/docs/retained.md", "retained docs\n");
@@ -214,7 +214,7 @@ it("rejects a root commit mixing owned and unrelated files", async () => {
   const docs = new DocsService(root), base = await git(root, "rev-parse", "HEAD");
   await writeFile(join(root, "owned.txt"), "owned"); await writeFile(join(root, "other.txt"), "other");
   await git(root, "add", "owned.txt", "other.txt"); await git(root, "commit", "-qm", "mixed");
-  await expect(docs.rootResult(await git(root, "rev-parse", "HEAD"), base, ["owned.txt"])).rejects.toThrow("混合");
+  await expect(docs.rootResult(await git(root, "rev-parse", "HEAD"), base, ["owned.txt"])).rejects.toThrow("mixes");
 });
 
 it("moves only the exact changed reference when one file supplies several sections", async () => {
@@ -260,15 +260,15 @@ it("validates exact sections on create and update while keeping description sepa
   const commit = await service.commitDocs(workspaceId, { message: "Sections" });
 
   await expect(service.createWorkItem(workspaceId, { ...contract,
-    refs: [{ path, section: "Item", commit: commit.commit }] })).rejects.toThrow("不唯一");
+    refs: [{ path, section: "Item", commit: commit.commit }] })).rejects.toThrow("ambiguous");
   await expect(service.createWorkItem(workspaceId, { ...contract,
-    refs: [{ path, section: "Spec / A / Item（L5）", commit: commit.commit }] })).rejects.toThrow("不存在");
+    refs: [{ path, section: "Spec / A / Item（L5）", commit: commit.commit }] })).rejects.toThrow("does not exist");
 
   const item = await service.createWorkItem(workspaceId, { ...contract,
     refs: [{ path, section: "Spec / A / Item", description: "L5 · first item", commit: "HEAD" }] });
   expect(item.refs[0]).toEqual({ path, section: "Spec / A / Item", description: "L5 · first item", commit: commit.commit });
   await expect(service.updateWorkItem(workspaceId, item.workItemId, { note: "Wrong section",
-    refs: [{ path, section: "Missing", commit: commit.commit }] })).rejects.toThrow("不存在");
+    refs: [{ path, section: "Missing", commit: commit.commit }] })).rejects.toThrow("does not exist");
 
   await writeFile(join(root, "AGENTS.md"), "# Rules\n\n## Checks\n\nRun them.\n");
   await git(root, "add", "AGENTS.md"); await git(root, "commit", "-qm", "rules");
@@ -302,8 +302,8 @@ it("retains a reference and diagnoses it when the heading disappears", async () 
   expect(retained.refs[0]?.commit).toBe(initial.commit);
   expect(retained.contractRevision).toBe(0);
   const diagnosis = await service.diagnoseWorkItem(workspaceId, item.workItemId);
-  expect(diagnosis.invalidRefs).toEqual([expect.objectContaining({ path, section: "Spec / Alpha", commit: initial.commit, reason: expect.stringContaining("不存在") })]);
-  expect(diagnosis.waiting).toContainEqual(expect.stringContaining("引用定位失效"));
+  expect(diagnosis.invalidRefs).toEqual([expect.objectContaining({ path, section: "Spec / Alpha", commit: initial.commit, reason: expect.stringContaining("does not exist") })]);
+  expect(diagnosis.waiting).toContainEqual(expect.objectContaining({ code: "waiting.invalidRef" }));
 });
 
 it("moves a worker's own document commit without notifying that worker", async () => {

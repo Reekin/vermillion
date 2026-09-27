@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, Copy, MessageSquare, Pause, Play, Plus, RotateCw, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { type AgentRun, type DecisionCard, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction, type WorkRequest } from "@vermillion/workbench/client";
-import { t } from "../../../i18n/index.js";
+import { serviceText, t } from "../../../i18n/index.js";
 import { formatDateTime, formatDuration, formatListTime, joinList } from "../../../i18n/format.js";
 import { useLocale, useT } from "../../../i18n/react.js";
 import { writeClipboardText } from "../../chat-shell/clipboard.js";
@@ -344,7 +344,7 @@ const WorkDetail = ({ entry, title, client, workspaceId, decisions, handlers, on
   const [error, setError] = useState<string>();
   const { request, items } = entry;
   const state = workRequestStatus(request, items);
-  const raw = [request.failure, request.waitReason, entry.attention?.raw].filter((value, index, all): value is string => Boolean(value) && all.indexOf(value) === index);
+  const raw = [serviceText(request.failure), serviceText(request.waitReason), entry.attention?.raw].filter((value, index, all): value is string => Boolean(value) && all.indexOf(value) === index);
   const finished = entry.section === "ended";
   const stopped = request.paused || request.userStopped;
   const pending = pendingRequestDecisions(request, decisions);
