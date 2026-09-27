@@ -72,7 +72,7 @@ it("routes generic steer through the session port and returns its delivery mode"
   await service.pauseWorkItem(fixture.workspaceId, { workItemId: item.workItemId });
   const before = await service.getWorkItem(fixture.workspaceId, item.workItemId);
 
-  await expect(client.request("steer", { sessionId: "active", content: "Continue the current turn." })).resolves.toMatchObject({
+  await expect(client.request("steer", { sessionId: "active", content: "Continue the current turn.", fromSessionId: "verifier" })).resolves.toMatchObject({
     sessionId: "active",
     turnId: "active-turn",
     delivery: "steered"
@@ -82,7 +82,7 @@ it("routes generic steer through the session port and returns its delivery mode"
     turnId: "started-turn",
     delivery: "started"
   });
-  expect(sessionSteerer).toHaveBeenNthCalledWith(1, expect.objectContaining({ sessionId: "active", content: "Continue the current turn.", messageId: expect.any(String) }));
-  expect(sessionSteerer).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: "idle", content: "Start a new turn.", messageId: expect.any(String) }));
+  expect(sessionSteerer).toHaveBeenNthCalledWith(1, expect.objectContaining({ sessionId: "active", content: "Continue the current turn.", messageId: expect.any(String), fromSessionId: "verifier" }));
+  expect(sessionSteerer).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: "idle", content: "Start a new turn.", messageId: expect.any(String), fromSessionId: null }));
   expect(await service.getWorkItem(fixture.workspaceId, item.workItemId)).toEqual(before);
 });

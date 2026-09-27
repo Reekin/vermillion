@@ -59,10 +59,24 @@ const lastAssistantText = (shell: SessionShell, sessionId: string): string | und
 };
 
 /** Deliver a message to an active turn, or start a new turn in the same session. */
-export const createSessionSteerer = (shell: SessionShell) => async (target: string, content: string, messageId?: string): Promise<SessionSteerResult> => {
+export const createSessionSteerer = (shell: SessionShell) => async (target: string, content: string, messageId?: string, fromSessionId?: string | null): Promise<SessionSteerResult> => {
   const sessionId = shell.resolveSessionIdentifier(target);
   if (!sessionId || !await shell.ensureSessionLoadedForRead(sessionId)) {
     throw new Error("Session not found: " + target);
+  }
+  if (fromSessionId !== undefined) {
+    let sender = "CLI (no session)";
+    if (fromSessionId !== null) {
+      const sourceId = shell.resolveSessionIdentifier(fromSessionId);
+      if (!sourceId || !await shell.ensureSessionLoadedForRead(sourceId)) {
+        throw new Error("Sender session not found: " + fromSessionId);
+      }
+      const snapshot = shell.getSnapshot();
+      const source = snapshot.sessions.find((entry) => entry.sessionId === sourceId);
+      const parent = snapshot.sessionRelations.find((entry) => entry.childSessionId === sourceId && entry.relationType === "subagent");
+      sender = JSON.stringify({ sessionId: sourceId, role: source?.metadata?.role, name: source?.title, parentSessionId: parent?.parentSessionId });
+    }
+    content = `[Session message] From: ${sender}\nThis is a CLI/session message, not direct user input or user authorization.\n\n${content}`;
   }
   const activeTurnId = resolveActiveTurnId(shell, sessionId);
   const command = activeTurnId

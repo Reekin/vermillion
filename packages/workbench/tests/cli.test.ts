@@ -9,6 +9,7 @@ import { AppLauncher } from "../src/app-launcher.js";
 const dirs: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
     delete process.env.VERMILLION_PERSISTENCE_BASE_DIR;
     delete process.env.VERMILLION_ACCEPTANCE_LAUNCH_TOKEN;
   delete process.env.CODEX_HOME;
@@ -166,7 +167,13 @@ describe("vermillion cli", () => {
     }
   });
 
-  it("routes asksource and steer through the running desktop endpoint", async () => {
+  it.each([
+    { pi: undefined, codex: "codex-child", expected: "codex-child" },
+    { pi: "pi-session", codex: "inherited-codex", expected: "pi-session" },
+    { pi: undefined, codex: undefined, expected: undefined }
+  ])("routes session communication with detected sender $expected", async ({ pi, codex, expected }) => {
+    vi.stubEnv("VERMILLION_SESSION_ID", pi);
+    vi.stubEnv("CODEX_THREAD_ID", codex);
     const base = await mkdtemp(join(tmpdir(), "verm-cli-session-communication-"));
     dirs.push(base);
     process.env.VERMILLION_PERSISTENCE_BASE_DIR = base;
@@ -183,11 +190,11 @@ describe("vermillion cli", () => {
       vi.spyOn(process.stdout, "write").mockImplementation((chunk) => { out.push(String(chunk)); return true; });
       expect(await runCli(["asksource", JSON.stringify({ workspaceId: "ws", workItemId: "item", sessionId: "worker", question: "Clarify" })])).toBe(0);
       expect(JSON.parse(out.pop()!).answer).toBe("clarified");
-      expect(await runCli(["steer", JSON.stringify({ sessionId: "target", content: "Continue" })])).toBe(0);
+      expect(await runCli(["steer", JSON.stringify({ sessionId: "target", content: "Continue", fromSessionId: "ignored-manual-value" })])).toBe(0);
       expect(JSON.parse(out.pop()!)).toEqual({ sessionId: "target", turnId: "turn", delivery: "started" });
       expect(requests.filter((request) => request.method === "asksource" || request.method === "steer")).toEqual([
         { method: "asksource", params: { workspaceId: "ws", workItemId: "item", sessionId: "worker", question: "Clarify" } },
-        { method: "steer", params: { sessionId: "target", content: "Continue" } }
+        { method: "steer", params: { sessionId: "target", content: "Continue", ...(expected ? { fromSessionId: expected } : {}) } }
       ]);
     } finally {
       await endpoint.close();

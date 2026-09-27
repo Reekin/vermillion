@@ -814,8 +814,8 @@ const boot = async (): Promise<void> => {
       if (sent && "accepted" in sent && sent.accepted === false) throw new Error("The engine did not accept the session message.");
       return { sessionId: opened.sessionId, ...(sent?.turnId ? { turnId: sent.turnId } : {}) };
     },
-    sessionSteerer: async ({ sessionId, content, messageId }) => {
-      return sessionSteerer(sessionId, content, messageId);
+    sessionSteerer: async ({ sessionId, content, messageId, fromSessionId }) => {
+      return sessionSteerer(sessionId, content, messageId, fromSessionId);
     },
     sessionReader: (input) => service.readSession(input),
     deliveryConfirmer: (sessionId, messageId) => agentRunner.confirmMessage!(sessionId, messageId),

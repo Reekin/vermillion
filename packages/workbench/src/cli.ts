@@ -64,6 +64,9 @@ const executeCli = async (argv: string[]): Promise<number> => {
   }
   const baseDir = target?.dataDir ?? (process.env.VERMILLION_PERSISTENCE_BASE_DIR?.trim() || join(homedir(), ".vermillion"));
   const request = { method, params: rawParams ? JSON.parse(rawParams) : {} };
+  if (method === "steer") {
+    request.params.fromSessionId = process.env.VERMILLION_SESSION_ID?.trim() || process.env.CODEX_THREAD_ID?.trim() || undefined;
+  }
   // Acceptance instances belong to the CLI's checkout/release, not a running desktop's build.
   const localAppMethod = method === "app.start" || method === "app.stop";
   if (target && localAppMethod) throw new Error("--target is for RPC calls to a running instance; app.start/app.stop use their explicit target parameters");

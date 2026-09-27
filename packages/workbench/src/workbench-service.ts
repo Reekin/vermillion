@@ -90,6 +90,8 @@ export type SessionSteerer = (input: {
   sessionId: string;
   content: string;
   messageId?: string;
+  /** Undefined for internal delivery; null for CLI without a session. */
+  fromSessionId?: string | null;
 }) => Promise<SessionSteerResult>;
 
 export type DeliveryConfirmer = (sessionId: string, messageId: string) => Promise<{ accepted: boolean; turnId?: string; active?: boolean }>;
@@ -1328,10 +1330,10 @@ export class WorkbenchService {
     return this.sessionReader(input);
   }
 
-  async steerSession(sessionId: string, content: string): Promise<SessionSteerResult & { accepted: boolean; delivery: "started" | "steered" }> {
+  async steerSession(sessionId: string, content: string, fromSessionId?: string): Promise<SessionSteerResult & { accepted: boolean; delivery: "started" | "steered" }> {
     if (!content.trim()) throw new Error("steer content is required.");
     if (!this.sessionSteerer) throw new Error("steer requires a running desktop instance.");
-    const result = await this.sessionSteerer({ sessionId, content: content.trim(), messageId: createId("message") });
+    const result = await this.sessionSteerer({ sessionId, content: content.trim(), messageId: createId("message"), fromSessionId: fromSessionId ?? null });
     return { ...result, accepted: result.accepted ?? (!result.error && !!result.turnId), delivery: result.delivery ?? "started" };
   }
 

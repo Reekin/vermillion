@@ -81,7 +81,7 @@ export const workbenchRpc = {
     })
   },
   "steer": {
-    params: z.object({ sessionId: z.string().min(1), content: z.string().trim().min(1) }),
+    params: z.object({ sessionId: z.string().min(1), content: z.string().trim().min(1), fromSessionId: z.string().trim().min(1).optional() }),
     result: z.object({
       sessionId: z.string().min(1),
       turnId: z.string().min(1).optional(),

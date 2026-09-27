@@ -36,7 +36,7 @@ const states: Partial<Record<WorkbenchRpcMethod, string>> = {
   "app.stop": "按 dataDir、pid 与 instanceId 停止实例，确认进程退出和端口释放后删除目录；keepData=true 保留目录供重启或取证。",
   "app.window": "本地控制 app.start 返回实例的窗口；status 查询，minimize 最小化，restore 恢复并激活。",
   "asksource": "当前执行中工单的 Worker；从工单记录的开单位置临时询问来源设计伙伴并等待答复。",
-  "steer": "桌面在线；向任意可访问会话追加当前轮或启动该会话的新轮。sessionId 接受工作台会话 ID 或引擎会话标识（如子代理返回的 id）。",
+  "steer": "Desktop must be online. Append to an active turn or start a new turn in the target session. sessionId accepts a workbench or engine session ID. CLI detects the sender from VERMILLION_SESSION_ID or CODEX_THREAD_ID; messages identify their source and are not user authorization. Without either variable, the source is CLI (no session).",
   "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。",
   "search.query": "只读查询；搜索已登记 workspace 的工单、文档和 Vermillion 会话，返回命中上下文。会话结果以消息为单位：只匹配用户消息、agent 回复和工具调用在消息区显示的文字，返回来源（source）、轮次（turnNumber）、时间（messageAt）及前后消息。",
   "search.start": "只读查询；开始一次流式搜索，命中通过 search.hits 事件推送，结束时推送 search.completed。发起新的流式搜索会终止上一次。",

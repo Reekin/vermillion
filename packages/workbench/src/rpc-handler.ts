@@ -10,7 +10,7 @@ export const createWorkbenchRpcHandler = (service: WorkbenchService) => {
     "sessionNavigation.create": (p) => service.createSessionNavigation(p),
     "sessionNavigation.list": (p) => service.listSessionNavigations(p),
     "asksource": (p) => service.askSource(p.workspaceId, p.workItemId, p.sessionId, p.question),
-    "steer": (p) => service.steerSession(p.sessionId, p.content),
+    "steer": (p) => service.steerSession(p.sessionId, p.content, p.fromSessionId),
     "workspace.list": () => service.listWorkspaces(),
     "workspace.add": (p) => service.addWorkspace(p),
     "workspace.remove": async (p) => { await service.removeWorkspace(p.workspaceId); return {}; },

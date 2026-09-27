@@ -2,6 +2,28 @@ import { describe, expect, it, vi } from "vitest";
 import { createAgentRunner, createSessionSteerer, createSourceAsker } from "../src/electron/agent-runner.js";
 
 describe("AgentRunner recovery", () => {
+  it.each([true, false])("labels agent and terminal messages at delivery (active=%s)", async (active) => {
+    const shell = {
+      resolveSessionIdentifier: (id: string) => id === "child-thread" ? "child" : id === "missing" ? undefined : id,
+      ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
+      getActiveTurnId: () => active ? "turn" : undefined,
+      getSnapshot: () => ({ turns: [], sessions: [{ sessionId: "child", title: "Verifier" }],
+        sessionRelations: [{ childSessionId: "child", parentSessionId: "worker", relationType: "subagent" }] }),
+      executeCommand: vi.fn(async (_input: { command: { type: string; content: string } }) => ({ accepted: true, turnId: "turn" }))
+    };
+    const steer = createSessionSteerer(shell as unknown as Parameters<typeof createSessionSteerer>[0]);
+    await steer("worker", "Please restart the test instance.", "message", "child-thread");
+    const command = shell.executeCommand.mock.calls[0]![0].command;
+    expect(command.type).toBe(active ? "steerTurn" : "sendUserMessage");
+    expect(command.content).toContain('[Session message] From: {"sessionId":"child","name":"Verifier","parentSessionId":"worker"}');
+    expect(command.content).toContain("not direct user input or user authorization");
+    expect(command.content).toContain("Please restart the test instance.");
+    await steer("worker", "Terminal update", "terminal", null);
+    expect(shell.executeCommand.mock.calls[1]![0].command.content).toContain("CLI (no session)");
+    await expect(steer("worker", "update", "bad", "missing")).rejects.toThrow("Sender session not found");
+    expect(shell.executeCommand).toHaveBeenCalledTimes(2);
+  });
+
   it("recognizes only live user waits and subscribes to their resolution", () => {
     const activity = { confirmation: "live", status: "active", pendingApprovals: [{}], pendingInputs: [] as object[] };
     let notify!: (envelope: { event: { type: string; sessionId: string } }) => void;
