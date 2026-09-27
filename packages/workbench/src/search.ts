@@ -420,7 +420,7 @@ const ROLLOUT_INDEX_PATTERN =
 
 const toolItemTypes = new Set([
   "CommandExecution", "McpToolCall", "DynamicToolCall", "CollabAgentToolCall", "WebSearch",
-  "ImageView", "ImageGeneration", "Reasoning", "Extension"
+  "ImageView", "ImageGeneration", "Reasoning", "Extension", "FileChange"
 ]);
 
 export type RolloutMessageRecord = {
@@ -645,6 +645,12 @@ const toolInput = (item: Record<string, unknown>): ToolInput | undefined => {
     case "ImageView": {
       const path = asNonEmptyString(item.path)?.replace(/^file:\/\/\/?/, "");
       return { toolName: "imageView", status, ...(path ? { inputSummary: path } : {}) };
+    }
+    case "FileChange": {
+      // Rollouts key the patched files by path.
+      const paths = isRecord(item.changes) ? Object.keys(item.changes) : [];
+      if (paths.length === 0) return undefined;
+      return { toolName: "fileChange", status, actions: paths.map((path): ToolAction => ({ kind: "edit", target: path })) };
     }
     case "ImageGeneration": {
       const prompt = asNonEmptyString(item.revised_prompt) ?? asNonEmptyString(item.prompt);

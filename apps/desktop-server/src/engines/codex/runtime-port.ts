@@ -97,6 +97,7 @@ import {
   summarizeCodexRawReasoningItem,
   summarizeCodexReasoningThreadItem,
   summarizeCodexWebSearchAction,
+  summarizeCodexFileChange,
   codexCommandActions
 } from "./extensions/process-activity.js";
 import { resolveHostToolDefinition } from "../../host-tools.js";
@@ -3541,6 +3542,32 @@ export class CodexAppServerRuntimePort
       if (record) {
         this.recordTurnChanges?.(record);
       }
+      const step = summarizeCodexFileChange(item);
+      const toolItemKey = this.codexToolItemKey(turnId, item.id);
+      if (!this.startedCodexToolItemIds.has(toolItemKey)) {
+        this.startedCodexToolItemIds.add(toolItemKey);
+        this.emitEvent("tool.started", {
+          sessionId,
+          turnId,
+          toolCallId: item.id,
+          toolName: step.toolName,
+          inputSummary: step.inputSummary,
+          actions: step.actions,
+          engineId: this.engineId
+        });
+      }
+      if (method === "item/started") {
+        return;
+      }
+      this.startedCodexToolItemIds.delete(toolItemKey);
+      this.emitEvent("tool.completed", {
+        sessionId,
+        turnId,
+        toolCallId: item.id,
+        status: step.status === "running" ? "completed" : step.status,
+        outputSummary: step.outputSummary,
+        engineId: this.engineId
+      });
       return;
     }
 

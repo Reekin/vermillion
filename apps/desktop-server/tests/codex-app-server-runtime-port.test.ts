@@ -318,6 +318,23 @@ describe("Codex app-server runtime port", () => {
     expect(tool[0]!.params).toMatchObject({ toolCallId: "session-web:web-1", toolName: "webSearch", inputSummary: expect.stringContaining("https://example.com/docs") });
   });
 
+  it("shows an applied patch as an edit step with its diff", () => {
+    const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1" });
+    port.attachThreadToSession("session-patch", "thread-patch");
+    const events: Array<{ method: string; params: Record<string, unknown> }> = [];
+    port.subscribe((event) => events.push(event));
+    const notify = (port as unknown as { handleNotification: (method: string, params: Record<string, unknown>) => void })
+      .handleNotification.bind(port);
+    const item = { type: "fileChange", id: "patch-1",
+      changes: [{ path: "I:/tmp/a.txt", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-two\n+2" }] };
+    notify("item/started", { threadId: "thread-patch", turnId: "turn-patch", item: { ...item, status: "inProgress" } });
+    notify("item/completed", { threadId: "thread-patch", turnId: "turn-patch", item: { ...item, status: "completed" } });
+    const tool = events.filter((event) => event.method.startsWith("tool."));
+    expect(tool.map((event) => event.method)).toEqual(["tool.started", "tool.completed"]);
+    expect(tool[0]!.params).toMatchObject({ toolName: "fileChange", actions: [{ kind: "edit", target: "I:/tmp/a.txt" }] });
+    expect(tool[1]!.params).toMatchObject({ status: "completed", outputSummary: expect.stringContaining("+2") });
+  });
+
   it("uses current role instructions at first start and injects each later revision once", async () => {
     const rebuilt = vi.fn();
     const port = createCodexAppServerRuntimePort({ resolveConversationIdBySessionId: () => "conversation-1",

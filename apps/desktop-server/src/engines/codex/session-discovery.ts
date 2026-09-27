@@ -77,6 +77,7 @@ import {
   summarizeCodexMcpToolCall,
   summarizeCodexReasoningThreadItem,
   summarizeCodexWebSearchAction,
+  summarizeCodexFileChange,
   codexCommandActions
 } from "./extensions/process-activity.js";
 import {
@@ -617,6 +618,18 @@ const hydrateCodexTurnEntities = async (input: {
 
       if (isFileChangeItem(item)) {
         fileChanges.push(...item.changes);
+        const step = summarizeCodexFileChange(item);
+        toolCallIds.push(itemEntityId);
+        toolCalls.push(
+          parseToolCall({
+            toolCallId: itemEntityId,
+            sessionId: entry.sessionId,
+            turnId: turn.id,
+            ...step,
+            startedAt: itemStartedAt,
+            completedAt: step.status === "running" ? undefined : itemStartedAt
+          })
+        );
         continue;
       }
 

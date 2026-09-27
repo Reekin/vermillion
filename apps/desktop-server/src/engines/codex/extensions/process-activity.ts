@@ -2,6 +2,7 @@ import type { ResponseItem } from "../../../codex-app-server-generated/ResponseI
 import type { ThreadItem } from "../../../codex-app-server-generated/v2/ThreadItem.js";
 import { statSync } from "node:fs";
 import { filePathToFileUri, type ToolAction } from "@vermillion/shared";
+import { mergeFileChangeDiffs } from "../../../file-change-diff.js";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -301,6 +302,23 @@ export const mapCodexResponseItemStatus = (
   status: string | undefined
 ): "completed" | "failed" | "cancelled" =>
   status === "failed" ? "failed" : status === "cancelled" ? "cancelled" : "completed";
+
+type CodexFileChangeItem = Extract<ThreadItem, { type: "fileChange" }>;
+
+/** An applied patch as a process step: one edit per file, the patch itself as the output. */
+export const summarizeCodexFileChange = (item: CodexFileChangeItem) => {
+  const diff = mergeFileChangeDiffs(item.changes);
+  return {
+    toolName: "fileChange",
+    inputSummary: item.changes.map((change) => change.path).join("\n") || undefined,
+    actions: item.changes.map((change): ToolAction => ({ kind: "edit", target: change.path })),
+    status: item.status === "inProgress" ? "running" as const
+      : item.status === "failed" ? "failed" as const
+        : item.status === "declined" ? "cancelled" as const
+          : "completed" as const,
+    ...(diff ? { outputSummary: diff } : {})
+  };
+};
 
 type CodexCommandItem = Extract<ThreadItem, { type: "commandExecution" }>;
 
