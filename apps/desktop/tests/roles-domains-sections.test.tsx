@@ -131,4 +131,12 @@ describe("DomainsSection", () => {
     await user.click(screen.getByRole("button", { name: "1 个 Issue" }));
     expect(onOpenIssues).toHaveBeenCalledWith("work-execution");
   });
+
+  it("shows each domain's first paragraph in the list", () => {
+    render(<DomainsSection client={{ request: vi.fn(async () => ({ content: "" })) } as unknown as WorkbenchClient} workspaceId="ws" workspaceRoot="I:/project"
+      domains={[{ ...domain, domainId: "editor", title: "Editor", summary: "Everything about editing docs." }, domain]}
+      issues={[]} onOpenDoc={vi.fn()} onOpenInstruction={vi.fn()} onOpenSession={vi.fn()} onOpenIssues={vi.fn()} patrolRuns={[]} />);
+    expect(screen.getByText("Everything about editing docs.")).toBeTruthy();
+    expect(screen.getByText("work-execution · 1 个规范")).toBeTruthy();
+  });
 });

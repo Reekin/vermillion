@@ -155,7 +155,9 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
     </form>}
     <ul className="min-h-0 flex-1 overflow-auto">{domains.map((domain) => <li key={domain.domainId}>
       <ListRow title={<span className="vm-domain-item__title">{domain.title}{decisionDomains.has(domain.domainId) && <span className="vm-domain-item__mark" aria-label={t("docs.domains.hasDecision")} />}</span>}
-        meta={t("docs.domains.meta", { id: domain.domainId, count: domain.standards.length })} selected={domain.domainId === selected?.domainId}
+        meta={<span title={[domain.summary, t("docs.domains.meta", { id: domain.domainId, count: domain.standards.length })].filter(Boolean).join("\n")}>
+          {domain.summary || t("docs.domains.meta", { id: domain.domainId, count: domain.standards.length })}</span>}
+        selected={domain.domainId === selected?.domainId}
         onClick={() => setSelectedId(domain.domainId)}
         hoverActions={<IconButton icon={X} size={12} label={t("docs.domains.deleteLabel", { title: domain.title })} onClick={() => setRemoving(domain.domainId)} />} />
     </li>)}</ul>
