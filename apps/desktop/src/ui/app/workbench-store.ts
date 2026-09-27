@@ -99,6 +99,8 @@ export type WorkbenchState = {
   /** Opens any session in the workbench conversation tab. */
   showAgentSession: (workspaceId: string, sessionId: string, turnId?: string) => void;
   navigateSession?: (workspaceId: string, sessionId: string, turnId?: string) => void;
+  /** Re-reads the workspace order after session activity; only a changed order updates `workspaces`. */
+  refreshWorkspaceOrder: () => void;
   /** Subscribes to workbench events and loads initial state. Returns an unsubscribe. */
   connect: () => () => void;
 };
@@ -127,6 +129,8 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
     const workspaceOwners = new Map<string, object>();
     let connected = false;
     let connectionEpoch = 0;
+    let workspaceOrderRunning = false;
+    let workspaceOrderDirty = false;
 
     const readViewField = async (
       field: WorkspaceViewField,
@@ -242,6 +246,26 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
       if (draftWorkspaceId) localStorage.setItem(LAST_WORKSPACE_KEY, draftWorkspaceId);
       loadView();
       scheduleTasks(workspaces.map((workspace) => workspace.workspaceId));
+    };
+
+    // Membership changes arrive as `workspaces.changed`; this pass only reorders the workspaces already held.
+    const drainWorkspaceOrder = async (epoch: number) => {
+      workspaceOrderRunning = true;
+      try {
+        do {
+          workspaceOrderDirty = false;
+          const listed = await client.request("workspace.list", {});
+          if (!connected || epoch !== connectionEpoch) return;
+          const current = get().workspaces;
+          const currentIds = new Set(current.map((workspace) => workspace.workspaceId));
+          if (listed.length !== current.length || listed.some((workspace) => !currentIds.has(workspace.workspaceId))) continue;
+          if (listed.some((workspace, index) => workspace.workspaceId !== current[index]!.workspaceId)) {
+            set({ workspaces: listed });
+          }
+        } while (workspaceOrderDirty);
+      } finally {
+        workspaceOrderRunning = false;
+      }
     };
 
     const viewRefreshKey = (
@@ -426,6 +450,11 @@ export const createWorkbenchStore = (client: WorkbenchClient) =>
         if (get().navigateSession) { get().navigateSession!(workspaceId, sessionId, turnId); return; }
         get().browseWorkspace(workspaceId);
         set({ workspaceSection: "sessions", panel: "workbench", overlay: undefined });
+      },
+      refreshWorkspaceOrder: () => {
+        if (!connected) return;
+        if (workspaceOrderRunning) { workspaceOrderDirty = true; return; }
+        void drainWorkspaceOrder(connectionEpoch).catch(() => undefined);
       },
 
       connect: () => {

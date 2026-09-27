@@ -24,7 +24,7 @@ export const createFileWorkspaceSource = (registryPath: string, now: () => strin
     await writeFile(tmp, JSON.stringify(doc, null, 2) + "\n", "utf8");
     await rename(tmp, registryPath);
   };
-  const toRecord = (w: z.infer<typeof zRecord>) => ({ workspaceId: w.workspaceId, rootPath: w.absolutePath, label: w.label, createdAt: w.createdAt, updatedAt: w.updatedAt });
+  const toRecord = (w: z.infer<typeof zRecord>) => ({ workspaceId: w.workspaceId, rootPath: w.absolutePath, label: w.label, createdAt: w.createdAt });
   return {
     list: async () => (await load()).workspaces.map(toRecord),
     register: async (input) => {

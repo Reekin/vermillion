@@ -72,8 +72,9 @@ const issueStatusText: Record<Issue["status"], string> = {
 
 /** Source of truth for workspace identity; the session engine's registry in production. */
 export type WorkspaceSource = {
-  list: () => Promise<Array<{ workspaceId: string; rootPath: string; label: string; createdAt: string; updatedAt: string }>>;
-  register: (input: { rootPath: string; label?: string }) => Promise<{ workspaceId: string; rootPath: string; label: string; createdAt: string; updatedAt: string }>;
+  /** `lastActiveAt` is the latest session activity in the workspace, when the source knows sessions. */
+  list: () => Promise<Array<{ workspaceId: string; rootPath: string; label: string; createdAt: string; lastActiveAt?: string }>>;
+  register: (input: { rootPath: string; label?: string }) => Promise<{ workspaceId: string; rootPath: string; label: string; createdAt: string }>;
   remove: (workspaceId: string) => Promise<void>;
 };
 
@@ -560,11 +561,12 @@ export class WorkbenchService {
     return this.sessionNavigation.list(input);
   }
 
+  /** Most recent session activity first; workspaces without sessions follow, newest added first. */
   async listWorkspaces(): Promise<Workspace[]> {
     const list = await this.workspaces.list();
     return list
-      .map((w) => ({ workspaceId: w.workspaceId, rootPath: w.rootPath, label: w.label, createdAt: w.createdAt, lastActiveAt: w.updatedAt }))
-      .sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
+      .map((w) => ({ workspaceId: w.workspaceId, rootPath: w.rootPath, label: w.label, createdAt: w.createdAt, ...(w.lastActiveAt ? { lastActiveAt: w.lastActiveAt } : {}) }))
+      .sort((a, b) => (b.lastActiveAt ?? "").localeCompare(a.lastActiveAt ?? "") || b.createdAt.localeCompare(a.createdAt));
   }
 
   async addWorkspace(input: { rootPath: string; label?: string }): Promise<Workspace> {
@@ -575,7 +577,7 @@ export class WorkbenchService {
     await new DocsService(rootPath).ensureRepo();
     const record = await this.workspaces.register({ rootPath, label: input.label?.trim() || basename(rootPath) });
     this.emit({ type: "workspaces.changed" });
-    return { workspaceId: record.workspaceId, rootPath: record.rootPath, label: record.label, createdAt: record.createdAt, lastActiveAt: record.updatedAt };
+    return { workspaceId: record.workspaceId, rootPath: record.rootPath, label: record.label, createdAt: record.createdAt };
   }
 
   async removeWorkspace(workspaceId: string): Promise<void> {

@@ -230,6 +230,7 @@ export type SelectOption = { value: string; label: string; hint?: string; disabl
 /**
  * Single-choice dropdown drawn by the app (never the native <select>): trigger, popup list with optional
  * second-line hints, keyboard navigation. `plain` is the transparent, hairline-bordered trigger used in toolbars.
+ * While the popup is open, options keep the order they had when it opened; reordering applies after it closes.
  */
 export const Select = ({ value, options, onChange, label, hint, placeholder, disabled, compact, plain, className, "aria-label": ariaLabel }: {
   value: string;
@@ -245,10 +246,15 @@ export const Select = ({ value, options, onChange, label, hint, placeholder, dis
   "aria-label"?: string;
 }) => {
   const selected = options.find((option) => option.value === value);
+  const [openOrder, setOpenOrder] = useState<string[]>();
+  const shown = openOrder
+    ? [...openOrder.flatMap((key) => options.find((option) => option.value === key) ?? []), ...options.filter((option) => !openOrder.includes(option.value))]
+    : options;
   return (
     <div className={cn("block min-w-0", className)}>
       {label && <span className="eyebrow block">{label}</span>}
       <BaseSelect.Root value={selected ? value : null} disabled={disabled}
+        onOpenChange={(open) => setOpenOrder(open ? options.map((option) => option.value) : undefined)}
         onValueChange={(next) => { if (typeof next === "string" && next !== value) onChange(next); }}>
         <BaseSelect.Trigger aria-label={ariaLabel ?? (typeof label === "string" ? label : undefined)}
           className={cn("vm-select-trigger", label && "mt-1.5")} data-compact={compact || undefined} data-plain={plain || undefined}>
@@ -259,7 +265,7 @@ export const Select = ({ value, options, onChange, label, hint, placeholder, dis
           <BaseSelect.Positioner side="bottom" align="start" sideOffset={4} alignItemWithTrigger={false} className="z-[1100]">
             <BaseSelect.Popup className="vm-select-popup">
               <BaseSelect.List>
-                {options.map((option) => (
+                {shown.map((option) => (
                   <BaseSelect.Item key={option.value} value={option.value} label={option.label} disabled={option.disabled} className="vm-select-item">
                     <BaseSelect.ItemIndicator className="flex items-center text-strong" keepMounted={false}><Check size={13} aria-hidden="true" /></BaseSelect.ItemIndicator>
                     <BaseSelect.ItemText className="vm-select-item__text col-start-2">{option.label}</BaseSelect.ItemText>

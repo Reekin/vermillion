@@ -151,6 +151,7 @@ export class SessionBrowserReadModel {
   private readonly fingerprintsByWorkspaceId = new Map<string, Map<string, string>>();
   private readonly itemsBySessionId = new Map<string, SessionBrowserItemRpc>();
   private readonly revisions = new Map<string, string>();
+  private readonly activityByWorkspaceId = new Map<string, string>();
 
   public constructor(sessionSeeds: readonly SessionBrowserReadModelSeed[]) {
     const seeds = collectForkTrees(sessionSeeds);
@@ -193,6 +194,8 @@ export class SessionBrowserReadModel {
       this.rootsByWorkspaceId.set(workspaceId, workspaceRoots);
       this.fingerprintsByWorkspaceId.set(workspaceId, new Map(fingerprints));
       this.revisions.set(workspaceId, createRevision(JSON.stringify(fingerprints)));
+      const activityAt = latest(workspaceRoots.map((root) => root.activityAt ?? root.lastCompletedTurnAt));
+      if (activityAt) this.activityByWorkspaceId.set(workspaceId, activityAt);
     }
   }
 
@@ -211,6 +214,11 @@ export class SessionBrowserReadModel {
 
   public workspaces(): string[] {
     return [...this.revisions.keys()];
+  }
+
+  /** Latest activity of the listed trees in each workspace; workspaces without any are absent. */
+  public workspaceActivity(): ReadonlyMap<string, string> {
+    return this.activityByWorkspaceId;
   }
 
   public revision(workspaceId: string): string {

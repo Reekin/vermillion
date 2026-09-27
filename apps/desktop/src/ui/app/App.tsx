@@ -5,6 +5,7 @@ import type { SessionExecutionProfileInput } from "@vermillion/shared";
 import type { RendererStore } from "../../store/store.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { SessionPane } from "../chat-shell/SessionPane.js";
+import { useRendererStoreState } from "../chat-shell/use-renderer-store-state.js";
 import type { MessageFileLinkMenuProps } from "../chat-shell/MessageMarkdownView.js";
 import { WorkbenchChatTree } from "./components/WorkbenchChatTree.js";
 import { DocsPanel } from "./components/DocsPanel.js";
@@ -151,6 +152,9 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   }), [store, openSessionTarget]);
   const workspaceIds = useMemo(() => workspaces.filter((w) => !workspaceFilterId || w.workspaceId === workspaceFilterId).map((w) => w.workspaceId), [workspaces, workspaceFilterId]);
   const sidebar = useSessionSidebar({ transport, store: sessionStore, workspaceIds });
+  // Workspace lists follow session activity, so every session list change may reorder them.
+  const sessionBrowserSignal = useRendererStoreState(sessionStore).refreshSignals.sessionBrowser;
+  useEffect(() => { store.getState().refreshWorkspaceOrder(); }, [store, sessionBrowserSignal]);
   const workspaceLabelById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w.label])), [workspaces]);
   const workspaceById = useMemo(() => new Map(workspaces.map((w) => [w.workspaceId, w])), [workspaces]);
   const [reloadSignal, setReloadSignal] = useState(0);

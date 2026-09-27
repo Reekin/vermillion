@@ -18,14 +18,17 @@ const rowClass = "flex h-8 w-full items-center gap-2 px-2.5 text-left text-label
 export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: WorkspacePickerProps) => {
   const disabled = lockedWorkspaceId !== undefined;
   const client = store((s) => s.client);
-  const workspaces = store((s) => s.workspaces);
+  const liveWorkspaces = store((s) => s.workspaces);
   const draftWorkspaceId = store((s) => s.draftWorkspaceId);
   const activeWorkspaceId = lockedWorkspaceId ?? draftWorkspaceId;
   const selectWorkspace = store((s) => s.setDraftWorkspace);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // The open list keeps the order it opened with; activity reorders apply on the next open.
+  const [openWorkspaces, setOpenWorkspaces] = useState<typeof liveWorkspaces>();
+  const workspaces = open && openWorkspaces ? openWorkspaces : liveWorkspaces;
 
-  const current = workspaces.find((w) => w.workspaceId === activeWorkspaceId);
+  const current = liveWorkspaces.find((w) => w.workspaceId === activeWorkspaceId);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? workspaces.filter((w) => w.label.toLowerCase().includes(q) || w.rootPath.toLowerCase().includes(q)) : workspaces;
@@ -45,7 +48,7 @@ export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: Wor
   };
 
   return (
-    <Popover.Root open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
+    <Popover.Root open={open} onOpenChange={(next) => { setOpen(next); setOpenWorkspaces(next ? liveWorkspaces : undefined); if (!next) setQuery(""); }}>
       <Popover.Trigger
         render={<ConfigurationButton />}
         disabled={disabled}

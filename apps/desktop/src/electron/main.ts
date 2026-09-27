@@ -854,22 +854,23 @@ const boot = async (): Promise<void> => {
       };
     },
     workspaces: {
-      list: async () =>
-        (await service.listWorkspaces()).workspaces.map((workspace) => ({
+      list: async () => {
+        const [{ workspaces }, activity] = await Promise.all([service.listWorkspaces(), service.listWorkspaceActivity()]);
+        return workspaces.map((workspace) => ({
           workspaceId: workspace.workspaceId,
           rootPath: workspace.absolutePath,
           label: workspace.label,
           createdAt: workspace.createdAt,
-          updatedAt: workspace.updatedAt
-        })),
+          lastActiveAt: activity.get(workspace.workspaceId)
+        }));
+      },
       register: async (input) => {
         const workspace = await service.addWorkspace(input);
         return {
           workspaceId: workspace.workspaceId,
           rootPath: workspace.absolutePath,
           label: workspace.label,
-          createdAt: workspace.createdAt,
-          updatedAt: workspace.updatedAt
+          createdAt: workspace.createdAt
         };
       },
       remove: async (workspaceId) => {

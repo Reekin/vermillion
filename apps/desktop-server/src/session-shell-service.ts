@@ -548,6 +548,11 @@ export class SessionShellService {
     return this.sessionCatalog.get(sessionId);
   }
 
+  /** Latest session activity per workspace, as the session list orders its trees. */
+  public async listWorkspaceActivity(): Promise<ReadonlyMap<string, string>> {
+    return this.sessionCatalog.workspaceActivity();
+  }
+
   public async listSessionSearchEntries(): Promise<Array<{
     sessionId: string;
     providerSessionId?: string;

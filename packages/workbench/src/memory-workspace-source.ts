@@ -2,7 +2,7 @@ import type { WorkspaceSource } from "./workbench-service.js";
 
 /** In-memory WorkspaceSource for tests and standalone tooling. */
 export const createMemoryWorkspaceSource = (now: () => string = () => new Date().toISOString()): WorkspaceSource => {
-  const records: Array<{ workspaceId: string; rootPath: string; label: string; createdAt: string; updatedAt: string }> = [];
+  const records: Array<{ workspaceId: string; rootPath: string; label: string; createdAt: string }> = [];
   return {
     list: async () => [...records],
     register: async (input) => {
@@ -12,8 +12,7 @@ export const createMemoryWorkspaceSource = (now: () => string = () => new Date()
         workspaceId: "ws-" + (records.length + 1),
         rootPath: input.rootPath,
         label: input.label ?? input.rootPath,
-        createdAt: now(),
-        updatedAt: now()
+        createdAt: now()
       };
       records.push(record);
       return record;

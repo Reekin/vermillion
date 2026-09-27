@@ -6,7 +6,8 @@ export const zWorkspace = z.object({
   rootPath: z.string().min(1),
   label: z.string().min(1),
   createdAt: z.string(),
-  lastActiveAt: z.string()
+  /** Latest session activity in the workspace; absent when it has no listed sessions. */
+  lastActiveAt: z.string().optional()
 });
 export type Workspace = z.infer<typeof zWorkspace>;
 

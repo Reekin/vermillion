@@ -41,6 +41,21 @@ describe("SessionBrowserReadModel", () => {
     expect(model.get("missing")).toBeUndefined();
   });
 
+  it("reports each workspace's latest activity over its listed trees", () => {
+    const model = new SessionBrowserReadModel([
+      seed({ sessionId: "a-1", sortAt: "2026-07-19T01:00:00Z" }),
+      seed({ sessionId: "a-2", sortAt: "2026-07-19T03:00:00Z" }),
+      seed({ sessionId: "a-archived", sortAt: "2026-07-19T09:00:00Z", archivedAt: "2026-07-19T09:00:00Z" }),
+      seed({ sessionId: "b-1", sortAt: "2026-07-19T05:00:00Z", workspaceId: "workspace-2" }),
+      seed({ sessionId: "c-archived", sortAt: "2026-07-19T06:00:00Z", workspaceId: "workspace-3", archivedAt: "2026-07-19T06:00:00Z" })
+    ]);
+
+    expect(Object.fromEntries(model.workspaceActivity())).toEqual({
+      "workspace-1": "2026-07-19T03:00:00Z",
+      "workspace-2": "2026-07-19T05:00:00Z"
+    });
+  });
+
   it("nests subagent sessions under their parent and keeps them out of the root rows", () => {
     const model = new SessionBrowserReadModel([
       seed({ sessionId: "worker", sortAt: "2026-07-19T01:00:00Z" }),

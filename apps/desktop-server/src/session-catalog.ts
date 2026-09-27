@@ -178,6 +178,10 @@ export class SessionCatalogService {
     return (await this.getReadModel()).get(sessionId);
   }
 
+  public async workspaceActivity(): Promise<ReadonlyMap<string, string>> {
+    return (await this.getReadModel()).workspaceActivity();
+  }
+
   public invalidate(): void {
     this.catalogRevision += 1;
     this.materialized = undefined;
