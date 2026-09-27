@@ -14,7 +14,6 @@ export const getLocale = (): Locale => current;
 export const setLocale = (locale: Locale): void => {
   if (locale === current) return;
   current = locale;
-  if (typeof document !== "undefined") document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
   for (const listener of listeners) listener();
 };
 
