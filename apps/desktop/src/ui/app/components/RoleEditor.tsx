@@ -6,8 +6,9 @@ import { resolveComposerExecutionSelection, resolveComposerModels } from "../../
 import type { WorkbenchStore } from "../workbench-store.js";
 import { Modal } from "./Modal.js";
 import { Button, Field, InlineNotice, Select } from "./ui.js";
+import { t } from "../../../i18n/index.js";
+import { useT } from "../../../i18n/react.js";
 
-const inheritInputLabel = "沿用输入器配置";
 const inheritGlobalValue = "__inherit_global__";
 const defaultValue = "__default__";
 const selectionValue = (value: string | null | undefined) => value === null ? defaultValue : value ?? "";
@@ -33,7 +34,8 @@ export const loadRoleModelOptions = async (transport: DesktopTransport): Promise
 };
 
 /** Mode names shown to users; the stored values stay global / override / append. */
-export const roleModeLabel: Record<RoleDocument["mode"], string> = { global: "沿用全局", override: "覆盖正文", append: "追加正文" };
+export const roleModeLabel = (mode: RoleDocument["mode"]): string =>
+  mode === "global" ? t("docs.roles.mode.global") : mode === "override" ? t("docs.roles.mode.override") : t("docs.roles.mode.append");
 
 export const RoleEditor = ({ store, transport }: { store: WorkbenchStore; transport: DesktopTransport }) => {
   const client = store((s) => s.client);
@@ -51,6 +53,8 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
   roleId: string;
   onClose: () => void;
 }) => {
+  const t = useT();
+  const inheritInputLabel = t("docs.roles.inheritComposer");
   const [document, setDocument] = useState<RoleDocument>();
   const [globalDocument, setGlobalDocument] = useState<RoleDocument>();
   const [models, setModels] = useState<EngineModelRpc[]>([]);
@@ -76,7 +80,7 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
         setModels(options.models);
         setInheritedModelId(options.inheritedModelId);
       })
-      .catch((cause) => { if (!cancelled) setCatalogError("模型选项加载失败：" + (cause instanceof Error ? cause.message : String(cause))); });
+      .catch((cause) => { if (!cancelled) setCatalogError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
   }, [client, transport, workspaceId, roleId]);
 
@@ -149,53 +153,53 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
   const fieldDisabled = Boolean(isGlobal || saving);
 
   return (
-    <Modal title={"角色 · " + roleId} onClose={onClose} width={860} height="78vh">
+    <Modal title={t("docs.roleEditor.title", { roleId })} onClose={onClose} width={860} height="78vh">
       <div className="flex h-full flex-col" onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key === "s") { event.preventDefault(); void save(); }
       }}>
         <div className="min-h-0 flex-1 overflow-auto p-4">
           {document ? (
             <div className="space-y-4">
-              <Select label="本 workspace 定制方式" value={document.mode} disabled={saving} onChange={(value) => changeMode(value as RoleDocument["mode"])}
-                options={(["global", "override", "append"] as const).map((mode) => ({ value: mode, label: roleModeLabel[mode] }))} />
+              <Select label={t("docs.roleEditor.mode")} value={document.mode} disabled={saving} onChange={(value) => changeMode(value as RoleDocument["mode"])}
+                options={(["global", "override", "append"] as const).map((mode) => ({ value: mode, label: roleModeLabel(mode) }))} />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Select label="模型" value={isAppend ? document.model ?? inheritGlobalValue : document.model ?? ""} disabled={fieldDisabled}
+                <Select label={t("docs.roles.model")} value={isAppend ? document.model ?? inheritGlobalValue : document.model ?? ""} disabled={fieldDisabled}
                   onChange={(value) => update({ model: value === inheritGlobalValue ? undefined : value || undefined })}
                   options={[
-                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? `沿用全局（${globalModelLabel}）` : inheritInputLabel },
-                    ...(document.model && !models.some((model) => model.modelId === document.model) ? [{ value: document.model, label: `${document.model}（当前文件）` }] : []),
+                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? t("docs.roleEditor.inheritGlobal", { value: globalModelLabel }) : inheritInputLabel },
+                    ...(document.model && !models.some((model) => model.modelId === document.model) ? [{ value: document.model, label: t("docs.roleEditor.currentFile", { value: document.model }) }] : []),
                     ...models.map((model) => ({ value: model.modelId, label: model.displayName }))
                   ]} />
-                <Select label="推理档位" value={isAppend ? appendSelectionValue(document.reasoningOptionId) : selectionValue(document.reasoningOptionId)} disabled={fieldDisabled}
+                <Select label={t("docs.roleEditor.reasoning")} value={isAppend ? appendSelectionValue(document.reasoningOptionId) : selectionValue(document.reasoningOptionId)} disabled={fieldDisabled}
                   onChange={(value) => update({ reasoningOptionId: settingValue(value) })}
                   options={[
-                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? `沿用全局（${globalReasoningLabel}）` : inheritInputLabel },
+                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? t("docs.roleEditor.inheritGlobal", { value: globalReasoningLabel }) : inheritInputLabel },
                     { value: defaultValue, label: defaultReasoning ? `Default (${defaultReasoning})` : "Default" },
-                    ...(document.reasoningOptionId && !reasoningOptions.some((option) => option.optionId === document.reasoningOptionId) ? [{ value: document.reasoningOptionId, label: `${document.reasoningOptionId}（当前文件）` }] : []),
+                    ...(document.reasoningOptionId && !reasoningOptions.some((option) => option.optionId === document.reasoningOptionId) ? [{ value: document.reasoningOptionId, label: t("docs.roleEditor.currentFile", { value: document.reasoningOptionId }) }] : []),
                     ...reasoningOptions.map((option) => ({ value: option.optionId, label: option.displayName }))
                   ]} />
-                <Select label="速度" value={isAppend ? appendSelectionValue(document.serviceTierId) : selectionValue(document.serviceTierId)} disabled={fieldDisabled}
+                <Select label={t("docs.roleEditor.speed")} value={isAppend ? appendSelectionValue(document.serviceTierId) : selectionValue(document.serviceTierId)} disabled={fieldDisabled}
                   onChange={(value) => update({ serviceTierId: settingValue(value) })}
                   options={[
-                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? `沿用全局（${globalServiceTierLabel}）` : inheritInputLabel },
+                    { value: isAppend ? inheritGlobalValue : "", label: isAppend ? t("docs.roleEditor.inheritGlobal", { value: globalServiceTierLabel }) : inheritInputLabel },
                     { value: defaultValue, label: "Standard" },
-                    ...(document.serviceTierId && !serviceTiers.some((tier) => tier.tierId === document.serviceTierId) ? [{ value: document.serviceTierId, label: `${document.serviceTierId}（当前文件）` }] : []),
+                    ...(document.serviceTierId && !serviceTiers.some((tier) => tier.tierId === document.serviceTierId) ? [{ value: document.serviceTierId, label: t("docs.roleEditor.currentFile", { value: document.serviceTierId }) }] : []),
                     ...serviceTiers.map((tier) => ({ value: tier.tierId, label: tier.displayName, hint: tier.description }))
                   ]} />
               </div>
-              {roleId === "supervisor" && <Field kind="input" type="number" label="检查间隔（分钟）" min={1} step={1}
+              {roleId === "supervisor" && <Field kind="input" type="number" label={t("docs.roleEditor.interval")} min={1} step={1}
                 value={document.checkIntervalMinutes ?? (isGlobal ? 5 : "")} disabled={fieldDisabled}
-                placeholder={isAppend ? `沿用全局（${globalDocument?.checkIntervalMinutes ?? 5} 分钟）` : "默认 5 分钟"}
+                placeholder={isAppend ? t("docs.roleEditor.inheritGlobal", { value: t("common.durationMinutes", { minutes: globalDocument?.checkIntervalMinutes ?? 5 }) }) : t("docs.roleEditor.defaultInterval", { minutes: 5 })}
                 onChange={(event) => update({ checkIntervalMinutes: event.target.value === "" ? undefined : Number(event.target.value) })} />}
-              {catalogError && <InlineNotice tone="error">{catalogError}</InlineNotice>}
-              <Field kind="textarea" label="Prompt 正文" rows={14} value={document.body} disabled={fieldDisabled} onChange={(event) => update({ body: event.target.value })} />
+              {catalogError && <InlineNotice tone="error">{t("docs.roleEditor.catalogFailed", { error: catalogError })}</InlineNotice>}
+              <Field kind="textarea" label={t("docs.roleEditor.body")} rows={14} value={document.body} disabled={fieldDisabled} onChange={(event) => update({ body: event.target.value })} />
             </div>
-          ) : !error && <InlineNotice>加载中…</InlineNotice>}
+          ) : !error && <InlineNotice>{t("common.loading")}</InlineNotice>}
           {error && <InlineNotice tone="error">{error}</InlineNotice>}
         </div>
         <footer className="flex h-10 shrink-0 items-center gap-3 border-t border-border px-4">
-          <span className="text-caption text-muted-foreground">保存到本 workspace · {dirty ? "未保存 · Ctrl+S" : "已保存"}</span>
-          <Button size="sm" variant="primary" className="ml-auto" disabled={!document || !dirty || saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</Button>
+          <span className="text-caption text-muted-foreground">{t("docs.roleEditor.footer", { status: dirty ? t("docs.unsavedHint") : t("docs.saved") })}</span>
+          <Button size="sm" variant="primary" className="ml-auto" disabled={!document || !dirty || saving} onClick={() => void save()}>{saving ? t("docs.saving") : t("common.save")}</Button>
         </footer>
       </div>
     </Modal>

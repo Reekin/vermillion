@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import type { ComposerStatusNotice } from "../chat-shell/composer-status.js";
+import { t } from "../../i18n/index.js";
+import { formatClock, formatListTime, formatMonthDay } from "../../i18n/format.js";
 
 export type OutputSeverity = "info" | "warning" | "error";
 
@@ -90,15 +92,29 @@ export const statusBarDismissDelayMs = (entry: OutputEntry): number | undefined 
 
 type WarningContext = { engineId?: string; summary?: string; details?: string; path?: string };
 
-const contextLabels: Record<string, string> = {
-  persistent: "",
-  executionRecoverySessionId: "会话",
-  chatTreeRefreshSessionId: "会话",
-  sessionId: "会话"
+/** Context keys shown under their own label; `persistent` is internal and hidden. */
+const contextLabel = (key: string): string | undefined => {
+  switch (key) {
+    case "persistent":
+      return undefined;
+    case "executionRecoverySessionId":
+    case "chatTreeRefreshSessionId":
+    case "sessionId":
+      return t("app.output.contextSession");
+    default:
+      return key;
+  }
 };
 
 const readableValue = (value: unknown): string =>
   typeof value === "string" ? value : JSON.stringify(value);
+
+const warningLines = (warning: WarningContext): string[] =>
+  [
+    warning.summary && t("app.output.detailOriginal") + "  " + warning.summary,
+    warning.details && t("app.output.detailDetails") + "  " + warning.details,
+    warning.path && t("app.output.detailConfig") + "  " + warning.path
+  ].filter((line): line is string => Boolean(line));
 
 /**
  * Technical details in readable sections (original text, engine warnings, context, stack), shown in the
@@ -106,19 +122,16 @@ const readableValue = (value: unknown): string =>
  */
 export const outputEntryDetails = (entry: OutputEntry): string | undefined => {
   const sections: string[] = [];
-  if (entry.detail) sections.push("// 原始信息\n" + entry.detail);
+  if (entry.detail) sections.push("// " + t("app.output.sectionOriginal") + "\n" + entry.detail);
   const { engineConfigWarnings, ...rest } = entry.context ?? {};
   for (const warning of Array.isArray(engineConfigWarnings) ? engineConfigWarnings as WarningContext[] : []) {
-    sections.push(["// 引擎配置警告",
-      warning.summary && "原文  " + warning.summary,
-      warning.details && "详情  " + warning.details,
-      warning.path && "配置  " + warning.path].filter(Boolean).join("\n"));
+    sections.push(["// " + t("app.output.sectionEngineWarning"), ...warningLines(warning)].join("\n"));
   }
   const context = Object.entries(rest)
-    .filter(([key, value]) => contextLabels[key] !== "" && value !== undefined)
-    .map(([key, value]) => (contextLabels[key] ?? key) + "  " + readableValue(value));
-  if (context.length) sections.push(["// 上下文", ...context].join("\n"));
-  if (entry.stack) sections.push("// 调用栈\n" + entry.stack);
+    .filter(([key, value]) => contextLabel(key) !== undefined && value !== undefined)
+    .map(([key, value]) => contextLabel(key) + "  " + readableValue(value));
+  if (context.length) sections.push(["// " + t("app.output.sectionContext"), ...context].join("\n"));
+  if (entry.stack) sections.push("// " + t("app.output.sectionStack") + "\n" + entry.stack);
   return sections.length ? sections.join("\n\n") : undefined;
 };
 
@@ -130,14 +143,13 @@ export const outputEntryConfigPath = (entry: OutputEntry): string | undefined =>
 
 /** User-facing wording of an engine configuration warning; the engine's summary is kept as original text. */
 export const engineWarningReason = (engineLabel: string): { title: string; next: string } => ({
-  title: `${engineLabel} 配置无法加载，已改用默认配置`,
-  next: "检查配置文件里引用的文件路径，修正后下一次发送即生效，无需重启。"
+  title: t("app.output.engineWarningTitle", { engine: engineLabel }),
+  next: t("app.output.engineWarningNext")
 });
 
 export const engineWarningDetails = (warning: { summary?: string; details?: string; path?: string }): string | undefined => {
-  const lines = [warning.summary && "原文  " + warning.summary, warning.details && "详情  " + warning.details, warning.path && "配置  " + warning.path]
-    .filter((line): line is string => Boolean(line));
-  return lines.length ? ["// 引擎配置警告", ...lines].join("\n") : undefined;
+  const lines = warningLines(warning);
+  return lines.length ? ["// " + t("app.output.sectionEngineWarning"), ...lines].join("\n") : undefined;
 };
 
 /** Keeps the first receipt time of warnings that are still reported; new ones are stamped with now. */
@@ -183,37 +195,17 @@ export const withEngineConfigWarnings = (
       };
 };
 
-export const sourceLabels: Record<NonNullable<ComposerStatusNotice["source"]>, string> = {
-  "engine-list": "引擎列表",
-  "engine-select": "引擎选择",
-  subscription: "事件订阅",
-  send: "发送",
-  "create-session": "新建会话",
-  approval: "审批",
-  "workspace-add": "添加 workspace",
-  "workspace-action": "workspace 操作",
-  "session-browser": "会话列表",
-  "session-action": "会话操作",
-  "chat-tree": "会话树",
-  delegation: "委派",
-  settings: "设置"
-};
+export const sourceLabel = (source: NonNullable<ComposerStatusNotice["source"]>): string =>
+  t(`app.output.source.${source}` as "app.output.source.send");
 
-/** List time: 刚刚, N 分钟前, today's clock time, or 昨天 HH:MM. */
+/** List time: 刚刚, N 分钟前, today's clock time, 昨天 HH:MM, or the date with the clock time. */
 export const formatRelativeTime = (at: string, now: Date = new Date()): string => {
   const time = new Date(at);
-  const seconds = Math.max(0, Math.round((now.getTime() - time.getTime()) / 1000));
-  if (seconds < 60) return "刚刚";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
-  const clock = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (time.toDateString() === now.toDateString()) return clock;
-  if (time.toDateString() === yesterday.toDateString()) return `昨天 ${clock}`;
-  return `${time.getMonth() + 1}月${time.getDate()}日 ${clock}`;
+  const listed = formatListTime(time, { now });
+  return listed === formatMonthDay(time, now) ? `${listed} ${formatClock(time)}` : listed;
 };
 
-export const severityLabels: Record<OutputSeverity, string> = { error: "错误", warning: "警告", info: "信息" };
+export const severityLabel = (severity: OutputSeverity): string => t(`app.output.severity.${severity}`);
 
 export type OutputState = {
   entries: OutputEntry[];

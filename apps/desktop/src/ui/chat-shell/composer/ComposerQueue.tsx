@@ -1,4 +1,6 @@
 import type { ReactElement } from "react";
+import { formatClock } from "../../../i18n/format.js";
+import { useT } from "../../../i18n/react.js";
 import { Button } from "../Button.js";
 import type { ComposerIntent, QueuedComposerMessage } from "./composer-types.js";
 
@@ -7,7 +9,7 @@ const formatQueuedTime = (iso: string): string => {
   if (Number.isNaN(date.getTime())) {
     return iso;
   }
-  return date.toLocaleTimeString();
+  return formatClock(date, true);
 };
 
 export const ComposerQueue = ({
@@ -27,20 +29,21 @@ export const ComposerQueue = ({
   onSendNow: (messageId: string) => Promise<void>;
   onSteerNow: (messageId: string) => Promise<void>;
 }): ReactElement | null => {
+  const t = useT();
   if (queue.length === 0) {
     return null;
   }
 
   return (
-    <div className="awb-composer-queue" aria-label="排队中的消息">
+    <div className="awb-composer-queue" aria-label={t("session.queuedMessages")}>
       {queue.map((item) => (
         <article key={item.id} className="awb-composer-queue__item">
           <div className="awb-composer-queue__copy">
             <strong>
               {item.text ||
                 (item.skills.length > 0
-                  ? "带技能的追加消息"
-                  : "仅含附件的追加消息")}
+                  ? t("session.queuedWithSkills")
+                  : t("session.queuedAttachmentsOnly"))}
             </strong>
             <span>
               {item.skills.length} skill(s) · {item.attachments.length} attachment(s) ·{" "}

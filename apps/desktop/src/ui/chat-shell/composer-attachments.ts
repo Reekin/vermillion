@@ -4,6 +4,7 @@ import {
   type Attachment
 } from "@vermillion/shared";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
+import { t } from "../../i18n/index.js";
 
 export type ComposerAttachmentOrigin = "picker" | "drop" | "paste";
 
@@ -185,7 +186,7 @@ export const restoreComposerAttachment = (attachment: Attachment): ComposerAttac
   return {
     attachment,
     dedupeKey: attachment.uri,
-    displayName: attachment.name ?? "附件",
+    displayName: attachment.name ?? t("session.attachment"),
     isImage,
     mimeType: attachment.mimeType,
     previewUrl: isImage
@@ -193,7 +194,7 @@ export const restoreComposerAttachment = (attachment: Attachment): ComposerAttac
       : undefined,
     releasePreviewUrl: false,
     size: 0,
-    sizeLabel: "未知大小"
+    sizeLabel: t("session.unknownSize")
   };
 };
 

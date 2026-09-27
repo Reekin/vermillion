@@ -4,6 +4,7 @@ import type {
   RuntimeInteraction
 } from "@vermillion/shared";
 import type { ReactElement } from "react";
+import { useT } from "../../i18n/react.js";
 import type { ImageLightboxState } from "./ImageLightbox.js";
 import {
   MessageMarkdownView,
@@ -156,6 +157,7 @@ export const TurnProcessPanel = ({
   onRespondApproval,
   onRespondInteraction
 }: TurnProcessPanelProps): ReactElement => {
+  const t = useT();
   const interactions = row.interactions ?? [];
   const historyItems =
     hiddenRows.length > 0 ? buildTurnHistoryItems(row, hiddenRows) : [];
@@ -223,7 +225,7 @@ export const TurnProcessPanel = ({
       {renderStandaloneActivity && row.approvals.length > 0 && (
         <section className="awb-turn-process__section">
           <header className="awb-turn-process__section-header">
-            <h4>审批请求</h4>
+            <h4>{t("session.approvalRequests")}</h4>
             <span>{row.approvals.length}</span>
           </header>
           <ApprovalFlowView
@@ -237,7 +239,7 @@ export const TurnProcessPanel = ({
       {renderStandaloneActivity && interactions.length > 0 && (
         <section className="awb-turn-process__section">
           <header className="awb-turn-process__section-header">
-            <h4>待回答的问题</h4>
+            <h4>{t("session.pendingQuestions")}</h4>
             <span>{interactions.length}</span>
           </header>
           <InteractionFlowView

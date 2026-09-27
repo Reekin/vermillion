@@ -43,6 +43,19 @@ afterEach(async () => {
 });
 
 describe("WorkspaceRegistryService", () => {
+  it("writes the system language on first launch and keeps a saved language afterwards", async () => {
+    const baseDir = await createTempDir();
+    const first = new WorkspaceRegistryService({ baseDir, defaultLocale: "zh" });
+    await first.ready();
+    expect(first.getState().locale).toBe("zh");
+    expect(JSON.parse(await readFile(join(baseDir, "workspace-registry.json"), "utf8")).locale).toBe("zh");
+
+    await first.updateSettings({ locale: "en" });
+    const restarted = new WorkspaceRegistryService({ baseDir, defaultLocale: "zh" });
+    await restarted.ready();
+    expect(restarted.getState().locale).toBe("en");
+  });
+
   it("persists workspaces, pin state, and last active selection", async () => {
     const baseDir = await createTempDir();
     const service = new WorkspaceRegistryService({

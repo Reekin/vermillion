@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { InboxItem, WorkItem } from "@vermillion/workbench/client";
+import { t } from "../../../i18n/index.js";
+import { useT } from "../../../i18n/react.js";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { useWorkflowContext } from "../use-workflow-context.js";
 import { WorkItemDialog } from "./WorkItemDialog.js";
@@ -10,14 +12,26 @@ import { Badge, Button, Card, CollapsibleDetails, EmptyState, Field, InlineNotic
 
 type InboxPanelProps = { store: WorkbenchStore; includeProcessed?: boolean };
 
+const labelled = (label: string, value: string) => t("work.labelValue", { label, value });
+const verificationLabel = (status: string) => {
+  switch (status) {
+    case "pass": return t("work.verify.pass");
+    case "defect": return t("work.verify.defect");
+    case "blocked": return t("work.verify.blocked");
+    case "incomplete": return t("work.verify.incomplete");
+    default: return t("work.verify.failed");
+  }
+};
+
 export const InboxPanel = ({ store, includeProcessed = false }: InboxPanelProps) => {
+  useT();
   const inbox = store((s) => includeProcessed ? s.inboxHistory : s.inbox);
   const inboxError = store((s) => s.inboxError);
   if (inboxError) {
-    return <EmptyState title="Inbox 加载失败" hint={inboxError} />;
+    return <EmptyState title={t("work.inbox.loadFailed")} hint={inboxError} />;
   }
   if (inbox.length === 0) {
-    return <EmptyState title={includeProcessed ? "暂无消息" : "没有待处理事项"} hint="决策卡和已合入通知会出现在这里。" />;
+    return <EmptyState title={includeProcessed ? t("work.inbox.noMessages") : t("work.inbox.nothingPending")} hint={t("work.inbox.emptyHint")} />;
   }
   return (
     <ul className="mx-auto w-full max-w-4xl space-y-3 p-4">
@@ -31,6 +45,7 @@ export const InboxPanel = ({ store, includeProcessed = false }: InboxPanelProps)
 };
 
 const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "decision" }> }) => {
+  useT();
   const client = store((s) => s.client);
   const showAgentSession = store((s) => s.showAgentSession);
   const [busy, setBusy] = useState(false);
@@ -65,8 +80,8 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
     <Card
       header={
         <>
-          <Badge tone="accent">{answered ? "已答复" : "决策"}</Badge>
-          {sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>进入会话</Button>}
+          <Badge tone="accent">{answered ? t("work.detail.answered") : t("work.inbox.decision")}</Badge>
+          {sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>{t("work.inbox.enterSession")}</Button>}
         </>
       }
     >
@@ -74,7 +89,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       {card.context && <p className="mt-1.5 whitespace-pre-wrap text-body text-muted-foreground">{card.context}</p>}
       {adjustments.length > 0 && (
         <div className="mt-3 rounded-md border border-border bg-input px-3 py-2">
-          <div className="eyebrow mb-1">等待答复期间工单已调整</div>
+          <div className="eyebrow mb-1">{t("work.inbox.adjusted")}</div>
           <ul className="space-y-1">
             {adjustments.map((a) => (
               <li key={a.at} className="whitespace-pre-wrap text-label text-foreground">{a.note}</li>
@@ -93,7 +108,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
               </Button>
               <div className="min-w-0 pt-1.5 text-caption text-muted-foreground">
                 {option.detail && <span>{option.detail}</span>}
-                {recommended && card.recommendation && <span className="block text-caption text-muted-foreground">推荐：{card.recommendation}</span>}
+                {recommended && card.recommendation && <span className="block text-caption text-muted-foreground">{labelled(t("work.inbox.recommended"), card.recommendation)}</span>}
               </div>
             </li>
           );
@@ -106,24 +121,24 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
           if (note.trim()) void answer();
         }}
       >
-        <Field kind="textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注" className="min-w-0 flex-1" />
-        <Button type="submit" disabled={busy || !note.trim()} className="shrink-0">仅以备注答复</Button>
+        <Field kind="textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder={t("work.inbox.note")} className="min-w-0 flex-1" />
+        <Button type="submit" disabled={busy || !note.trim()} className="shrink-0">{t("work.inbox.answerWithNote")}</Button>
       </form>
       </>}
-      {answered && <DetailSection title="答复结果">
+      {answered && <DetailSection title={t("work.inbox.answerResult")}>
         <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
-        <p>{card.deliveryPending ? "答复已保存，等待送达执行会话" : "答复已送达执行会话"}</p>
+        <p>{card.deliveryPending ? t("work.inbox.answerSaved") : t("work.inbox.answerDelivered")}</p>
         {card.deliveryFailure && <InlineNotice tone="error" className="px-0">{card.deliveryFailure}</InlineNotice>}
-        {card.deliveryPending && <Button size="sm" disabled={busy} onClick={() => void answer()}>重试送达</Button>}
+        {card.deliveryPending && <Button size="sm" disabled={busy} onClick={() => void answer()}>{t("work.inbox.retryDelivery")}</Button>}
       </DetailSection>}
-      {action && <DetailSection title={answered ? "当前处置" : "已尝试的处置"}>
+      {action && <DetailSection title={answered ? t("work.inbox.currentHandling") : t("work.inbox.attemptedHandling")}>
         <p>{actionRoleLabel(action)} · {actionStatusText(action)}</p>
-        {dispositions.length ? dispositions.slice(-5).map((summary, index) => <p key={index}>{summary}</p>) : <p>尚无已执行的自动处置。</p>}
+        {dispositions.length ? dispositions.slice(-5).map((summary, index) => <p key={index}>{summary}</p>) : <p>{t("work.inbox.noHandling")}</p>}
       </DetailSection>}
-      {relatedIds.length > 0 && <DetailSection title="相关工单">{relatedIds.map((id) => {
+      {relatedIds.length > 0 && <DetailSection title={t("work.inbox.relatedItems")}>{relatedIds.map((id) => {
         const related = data?.workItems.find((entry) => entry.workItemId === id);
         return <ListRow key={id} title={related?.title ?? id} leading={related && <Badge>{related.risk}</Badge>}
-          trailing={related && <Badge>{statusLabel[related.status]}</Badge>} onClick={() => setDetailId(id)} />;
+          trailing={related && <Badge>{statusLabel(related.status)}</Badge>} onClick={() => setDetailId(id)} />;
       })}</DetailSection>}
       {contextError && <InlineNotice tone="error">{contextError}</InlineNotice>}
       {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
@@ -137,6 +152,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
 };
 
 const IntegrationCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "integration" }> }) => {
+  useT();
   const client = store((s) => s.client);
   const showAgentSession = store((s) => s.showAgentSession);
   const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + item.workItem.workItemId] ?? false);
@@ -148,11 +164,11 @@ const IntegrationCard = ({ store, item }: { store: WorkbenchStore; item: Extract
   const currentAction = action?.kind === "integration" ? action : item.action;
   const sessionId = workItem.run.sessionId;
   return <>
-    <Card header={<><Badge tone="accent">合入受阻</Badge>{sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>进入会话</Button>}</>}>
+    <Card header={<><Badge tone="accent">{t("work.integration.blocked")}</Badge>{sessionId && <Button size="sm" variant="ghost" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, sessionId)}>{t("work.inbox.enterSession")}</Button>}</>}>
       <p className="break-words text-label font-medium text-strong">{workItem.title}</p>
       <IntegrationControls client={client} workspaceId={item.workspaceId} workItemId={workItem.workItemId} action={currentAction} item={workItem} />
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button size="sm" variant="ghost" outlined onClick={() => setDetailId(workItem.workItemId)}>查看工单</Button>
+        <Button size="sm" variant="ghost" outlined onClick={() => setDetailId(workItem.workItemId)}>{t("work.inbox.viewItem")}</Button>
       </div>
       <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, item.workItem.workItemId)}>{currentAction.history.map((entry) => entry.at + " " + entry.message).join("\n")}</CollapsibleDetails>
       {contextError && <InlineNotice tone="error">{contextError}</InlineNotice>}
@@ -163,32 +179,30 @@ const IntegrationCard = ({ store, item }: { store: WorkbenchStore; item: Extract
 
 const technicalDetails = (item: WorkItem): string => {
   const { merge, evidence, verify } = item;
-  const verificationStatus = (entry: { status: string }) => entry.status;
-  const verificationLabel = (status: string) => ({ pass: "通过", defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成" }[status] ?? "未通过");
   return [
-    merge && ["合入", "commit: " + (merge.commit ?? "无代码改动"), "时间: " + merge.mergedAt, "Diff 概况", merge.diffStat || "无文件变更"].join("\n"),
-    evidence && ["命令输出", ...evidence.commands.map((entry) => "$ " + entry.command + "\n" + entry.output)].join("\n\n"),
-    ["Review 处置", ...item.review.map((entry) => (entry.decision === "accepted" ? "采纳：" : "拒绝：") + entry.comment + "\n理由：" + entry.reason)].join("\n\n"),
-    verify && ["验收过程 · " + verify.verifiedAt, ...verify.items.map((entry) => [
-      (entry.index + 1) + ". " + (item.acceptance[entry.index]?.text ?? "验收项"),
-      verificationLabel(verificationStatus(entry)) + "：" + entry.evidence
+    merge && [t("work.inbox.merge"), "commit: " + (merge.commit ?? t("work.inbox.noCodeChanges")), t("work.inbox.time", { time: merge.mergedAt }), t("work.inbox.diffSummary"), merge.diffStat || t("work.inbox.noFileChanges")].join("\n"),
+    evidence && [t("work.inbox.commandOutput"), ...evidence.commands.map((entry) => "$ " + entry.command + "\n" + entry.output)].join("\n\n"),
+    [t("work.inbox.reviewHandling"), ...item.review.map((entry) => labelled(entry.decision === "accepted" ? t("work.inbox.reviewAccepted") : t("work.inbox.reviewRejected"), entry.comment)
+      + "\n" + labelled(t("work.detail.reason"), entry.reason))].join("\n\n"),
+    verify && [t("work.inbox.acceptanceRun", { time: verify.verifiedAt }), ...verify.items.map((entry) => [
+      (entry.index + 1) + ". " + (item.acceptance[entry.index]?.text ?? t("work.inbox.acceptanceItem")),
+      labelled(verificationLabel(entry.status), entry.evidence)
     ].join("\n"))].join("\n\n"),
-    evidence?.assumptions.length && "假设\n" + evidence.assumptions.join("\n"),
-    evidence?.untested.length && "未测\n" + evidence.untested.join("\n"),
-    evidence?.outOfScopeFindings.length && "范围外发现\n" + evidence.outOfScopeFindings.join("\n"),
-    evidence?.attachments.length && "附件\n" + evidence.attachments.join("\n")
+    evidence?.assumptions.length && t("work.detail.assumptions") + "\n" + evidence.assumptions.join("\n"),
+    evidence?.untested.length && t("work.detail.untested") + "\n" + evidence.untested.join("\n"),
+    evidence?.outOfScopeFindings.length && t("work.detail.outOfScopeFindings") + "\n" + evidence.outOfScopeFindings.join("\n"),
+    evidence?.attachments.length && t("work.detail.attachments") + "\n" + evidence.attachments.join("\n")
   ].filter(Boolean).join("\n\n");
 };
 
 const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<InboxItem, { kind: "merged" }> }) => {
+  useT();
   const client = store((s) => s.client);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
   const [reason, setReason] = useState("");
   const { workItem } = item;
-  const verificationStatus = (entry: { status: string }) => entry.status;
-  const verificationLabel = (status: string) => ({ pass: "通过", defect: "发现缺陷", blocked: "条件不足", incomplete: "尚未完成" }[status] ?? "未通过");
   const showDetails = store((s) => s.expandedInboxDetails[item.workspaceId + "/" + workItem.workItemId] ?? false);
   const toggleDetails = store((s) => s.toggleInboxDetails);
   const showAgentSession = store((s) => s.showAgentSession);
@@ -207,13 +221,13 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
     <Card
       header={
         <>
-          <Badge>{workItem.merge?.acknowledgedAt ? "已处理" : "已合入"}</Badge>
-          <span className="ml-auto truncate text-caption text-muted-foreground">工单</span>
+          <Badge>{workItem.merge?.acknowledgedAt ? t("work.inbox.handled") : t("work.state.merged")}</Badge>
+          <span className="ml-auto truncate text-caption text-muted-foreground">{t("work.inbox.workItem")}</span>
         </>
       }
       footer={
         workItem.merge?.acknowledgedAt ? (
-          workItem.run.sessionId && <Button variant="ghost" size="sm" outlined onClick={() => showAgentSession(item.workspaceId, workItem.run.sessionId!)}>会话</Button>
+          workItem.run.sessionId && <Button variant="ghost" size="sm" outlined onClick={() => showAgentSession(item.workspaceId, workItem.run.sessionId!)}>{t("work.detail.session")}</Button>
         ) : rollingBack ? (
           <form
             className="flex min-w-0 flex-1 flex-wrap items-end gap-2"
@@ -223,15 +237,15 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
               void run(() => client.request("workItem.rollback", { workspaceId: item.workspaceId, workItemId: workItem.workItemId, reason: reason.trim() }));
             }}
           >
-            <Field kind="textarea" rows={2} label="回滚理由" autoFocus disabled={busy} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明需要修改的地方，Worker 会据此继续处理" className="w-full" />
-            <Button variant="primary" type="submit" disabled={busy || !reason.trim()}>确认回滚并续做</Button>
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => setRollingBack(false)}>取消</Button>
+            <Field kind="textarea" rows={2} label={t("work.inbox.rollbackReason")} autoFocus disabled={busy} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={t("work.inbox.rollbackPlaceholder")} className="w-full" />
+            <Button variant="primary" type="submit" disabled={busy || !reason.trim()}>{t("work.inbox.confirmRollback")}</Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => setRollingBack(false)}>{t("common.cancel")}</Button>
           </form>
         ) : (
           <>
-            <Button variant="primary" disabled={busy} onClick={() => void run(() => client.request("inbox.acknowledge", { workspaceId: item.workspaceId, workItemId: workItem.workItemId }))}>知道了</Button>
-            {workItem.merge?.commit && <Button disabled={busy} onClick={() => setRollingBack(true)}>附理由回滚</Button>}
-            {workItem.run.sessionId && <Button variant="ghost" size="sm" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, workItem.run.sessionId!)}>会话</Button>}
+            <Button variant="primary" disabled={busy} onClick={() => void run(() => client.request("inbox.acknowledge", { workspaceId: item.workspaceId, workItemId: workItem.workItemId }))}>{t("work.inbox.acknowledge")}</Button>
+            {workItem.merge?.commit && <Button disabled={busy} onClick={() => setRollingBack(true)}>{t("work.inbox.rollback")}</Button>}
+            {workItem.run.sessionId && <Button variant="ghost" size="sm" outlined className="ml-auto" onClick={() => showAgentSession(item.workspaceId, workItem.run.sessionId!)}>{t("work.detail.session")}</Button>}
           </>
         )
       }
@@ -244,7 +258,7 @@ const MergedCard = ({ store, item }: { store: WorkbenchStore; item: Extract<Inbo
         <ul className="mt-3 space-y-1">
           {workItem.verify.items.map((v) => (
             <li key={v.index} className="flex gap-2 text-label">
-              <Badge>{verificationLabel(verificationStatus(v))}</Badge>
+              <Badge>{verificationLabel(v.status)}</Badge>
               <span className="min-w-0 whitespace-pre-wrap break-words text-muted-foreground">{v.evidence}</span>
             </li>
           ))}

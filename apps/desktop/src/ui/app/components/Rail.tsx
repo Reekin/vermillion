@@ -1,6 +1,8 @@
 import { Inbox, PanelsTopLeft, Settings } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import type { Overlay, Panel } from "../workbench-store.js";
+import { t } from "../../../i18n/index.js";
+import { useT } from "../../../i18n/react.js";
 
 type RailProps = {
   panel: Panel;
@@ -10,15 +12,20 @@ type RailProps = {
   onOpenPage: (panel: Panel) => void;
 };
 
-const items: Array<{ id: Panel | Overlay; label: string; icon: typeof Inbox }> = [
-  { id: "workbench", label: "工作台", icon: PanelsTopLeft },
+const items = (): Array<{ id: Panel | Overlay; label: string; icon: typeof Inbox }> => [
+  { id: "workbench", label: t("app.rail.workbench"), icon: PanelsTopLeft },
   { id: "inbox", label: "Inbox", icon: Inbox },
-  { id: "settings", label: "设置", icon: Settings }
+  { id: "settings", label: t("app.settings"), icon: Settings }
 ];
 
-export const Rail = ({ panel, overlay, inboxCount, onSelect, onOpenPage }: RailProps) => (
-  <nav className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-border-strong bg-app-shell py-3" aria-label="主导航">
-    {items.map(({ id, label, icon: Icon }) => {
+export const Rail = (props: RailProps) => {
+  useT();
+  return <RailView {...props} />;
+};
+
+const RailView = ({ panel, overlay, inboxCount, onSelect, onOpenPage }: RailProps) => (
+  <nav className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-border-strong bg-app-shell py-3" aria-label={t("app.rail.label")}>
+    {items().map(({ id, label, icon: Icon }) => {
       const active = overlay ? overlay === id : panel === id;
       return (
         <button

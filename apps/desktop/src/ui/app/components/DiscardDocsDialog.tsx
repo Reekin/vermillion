@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import type { DocChange, WorkbenchClient } from "@vermillion/workbench/client";
 import { Modal } from "./Modal.js";
 import { Button, InlineNotice } from "./ui.js";
-
-const actionLabel = { added: "删除新增文件", modified: "还原修改", deleted: "恢复已删除文件" };
+import { useT } from "../../../i18n/react.js";
 
 export const DiscardDocsDialog = ({ client, workspaceId, path, sessionId, onClose }: {
   client: WorkbenchClient; workspaceId: string; path: string; sessionId?: string; onClose: () => void;
 }) => {
+  const t = useT();
+  const actionLabel: Record<DocChange["status"], string> = { added: t("docs.discard.added"), modified: t("docs.discard.modified"), deleted: t("docs.discard.deleted") };
   const [changes, setChanges] = useState<DocChange[]>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -31,20 +32,20 @@ export const DiscardDocsDialog = ({ client, workspaceId, path, sessionId, onClos
     } finally { setBusy(false); }
   };
   const close = () => { if (!busy) onClose(); };
-  return <Modal title="丢弃文档变更" onClose={close} width={560}>
+  return <Modal title={t("docs.discard.title")} onClose={close} width={560}>
     <div className="p-4">
-      <p className="text-body text-foreground">以下文件将恢复到最近一次提交的状态。未提交的修改会丢失。</p>
+      <p className="text-body text-foreground">{t("docs.discard.body")}</p>
       {changes ? changes.length ? <ul className="mt-3 max-h-60 overflow-auto rounded-md border border-border">
         {changes.map((change) => <li key={change.path} className="flex items-start gap-3 border-b border-border px-3 py-2 last:border-b-0">
           <span className="min-w-0 flex-1 break-all font-mono text-caption text-foreground">{change.path.replace(/^\.vermillion\/docs\//, "")}</span>
           <span className="shrink-0 text-caption text-muted-foreground">{actionLabel[change.status]}</span>
         </li>)}
-      </ul> : <InlineNotice className="mt-3 px-0">所选范围没有未提交的变更。</InlineNotice>
-        : !error && <InlineNotice className="mt-3 px-0">正在读取变更…</InlineNotice>}
+      </ul> : <InlineNotice className="mt-3 px-0">{t("docs.discard.none")}</InlineNotice>
+        : !error && <InlineNotice className="mt-3 px-0">{t("docs.discard.loading")}</InlineNotice>}
       {error && <InlineNotice tone="error" className="mt-3 px-0">{error}</InlineNotice>}
       <div className="mt-4 flex justify-end gap-2">
-        <Button variant="ghost" onClick={close} disabled={busy}>取消</Button>
-        <Button onClick={() => void discard()} disabled={busy || !changes?.length}>{busy ? "正在丢弃…" : "丢弃变更"}</Button>
+        <Button variant="ghost" onClick={close} disabled={busy}>{t("common.cancel")}</Button>
+        <Button onClick={() => void discard()} disabled={busy || !changes?.length}>{busy ? t("docs.discard.busy") : t("docs.discard.submit")}</Button>
       </div>
     </div>
   </Modal>;

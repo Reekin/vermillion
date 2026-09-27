@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { writeClipboardImage } from "./clipboard.js";
+import { t } from "../../i18n/index.js";
 
 export type ImageLightboxState = {
   src: string;
@@ -81,9 +82,9 @@ export const ImageLightbox = ({
           onClose: () => setMenu(undefined),
           onCopy: () => {
             void writeClipboardImage(image.src)
-              .then(() => setNotice({ message: "图片已复制" }))
+              .then(() => setNotice({ message: t("session.imageCopied") }))
               .catch((error: unknown) => setNotice({
-                message: `复制图片失败：${error instanceof Error ? error.message : String(error)}`,
+                message: t("session.copyImageFailed", { error: error instanceof Error ? error.message : String(error) }),
                 error: true
               }));
           }

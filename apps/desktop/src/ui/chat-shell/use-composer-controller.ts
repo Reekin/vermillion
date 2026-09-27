@@ -28,6 +28,7 @@ import type {
 } from "@vermillion/shared";
 import { readSessionExecutionProfile } from "@vermillion/shared";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
+import { t } from "../../i18n/index.js";
 import {
   createComposerAttachments,
   extractPastedMessageImages,
@@ -173,10 +174,10 @@ export const goalCommandBlockedReason = (
   threadGoal?: ThreadGoal
 ): string | undefined => {
   if (command?.kind === "set" && threadGoal) {
-    return "已有目标，先用 /goal clear 清除再设置新目标";
+    return t("session.goalExistsClearFirst");
   }
   if (command?.kind === "edit") {
-    return "暂不支持编辑目标，先用 /goal clear 清除再设置新目标";
+    return t("session.goalEditUnsupported");
   }
   return undefined;
 };
@@ -507,7 +508,7 @@ export const useComposerController = (
         setDraftProfileReady(true);
       }).catch((error: unknown) => {
         if (!cancelled) input.onStatusNotice({
-          message: "读取草稿配置失败", detail: String(error),
+          message: t("session.readDraftConfigFailed"), detail: String(error),
           source: "send"
         });
       });
@@ -702,7 +703,7 @@ export const useComposerController = (
           setModelCatalog(undefined);
           setIsExecutionLoading(false);
           input.onStatusNotice({
-            message: "读取模型列表失败", detail: (error as Error).message,
+            message: t("session.readModelsFailed"), detail: (error as Error).message,
             source: "settings",
             ...statusNoticeErrorDetails(error)
           });
@@ -743,7 +744,7 @@ export const useComposerController = (
             slashSuggestions: []
           });
           input.onStatusNotice({
-            message: "读取会话能力失败", detail: (error as Error).message,
+            message: t("session.readCapabilitiesFailed"), detail: (error as Error).message,
             source: "send",
             ...statusNoticeErrorDetails(error)
           });
@@ -775,7 +776,7 @@ export const useComposerController = (
         setAvailableSkills([]);
         setIsSkillsLoading(false);
         input.onStatusNotice({
-          message: "读取技能列表失败", detail: (error as Error).message,
+          message: t("session.readSkillsFailed"), detail: (error as Error).message,
           persistent: true,
           source: "send",
           ...statusNoticeErrorDetails(error)
@@ -1028,7 +1029,7 @@ export const useComposerController = (
     }
     onDraftChange("");
     reportSendNotice({
-      message: "已加入发送队列",
+      message: t("session.addedToQueue"),
       source: "send"
     });
   };
@@ -1052,7 +1053,7 @@ export const useComposerController = (
     setIsDispatching(true);
     reportSendNotice({
       message:
-        payload.mode === "steer" ? "正在引导当前回合…" : "正在发送…",
+        payload.mode === "steer" ? t("session.steeringTurn") : t("session.sendingEllipsis"),
       persistent: true,
       source: "send"
     });
@@ -1092,14 +1093,14 @@ export const useComposerController = (
         }
       }
       reportSendNotice({
-        message: payload.mode === "steer" ? "已发送引导" : "已发送",
+        message: payload.mode === "steer" ? t("session.steerSent") : t("session.sent"),
         source: "send"
       });
       input.onRequestTranscriptBottom?.(sessionId);
       return true;
     } catch (error) {
       reportSendNotice({
-        message: "发送失败，查看详情后重试", detail: (error as Error).message,
+        message: t("session.sendFailedRetry"), detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1120,17 +1121,16 @@ export const useComposerController = (
     if (!input.activeSessionId) {
       return false;
     }
-    const actionLabel =
-      command.kind === "clear"
-        ? "正在清除目标"
-        : command.kind === "pause"
-          ? "正在暂停目标"
-          : command.kind === "resume"
-            ? "正在恢复目标"
-            : "正在设置目标";
     setIsDispatching(true);
     reportSendNotice({
-      message: `${actionLabel}…`,
+      message:
+        command.kind === "clear"
+          ? t("session.goalClearing")
+          : command.kind === "pause"
+            ? t("session.goalPausing")
+            : command.kind === "resume"
+              ? t("session.goalResuming")
+              : t("session.goalSetting"),
       persistent: true,
       source: "send"
     });
@@ -1156,18 +1156,18 @@ export const useComposerController = (
       reportSendNotice({
         message:
           command.kind === "clear"
-            ? "目标已清除"
+            ? t("session.goalCleared")
             : command.kind === "pause"
-              ? "目标已暂停"
+              ? t("session.goalPausedNotice")
               : command.kind === "resume"
-                ? "目标已恢复"
-                : "目标已设置",
+                ? t("session.goalResumed")
+                : t("session.goalSet"),
         source: "send"
       });
       return true;
     } catch (error) {
       reportSendNotice({
-        message: "目标操作失败", detail: (error as Error).message,
+        message: t("session.goalActionFailed"), detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1192,7 +1192,7 @@ export const useComposerController = (
     const goalCommand = parseGoalSlashCommand(draft);
     if (goalCommand?.kind === "empty") {
       reportSendNotice({
-        message: "在 /goal 后写上目标内容",
+        message: t("session.goalMissingObjective"),
         source: "send"
       });
       return;
@@ -1214,7 +1214,7 @@ export const useComposerController = (
         getAttachmentsForSession().length > 0
       ) {
         reportSendNotice({
-          message: "/goal 命令只使用其后的文字",
+          message: t("session.goalTextOnly"),
           source: "send"
         });
         return;
@@ -1294,7 +1294,7 @@ export const useComposerController = (
         await input.onCancelBranchSend?.(cancellableBranchSend.operationId);
       } catch (error) {
         reportSendNotice({
-          message: "取消发送失败", detail: (error as Error).message,
+          message: t("session.cancelSendFailed"), detail: (error as Error).message,
           persistent: true,
           source: "send",
           ...statusNoticeErrorDetails(error)
@@ -1312,12 +1312,12 @@ export const useComposerController = (
         turnId: interruptTurnId
       });
       reportSendNotice({
-        message: "已请求停止",
+        message: t("session.stopRequested"),
         source: "send"
       });
     } catch (error) {
       reportSendNotice({
-        message: "停止失败", detail: (error as Error).message,
+        message: t("session.stopFailed"), detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1421,7 +1421,7 @@ export const useComposerController = (
     }
     if (!capabilities.supportsAttachments) {
       reportSendNotice({
-        message: "当前会话不支持附件",
+        message: t("session.attachmentsUnsupported"),
         source: "send"
       });
       return;
@@ -1466,7 +1466,7 @@ export const useComposerController = (
     }
     void appendComposerAttachments(files, "paste").catch((error) => {
       reportSendNotice({
-        message: "粘贴附件失败", detail: (error as Error).message,
+        message: t("session.pasteAttachmentFailed"), detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)
@@ -1516,7 +1516,7 @@ export const useComposerController = (
     }
     void appendComposerAttachments(files, "drop").catch((error) => {
       reportSendNotice({
-        message: "拖入附件失败", detail: (error as Error).message,
+        message: t("session.dropAttachmentFailed"), detail: (error as Error).message,
         persistent: true,
         source: "send",
         ...statusNoticeErrorDetails(error)

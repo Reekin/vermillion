@@ -38,24 +38,29 @@ import "./app.css";
 import { SessionNavigationContext, renderSessionNavigation } from "./session-navigation.js";
 import type { SessionNavigation } from "@vermillion/workbench/client";
 import type { SearchHit } from "@vermillion/workbench/client";
+import { t } from "../../i18n/index.js";
+import { useLocale } from "../../i18n/react.js";
+import { useLocaleSync } from "./use-locale-sync.js";
 
 type AppProps = {
   sessionStore: RendererStore;
   transport: DesktopTransport;
 };
 
-const tabs: Array<{ id: WorkspaceSection; label: string }> = [
-  { id: "sessions", label: "会话" },
-  { id: "workItems", label: "工作" },
-  { id: "domains", label: "领域" },
-  { id: "roles", label: "角色" },
+const tabs = (): Array<{ id: WorkspaceSection; label: string }> => [
+  { id: "sessions", label: t("app.tab.sessions") },
+  { id: "workItems", label: t("app.tab.work") },
+  { id: "domains", label: t("app.tab.domains") },
+  { id: "roles", label: t("app.tab.roles") },
   { id: "issues", label: "Issues" },
-  { id: "automation", label: "自动化" },
-  { id: "manage", label: "管理" }
+  { id: "automation", label: t("app.tab.automations") },
+  { id: "manage", label: t("app.tab.manage") }
 ];
 
 
 export const App = ({ sessionStore, transport }: AppProps) => {
+  useLocaleSync(sessionStore, transport);
+  const locale = useLocale();
   const store = useMemo(() => createWorkbenchStore(createRendererWorkbenchClient()), []);
   const outputStore = useMemo(() => createOutputStore(), []);
   const reportNotice = useCallback((notice: ComposerStatusNotice) => outputStore.getState().report(notice), [outputStore]);
@@ -119,12 +124,13 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const renderFileLinkContextMenu = useCallback(({ path, location, target, onCopy, ...props }: MessageFileLinkMenuProps) => (
     <ContextMenu {...props} zIndex={1001}
       items={[
-        { key: "copy-path", label: "复制路径", onSelect: () => onCopy(path) },
+        { key: "copy-path", label: t("app.menu.copyPath"), onSelect: () => onCopy(path) },
         ...(location
-          ? [{ key: "copy-location", label: "复制文件位置", onSelect: () => onCopy(target) }]
+          ? [{ key: "copy-location", label: t("app.menu.copyLocation"), onSelect: () => onCopy(target) }]
           : [])
       ]} />
-  ), []);
+  // Rebuilt on a language switch so the menu labels follow it.
+  ), [locale]);
   const openSearchDoc = useCallback((hit: SearchHit) => {
     if (!hit.path) return;
     setSearchOpen(false);
@@ -205,7 +211,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     }
     const fallback = engines[0]?.engineId;
     if (!fallback) {
-      throw new Error("没有可用的会话引擎。");
+      throw new Error(t("app.error.noEngine"));
     }
     return fallback;
   }, [transport]);
@@ -224,7 +230,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
   const createSession = useCallback(
     async ({ execution }: { execution?: SessionExecutionProfileInput }) => {
       const workspace = draftWorkspaceId ? workspaceById.get(draftWorkspaceId) : undefined;
-      if (!workspace) throw new Error("请先在 Composer 里选择一个 workspace。");
+      if (!workspace) throw new Error(t("app.error.pickWorkspaceInComposer"));
       const engineId = await resolveNewSessionEngineId();
       const created = await transport.sessionBrowser.create({
         workspaceId: workspace.workspaceId,
@@ -299,9 +305,9 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             onClearNotice={() => { sessionActions.clearNotice(); if (sidebar.error) void sidebar.reload(); }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <Tabs items={tabs.map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab.id === "workItems" && workAttentionCount ? { ...tab, count: workAttentionCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)}>
+            <Tabs items={tabs().map((tab) => tab.id === "issues" && issueUnreadCount ? { ...tab, count: issueUnreadCount } : tab.id === "workItems" && workAttentionCount ? { ...tab, count: workAttentionCount } : tab)} selected={section} onSelect={(id) => store.getState().setWorkspaceSection(id as WorkspaceSection)}>
               {section === "sessions"
-                ? <Button className="vm-docs-toggle" size="sm" variant="ghost" aria-expanded={docsExplorerOpen} onClick={() => setDocsExplorerOpen((open) => !open)}>文档栏</Button>
+                ? <Button className="vm-docs-toggle" size="sm" variant="ghost" aria-expanded={docsExplorerOpen} onClick={() => setDocsExplorerOpen((open) => !open)}>{t("app.docsToggle")}</Button>
                 : <WorkspaceSwitcher store={store} />}
             </Tabs>
             <div className={section === "sessions" ? "vm-conversation-layout" : "hidden"}>
@@ -322,7 +328,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   renderTurnNavigation={renderSessionNavigation}
                   renderChatTree={(props) => <WorkbenchChatTree {...props} client={store.getState().client} transport={transport} />}
                   renderImageContextMenu={({ onCopy, ...props }) => <ContextMenu {...props} zIndex={1001}
-                    items={[{ key: "copy-image", label: "复制图片", onSelect: onCopy }]} />}
+                    items={[{ key: "copy-image", label: t("app.menu.copyImage"), onSelect: onCopy }]} />}
                   renderFileLinkContextMenu={renderFileLinkContextMenu}
                   composerHeader={currentWorkRequest || currentWorkItem || currentDecisions.length > 0 ? <>
                     {sessionWorkspaceId && <CurrentWorkBar key={currentWorkItem?.workItemId ?? currentWorkRequest?.requestId ?? workSessionId} client={store.getState().client} workspaceId={sessionWorkspaceId}
@@ -330,20 +336,20 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                       request={currentWorkRequest} item={currentWorkItem} hasDecision={currentDecisions.length > 0}
                       onOpenSession={(id) => void openSessionTarget(sessionWorkspaceId, id)}
                       onOpenWorkItem={currentWorkItem ? () => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: currentWorkItem.workItemId }) : undefined} />}
-                    {currentDecisions.length > 0 && <section className="vm-decision-context" aria-label="决策回复">
-                      {currentDecisions.length > 1 ? <Select aria-label="选择待回复决策" compact value={currentDecision?.decisionId ?? ""} placeholder="选择要回复的决策"
+                    {currentDecisions.length > 0 && <section className="vm-decision-context" aria-label={t("app.decision.region")}>
+                      {currentDecisions.length > 1 ? <Select aria-label={t("app.decision.pickLabel")} compact value={currentDecision?.decisionId ?? ""} placeholder={t("app.decision.pickPlaceholder")}
                         options={currentDecisions.map((card) => ({ value: card.decisionId, label: card.question }))}
                         onChange={(decisionId) => setDecisionMode({ sessionId: workSessionId, decisionId, ordinary: true })} /> : <p className="vm-decision-context__question">{currentDecision?.question}</p>}
                       <div className="vm-decision-context__modes">
-                        <Button size="sm" variant="ghost" disabled={!currentDecision} aria-pressed={answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: false })}>回复此决策</Button>
-                        <Button size="sm" variant="ghost" aria-pressed={!answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: true })}>普通消息</Button>
+                        <Button size="sm" variant="ghost" disabled={!currentDecision} aria-pressed={answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: false })}>{t("app.decision.answerMode")}</Button>
+                        <Button size="sm" variant="ghost" aria-pressed={!answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: true })}>{t("app.decision.ordinaryMode")}</Button>
                       </div>
                     </section>}
                   </> : undefined}
                   composerSubmitOverride={answeringDecision && currentDecision && sessionWorkspaceId ? {
-                    label: "发送决策答复", placeholder: "写下你的决定…",
+                    label: t("app.decision.send"), placeholder: t("app.decision.placeholder"),
                     submit: async (payload) => {
-                      if (payload.attachments?.length) throw new Error("决策答复使用文字；附件可切换为普通消息发送。");
+                      if (payload.attachments?.length) throw new Error(t("app.decision.noAttachments"));
                       await store.getState().client.request("decision.answer", { workspaceId: sessionWorkspaceId, decisionId: currentDecision.decisionId, note: payload.content });
                       setDecisionMode({ ordinary: true });
                     }
@@ -354,14 +360,14 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                   </>}
                 />
               </main>
-              <aside className="vm-conversation-docs border-l border-border-strong bg-app-shell" data-open={docsExplorerOpen} aria-label="文档">
-                <div className="vm-docs-close"><Button size="sm" variant="ghost" onClick={() => setDocsExplorerOpen(false)}>收起文档栏</Button></div>
+              <aside className="vm-conversation-docs border-l border-border-strong bg-app-shell" data-open={docsExplorerOpen} aria-label={t("app.docsRegion")}>
+                <div className="vm-docs-close"><Button size="sm" variant="ghost" onClick={() => setDocsExplorerOpen(false)}>{t("app.docsCollapse")}</Button></div>
                 <DocsPanel store={store} onFileAction={onFileAction} primaryAction={
                   <StartWorkButton {...workTarget} composer={composerActions} onStart={async (input) => {
                     const workspaceId = sessionId ? sessionWorkspaceId : draftWorkspaceId;
-                    if (!workspaceId) throw new Error("请先选择 workspace。");
+                    if (!workspaceId) throw new Error(t("app.error.pickWorkspace"));
                     await store.getState().client.request("work.start", { workspaceId, ...input });
-                    store.getState().setDocCommit({ kind: "work", title: openSession?.title ?? "当前会话" });
+                    store.getState().setDocCommit({ kind: "work", title: openSession?.title ?? t("app.currentSession") });
                   }} />
                 } />
               </aside>
@@ -376,7 +382,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
           <InboxPanel store={store} includeProcessed={overlay !== "inbox" && panel === "inbox"} />
         </Modal>
         <Modal contained presentation={overlay === "settings" ? "modal" : "hidden"}
-          title="设置" width={640} onClose={closeOverlay}>
+          title={t("app.settings")} width={640} onClose={closeOverlay}>
           <SettingsPage transport={transport} sessionStore={sessionStore} />
         </Modal>
       </div>

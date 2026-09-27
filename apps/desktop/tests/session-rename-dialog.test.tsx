@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "../src/i18n/index.js";
 import { SessionRenameDialog } from "../src/ui/app/components/SessionRenameDialog.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setLocale("zh");
+});
 
 describe("SessionRenameDialog", () => {
   it("blocks unchanged and blank titles, then submits a trimmed edited title", async () => {
@@ -36,5 +40,13 @@ describe("SessionRenameDialog", () => {
     view.rerender(<SessionRenameDialog {...props} busy={false} error="Save failed" />);
     expect(screen.getByText("Save failed")).toBeTruthy();
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "会话标题" }).disabled).toBe(false);
+  });
+
+  it("switches its labels when the interface language changes", () => {
+    render(<SessionRenameDialog title="当前标题" busy={false} error={undefined} onSubmit={vi.fn()} onClose={vi.fn()} />);
+    act(() => setLocale("en"));
+    expect(screen.getByRole("dialog", { name: "Rename session" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Session title" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
   });
 });

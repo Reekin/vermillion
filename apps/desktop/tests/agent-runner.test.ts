@@ -182,7 +182,7 @@ describe("AgentRunner recovery", () => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       listSessions: () => [{ sessionId: "design", engineId: "codex" }],
-      getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
+      getSettings: vi.fn().mockResolvedValue({ locale: "zh", executionPreferencesByEngineId: {} }),
       runSessionAction: vi.fn().mockImplementation(async (input: { action: string }) =>
         input.action === "fork"
           ? { action: "fork", status: "forked", forkedSessionId: "ask-session" }
@@ -226,7 +226,7 @@ describe("AgentRunner recovery", () => {
     const shell = {
       ensureSessionLoadedForRead: vi.fn().mockResolvedValue(true),
       listSessions: () => [{ sessionId: "design", engineId: "codex" }],
-      getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
+      getSettings: vi.fn().mockResolvedValue({ locale: "zh", executionPreferencesByEngineId: {} }),
       runSessionAction: vi.fn().mockImplementation(async (input: { action: string }) =>
         input.action === "fork" ? { action: "fork", status: "forked", forkedSessionId: "ask-session" } : { action: "archive", archived: true }),
       setSessionTitle: vi.fn().mockResolvedValue(undefined),
@@ -312,7 +312,7 @@ describe("AgentRunner recovery", () => {
       listEngines: () => [{ engineId: "codex", displayName: "Codex" }],
       listWorkspaces: async () => ({ workspaces: [{ workspaceId: "workspace", absolutePath: "I:/workspace" }] }),
       getChatTree: async () => ({ treeId: "tree" }),
-      getSettings: async () => ({ executionPreferencesByEngineId: {} }),
+      getSettings: async () => ({ locale: "zh", executionPreferencesByEngineId: {} }),
       getSnapshot: () => ({ turns: cached ? [{ sessionId: "source", turnId: "turn", status: "completed" }] : [] }),
       runSessionAction: vi.fn().mockResolvedValue({ action: "fork", status: "forked", forkedSessionId: "worker" }),
       setSessionTitle: vi.fn(), openSession: vi.fn()
@@ -363,7 +363,7 @@ describe("AgentRunner recovery", () => {
       getSnapshot: vi.fn().mockReturnValue({ sessions: [{ sessionId: "worker", metadata: { providerSessionId: "provider-thread" } }], turns: [] }),
       updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
       setSessionTitle: vi.fn().mockResolvedValue(undefined),
-      getSettings: vi.fn().mockResolvedValue({ executionPreferencesByEngineId: {} }),
+      getSettings: vi.fn().mockResolvedValue({ locale: "zh", executionPreferencesByEngineId: {} }),
       openSession: vi.fn().mockRejectedValue(new Error("Open session cancelled."))
     };
     const runner = createAgentRunner(shell as unknown as Parameters<typeof createAgentRunner>[0]);

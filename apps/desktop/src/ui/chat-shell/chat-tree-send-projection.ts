@@ -1,4 +1,5 @@
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
+import { t } from "../../i18n/index.js";
 
 /** Operation nodes occupy the same sibling slot while their real turn is being created. */
 export const projectChatTreeSends = (
@@ -18,7 +19,7 @@ export const projectChatTreeSends = (
     nodes.push({
       nodeId: operation.operationId,
       parentNodeId: operation.nodeId,
-      label: operation.content.trim().slice(0, 80) || "附件",
+      label: operation.content.trim().slice(0, 80) || t("session.attachment"),
       order: baseOrder + index,
       isCurrent: false
     });

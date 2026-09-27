@@ -7,6 +7,8 @@ import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-sig
 import { writeClipboardText } from "../../chat-shell/clipboard.js";
 import { cn } from "../lib/cn.js";
 import { Button, IconButton } from "./ui.js";
+import { formatClock } from "../../../i18n/format.js";
+import { useLocale, useT } from "../../../i18n/react.js";
 import {
   countOutput,
   engineWarningDetails,
@@ -14,8 +16,8 @@ import {
   matchesOutputFilter,
   outputEntryConfigPath,
   outputEntryDetails,
-  severityLabels,
-  sourceLabels,
+  severityLabel,
+  sourceLabel,
   statusBarDismissDelayMs,
   formatRelativeTime,
   type OutputSeverity,
@@ -27,7 +29,8 @@ const allSeverities: OutputSeverity[] = ["error", "warning", "info"];
 
 const SeverityIcon = ({ severity, className, size = 14 }: { severity: OutputSeverity; className?: string; size?: number }) => {
   const Icon = severityIcons[severity];
-  return <Icon size={size} aria-label={severityLabels[severity]} className={cn("vm-output-icon", className)} data-severity={severity} />;
+  useT();
+  return <Icon size={size} aria-label={severityLabel(severity)} className={cn("vm-output-icon", className)} data-severity={severity} />;
 };
 
 /** Paths show the file name first with its folder after it; the full path is in the tooltip. */
@@ -36,7 +39,7 @@ const fileName = (path: string): string => {
   return parts.length > 1 ? `${parts.at(-1)} · ${parts.at(-2)}` : path;
 };
 
-const formatTime = (at: string): string => new Date(at).toLocaleTimeString([], { hour12: false });
+const formatTime = (at: string): string => formatClock(new Date(at), true);
 
 /** Monospace details: section titles and labels muted, values in the body colour; text matches what is copied. */
 const DetailCode = ({ text }: { text: string }) => (
@@ -81,6 +84,7 @@ export type OutputStatusProps = {
 
 /** Status bar summary of the output (latest notice and problem counts) and the output panel it opens. */
 export const OutputStatus = ({ store, sessionStore, transport, onOpenSession, sessionTitle }: OutputStatusProps) => {
+  const t = useT();
   const entries = store((state) => state.entries);
   const warnings = store((state) => state.warnings);
   const latestId = store((state) => state.latestId);
@@ -120,7 +124,7 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession, se
         </button>
       )}
       {latest && <span className="vm-output-separator" aria-hidden="true" />}
-      <Popover.Trigger render={<button type="button" className="vm-output-counts" aria-label={`输出：${counts.error} 个错误，${counts.warning} 个警告`} />}>
+      <Popover.Trigger render={<button type="button" className="vm-output-counts" aria-label={t("app.output.countsLabel", { errors: counts.error, warnings: counts.warning })} />}>
         {(["error", "warning"] as const).map((severity) => (
           <span key={severity} className="vm-output-count" data-zero={counts[severity] === 0}>
             <SeverityIcon severity={severity} size={12} />{counts[severity]}
@@ -129,7 +133,7 @@ export const OutputStatus = ({ store, sessionStore, transport, onOpenSession, se
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="top" align="end" sideOffset={6} className="z-50">
-          <Popover.Popup aria-label="输出" className="vm-output-panel" initialFocus={searchRef}>
+          <Popover.Popup aria-label={t("app.output.title")} className="vm-output-panel" initialFocus={searchRef}>
             <OutputPanel store={store} engineLabels={engineLabels} searchRef={searchRef} onOpenSession={onOpenSession} sessionTitle={sessionTitle} onClose={() => setOpen(false)} />
           </Popover.Popup>
         </Popover.Positioner>
@@ -146,6 +150,8 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTit
   sessionTitle?: (sessionId: string) => string | undefined;
   onClose: () => void;
 }) => {
+  const t = useT();
+  const locale = useLocale();
   const entries = store((state) => state.entries);
   const warnings = store((state) => state.warnings);
   const [severities, setSeverities] = useState<ReadonlySet<OutputSeverity>>(new Set(allSeverities));
@@ -158,22 +164,22 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTit
     const filter = { severities, text };
     const problems = warnings.map((warning, index): Row => ({
       key: `problem-${warning.engineId}-${index}`, group: "problems", severity: "warning", at: warning.at, firstAt: warning.at,
-      source: `${warning.engineLabel} 配置`, message: engineWarningReason(warning.engineLabel).title, next: engineWarningReason(warning.engineLabel).next,
+      source: t("app.output.engineConfigSource", { engine: warning.engineLabel }), message: engineWarningReason(warning.engineLabel).title, next: engineWarningReason(warning.engineLabel).next,
       count: 1, details: engineWarningDetails(warning),
-      meta: [<span key="engine">引擎 {warning.engineLabel}</span>, ...(warning.path ? [<span key="path" title={warning.path}>配置 {fileName(warning.path)}</span>] : [])]
+      meta: [<span key="engine">{t("app.output.metaEngine", { value: warning.engineLabel })}</span>, ...(warning.path ? [<span key="path" title={warning.path}>{t("app.output.metaConfig", { value: fileName(warning.path) })}</span>] : [])]
     }));
     const events = entries.map((entry): Row => ({
       key: entry.id, group: "events", severity: entry.severity, at: entry.at, firstAt: entry.firstAt,
-      source: entry.source ? sourceLabels[entry.source] : "应用", message: entry.message, count: entry.count,
+      source: entry.source ? sourceLabel(entry.source) : t("app.output.sourceApp"), message: entry.message, count: entry.count,
       details: outputEntryDetails(entry), sessionId: entry.sessionId,
       meta: [
-        ...(entry.sessionId ? [<span key="session">会话 {sessionTitle?.(entry.sessionId) ?? entry.sessionId}</span>] : []),
-        ...(entry.engineId ? [<span key="engine">引擎 {engineLabels[entry.engineId] ?? entry.engineId}</span>] : []),
-        ...(outputEntryConfigPath(entry) ? [<span key="path" title={outputEntryConfigPath(entry)}>配置 {fileName(outputEntryConfigPath(entry)!)}</span>] : [])
+        ...(entry.sessionId ? [<span key="session">{t("app.output.metaSession", { value: sessionTitle?.(entry.sessionId) ?? entry.sessionId })}</span>] : []),
+        ...(entry.engineId ? [<span key="engine">{t("app.output.metaEngine", { value: engineLabels[entry.engineId] ?? entry.engineId })}</span>] : []),
+        ...(outputEntryConfigPath(entry) ? [<span key="path" title={outputEntryConfigPath(entry)}>{t("app.output.metaConfig", { value: fileName(outputEntryConfigPath(entry)!) })}</span>] : [])
       ]
     }));
     return [...problems, ...events].filter((row) => matchesOutputFilter(filter, row.severity, [row.message, row.source, row.details]));
-  }, [engineLabels, entries, sessionTitle, severities, text, warnings]);
+  }, [engineLabels, entries, sessionTitle, severities, text, warnings, locale, t]);
 
   // Without a choice, show the newest error: it is usually why the panel was opened.
   const selected = rows.find((row) => row.key === selectedKey)
@@ -222,10 +228,10 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTit
   return (
     <>
       <div className="vm-output-toolbar">
-        <span className="vm-output-title">输出</span>
-        <div className="vm-output-filters" role="group" aria-label="按级别筛选">
+        <span className="vm-output-title">{t("app.output.title")}</span>
+        <div className="vm-output-filters" role="group" aria-label={t("app.output.filterBySeverity")}>
           {allSeverities.map((severity) => (
-            <button key={severity} type="button" aria-pressed={severities.has(severity)} title={`显示${severityLabels[severity]}`}
+            <button key={severity} type="button" aria-pressed={severities.has(severity)} title={t("app.output.showSeverity", { severity: severityLabel(severity) })}
               onClick={() => toggleSeverity(severity)}>
               <SeverityIcon severity={severity} />{counts[severity]}
             </button>
@@ -233,33 +239,33 @@ const OutputPanel = ({ store, engineLabels, searchRef, onOpenSession, sessionTit
         </div>
         <label className="vm-output-search">
           <Search size={14} aria-hidden="true" />
-          <input ref={searchRef} data-ui-raw="search box inside the output popover" value={text} placeholder="筛选"
-            aria-label="筛选输出" onChange={(event) => setText(event.target.value)} />
+          <input ref={searchRef} data-ui-raw="search box inside the output popover" value={text} placeholder={t("app.output.filter")}
+            aria-label={t("app.output.filterLabel")} onChange={(event) => setText(event.target.value)} />
         </label>
-        <IconButton icon={Trash2} label="清空事件记录" disabled={!entries.length} onClick={() => store.getState().clear()} />
-        <IconButton icon={X} label="关闭" onClick={onClose} />
+        <IconButton icon={Trash2} label={t("app.output.clear")} disabled={!entries.length} onClick={() => store.getState().clear()} />
+        <IconButton icon={X} label={t("common.close")} onClick={onClose} />
       </div>
       <ul className="vm-output-list">
-        {renderGroup("problems", "当前问题")}
-        {renderGroup("events", "事件记录")}
-        {!rows.length && <li className="vm-output-empty">{entries.length || warnings.length ? "没有符合筛选的记录" : "暂无输出"}</li>}
+        {renderGroup("problems", t("app.output.problems"))}
+        {renderGroup("events", t("app.output.events"))}
+        {!rows.length && <li className="vm-output-empty">{entries.length || warnings.length ? t("app.output.noMatches") : t("app.output.empty")}</li>}
       </ul>
       {selected && (
-        <section className="vm-output-detail" aria-label="详情">
+        <section className="vm-output-detail" aria-label={t("app.output.detail")}>
           <div className="vm-output-detail__head">
             <span className="vm-output-level" data-severity={selected.severity}>
-              <SeverityIcon severity={selected.severity} />{severityLabels[selected.severity]}
+              <SeverityIcon severity={selected.severity} />{severityLabel(selected.severity)}
             </span>
             <span>{selected.source}</span>
-            <span className="vm-output-time">{selected.count > 1 ? `${formatTime(selected.firstAt)} – ${formatTime(selected.at)} · 出现 ${selected.count} 次` : formatTime(selected.at)}</span>
+            <span className="vm-output-time">{selected.count > 1 ? t("app.output.occurrences", { first: formatTime(selected.firstAt), last: formatTime(selected.at), count: selected.count }) : formatTime(selected.at)}</span>
             <span className="vm-output-detail__actions">
               {selected.sessionId && onOpenSession && (
                 <Button size="sm" variant="ghost" outlined onClick={() => { if (onOpenSession(selected.sessionId!)) onClose(); }}>
-                  <ExternalLink size={14} aria-hidden="true" />打开会话
+                  <ExternalLink size={14} aria-hidden="true" />{t("app.output.openSession")}
                 </Button>
               )}
               <Button size="sm" variant="ghost" outlined onClick={copy}>
-                <Copy size={14} aria-hidden="true" />{copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : "复制"}
+                <Copy size={14} aria-hidden="true" />{copyState === "copied" ? t("common.copied") : copyState === "failed" ? t("app.output.copyFailed") : t("common.copy")}
               </Button>
             </span>
           </div>

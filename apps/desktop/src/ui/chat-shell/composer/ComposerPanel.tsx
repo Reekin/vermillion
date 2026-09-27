@@ -18,6 +18,8 @@ import type {
   ThreadGoal
 } from "@vermillion/shared";
 import { Button } from "../Button.js";
+import { t } from "../../../i18n/index.js";
+import { useT } from "../../../i18n/react.js";
 import type { ComposerAttachment } from "../composer-attachments.js";
 import type { ImageLightboxState } from "../ImageLightbox.js";
 import {
@@ -76,17 +78,14 @@ const formatContextUsageLabel = (contextUsage: ContextUsage): string => {
   return `${percent}% · ${usedTokens}/${formatTokenCount(contextUsage.contextWindow)}`;
 };
 
-const threadGoalStatusLabels: Record<ThreadGoal["status"], string> = {
-  active: "进行中",
-  paused: "已暂停",
-  blocked: "受阻",
-  usageLimited: "用量已达上限",
-  budgetLimited: "预算已达上限",
-  complete: "已完成"
-};
-
-const threadGoalStatusLabel = (status: ThreadGoal["status"]): string =>
-  threadGoalStatusLabels[status];
+const threadGoalStatusLabel = (status: ThreadGoal["status"]): string => ({
+  active: t("session.goalActive"),
+  paused: t("session.goalPaused"),
+  blocked: t("session.goalBlocked"),
+  usageLimited: t("session.goalUsageLimited"),
+  budgetLimited: t("session.goalBudgetLimited"),
+  complete: t("session.goalComplete")
+})[status];
 
 const formatThreadGoalUsage = (goal: ThreadGoal): string | undefined => {
   if (!goal.tokenBudget) {
@@ -110,7 +109,7 @@ export const ComposerPanel = ({
   threadGoal,
   beforeEditor,
   submitLabel,
-  placeholder = "继续交谈，或补充工作要求…",
+  placeholder = t("session.composerPlaceholder"),
   extraExecutionControls,
   intent,
   supportsSteer,
@@ -206,6 +205,7 @@ export const ComposerPanel = ({
   onRespondApproval?: (input: ApprovalResponseInput) => Promise<void>;
   onRespondInteraction?: (input: InteractionResponseInput) => Promise<void>;
 }): ReactElement => {
+  useT();
   const [editorHeight, setEditorHeight] = useState(composerEditorMinHeight);
   const selectedModel = models.find(
     (model) => model.modelId === selectedExecution?.modelId
@@ -291,7 +291,7 @@ export const ComposerPanel = ({
     />
     {beforeEditor ? <div className="awb-composer__before-editor">{beforeEditor}</div> : null}
     {selectedSkills.length > 0 ? (
-      <div className="awb-composer-skills" aria-label="已选技能">
+      <div className="awb-composer-skills" aria-label={t("session.selectedSkills")}>
         {selectedSkills.map((skill) => (
           <article key={skill.id} className="awb-composer-skill">
             <div className="awb-composer-skill__copy">
@@ -311,7 +311,7 @@ export const ComposerPanel = ({
       </div>
     ) : null}
     {attachments.length > 0 ? (
-      <div className="awb-composer__attachments" aria-label="附件">
+      <div className="awb-composer__attachments" aria-label={t("session.attachment")}>
         {attachments.map((attachment) => (
           <article
             key={attachment.attachment.attachmentId}
@@ -327,7 +327,7 @@ export const ComposerPanel = ({
                     alt: attachment.displayName
                   })
                 }
-                aria-label={`预览 ${attachment.displayName}`}
+                aria-label={t("session.previewItem", { name: attachment.displayName })}
                 disabled={!onPreviewAttachment}
               >
                 <img src={attachment.previewUrl} alt={attachment.displayName} />
@@ -347,7 +347,7 @@ export const ComposerPanel = ({
               variant="ghost"
               size="sm"
               className="awb-composer__attachment-remove"
-              aria-label={`移除 ${attachment.displayName}`}
+              aria-label={t("session.removeItem", { name: attachment.displayName })}
               onClick={() => onRemoveAttachment(attachment.attachment.attachmentId)}
             >
               ×
@@ -357,7 +357,7 @@ export const ComposerPanel = ({
       </div>
     ) : null}
     {pendingApprovals.length > 0 ? (
-      <section className="awb-composer-approvals" aria-label="待审批">
+      <section className="awb-composer-approvals" aria-label={t("session.pendingApprovals")}>
         <ApprovalFlowView
           approvals={pendingApprovals}
           onRespond={onRespondApproval}
@@ -365,7 +365,7 @@ export const ComposerPanel = ({
       </section>
     ) : null}
     {pendingInteractions.length > 0 ? (
-      <section className="awb-composer-approvals" aria-label="待回答">
+      <section className="awb-composer-approvals" aria-label={t("session.pendingAnswers")}>
         <InteractionFlowView
           interactions={pendingInteractions}
           onRespond={onRespondInteraction}
@@ -375,7 +375,7 @@ export const ComposerPanel = ({
     <div className="awb-composer-panel__editor">
       <textarea
         ref={textareaRef}
-        aria-label="消息"
+        aria-label={t("session.messageInput")}
         placeholder={placeholder}
         value={draft}
         onChange={(event) =>
@@ -391,13 +391,13 @@ export const ComposerPanel = ({
         onPaste={onPaste}
       />
       <div className="awb-composer-panel__editor-bottom">
-        <span className="awb-composer__input-hint">Enter 发送 · Shift + Enter 换行</span>
+        <span className="awb-composer__input-hint">{t("session.inputHint")}</span>
         <Button
           variant="primary"
           size="icon"
           className="awb-composer__primary-action"
-          aria-label={primaryAction === "stop" ? "停止" : submitLabel ?? (primaryAction === "steer" ? "补充到当前轮次" : "发送")}
-          title={primaryAction === "stop" ? "停止" : submitLabel ?? (primaryAction === "steer" ? "补充到当前轮次" : "发送")}
+          aria-label={primaryAction === "stop" ? t("session.stop") : submitLabel ?? (primaryAction === "steer" ? t("session.steer") : t("session.send"))}
+          title={primaryAction === "stop" ? t("session.stop") : submitLabel ?? (primaryAction === "steer" ? t("session.steer") : t("session.send"))}
           onClick={() =>
             primaryAction === "stop" ? void onStop() : void onPrimaryAction()
           }
@@ -424,11 +424,11 @@ export const ComposerPanel = ({
         {threadGoal ? (
           <div
             className={`awb-composer-goal awb-composer-goal--${threadGoal.status}`}
-            aria-label={`目标 ${threadGoalStatusLabel(threadGoal.status)}: ${threadGoal.objective}`}
+            aria-label={t("session.goalAria", { status: threadGoalStatusLabel(threadGoal.status), objective: threadGoal.objective })}
             title={threadGoal.objective}
           >
             <span className="awb-composer-goal__dot" aria-hidden="true" />
-            <span className="awb-composer-goal__label">目标</span>
+            <span className="awb-composer-goal__label">{t("session.goal")}</span>
             <span className="awb-composer-goal__status">
               {threadGoalStatusLabel(threadGoal.status)}
             </span>
@@ -445,7 +445,7 @@ export const ComposerPanel = ({
       </div>
       <div className="awb-composer__right-rail">
         {isExecutionLoading || models.length > 0 || extraExecutionControls ? (
-          <div className="awb-composer-execution" aria-label="本轮配置">
+          <div className="awb-composer-execution" aria-label={t("session.turnConfig")}>
             {extraExecutionControls}
             <ExecutionConfigControl
               models={models}
@@ -464,7 +464,7 @@ export const ComposerPanel = ({
         {contextUsage ? (
           <div
             className="awb-composer-context"
-            aria-label={`上下文用量 ${formatContextUsageLabel(contextUsage)}`}
+            aria-label={t("session.contextUsageAria", { usage: formatContextUsageLabel(contextUsage) })}
             tabIndex={0}
             style={
               {
@@ -476,7 +476,7 @@ export const ComposerPanel = ({
           >
             <span className="awb-composer-context__ring" aria-hidden="true" />
             <span className="awb-composer-context__tooltip" role="tooltip">
-              上下文 {formatContextUsageLabel(contextUsage)}
+              {t("session.contextUsage", { usage: formatContextUsageLabel(contextUsage) })}
             </span>
           </div>
         ) : null}

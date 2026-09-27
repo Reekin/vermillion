@@ -579,7 +579,7 @@ export class SessionShellService {
     const displayTitle = (title: string | undefined): string => {
       const value = title?.trim();
       return !value || /^codex-thread:[0-9a-f-]+$/i.test(value) || /^rollout-.*\.jsonl$/i.test(value)
-        ? "未命名会话"
+        ? ""
         : value;
     };
     const activityAt = (entry: typeof entries[number]): string | undefined =>

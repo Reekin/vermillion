@@ -409,6 +409,7 @@ describe("SessionShellService", () => {
   it("reads and updates persisted shell settings through the workspace registry", async () => {
     const ready = vi.fn().mockResolvedValue(undefined);
     const getState = vi.fn().mockReturnValue({
+      locale: "zh",
       defaultNewSessionEngineId: "pi",
       allowedModelIdsByEngineId: { codex: ["gpt-5.5-codex"] },
       customModelReasoningOptionIdsByEngineId: {
@@ -417,6 +418,7 @@ describe("SessionShellService", () => {
       executionPreferencesByEngineId: savedExecutionPreferences
     });
     const updateSettings = vi.fn().mockResolvedValue(undefined);
+    const notifySettingsChanged = vi.fn();
     const selectEngine = vi.fn().mockReturnValue({
       selectedEngineId: "codex"
     });
@@ -427,13 +429,15 @@ describe("SessionShellService", () => {
           getState,
           updateSettings
         }),
-        selectEngine
+        selectEngine,
+        notifySettingsChanged
       } as never,
       sessionCatalog: {} as never,
       sessionActions: {} as never,
     });
 
     await expect(service.getSettings()).resolves.toEqual({
+      locale: "zh",
       defaultNewSessionEngineId: "pi",
       engineProgramPathsByEngineId: {},
       engineProgramResolutionsByEngineId: {},
@@ -446,6 +450,7 @@ describe("SessionShellService", () => {
     });
 
     getState.mockReturnValue({
+      locale: "zh",
       defaultNewSessionEngineId: "codex",
       allowedModelIdsByEngineId: { codex: ["gpt-5.5-codex"] },
       customModelReasoningOptionIdsByEngineId: {
@@ -458,6 +463,7 @@ describe("SessionShellService", () => {
         defaultNewSessionEngineId: "codex"
       })
     ).resolves.toEqual({
+      locale: "zh",
       defaultNewSessionEngineId: "codex",
       engineProgramPathsByEngineId: {},
       engineProgramResolutionsByEngineId: {},
@@ -468,6 +474,7 @@ describe("SessionShellService", () => {
       },
       executionPreferencesByEngineId: savedExecutionPreferences
     });
+    expect(notifySettingsChanged).toHaveBeenCalledTimes(1);
     expect(updateSettings).toHaveBeenCalledWith({
       defaultNewSessionEngineId: "codex"
     });

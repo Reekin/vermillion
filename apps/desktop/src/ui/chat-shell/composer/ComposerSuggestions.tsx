@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactElement } from "react";
+import { useT } from "../../../i18n/react.js";
 import type { ComposerSuggestionState } from "./composer-types.js";
 
 export const ComposerSuggestions = ({
@@ -10,6 +11,7 @@ export const ComposerSuggestions = ({
   onHover: (index: number) => void;
   onSelect: (index: number) => Promise<void>;
 }): ReactElement | null => {
+  const t = useT();
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
@@ -33,10 +35,10 @@ export const ComposerSuggestions = ({
   return (
     <div className="awb-composer-suggestions" role="listbox">
       {suggestions.loading && suggestions.items.length === 0 ? (
-        <div className="awb-composer-suggestions__empty">加载中…</div>
+        <div className="awb-composer-suggestions__empty">{t("common.loading")}</div>
       ) : null}
       {!suggestions.loading && suggestions.items.length === 0 ? (
-        <div className="awb-composer-suggestions__empty">没有匹配项</div>
+        <div className="awb-composer-suggestions__empty">{t("session.noMatches")}</div>
       ) : null}
       {suggestions.items.map((item, index) => (
         <button

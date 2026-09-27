@@ -2438,10 +2438,10 @@ export class CodexAppServerRuntimePort
         const itemId = String(params.itemId ?? requestId);
         const title =
           method === "item/fileChange/requestApproval"
-            ? "批准文件修改"
+            ? "Approve file changes"
             : method === "item/permissions/requestApproval"
-              ? "批准额外权限"
-              : "批准运行命令";
+              ? "Approve additional permissions"
+              : "Approve command";
         const details = [
           typeof params.reason === "string" ? params.reason : undefined,
           typeof params.command === "string" ? params.command : undefined,

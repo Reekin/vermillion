@@ -5,6 +5,7 @@ import {
 } from "@vermillion/shared";
 import { DiffDialog } from "../../../ui/app/components/DiffDialog.js";
 import { Button } from "../../../ui/chat-shell/Button.js";
+import { useT } from "../../../i18n/react.js";
 
 export type CodexTurnChangesExtensionProps = {
   sessionId: string;
@@ -46,6 +47,7 @@ export const CodexTurnChangesExtension = ({
   canUndo,
   onUndoTurn
 }: CodexTurnChangesExtensionProps): ReactElement | null => {
+  const t = useT();
   const mergedDiff = useMemo(
     () =>
       changedFiles
@@ -74,7 +76,7 @@ export const CodexTurnChangesExtension = ({
     try {
       const result = await onUndoTurn({ sessionId, turnId });
       if (!result.undone) {
-        setUndoError(result.errorMessage ?? "撤销失败。");
+        setUndoError(result.errorMessage ?? t("session.undoFailed"));
         return;
       }
       setIsUndone(true);
@@ -86,9 +88,9 @@ export const CodexTurnChangesExtension = ({
   };
 
   return (
-    <section className="vm-changes" aria-label="文件变更">
+    <section className="vm-changes" aria-label={t("session.fileChanges")}>
       <header className="vm-changes__header">
-        <span className="vm-changes__title">{summary.fileCount} 个文件变更</span>
+        <span className="vm-changes__title">{t("session.fileChangeCount", { count: summary.fileCount })}</span>
         <span className="vm-changes__stats">
           <span className="is-add">+{summary.linesAdded}</span>
           <span className="is-delete">−{summary.linesDeleted}</span>
@@ -100,11 +102,11 @@ export const CodexTurnChangesExtension = ({
           onClick={() => void onUndo()}
           disabled={!onUndoTurn || !canUndo || isUndoing || isUndone}
         >
-          {isUndone ? "已撤销" : isUndoing ? "撤销中…" : "撤销"}
+          {isUndone ? t("session.undone") : isUndoing ? t("session.undoing") : t("session.undo")}
         </Button>
       </header>
       {undoError && <p className="vm-changes__notice" role="alert">{undoError}</p>}
-      {isUndone && <p className="vm-changes__notice">本轮改动已在本地撤销。</p>}
+      {isUndone && <p className="vm-changes__notice">{t("session.turnUndone")}</p>}
       <ul className="vm-changes__list">
         {changedFiles.map((file) => {
           const fileSummary = summarizeUnifiedDiff(file.diff);

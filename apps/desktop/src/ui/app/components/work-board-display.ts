@@ -1,4 +1,5 @@
 import type { DecisionCard, WorkflowAction, WorkItem, WorkRequest } from "@vermillion/workbench/client";
+import { t } from "../../../i18n/index.js";
 import { isOpenWorkItem, isOpenWorkRequest } from "./task-labels.js";
 import { workItemAttention, workRequestAttention, type Attention } from "./workflow-display.js";
 export { isOpenWorkItem, isOpenWorkRequest, isPreparingWork } from "./task-labels.js";
@@ -6,7 +7,7 @@ export { isOpenWorkItem, isOpenWorkRequest, isPreparingWork } from "./task-label
 /** Board groups, in display order: what needs the user, what is moving on its own, what has ended. */
 export type BoardSection = "attention" | "active" | "ended";
 export const boardSections: BoardSection[] = ["attention", "active", "ended"];
-export const boardSectionLabel: Record<BoardSection, string> = { attention: "需要你处理", active: "进行中", ended: "已结束" };
+export const boardSectionLabel = (section: BoardSection): string => t(`work.board.section.${section}`);
 
 /** `open` is the default view: every unfinished group plus the most recent ended entries. */
 export type BoardFilter = "attention" | "active" | "open" | "ended" | "all";

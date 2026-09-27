@@ -1,6 +1,8 @@
 import { startTransition, useState, type ReactElement } from "react";
 import type { RuntimeInteraction } from "@vermillion/shared";
 import { Button } from "./Button.js";
+import { t } from "../../i18n/index.js";
+import { useT } from "../../i18n/react.js";
 import { ParticipantIdentityBadge } from "./ParticipantIdentityBadge.js";
 import {
   buildParticipantDirectory,
@@ -41,7 +43,7 @@ const questionLabelFor = (question: unknown, index: number): string =>
   "question" in question &&
   typeof question.question === "string"
     ? question.question
-    : `问题 ${index + 1}`;
+    : t("session.questionNumber", { number: index + 1 });
 
 const parseJsonObject = (value: string): Record<string, unknown> | undefined => {
   if (!value.trim()) {
@@ -49,7 +51,7 @@ const parseJsonObject = (value: string): Record<string, unknown> | undefined => 
   }
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("回复必须是 JSON 对象。");
+    throw new Error(t("session.replyMustBeObject"));
   }
   return parsed as Record<string, unknown>;
 };
@@ -59,6 +61,7 @@ export const InteractionFlowView = ({
   participantDirectory = defaultDirectory,
   onRespond
 }: InteractionFlowViewProps): ReactElement => {
+  useT();
   const [answerByKey, setAnswerByKey] = useState<Record<string, string>>({});
   const [contentByRequestId, setContentByRequestId] = useState<Record<string, string>>({});
   const [inFlightByRequestId, setInFlightByRequestId] = useState<Record<string, boolean>>({});
@@ -132,7 +135,7 @@ export const InteractionFlowView = ({
   };
 
   if (interactions.length === 0) {
-    return <p className="awb-detail__empty">这一轮没有待回答的问题。</p>;
+    return <p className="awb-detail__empty">{t("session.noPendingQuestions")}</p>;
   }
 
   return (
@@ -187,7 +190,7 @@ export const InteractionFlowView = ({
               </div>
             ) : (
               <label className="awb-approval-item__details">
-                <span>回复内容</span>
+                <span>{t("session.replyContent")}</span>
                 <textarea
                   value={contentByRequestId[interaction.requestId] ?? "{}"}
                   disabled={disabled}

@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { WorkflowAction } from "@vermillion/workbench/client";
-import { actionRoleLabel, actionStatusText, executionDuration, formatDuration, integrationFailureSummary, integrationProgress, integrationShortStatus, readableFailure, waitingActions, workItemEvents, workItemProgress, workItemSteps } from "../src/ui/app/components/workflow-display.js";
+import { formatDuration } from "../src/i18n/format.js";
+import { setLocale } from "../src/i18n/index.js";
+import { actionRoleLabel, actionStatusText, executionDuration, integrationFailureSummary, integrationProgress, integrationShortStatus, readableFailure, waitingActions, workItemEvents, workItemProgress, workItemSteps } from "../src/ui/app/components/workflow-display.js";
 import { agentRun, execution, integration, workItem } from "./workbench-fixtures.js";
+
+afterEach(() => setLocale("zh"));
 
 describe("execution and integration presentation", () => {
   it("associates blocked actions with their single work item", () => {
@@ -137,5 +141,12 @@ describe("execution and integration presentation", () => {
     expect(formatDuration(87_000)).toBe("1 分 27 秒");
     expect(formatDuration(52 * 60_000)).toBe("52 分钟");
     expect(formatDuration(185 * 60_000)).toBe("3 小时 5 分");
+  });
+
+  it("follows the interface language", () => {
+    setLocale("en");
+    expect(integrationProgress(integration({ actionId: "merge", workItemId: "one", status: "decision" }))).toBe("Merge blocked");
+    expect(readableFailure("turn interrupted")).toEqual({ title: "This turn was interrupted", next: "Retry to continue in the original session." });
+    expect(workItemSteps(workItem({ workItemId: "one", status: "queued" }), [], [])[0]!.label).toBe("Queued");
   });
 });

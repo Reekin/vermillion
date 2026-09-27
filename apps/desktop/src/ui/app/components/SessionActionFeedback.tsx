@@ -2,6 +2,7 @@ import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import type { SessionMenu } from "../use-session-actions.js";
 import { cn } from "../lib/cn.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { useT } from "../../../i18n/react.js";
 
 type Props<TAction extends string> = {
   menu: SessionMenu<TAction> | undefined;
@@ -16,13 +17,14 @@ type Props<TAction extends string> = {
 export const SessionActionFeedback = <TAction extends string = SessionActionDescriptorRpc["action"]>(
   { menu, onCloseMenu, onRunAction, onOpenRename, notice, onClearNotice }: Props<TAction>
 ) => {
+  const t = useT();
   const renameTitle = menu?.title;
   return (
     <>
       {notice && (
         <div role="status" className={cn("flex items-start gap-2 border-t border-border px-4 py-2 text-caption", notice.error ? "text-strong" : "text-muted-foreground")}>
           <span className="min-w-0 flex-1 break-words">{notice.text}</span>
-          {notice.error && <button type="button" className="shrink-0 text-faint-foreground hover:text-foreground" onClick={onClearNotice}>关闭</button>}
+          {notice.error && <button type="button" className="shrink-0 text-faint-foreground hover:text-foreground" onClick={onClearNotice}>{t("common.close")}</button>}
         </div>
       )}
       {menu && (

@@ -24,6 +24,7 @@ import { Select as BaseSelect } from "@base-ui/react/select";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Button as ShellButton } from "../../chat-shell/Button.js";
 import { cn } from "../lib/cn.js";
+import { t } from "../../../i18n/index.js";
 export { ConfigurationSelect, ConfigurationButton } from "../../chat-shell/composer/ConfigurationControl.js";
 export { SourceEditor } from "./SourceEditor.js";
 export { MarkdownPreview } from "./MarkdownPreview.js";
@@ -183,7 +184,7 @@ export const StatusDot = ({ status }: { status: "none" | "running" | "unread_com
   <span data-session-status={status} className="inline-flex h-1.5 w-1.5 shrink-0 items-center justify-center">
     {status !== "none" && (
       <span
-        aria-label={status === "running" ? "进行中" : "已完成未读"}
+        aria-label={status === "running" ? t("app.ui.running") : t("app.ui.completedUnread")}
         className={cn("h-1.5 w-1.5 rounded-full", status === "running" ? "animate-pulse bg-status-running" : "bg-status-unread")}
       />
     )}
@@ -258,7 +259,7 @@ export const Select = ({ value, options, onChange, label, hint, placeholder, dis
         onValueChange={(next) => { if (typeof next === "string" && next !== value) onChange(next); }}>
         <BaseSelect.Trigger aria-label={ariaLabel ?? (typeof label === "string" ? label : undefined)}
           className={cn("vm-select-trigger", label && "mt-1.5")} data-compact={compact || undefined} data-plain={plain || undefined}>
-          <span className="vm-select-value" data-placeholder={selected ? undefined : ""}>{selected?.label ?? placeholder ?? "请选择"}</span>
+          <span className="vm-select-value" data-placeholder={selected ? undefined : ""}>{selected?.label ?? placeholder ?? t("app.ui.selectPlaceholder")}</span>
           <ChevronDown size={14} aria-hidden="true" className="shrink-0 text-muted-foreground" />
         </BaseSelect.Trigger>
         <BaseSelect.Portal>
@@ -348,14 +349,14 @@ export const StatusBar = ({ icon: Icon, label, notice, children, open, onOpenCha
   /** Right-aligned status items such as the output summary. */
   trailing?: ReactNode;
 }) => (
-  <footer aria-label="状态条" className="flex h-8 shrink-0 items-center gap-1 border-t border-border-strong bg-app-shell px-2">
+  <footer aria-label={t("app.ui.statusBar")} className="flex h-8 shrink-0 items-center gap-1 border-t border-border-strong bg-app-shell px-2">
     <div role="status" className="min-w-0 max-w-full truncate text-caption text-foreground" title={notice}>
       {notice ?? (
         <Popover.Root open={open} onOpenChange={onOpenChange}>
           <Popover.Trigger render={<Button variant="ghost" size="sm" />}><Icon size={13} aria-hidden="true" />{label}</Popover.Trigger>
           <Popover.Portal>
             <Popover.Positioner side="top" align="start" sideOffset={6} className="z-50">
-              <Popover.Popup aria-label="当前工单" className={floatingPanelClass}>
+              <Popover.Popup aria-label={t("app.status.title")} className={floatingPanelClass}>
                 {children}
               </Popover.Popup>
             </Popover.Positioner>
@@ -406,18 +407,18 @@ export const Checkbox = ({ label, checked, indeterminate, disabled, onChange }: 
 export const Stepper = ({ label, value, min, max, disabled, onChange }: { label: string; value: number; min: number; max: number; disabled?: boolean; onChange: (value: number) => void }) => (
   <span className="vm-stepper">
     {label}<span className="vm-stepper-control">
-      <IconButton icon={Minus} label={"减少" + label} disabled={disabled || value <= min} onClick={() => onChange(value - 1)} />
+      <IconButton icon={Minus} label={t("app.ui.decrease", { label })} disabled={disabled || value <= min} onClick={() => onChange(value - 1)} />
       <output aria-label={label}>{value}</output>
-      <IconButton icon={Plus} label={"增加" + label} disabled={disabled || value >= max} onClick={() => onChange(value + 1)} />
+      <IconButton icon={Plus} label={t("app.ui.increase", { label })} disabled={disabled || value >= max} onClick={() => onChange(value + 1)} />
     </span>
   </span>
 );
 
 /** Page tabs. `count` marks items that need the user; zero is not shown. `children` sits at the bar's right end. */
 export const Tabs = ({ items, selected, onSelect, children }: { items: Array<{ id: string; label: string; count?: number }>; selected: string; onSelect: (id: string) => void; children?: ReactNode }) => (
-  <nav className="vm-tabs" aria-label="工作台分页">
+  <nav className="vm-tabs" aria-label={t("app.ui.tabs")}>
     {items.map((item) => <button key={item.id} type="button" aria-current={selected === item.id ? "page" : undefined} onClick={() => onSelect(item.id)}>
-      {item.label}{item.count ? <span className="vm-tab-count" aria-label={`${item.count} 项需要处理`}>{item.count}</span> : null}
+      {item.label}{item.count ? <span className="vm-tab-count" aria-label={t("app.ui.tabAttention", { count: item.count })}>{item.count}</span> : null}
     </button>)}
     {children && <div className="vm-tabs__end">{children}</div>}
   </nav>
@@ -613,7 +614,7 @@ export const DetailSection = ({ title, children }: { title: string; children: Re
 );
 
 /** Controlled disclosure for supplementary technical text; parents retain expansion across panel changes. */
-export const CollapsibleDetails = ({ title = "技术详情", open, onToggle, children }: { title?: string; open: boolean; onToggle: () => void; children: string }) => (
+export const CollapsibleDetails = ({ title = t("app.technicalDetails"), open, onToggle, children }: { title?: string; open: boolean; onToggle: () => void; children: string }) => (
   <div className="mt-3">
     <Button type="button" variant="ghost" size="sm" aria-expanded={open} onClick={onToggle}>
       {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}{title}

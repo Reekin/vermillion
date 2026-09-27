@@ -18,6 +18,8 @@ import { createDesktopTransport } from "../../transport/desktop-transport.js";
 import { resolveLocalFileLinkTarget } from "./local-markdown-target.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { writeClipboardText } from "./clipboard.js";
+import { t } from "../../i18n/index.js";
+import { useT } from "../../i18n/react.js";
 
 /** What the application shell needs to render the right-click menu of a message file link. */
 export type MessageFileLinkMenuProps = {
@@ -440,13 +442,13 @@ const useFileLinkMenu = (
 
   const copy = (text: string): void => {
     void writeClipboardText(text)
-      .then(() => showNote({ message: "已复制" }))
+      .then(() => showNote({ message: t("common.copied") }))
       .catch((cause: unknown) => {
         if (!window.sessionDesktop) {
           console.error("File link clipboard write failed.", cause);
         }
         showNote({
-          message: `复制失败：${cause instanceof Error ? cause.message : String(cause)}`,
+          message: t("session.copyFailed", { error: cause instanceof Error ? cause.message : String(cause) }),
           error: true
         });
       });
@@ -495,11 +497,11 @@ const LocalFileLink = ({ href, children, renderFileLinkContextMenu }: {
   const open = async (): Promise<void> => {
     setError(undefined);
     try {
-      if (!window.session || !target) throw new Error("无法打开本地文件。");
+      if (!window.session || !target) throw new Error(t("session.openLocalFileFailed"));
       const result = await createDesktopTransport(window.session).file.runAction({ path: target.path, action: "open" });
-      if (!result.ok) throw new Error(result.errorMessage ?? "无法打开本地文件。");
+      if (!result.ok) throw new Error(result.errorMessage ?? t("session.openLocalFileFailed"));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法打开本地文件。");
+      setError(cause instanceof Error ? cause.message : t("session.openLocalFileFailed"));
     }
   };
   return <>
@@ -526,6 +528,7 @@ const UnsupportedFileLink = ({ target, children, renderFileLinkContextMenu }: {
   children: ReactNode;
   renderFileLinkContextMenu?: RenderMessageFileLinkMenu;
 }): ReactElement => {
+  const t = useT();
   const { openMenu, note, menu } = useFileLinkMenu(
     renderFileLinkContextMenu,
     { path: target, target }
@@ -536,7 +539,7 @@ const UnsupportedFileLink = ({ target, children, renderFileLinkContextMenu }: {
       <code className="awb-message__unsupported-link-target" title={target}>
         {target}
       </code>
-      <span className="awb-message__file-link-note">无法直接打开</span>
+      <span className="awb-message__file-link-note">{t("session.cannotOpenDirectly")}</span>
       {note}
       {menu}
     </span>
@@ -609,7 +612,7 @@ export const renderMessageMarkdown = ({
             type="button"
             className="awb-inline-image-button"
             onClick={() =>
-              onPreviewImage({ src: previewSrc ?? src, alt: alt ?? "图片预览" })
+              onPreviewImage({ src: previewSrc ?? src, alt: alt ?? t("session.imagePreview") })
             }
           >
             <img src={previewSrc} alt={alt ?? ""} {...props} />
@@ -633,6 +636,7 @@ const MermaidFallbackCode = ({ source }: { source: string }): ReactElement => (
 );
 
 const MermaidBlock = ({ source, renderId }: MermaidBlockProps): ReactElement => {
+  const t = useT();
   const [state, setState] = useState<
     | { status: "pending" }
     | { status: "rendered"; svg: string }
@@ -642,7 +646,7 @@ const MermaidBlock = ({ source, renderId }: MermaidBlockProps): ReactElement => 
   useEffect(() => {
     let disposed = false;
     if (source.trim().length === 0) {
-      setState({ status: "failed", error: "Mermaid 图为空。" });
+      setState({ status: "failed", error: t("session.mermaidEmpty") });
       return () => {
         disposed = true;
       };
@@ -665,7 +669,7 @@ const MermaidBlock = ({ source, renderId }: MermaidBlockProps): ReactElement => 
         if (!disposed) {
           setState({
             status: "failed",
-            error: error instanceof Error ? error.message : "Mermaid 图渲染失败。"
+            error: error instanceof Error ? error.message : t("session.mermaidRenderFailed")
           });
         }
       });
@@ -676,7 +680,7 @@ const MermaidBlock = ({ source, renderId }: MermaidBlockProps): ReactElement => 
   }, [renderId, source]);
 
   return (
-    <figure className="awb-mermaid" aria-label="Mermaid 图">
+    <figure className="awb-mermaid" aria-label={t("session.mermaidDiagram")}>
       {state.status === "rendered" ? (
         <div
           className="awb-mermaid__surface"
@@ -703,6 +707,7 @@ export const MessageMarkdownView = memo(({
   renderFileLinkContextMenu,
   footer
 }: MessageMarkdownViewProps): ReactElement => {
+  const t = useT();
   const [isCopied, setIsCopied] = useState(false);
   const copyResetTimerRef = useRef<number | undefined>(undefined);
   const sourceText = block.text ?? "";
@@ -759,14 +764,14 @@ export const MessageMarkdownView = memo(({
           <button
             type="button"
             className={`awb-message__copy${isCopied ? " is-copied" : ""}`}
-            aria-label={isCopied ? "已复制消息" : "复制消息"}
-            title={isCopied ? "已复制" : "复制"}
+            aria-label={isCopied ? t("session.messageCopied") : t("session.copyMessage")}
+            title={isCopied ? t("common.copied") : t("common.copy")}
             onClick={() => {
               void writeClipboardText(copyText)
                 .then(showCopiedFeedback)
                 .catch((error) => {
                   if (!window.sessionDesktop) {
-                    console.error("复制消息失败。", error);
+                    console.error("Message clipboard write failed.", error);
                   }
                 });
             }}
@@ -842,10 +847,10 @@ export const MessageMarkdownView = memo(({
                 <section
                   key={`${block.blockId}:directive:${index}`}
                   className="awb-code-comment"
-                  aria-label="代码审阅意见"
+                  aria-label={t("session.codeReviewComment")}
                 >
                   <header className="awb-code-comment__header">
-                    <span className="awb-code-comment__eyebrow">审阅意见</span>
+                    <span className="awb-code-comment__eyebrow">{t("session.reviewComment")}</span>
                     {priorityLabel && (
                       <span className="awb-code-comment__priority">{priorityLabel}</span>
                     )}

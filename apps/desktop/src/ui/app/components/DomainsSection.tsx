@@ -3,43 +3,30 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DomainConfig, DomainDefinition, Issue, PatrolRun, WorkbenchClient } from "@vermillion/workbench/client";
 import { Button, Card, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, MarkdownPreview, OverflowMenu, PanelHeader, Select, SettingRow, StatusIcon, StatusPill, Toggle, type StatusTone } from "./ui.js";
 import { Modal } from "./Modal.js";
+import { t } from "../../../i18n/index.js";
+import { formatClock, formatMonthDay } from "../../../i18n/format.js";
+import { useT } from "../../../i18n/react.js";
 
 const DOMAINS_DIR = ".vermillion/docs/domains/";
 const DOCS_DIR = ".vermillion/docs/";
 /** Number of recent patrols summarized in the result strip. */
 const PATROL_STRIP_SIZE = 14;
 
-const DOMAIN_TEMPLATE = `---
-standards:
-  - .vermillion/docs/<业务>/Standards.md
----
-# <领域名>
-
-## 覆盖什么
-
-## 什么样的改动应该考虑它
-`;
-
-const patrolTrigger: Record<PatrolRun["trigger"], string> = { manual: "手动", change: "目录变更", scheduled: "定时" };
-const onOff = (value: boolean): string => value ? "已开启" : "当前关闭";
+const patrolTrigger = (trigger: PatrolRun["trigger"]): string =>
+  trigger === "manual" ? t("docs.domains.trigger.manual") : trigger === "change" ? t("docs.domains.trigger.change") : t("docs.domains.trigger.scheduled");
+const onOff = (value: boolean): string => value ? t("docs.domains.on") : t("docs.domains.off");
 const fileTitle = (path: string): string => path.split("/").at(-1)?.replace(/\.md$/i, "") || path;
 
-const formatDay = (value: string): string => {
-  const date = new Date(value);
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
-};
+const formatDay = (value: string): string => formatMonthDay(new Date(value));
 
-const clockTime = (value: string): string => {
-  const date = new Date(value);
-  return `${formatDay(value)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-};
+const clockTime = (value: string): string => `${formatDay(value)} ${formatClock(new Date(value))}`;
 
-/** Relative time for fresh records, month/day with time for older ones. */
+/** Relative time for records of the last day, month/day with time for older ones. */
 export const patrolTime = (value: string, now = Date.now()): string => {
   const minutes = Math.max(0, Math.floor((now - Date.parse(value)) / 60_000));
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
-  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} 小时前`;
+  if (minutes < 1) return t("common.justNow");
+  if (minutes < 60) return t("common.minutesAgo", { count: minutes });
+  if (minutes < 24 * 60) return t("common.hoursAgo", { count: Math.floor(minutes / 60) });
   return clockTime(value);
 };
 
@@ -67,19 +54,19 @@ export const groupPatrolRuns = (runs: PatrolRun[]): PatrolEntry[] => {
 
 /** "9月14日 至 9月15日 连续 4 次无新变更，已跳过"; a single skip keeps its own summary. */
 export const skippedSummary = (runs: PatrolRun[]): string => {
-  if (runs.length === 1) return runs[0]!.summary || "无新变更，已跳过";
+  if (runs.length === 1) return runs[0]!.summary || t("docs.domains.skippedOne");
   const oldest = formatDay(runs.at(-1)!.startedAt);
   const newest = formatDay(runs[0]!.startedAt);
-  return `${oldest === newest ? oldest : `${oldest} 至 ${newest}`} 连续 ${runs.length} 次无新变更，已跳过`;
+  return t("docs.domains.skippedMany", { range: oldest === newest ? oldest : t("docs.domains.dayRange", { from: oldest, to: newest }), count: runs.length });
 };
 
 /** Header state of the domain's patrol: a running patrol wins over the configured schedule. */
 const patrolState = (config: DomainConfig | undefined, runs: PatrolRun[]): { tone: StatusTone; label: string } => {
   const active = runs.find((run) => run.status === "running" || run.status === "queued");
-  if (active) return { tone: "running", label: active.status === "running" ? "巡检中" : "等待巡检" };
-  if (!config?.enabled) return { tone: "neutral", label: "自动巡检未启用" };
-  if (config.retryAt) return { tone: "failed", label: "上次巡检失败" };
-  return { tone: "done", label: "自动巡检已启用" };
+  if (active) return { tone: "running", label: active.status === "running" ? t("docs.domains.state.running") : t("docs.domains.state.queued") };
+  if (!config?.enabled) return { tone: "neutral", label: t("docs.domains.state.disabled") };
+  if (config.retryAt) return { tone: "failed", label: t("docs.domains.state.failed") };
+  return { tone: "done", label: t("docs.domains.state.enabled") };
 };
 
 /** Resolves a relative link inside a domain document to a workspace path under .vermillion/docs. */
@@ -99,6 +86,7 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
   onOpenDoc: (path: string) => void; onOpenInstruction: (domainId: string) => void; onOpenSession: (sessionId: string) => void;
   onOpenIssues: (domainId: string) => void;
 }) => {
+  const t = useT();
   const [selectedId, setSelectedId] = useState(domains[0]?.domainId ?? "");
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
@@ -128,7 +116,7 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
     setError(undefined);
     try {
       const path = DOMAINS_DIR + id + ".md";
-      await client.request("docs.write", { workspaceId, path, content: DOMAIN_TEMPLATE });
+      await client.request("docs.write", { workspaceId, path, content: t("docs.domains.template") });
       setDraft(""); setCreating(false); setSelectedId(id); onOpenDoc(path);
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
   };
@@ -161,20 +149,20 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
   };
   const target = domains.find((domain) => domain.domainId === removing);
   const listed = <div className="flex w-60 shrink-0 flex-col border-r border-border bg-app-shell">
-    <PanelHeader title="领域"><IconButton icon={Plus} label="新建领域" onClick={() => setCreating((value) => !value)} /></PanelHeader>
+    <PanelHeader title={t("docs.domains.title")}><IconButton icon={Plus} label={t("docs.domains.new")} onClick={() => setCreating((value) => !value)} /></PanelHeader>
     {creating && <form className="flex items-center gap-1 px-4 pb-2" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-      <Field value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="领域 id" className="w-28" /><Button type="submit" size="sm" disabled={!draft.trim()}>创建</Button>
+      <Field value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("docs.domains.idPlaceholder")} className="w-28" /><Button type="submit" size="sm" disabled={!draft.trim()}>{t("docs.create")}</Button>
     </form>}
     <ul className="min-h-0 flex-1 overflow-auto">{domains.map((domain) => <li key={domain.domainId}>
-      <ListRow title={<span className="vm-domain-item__title">{domain.title}{decisionDomains.has(domain.domainId) && <span className="vm-domain-item__mark" aria-label="有待决策的 Issue" />}</span>}
-        meta={`${domain.domainId} · ${domain.standards.length} 个规范`} selected={domain.domainId === selected?.domainId}
+      <ListRow title={<span className="vm-domain-item__title">{domain.title}{decisionDomains.has(domain.domainId) && <span className="vm-domain-item__mark" aria-label={t("docs.domains.hasDecision")} />}</span>}
+        meta={t("docs.domains.meta", { id: domain.domainId, count: domain.standards.length })} selected={domain.domainId === selected?.domainId}
         onClick={() => setSelectedId(domain.domainId)}
-        hoverActions={<IconButton icon={X} size={12} label={"删除领域：" + domain.title} onClick={() => setRemoving(domain.domainId)} />} />
+        hoverActions={<IconButton icon={X} size={12} label={t("docs.domains.deleteLabel", { title: domain.title })} onClick={() => setRemoving(domain.domainId)} />} />
     </li>)}</ul>
   </div>;
   if (!selected) return <div className="flex min-h-0 flex-1">
     {listed}
-    <EmptyState title="还没有领域定义" action={<Button onClick={() => setCreating(true)}>新建领域</Button>} />
+    <EmptyState title={t("docs.domains.empty")} action={<Button onClick={() => setCreating(true)}>{t("docs.domains.new")}</Button>} />
   </div>;
   const instructionPath = `.vermillion/roles/maintainer/${selected.domainId}.md`;
   const runs = patrolRuns.filter((patrol) => patrol.domainId === selected.domainId);
@@ -190,63 +178,63 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
           <span className="vm-domain-id">{selected.domainId}</span>
           <span className="ml-auto" />
           <StatusPill tone={state.tone}>{state.label}</StatusPill>
-          <Button size="sm" onClick={() => void run()}><RefreshCw size={14} aria-hidden="true" />立即巡检</Button>
-          <OverflowMenu label={"更多操作：" + selected.title} items={[{ label: "删除领域", onSelect: () => setRemoving(selected.domainId) }]} />
+          <Button size="sm" onClick={() => void run()}><RefreshCw size={14} aria-hidden="true" />{t("docs.domains.patrolNow")}</Button>
+          <OverflowMenu label={t("docs.moreActions", { name: selected.title })} items={[{ label: t("docs.domains.delete"), onSelect: () => setRemoving(selected.domainId) }]} />
         </header>
         {error && <InlineNotice tone="error" className="px-0">{error}</InlineNotice>}
         <div className="vm-domain-grid">
-          <Card header={<h3 className="vm-card-title">领域定义</h3>}>
-            {definition === undefined ? <p className="text-caption text-muted-foreground">正在读取领域定义…</p>
+          <Card header={<h3 className="vm-card-title">{t("docs.domains.definition")}</h3>}>
+            {definition === undefined ? <p className="text-caption text-muted-foreground">{t("docs.domains.definitionLoading")}</p>
               : <div className="vm-domain-definition"><MarkdownPreview content={definitionBody(definition)} documentUrl={documentUrl} onOpenLink={(href) => {
                 const path = resolveDocLink(selected.path, href);
                 if (path) onOpenDoc(path);
                 return Boolean(path);
               }} /></div>}
           </Card>
-          {config && <Card header={<h3 className="vm-card-title">巡检</h3>}>
-            <SettingRow label="自动巡检" state={config.enabled ? `已开启 · 下次检查 ${clockTime(config.nextRunAt)}` : "当前关闭"}
-              control={<Toggle labelHidden label="自动巡检" checked={config.enabled} onChange={(enabled) => void updateConfig({ enabled })} />} />
-            <SettingRow label="目录变更后巡检" state={`${onOff(config.changeTrigger)} · ${config.triggerPaths.length} 个触发目录`}
-              actions={<Button size="sm" variant="ghost" onClick={() => setPickingPaths(true)}>选择目录</Button>}
-              control={<Toggle labelHidden label="目录变更后巡检" checked={config.changeTrigger} onChange={(changeTrigger) => void updateConfig({ changeTrigger })} />} />
-            <SettingRow label="定时巡检" state={config.retryAt ? `上次失败，${clockTime(config.retryAt)} 重试` : undefined}
-              control={<Select compact aria-label="定时巡检间隔" className="w-28" value={String(config.intervalHours)} onChange={(value) => void updateConfig({ intervalHours: Number(value) })}
-                options={[3, 6, 12, 24, 48, 168].map((hours) => ({ value: String(hours), label: `每 ${hours} 小时` }))} />} />
-            <SettingRow label="允许自动开单" state={`${onOff(config.autoWorkEnabled)} · 授权范围 ${config.authorizationScope.length} 项`}
-              actions={<Button size="sm" variant="ghost" onClick={() => setEditingAuthorization(true)}>编辑范围</Button>}
-              control={<Toggle labelHidden label="允许自动开单" checked={config.autoWorkEnabled} onChange={(autoWorkEnabled) => void updateConfig({ autoWorkEnabled })} />} />
+          {config && <Card header={<h3 className="vm-card-title">{t("docs.domains.patrol")}</h3>}>
+            <SettingRow label={t("docs.domains.autoPatrol")} state={config.enabled ? t("docs.domains.autoPatrolNext", { time: clockTime(config.nextRunAt) }) : t("docs.domains.off")}
+              control={<Toggle labelHidden label={t("docs.domains.autoPatrol")} checked={config.enabled} onChange={(enabled) => void updateConfig({ enabled })} />} />
+            <SettingRow label={t("docs.domains.changePatrol")} state={t("docs.domains.changePatrolState", { state: onOff(config.changeTrigger), count: config.triggerPaths.length })}
+              actions={<Button size="sm" variant="ghost" onClick={() => setPickingPaths(true)}>{t("docs.domains.chooseDirectories")}</Button>}
+              control={<Toggle labelHidden label={t("docs.domains.changePatrol")} checked={config.changeTrigger} onChange={(changeTrigger) => void updateConfig({ changeTrigger })} />} />
+            <SettingRow label={t("docs.domains.scheduledPatrol")} state={config.retryAt ? t("docs.domains.retry", { time: clockTime(config.retryAt) }) : undefined}
+              control={<Select compact aria-label={t("docs.domains.interval")} className="w-28" value={String(config.intervalHours)} onChange={(value) => void updateConfig({ intervalHours: Number(value) })}
+                options={[3, 6, 12, 24, 48, 168].map((hours) => ({ value: String(hours), label: t("docs.domains.everyHours", { hours }) }))} />} />
+            <SettingRow label={t("docs.domains.autoWork")} state={t("docs.domains.autoWorkState", { state: onOff(config.autoWorkEnabled), count: config.authorizationScope.length })}
+              actions={<Button size="sm" variant="ghost" onClick={() => setEditingAuthorization(true)}>{t("docs.domains.editScope")}</Button>}
+              control={<Toggle labelHidden label={t("docs.domains.autoWork")} checked={config.autoWorkEnabled} onChange={(autoWorkEnabled) => void updateConfig({ autoWorkEnabled })} />} />
           </Card>}
         </div>
-        <Card header={<h3 className="vm-card-title">规范与指令 <span className="vm-card-title__count">{selected.standards.length + 2}</span></h3>}>
+        <Card header={<h3 className="vm-card-title">{t("docs.domains.standards")} <span className="vm-card-title__count">{selected.standards.length + 2}</span></h3>}>
           <ul>
-            <li><FileRow icon={<FileText size={14} />} name="领域定义" path={selected.path} onOpen={() => onOpenDoc(selected.path)} /></li>
+            <li><FileRow icon={<FileText size={14} />} name={t("docs.domains.definition")} path={selected.path} onOpen={() => onOpenDoc(selected.path)} /></li>
             {selected.standards.map((path) => <li key={path}><FileRow icon={<ShieldCheck size={14} />} name={fileTitle(path)} path={path} onOpen={() => onOpenDoc(path)} /></li>)}
-            <li><FileRow icon={<RefreshCw size={14} />} name="巡检指令" path={instructionPath} onOpen={() => onOpenInstruction(selected.domainId)} /></li>
+            <li><FileRow icon={<RefreshCw size={14} />} name={t("docs.domains.instruction")} path={instructionPath} onOpen={() => onOpenInstruction(selected.domainId)} /></li>
           </ul>
         </Card>
-        <Card header={<h3 className="vm-card-title">巡检记录 {runs.length > 0 && <span className="vm-card-title__count">最近 {recent.length} 次</span>}
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onOpenIssues(selected.domainId)}>相关 Issues</Button></h3>}>
+        <Card header={<h3 className="vm-card-title">{t("docs.domains.history")} {runs.length > 0 && <span className="vm-card-title__count">{t("docs.domains.recentCount", { count: recent.length })}</span>}
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onOpenIssues(selected.domainId)}>{t("docs.domains.relatedIssues")}</Button></h3>}>
           {runs.length ? <>
-            <div className="vm-patrol-strip" aria-label="最近巡检结果">
+            <div className="vm-patrol-strip" aria-label={t("docs.domains.recentResults")}>
               {[...recent].reverse().map((patrol) => <i key={patrol.patrolRunId} data-tone={patrolTone(patrol)} title={`${patrolTime(patrol.startedAt)} · ${patrol.summary ?? ""}`} />)}
             </div>
             <ul>{groupPatrolRuns(runs).map((entry) => entry.kind === "skipped"
               ? <li key={entry.runs[0]!.patrolRunId} className="vm-patrol-entry">
-                <StatusIcon tone="neutral" icon={Ban} label="已跳过" />
+                <StatusIcon tone="neutral" icon={Ban} label={t("docs.domains.skipped")} />
                 <span className="vm-patrol-entry__text">{skippedSummary(entry.runs)}</span>
                 <span className="vm-patrol-entry__time">{patrolTime(entry.runs[0]!.startedAt)}</span>
               </li>
               : <PatrolRow key={entry.run.patrolRunId} run={entry.run} onOpenSession={onOpenSession} onOpenIssues={() => onOpenIssues(selected.domainId)} />)}</ul>
-          </> : <p className="text-caption text-muted-foreground">暂无巡检记录。</p>}
+          </> : <p className="text-caption text-muted-foreground">{t("docs.domains.noHistory")}</p>}
         </Card>
       </div>
     </div>
-    {target && <Modal title={"删除 " + target.title} onClose={() => setRemoving(undefined)} width={460}>
+    {target && <Modal title={t("docs.domains.deleteTitle", { title: target.title })} onClose={() => setRemoving(undefined)} width={460}>
       <div className="space-y-3 p-4">
-        <p className="text-caption text-muted-foreground">删除后移除领域定义、巡检指令和巡检配置；该领域已有的 Issue 与巡检记录保留。领域定义的删除作为文档变更，随文档提交。</p>
+        <p className="text-caption text-muted-foreground">{t("docs.domains.deleteBody")}</p>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setRemoving(undefined)}>取消</Button>
-          <Button variant="primary" onClick={() => void removeDomain(target.domainId)}>删除领域</Button>
+          <Button variant="ghost" onClick={() => setRemoving(undefined)}>{t("common.cancel")}</Button>
+          <Button variant="primary" onClick={() => void removeDomain(target.domainId)}>{t("docs.domains.delete")}</Button>
         </div>
       </div>
     </Modal>}
@@ -265,21 +253,24 @@ const FileRow = ({ icon, name, path, onOpen }: { icon: ReactNode; name: string; 
   </button>
 );
 
-const patrolIcons: Record<PatrolTone, { tone: StatusTone; label: string }> = {
-  clean: { tone: "done", label: "无问题" }, issue: { tone: "attention", label: "发现问题" },
-  failed: { tone: "failed", label: "失败" }, running: { tone: "running", label: "巡检中" }
-};
+const patrolIcon = (tone: PatrolTone): { tone: StatusTone; label: string } =>
+  tone === "clean" ? { tone: "done", label: t("docs.domains.result.clean") }
+    : tone === "issue" ? { tone: "attention", label: t("docs.domains.result.issue") }
+      : tone === "failed" ? { tone: "failed", label: t("docs.domains.result.failed") }
+        : { tone: "running", label: t("docs.domains.state.running") };
 
 const PatrolRow = ({ run, onOpenSession, onOpenIssues }: { run: PatrolRun; onOpenSession: (sessionId: string) => void; onOpenIssues: () => void }) => {
+  const t = useT();
   const tone = patrolTone(run);
-  const title = run.summary || (run.status === "queued" ? "等待巡检" : tone === "issue" ? `发现 ${run.issueIds.length} 个问题` : patrolIcons[tone].label);
-  const meta = [patrolTrigger[run.trigger], run.changedPaths.length ? `${run.changedPaths.length} 个文件变更` : undefined].filter(Boolean).join(" · ");
+  const icon = patrolIcon(tone);
+  const title = run.summary || (run.status === "queued" ? t("docs.domains.state.queued") : tone === "issue" ? t("docs.domains.issuesFound", { count: run.issueIds.length }) : icon.label);
+  const meta = [patrolTrigger(run.trigger), run.changedPaths.length ? t("docs.domains.filesChanged", { count: run.changedPaths.length }) : undefined].filter(Boolean).join(" · ");
   return <li className="vm-patrol-entry">
-    <StatusIcon tone={patrolIcons[tone].tone} label={patrolIcons[tone].label} />
+    <StatusIcon tone={icon.tone} label={icon.label} />
     <span className="vm-patrol-entry__text">{title}<small>{meta}</small></span>
     <span className="vm-patrol-entry__actions">
-      {run.issueIds.length > 0 && <Button size="sm" variant="ghost" onClick={onOpenIssues}>{run.issueIds.length} 个 Issue</Button>}
-      {run.sessionId && <Button size="sm" variant="ghost" onClick={() => onOpenSession(run.sessionId!)}>会话</Button>}
+      {run.issueIds.length > 0 && <Button size="sm" variant="ghost" onClick={onOpenIssues}>{t("docs.domains.issueCount", { count: run.issueIds.length })}</Button>}
+      {run.sessionId && <Button size="sm" variant="ghost" onClick={() => onOpenSession(run.sessionId!)}>{t("docs.domains.session")}</Button>}
     </span>
     <span className="vm-patrol-entry__time">{patrolTime(run.startedAt)}</span>
   </li>;
@@ -322,6 +313,7 @@ const remainderOf = (node: DirectoryNode, exclude: string): string[] => {
 const DirectoryPickerDialog = ({ client, workspaceId, selected, onSave, onClose }: {
   client: WorkbenchClient; workspaceId: string; selected: string[]; onSave: (paths: string[]) => void; onClose: () => void;
 }) => {
+  const t = useT();
   const [paths, setPaths] = useState<string[]>();
   const [chosen, setChosen] = useState<string[]>(selected);
   const [error, setError] = useState<string>();
@@ -348,26 +340,27 @@ const DirectoryPickerDialog = ({ client, workspaceId, selected, onSave, onClose 
     </div>,
     ...rows(child, depth + 1)
   ]);
-  return <Modal title="触发目录" onClose={onClose} width={520}><div className="space-y-3 p-4">
-    <p className="text-caption text-muted-foreground">这些目录下的变更会触发巡检。勾选父目录即覆盖其全部子目录。</p>
+  return <Modal title={t("docs.domains.triggerDirectories")} onClose={onClose} width={520}><div className="space-y-3 p-4">
+    <p className="text-caption text-muted-foreground">{t("docs.domains.triggerDirectoriesBody")}</p>
     {error && <InlineNotice tone="error" className="px-0">{error}</InlineNotice>}
     {paths ? <div className="max-h-[52vh] overflow-auto rounded-md border border-border bg-input p-2">{rows(tree, 0)}</div>
-      : <p className="text-caption text-muted-foreground">正在读取目录…</p>}
+      : <p className="text-caption text-muted-foreground">{t("docs.domains.directoriesLoading")}</p>}
     <div className="flex items-center gap-2">
-      <span className="text-caption text-muted-foreground">已选 {chosen.length} 个目录</span>
-      <Button variant="ghost" className="ml-auto" onClick={onClose}>取消</Button>
-      <Button variant="primary" disabled={!paths} onClick={() => onSave([...chosen].sort())}>保存</Button>
+      <span className="text-caption text-muted-foreground">{t("docs.domains.directoriesSelected", { count: chosen.length })}</span>
+      <Button variant="ghost" className="ml-auto" onClick={onClose}>{t("common.cancel")}</Button>
+      <Button variant="primary" disabled={!paths} onClick={() => onSave([...chosen].sort())}>{t("common.save")}</Button>
     </div>
   </div></Modal>;
 };
 
 const AuthorizationDialog = ({ selected, onSave, onClose }: { selected: string[]; onSave: (scope: string[]) => void; onClose: () => void }) => {
+  const t = useT();
   const [value, setValue] = useState(selected.join("\n"));
-  return <Modal title="自动修复授权范围" onClose={onClose} width={560}><div className="space-y-3 p-4">
-    <Field kind="textarea" label="每行一项" rows={6} hint="只填写允许自动恢复的既定要求偏差；需求取舍仍进入待决策。" value={value} onChange={(event) => setValue(event.target.value)} />
+  return <Modal title={t("docs.domains.authorization")} onClose={onClose} width={560}><div className="space-y-3 p-4">
+    <Field kind="textarea" label={t("docs.domains.authorizationField")} rows={6} hint={t("docs.domains.authorizationHint")} value={value} onChange={(event) => setValue(event.target.value)} />
     <div className="flex justify-end gap-2">
-      <Button variant="ghost" onClick={onClose}>取消</Button>
-      <Button variant="primary" onClick={() => onSave(value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))}>保存</Button>
+      <Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
+      <Button variant="primary" onClick={() => onSave(value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))}>{t("common.save")}</Button>
     </div>
   </div></Modal>;
 };

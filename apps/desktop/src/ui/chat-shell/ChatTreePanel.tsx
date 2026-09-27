@@ -1,6 +1,7 @@
 import { useMemo, type ReactElement, type ReactNode, type MouseEvent } from "react";
 import type { ChatTreeSendOperation, ChatTreeSnapshotRpc } from "@vermillion/shared";
 import { buildChatTreeGraphLayout } from "./chat-tree-layout.js";
+import { useT } from "../../i18n/react.js";
 
 const NODE_RADIUS = 7;
 const CONNECTOR_CURVE_OFFSET = 24;
@@ -37,6 +38,7 @@ export const ChatTreePanel = ({
   footer,
   renderNodeStatus = (status) => status
 }: ChatTreePanelProps): ReactElement => {
+  const t = useT();
   const graph = useMemo(() => buildChatTreeGraphLayout(chatTree), [chatTree]);
   const canvasWidth = Math.max(graph.width, 180);
   const graphNodeById = useMemo(
@@ -45,7 +47,7 @@ export const ChatTreePanel = ({
   );
 
   if (loading) {
-    return <p className="awb-detail__empty">正在加载会话树…</p>;
+    return <p className="awb-detail__empty">{t("session.loadingTree")}</p>;
   }
 
   if (error) {
@@ -53,7 +55,7 @@ export const ChatTreePanel = ({
   }
 
   if (!chatTree) {
-    return <p className="awb-detail__empty">选择一个会话查看它的会话树。</p>;
+    return <p className="awb-detail__empty">{t("session.selectSessionForTree")}</p>;
   }
 
   return (
@@ -105,8 +107,8 @@ export const ChatTreePanel = ({
               const operation = operations.find((op) => op.operationId === entry.node.nodeId || (op.turnId && op.turnId === entry.node.turnId));
               const virtual = operation && !entry.node.turnId;
               const operationAction = operation && (virtual || operation.cleanupPending) ? operation : undefined;
-            const status = virtual ? operation.status === "failed" ? "发送失败"
-              : operation.status === "creating" ? "正在创建分支" : "正在发送" : undefined;
+            const status = virtual ? operation.status === "failed" ? t("session.sendFailed")
+              : operation.status === "creating" ? t("session.creatingBranch") : t("session.sending") : undefined;
             return (
             <button
               key={operation?.operationId ?? entry.node.nodeId}

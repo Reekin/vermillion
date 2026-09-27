@@ -3,8 +3,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { Badge, Button, EmptyState, InlineNotice, ListRow, PanelHeader, StatusBar } from "./ui.js";
 import { statusLabel } from "./task-labels.js";
+import { useT } from "../../../i18n/react.js";
 
 export const TaskStatusBar = ({ store, trailing }: { store: WorkbenchStore; trailing?: ReactNode }) => {
+  const t = useT();
   const tasks = store((s) => s.tasks);
   const error = store((s) => s.tasksError);
   const workspaces = store((s) => s.workspaces);
@@ -21,11 +23,11 @@ export const TaskStatusBar = ({ store, trailing }: { store: WorkbenchStore; trai
     return () => window.clearTimeout(timer);
   }, [result, setResult]);
 
-  const notice = result && (result.kind === "commit" ? "已提交文档 · " + result.message : "已开工 · " + result.title);
+  const notice = result && (result.kind === "commit" ? t("app.status.committed", { message: result.message }) : t("app.status.started", { title: result.title }));
   return (
-    <StatusBar icon={ListTodo} label={`当前工单: ${tasks.length}`} notice={notice} open={open} onOpenChange={setOpen} trailing={trailing}>
-      <PanelHeader title="当前工单" />
-      {error ? <InlineNotice tone="error">工单加载失败：{error}</InlineNotice> : tasks.length === 0 && <EmptyState title="当前没有工单" />}
+    <StatusBar icon={ListTodo} label={t("app.status.count", { count: tasks.length })} notice={notice} open={open} onOpenChange={setOpen} trailing={trailing}>
+      <PanelHeader title={t("app.status.title")} />
+      {error ? <InlineNotice tone="error">{t("app.status.loadFailed", { error })}</InlineNotice> : tasks.length === 0 && <EmptyState title={t("app.status.empty")} />}
       <ul>
         {tasks.map((task) => {
           const row = (
@@ -33,7 +35,7 @@ export const TaskStatusBar = ({ store, trailing }: { store: WorkbenchStore; trai
               className="min-w-0 flex-1"
               title={task.title}
               meta={workspaces.find((w) => w.workspaceId === task.workspaceId)?.label}
-              trailing={<Badge>{statusLabel[task.status]}</Badge>}
+              trailing={<Badge>{statusLabel(task.status)}</Badge>}
               onClick={() => { setOpen(false); showTask(task); }}
             />
           );
@@ -44,7 +46,7 @@ export const TaskStatusBar = ({ store, trailing }: { store: WorkbenchStore; trai
                 {task.sessionId && <Button size="sm" variant="ghost" outlined onClick={() => {
                   setOpen(false);
                   showAgentSession(task.workspaceId, task.sessionId!);
-                }}>进入会话</Button>}
+                }}>{t("app.status.enterSession")}</Button>}
               </span>
             </li>
           );

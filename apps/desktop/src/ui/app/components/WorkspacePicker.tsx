@@ -3,6 +3,7 @@ import { Check, ChevronDown, Folder, FolderPlus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { ConfigurationButton } from "./ui.js";
+import { useT } from "../../../i18n/react.js";
 
 type WorkspacePickerProps = {
   store: WorkbenchStore;
@@ -16,6 +17,7 @@ const rowClass = "flex h-8 w-full items-center gap-2 px-2.5 text-left text-label
 
 /** Sits in the composer's configuration row; decides where the next new chat is created. */
 export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: WorkspacePickerProps) => {
+  const t = useT();
   const disabled = lockedWorkspaceId !== undefined;
   const client = store((s) => s.client);
   const liveWorkspaces = store((s) => s.workspaces);
@@ -56,7 +58,7 @@ export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: Wor
         className="max-w-52"
       >
         <Folder size={13} className="shrink-0 text-accent-strong" />
-        <span className="truncate">{current ? current.label : "无 workspace"}</span>
+        <span className="truncate">{current ? current.label : t("docs.picker.none")}</span>
         <ChevronDown size={12} className="shrink-0 text-faint-foreground" />
       </Popover.Trigger>
       <Popover.Portal>
@@ -69,7 +71,7 @@ export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: Wor
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索 workspace…"
+                placeholder={t("docs.picker.search")}
                 className="min-w-0 flex-1 bg-transparent text-label text-foreground outline-none placeholder:text-faint-foreground"
               />
             </label>
@@ -77,7 +79,7 @@ export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: Wor
               <li>
                 <button type="button" role="option" aria-selected={!activeWorkspaceId} className={rowClass} onClick={() => void choose(undefined)}>
                   <Folder size={14} className="text-faint-foreground" />
-                  <span className="text-muted-foreground">无 workspace</span>
+                  <span className="text-muted-foreground">{t("docs.picker.none")}</span>
                   {!activeWorkspaceId && <Check size={13} className="ml-auto text-strong" />}
                 </button>
               </li>
@@ -98,13 +100,13 @@ export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId }: Wor
                 </li>
               ))}
               {workspaces.length > 0 && filtered.length === 0 && (
-                <li className="px-2.5 py-1.5 text-caption text-muted-foreground">没有匹配的 workspace</li>
+                <li className="px-2.5 py-1.5 text-caption text-muted-foreground">{t("docs.picker.noMatch")}</li>
               )}
             </ul>
             <div className="border-t border-border py-1">
               <button type="button" className={rowClass} onClick={() => void addNew()}>
                 <FolderPlus size={14} className="text-muted-foreground" />
-                <span>新建 workspace…</span>
+                <span>{t("docs.picker.add")}</span>
               </button>
             </div>
           </Popover.Popup>

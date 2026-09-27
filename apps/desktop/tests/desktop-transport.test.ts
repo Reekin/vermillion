@@ -30,6 +30,7 @@ type PreloadMock = {
 };
 
 const defaultSettings: SessionSettingsRpc = {
+  locale: "zh",
   engineProgramPathsByEngineId: {},
   engineProgramResolutionsByEngineId: {},
   engineConfigWarningsByEngineId: {},

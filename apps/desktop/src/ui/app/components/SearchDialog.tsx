@@ -8,6 +8,9 @@ import type { SearchHit, SearchResult, WorkbenchClient } from "@vermillion/workb
 import { formatMessageTime } from "../../chat-shell/index.js";
 import { Modal } from "./Modal.js";
 import { Badge, Button, EmptyState, Field, IconButton, InlineNotice, ListRow, SectionLabel } from "./ui.js";
+import { t } from "../../../i18n/index.js";
+import { useLocale, useT } from "../../../i18n/react.js";
+import { toolStepResult, toolStepVerb } from "../../../i18n/tool-steps.js";
 
 type SearchDialogProps = {
   client: WorkbenchClient;
@@ -20,11 +23,7 @@ type SearchDialogProps = {
 /** Keystrokes settle before a scan starts; composed input waits for the IME to commit. */
 const QUERY_DEBOUNCE_MS = 150;
 
-const kindLabel: Record<SearchHit["kind"], string> = {
-  workItem: "工单",
-  session: "会话",
-  doc: "文档"
-};
+const kindLabel = (kind: SearchHit["kind"]): string => t(`app.search.kind.${kind}`);
 
 const kindIcon: Record<SearchHit["kind"], typeof FileText> = {
   workItem: ListTodo,
@@ -50,27 +49,59 @@ const toolIcons: Record<string, LucideIcon> = {
 
 type SearchSource = NonNullable<SearchHit["source"]>;
 
-const sourceLabel: Record<SearchSource, string> = {
-  user: "你",
-  agent: "agent 回复",
-  tool: "工具调用"
+const sourceLabel = (source: SearchSource): string => t(`app.search.source.${source}`);
+
+type ContextLine = SearchHit["context"][number];
+
+/** Session trees without a title of their own read as untitled. */
+const hitTitle = (hit: SearchHit): string => hit.treeTitle || hit.title || t("common.untitledSession");
+
+/** Where a work item line sits in the detail ("验收 3" / "Acceptance 3"). */
+const partLabel = (part: NonNullable<ContextLine["part"]>): string => {
+  switch (part.kind) {
+    case "acceptance":
+    case "acceptanceResult":
+    case "review":
+      return t(`app.search.part.${part.kind}`, { index: part.index ?? 0 });
+    default:
+      return t(`app.search.part.${part.kind}`);
+  }
+};
+
+/**
+ * Tool lines carry only the object as text (what search matched); the action and result are worded
+ * here, so the line reads as in the message area: "读取 README.md · 输出 3 行".
+ */
+const displayLine = (line: ContextLine): ContextLine => {
+  if (!line.toolStep) return line;
+  const step = line.toolStep as Parameters<typeof toolStepVerb>[0] & { result?: Parameters<typeof toolStepResult>[0] };
+  const prefix = toolStepVerb(step) + " ";
+  const object = step.kind === "list" && line.text === "." ? t("step.object.currentDirectory") : line.text;
+  const result = toolStepResult(step.result);
+  const shift = object === line.text ? prefix.length : 0;
+  return {
+    ...line,
+    text: prefix + object + (result ? " · " + result : ""),
+    matches: shift ? line.matches.map((match) => ({ start: match.start + shift, end: match.end + shift })) : []
+  };
 };
 
 /** "你 · 第 3 轮 · 昨天 14:42" */
 const sessionMeta = (hit: SearchHit): string =>
   [
-    hit.source ? sourceLabel[hit.source] : undefined,
-    hit.turnNumber ? "第 " + hit.turnNumber + " 轮" : undefined,
+    hit.source ? sourceLabel(hit.source) : undefined,
+    hit.turnNumber ? t("app.search.turn", { number: hit.turnNumber }) : undefined,
     formatMessageTime(hit.messageAt)
   ].filter(Boolean).join(" · ");
 
 const SourceMark = ({ hit }: { hit: SearchHit }) => {
+  useT();
   if (hit.source === "user") {
-    return <span aria-label="你" className="vm-search-source">你</span>;
+    return <span aria-label={sourceLabel("user")} className="vm-search-source">{t("app.search.youMark")}</span>;
   }
   const Icon = hit.source === "tool" ? toolIcons[hit.toolKind ?? "other"] ?? Wrench : MessageSquare;
   return (
-    <span aria-label={hit.source ? sourceLabel[hit.source] : "会话"} className="vm-search-source" data-source={hit.source}>
+    <span aria-label={hit.source ? sourceLabel(hit.source) : kindLabel("session")} className="vm-search-source" data-source={hit.source}>
       <Icon size={12} aria-hidden="true" />
     </span>
   );
@@ -83,11 +114,11 @@ const formatBytes = (bytes: number): string => {
 };
 
 const resultMeta = (hit: SearchHit): string =>
-  [kindLabel[hit.kind], hit.workspaceLabel, "第 " + hit.line + " 行 · 第 " + hit.column + " 列"]
+  [kindLabel(hit.kind), hit.workspaceLabel, t("app.search.lineColumn", { line: hit.line, column: hit.column })]
     .filter(Boolean)
     .join(" · ");
 
-const contextLineText = (line: SearchHit["context"][number]) => {
+const contextLineText = (line: ContextLine) => {
   if (line.matches.length === 0) return line.text;
   const parts: ReactElement[] = [];
   let cursor = 0;
@@ -108,15 +139,17 @@ const contextLineText = (line: SearchHit["context"][number]) => {
   return parts;
 };
 
-const matchingLine = (hit: SearchHit): SearchHit["context"][number] | undefined =>
-  hit.context.find((line) => line.line === hit.line) ??
+const matchingLine = (hit: SearchHit): ContextLine | undefined => {
+  const line = hit.context.find((line) => line.line === hit.line) ??
   hit.context.find((line) => line.matches.length > 0) ??
   hit.context[0];
+  return line && displayLine(line);
+};
 
 const RESULT_SNIPPET_CHARS = 96;
 const RESULT_SNIPPET_PREFIX_CHARS = 20;
 
-const snippetLine = (line: SearchHit["context"][number]): SearchHit["context"][number] => {
+const snippetLine = (line: ContextLine): ContextLine => {
   if (line.matches.length === 0) return line;
   const focus = line.matches[0]!.start;
   const desiredStart = Math.max(0, focus - RESULT_SNIPPET_PREFIX_CHARS);
@@ -137,27 +170,28 @@ const snippetLine = (line: SearchHit["context"][number]): SearchHit["context"][n
 };
 
 const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
+  useT();
   const hitLineRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     hitLineRef.current?.scrollIntoView({ block: "center" });
   }, [hit?.id]);
-  if (!hit) return <EmptyState title="选择一个命中位置" hint="右侧显示该位置附近的原文上下文。" />;
+  if (!hit) return <EmptyState title={t("app.search.pickHit")} hint={t("app.search.pickHitHint")} />;
   if (hit.kind !== "doc") {
     return (
-      <section aria-label={hit.kind === "session" ? "命中消息预览" : "命中内容预览"} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <section aria-label={hit.kind === "session" ? t("app.search.messagePreview") : t("app.search.contentPreview")} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="shrink-0 border-b border-border px-4 py-3">
-          <p className="truncate text-label font-medium text-strong" title={hit.treeTitle ?? hit.title}>
-            {hit.treeTitle ?? hit.title}
+          <p className="truncate text-label font-medium text-strong" title={hitTitle(hit)}>
+            {hitTitle(hit)}
           </p>
           <p className="mt-1 truncate text-caption text-muted-foreground">{hit.kind === "session" ? sessionMeta(hit) : hit.workspaceLabel}</p>
         </header>
         <div className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {hit.context.map((line) => {
+          {hit.context.map(displayLine).map((line) => {
             const current = line.line === hit.line;
             return (
               <div key={line.line} ref={current ? hitLineRef : undefined} data-current={current || undefined}
                 className="vm-search-message">
-                {(line.source || line.label) && <p className="text-micro text-muted-foreground">{line.source ? sourceLabel[line.source] : line.label}</p>}
+                {(line.source || line.part) && <p className="text-micro text-muted-foreground">{line.source ? sourceLabel(line.source) : partLabel(line.part!)}</p>}
                 <p className="mt-1 whitespace-pre-wrap break-words text-label">{contextLineText(line)}</p>
               </div>
             );
@@ -167,10 +201,10 @@ const SearchPreview = ({ hit }: { hit: SearchHit | undefined }) => {
     );
   }
   return (
-    <section aria-label="命中位置预览" className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section aria-label={t("app.search.locationPreview")} className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="shrink-0 border-b border-border px-4 py-3">
-        <p className="truncate text-label font-medium text-strong" title={hit.treeTitle ?? hit.title}>
-          {hit.treeTitle ?? hit.title}
+        <p className="truncate text-label font-medium text-strong" title={hitTitle(hit)}>
+          {hitTitle(hit)}
         </p>
         <p className="mt-1 truncate font-mono text-caption text-muted-foreground" title={hit.path}>
           {hit.path ?? resultMeta(hit)}
@@ -199,6 +233,7 @@ const SearchResultRow = ({
   onSelect: () => void;
   onOpen: () => void;
 }) => {
+  useT();
   const Icon = kindIcon[hit.kind];
   const line = matchingLine(hit);
   const shortLine = line ? snippetLine(line) : undefined;
@@ -208,7 +243,7 @@ const SearchResultRow = ({
       onDoubleClick={onOpen}
       onFocusCapture={onSelect}
       onMouseDown={(event) => event.stopPropagation()}
-      title="单击预览，双击打开"
+      title={t("app.search.rowHint")}
     >
       <ListRow
         leading={session
@@ -220,9 +255,9 @@ const SearchResultRow = ({
           </span>
         }
         titleClassName="vm-search-result-title"
-        meta={session ? sessionMeta(hit) : hit.workspaceLabel + " · " + (line?.label ?? "第 " + hit.line + " 行")}
-        trailing={session ? undefined : <Badge>{kindLabel[hit.kind]}</Badge>}
-        hoverActions={<IconButton icon={ArrowUpRight} label="打开" size={13} onClick={onOpen} />}
+        meta={session ? sessionMeta(hit) : hit.workspaceLabel + " · " + (line?.part ? partLabel(line.part) : t("app.search.line", { line: hit.line }))}
+        trailing={session ? undefined : <Badge>{kindLabel(hit.kind)}</Badge>}
+        hoverActions={<IconButton icon={ArrowUpRight} label={t("app.search.open")} size={13} onClick={onOpen} />}
         selected={selected}
         onClick={onSelect}
       />
@@ -253,6 +288,7 @@ const SearchResults = ({ rows, selectedId, onSelect, onOpen, onToggleTree, onExp
   onToggleTree: (id: string) => void;
   onExpandKind: (kind: SearchHit["kind"]) => void;
 }) => {
+  useT();
   const scrollRef = useRef<HTMLDivElement>(null);
   const getItemKey = useCallback((index: number) => rows[index]!.key, [rows]);
   const virtualizer = useVirtualizer({
@@ -268,7 +304,7 @@ const SearchResults = ({ rows, selectedId, onSelect, onOpen, onToggleTree, onExp
     if (index >= 0) virtualizer.scrollToIndex(index, { align: "auto" });
   }, [rows, selectedId, virtualizer]);
   return (
-    <div ref={scrollRef} className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto" aria-label="搜索结果">
+    <div ref={scrollRef} className="vm-scrollbar-hidden min-h-0 flex-1 overflow-y-auto" aria-label={t("app.search.results")}>
       <ul className="relative" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index]!;
@@ -279,7 +315,7 @@ const SearchResults = ({ rows, selectedId, onSelect, onOpen, onToggleTree, onExp
                 <SearchResultRow hit={row.hit} selected={row.hit.id === selectedId}
                   onSelect={() => onSelect(row.hit.id)} onOpen={() => onOpen(row.hit)} />
               ) : row.type === "label" ? (
-                <SectionLabel>{kindLabel[row.kind]} <span className="font-mono text-faint-foreground">{row.count}</span></SectionLabel>
+                <SectionLabel>{kindLabel(row.kind)} <span className="font-mono text-faint-foreground">{row.count}</span></SectionLabel>
               ) : row.type === "tree" ? (
                 <Button variant="ghost" size="sm" className="vm-search-tree-header w-full justify-start"
                   aria-expanded={row.expanded} onClick={() => onToggleTree(row.tree.treeId)}>
@@ -290,7 +326,7 @@ const SearchResults = ({ rows, selectedId, onSelect, onOpen, onToggleTree, onExp
               ) : (
                 <div className="px-3 pb-2">
                   <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => onExpandKind(row.kind)}>
-                    展开更多
+                    {t("app.search.showMore")}
                   </Button>
                 </div>
               )}
@@ -303,6 +339,7 @@ const SearchResults = ({ rows, selectedId, onSelect, onOpen, onToggleTree, onExp
 };
 
 export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpenSession }: SearchDialogProps) => {
+  const locale = useLocale();
   const [query, setQuery] = useState("");
   const [composing, setComposing] = useState(false);
   const [queryId, setQueryId] = useState<string>();
@@ -398,7 +435,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
       }
       grouped.set(treeId, {
         treeId,
-        title: hit.treeTitle ?? hit.title,
+        title: hitTitle(hit),
         activityAt: hit.treeActivityAt ?? hit.sessionActivityAt ?? "",
         hits: [hit]
       });
@@ -416,7 +453,7 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
         right.activityAt.localeCompare(left.activityAt) ||
         left.treeId.localeCompare(right.treeId)
       );
-  }, [hits]);
+  }, [hits, locale]);
 
   const openHit = (hit: SearchHit) => {
     if (hit.kind === "workItem") onOpenWorkItem(hit);
@@ -468,11 +505,11 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
   };
 
   return (
-    <Modal title="搜索" onClose={onClose} width={980} height="74vh" contentClassName="overflow-hidden">
+    <Modal title={t("app.search.title")} onClose={onClose} width={980} height="74vh" contentClassName="overflow-hidden">
       <div className="flex h-full min-h-[480px] min-w-0 flex-col" onKeyDown={handleKeyDown}>
         <div className="shrink-0 border-b border-border px-4 py-3">
           <Field
-            aria-label="搜索工单、会话和文档"
+            aria-label={t("app.search.placeholder")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onCompositionStart={() => setComposing(true)}
@@ -480,16 +517,16 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
               setQuery(event.currentTarget.value);
               setComposing(false);
             }}
-            placeholder="搜索工单、会话和文档"
+            placeholder={t("app.search.placeholder")}
             autoFocus
           />
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.15fr)]">
           <div className="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r">
             {error && <InlineNotice tone="error" className="pt-3">{error}</InlineNotice>}
-            {!trimmed && <EmptyState title="输入关键词开始搜索" />}
-            {scanning && hits.length === 0 && <InlineNotice className="pt-3">搜索中…</InlineNotice>}
-            {!scanning && trimmed && stats && hits.length === 0 && <EmptyState title="没有找到匹配内容" hint="换一个关键词试试。" />}
+            {!trimmed && <EmptyState title={t("app.search.enterQuery")} />}
+            {scanning && hits.length === 0 && <InlineNotice className="pt-3">{t("app.search.searching")}</InlineNotice>}
+            {!scanning && trimmed && stats && hits.length === 0 && <EmptyState title={t("app.search.noResults")} hint={t("app.search.noResultsHint")} />}
             <SearchResults key={trimmed} rows={rows} selectedId={selected?.id} onSelect={setSelectedId} onOpen={openHit}
               onExpandKind={(kind) => setExpandedKinds((current) => new Set(current).add(kind))}
               onToggleTree={(id) => setCollapsedTrees((current) => {
@@ -502,14 +539,15 @@ export const SearchDialog = ({ client, onClose, onOpenWorkItem, onOpenDoc, onOpe
           <SearchPreview hit={selected} />
         </div>
         <footer className="flex shrink-0 items-center gap-4 border-t border-border px-4 py-2 text-caption text-muted-foreground">
-          <span><kbd className="vm-kbd">↑↓</kbd> 选择</span>
-          <span><kbd className="vm-kbd">Enter</kbd> 打开并定位</span>
-          <span><kbd className="vm-kbd">Esc</kbd> 关闭</span>
+          <span><kbd className="vm-kbd">↑↓</kbd> {t("app.search.keySelect")}</span>
+          <span><kbd className="vm-kbd">Enter</kbd> {t("app.search.keyOpen")}</span>
+          <span><kbd className="vm-kbd">Esc</kbd> {t("common.close")}</span>
           <span className="ml-auto truncate">
             {stats
-              ? hits.length + " 条结果 · 扫描 " + stats.sourcesScanned + " 项 · " + formatBytes(stats.bytesScanned) + " · " + stats.durationMs + " ms" + (stats.truncated ? " · 结果已截断" : "")
+              ? t("app.search.stats", { hits: hits.length, sources: stats.sourcesScanned, bytes: formatBytes(stats.bytesScanned), ms: stats.durationMs })
+                + (stats.truncated ? " · " + t("app.search.truncated") : "")
               : scanning
-                ? "已找到 " + hits.length + " 条"
+                ? t("app.search.found", { count: hits.length })
                 : ""}
           </span>
         </footer>

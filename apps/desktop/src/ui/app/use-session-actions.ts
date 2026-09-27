@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { writeClipboardText } from "../chat-shell/clipboard.js";
+import { t } from "../../i18n/index.js";
 
 /**
  * 右键菜单按动作集合参数化：会话行用会话动作，会话树节点用节点动作。
@@ -84,7 +85,7 @@ export const useSessionActions = ({ transport, refreshSidebar, onArchived, onRes
           case "copy_session_id":
           case "copy_awb_session_id":
             await writeClipboardText(result.copiedText);
-            setNotice({ text: "已复制 " + result.copiedText });
+            setNotice({ text: t("app.sessionAction.copied", { text: result.copiedText }) });
             return;
           case "pin":
           case "unpin":
@@ -99,14 +100,14 @@ export const useSessionActions = ({ transport, refreshSidebar, onArchived, onRes
             return;
           case "resume":
             onResumed(sessionId);
-            setNotice({ text: "已重新连接会话" });
+            setNotice({ text: t("app.sessionAction.resumed") });
             return;
           case "refresh":
-            setNotice({ text: result.details ?? "已刷新运行环境" });
+            setNotice({ text: result.details ?? t("app.sessionAction.refreshed") });
             return;
         }
       } catch (error) {
-        setNotice({ text: action + " 失败：" + (error as Error).message, error: true });
+        setNotice({ text: t("app.sessionAction.failed", { action, error: (error as Error).message }), error: true });
       }
     },
     [transport, refreshSidebar, onArchived, onResumed]

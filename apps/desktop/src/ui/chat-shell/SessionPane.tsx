@@ -34,7 +34,8 @@ import type {
 import type { ChatTreeSendOperation, EngineModelCatalogRpc, TurnExecutionProfile } from "@vermillion/shared";
 import { describeToolStep, summarizeToolSteps } from "@vermillion/shared";
 import { t } from "../../i18n/index.js";
-import { formatDuration } from "../../i18n/format.js";
+import { formatClock, formatDuration, formatListTime, formatMonthDay } from "../../i18n/format.js";
+import { useT } from "../../i18n/react.js";
 import { toolSummaryText } from "../../i18n/tool-steps.js";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { buildProcessActivityEntries } from "./ProcessActivityView.js";
@@ -224,14 +225,12 @@ const toComposerExecutionSelection = (
       }
     : undefined;
 
-const pad2 = (value: number): string => String(value).padStart(2, "0");
-
 const isSameDay = (left: Date, right: Date): boolean =>
   left.getFullYear() === right.getFullYear() &&
   left.getMonth() === right.getMonth() &&
   left.getDate() === right.getDate();
 
-/** "14:42:24" today, "昨天 22:10:05", "9月11日 07:18:50", with the year when it differs. */
+/** "14:42:24" today, "昨天 22:10:05", "9月11日 07:18:50", with the year when it differs; never relative. */
 export const formatMessageTime = (iso: string | undefined, now = new Date()): string | undefined => {
   if (!iso) {
     return undefined;
@@ -240,19 +239,16 @@ export const formatMessageTime = (iso: string | undefined, now = new Date()): st
   if (Number.isNaN(date.getTime())) {
     return undefined;
   }
-  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+  const clock = formatClock(date, true);
   if (isSameDay(date, now)) {
     return clock;
   }
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (isSameDay(date, yesterday)) {
-    return `昨天 ${clock}`;
+    return t("common.yesterdayAt", { time: clock });
   }
-  const day = `${date.getMonth() + 1}月${date.getDate()}日`;
-  return date.getFullYear() === now.getFullYear()
-    ? `${day} ${clock}`
-    : `${date.getFullYear()}年${day} ${clock}`;
+  return `${formatMonthDay(date, now)} ${clock}`;
 };
 
 const describeTurnExecution = (
@@ -283,7 +279,7 @@ const maxSessionHeadingLength = 20;
 export const truncateSessionHeading = (value: string | undefined): string => {
   const normalized = value?.trim();
   if (!normalized) {
-    return "新会话";
+    return t("session.newSession");
   }
   if (normalized.length <= maxSessionHeadingLength) {
     return normalized;
@@ -299,29 +295,11 @@ export const formatRelativeActivityAge = (
   if (!iso) {
     return undefined;
   }
-  const timestamp = new Date(iso).getTime();
-  if (Number.isNaN(timestamp)) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
     return undefined;
   }
-  const elapsedMinutes = Math.max(0, Math.floor((nowMs - timestamp) / 60_000));
-  if (elapsedMinutes < 1) {
-    return "刚刚";
-  }
-  if (elapsedMinutes < 60) {
-    return `${elapsedMinutes} 分钟前`;
-  }
-  const date = new Date(timestamp);
-  const now = new Date(nowMs);
-  if (isSameDay(date, now)) {
-    return `${Math.floor(elapsedMinutes / 60)} 小时前`;
-  }
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (isSameDay(date, yesterday)) {
-    return `昨天 ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-  }
-  const day = `${date.getMonth() + 1}月${date.getDate()}日`;
-  return date.getFullYear() === now.getFullYear() ? day : `${date.getFullYear()}年${day}`;
+  return formatListTime(date, { now: new Date(nowMs), hoursAgo: true });
 };
 
 
@@ -468,12 +446,14 @@ const TranscriptPane = memo(
     pendingSend,
     onRetrySend,
     renderTurnNavigation
-  }: TranscriptPaneProps): ReactElement => (
+  }: TranscriptPaneProps): ReactElement => {
+    useT();
+    return (
     <section
       className={`awb-transcript${isSwitchPending || openingError ? " awb-transcript--waiting" : ""}`}
       ref={transcriptRef}
       role="region"
-      aria-label="消息记录"
+      aria-label={t("session.transcript")}
       aria-busy={isSwitchPending}
       tabIndex={0}
     >
@@ -485,13 +465,13 @@ const TranscriptPane = memo(
           <div className="awb-transcript__empty">
             <h3>
               {activeSessionId
-                  ? "还没有消息"
-                  : "新会话"}
+                  ? t("session.noMessagesYet")
+                  : t("session.newSession")}
             </h3>
             <p>
               {activeSessionId
-                  ? "发送一条消息，继续这段对话。"
-                  : "发送第一条消息开始会话。"}
+                  ? t("session.continueHint")
+                  : t("session.startHint")}
             </p>
           </div>
         )}
@@ -504,7 +484,7 @@ const TranscriptPane = memo(
               onClick={onLoadOlder}
               disabled={loadingOlderTurns || isOpeningSelectedSession}
             >
-              {loadingOlderTurns ? "正在加载更早的消息…" : "加载更早的消息"}
+              {loadingOlderTurns ? t("session.loadingOlder") : t("session.loadOlder")}
             </button>
           </div>
         )}
@@ -553,7 +533,7 @@ const TranscriptPane = memo(
                   const completed = formatMessageTime(visibleRow.turn.completedAt);
                   const durationMs = turnDurationMs(visibleRow.turn);
                   const duration = durationMs !== undefined ? formatDuration(durationMs) : undefined;
-                  return completed && duration ? `${completed}（${duration}）` : completed ?? duration;
+                  return completed && duration ? t("session.completedWithDuration", { completed, duration }) : completed ?? duration;
                 })()
               ].filter(Boolean).join(" · ") || undefined
             : undefined;
@@ -616,7 +596,7 @@ const TranscriptPane = memo(
                 <div className="awb-chat-entry__messages">
                   {visibleRow.blocks.length === 0 && (
                     <p className="awb-turn__empty">
-                      {isUserTurn ? "消息没有内容。" : "等待回复…"}
+                      {isUserTurn ? t("session.emptyMessage") : t("session.awaitingReply")}
                     </p>
                   )}
                   {visibleRow.blocks.map((block, blockIndex) => (
@@ -660,7 +640,8 @@ const TranscriptPane = memo(
         {pendingSend && <PendingBranchMessage operation={pendingSend} onRetry={onRetrySend} onPreviewImage={onPreviewImage} renderFileLinkContextMenu={renderFileLinkContextMenu} />}
       </div>
     </section>
-  ),
+    );
+  },
   (previous, next) =>
     previous.renderTurnNavigation === next.renderTurnNavigation &&
     previous.pendingSend === next.pendingSend &&
@@ -712,6 +693,7 @@ export const SessionPane = ({
   renderTurnNavigation,
   allowChatTree = true
 }: SessionPaneProps): ReactElement => {
+  useT();
   const renderStartedAt = performance.now();
   useLayoutEffect(() => { recordUiOperation("react.session-pane.commit", renderStartedAt, undefined, "render"); });
   const state = useRendererStoreState(store);
@@ -802,7 +784,7 @@ export const SessionPane = ({
         })
         .catch((error) => {
           setStatusNotice({
-            message: "保存执行偏好失败", detail: (error as Error).message,
+            message: t("session.saveExecutionPrefsFailed"), detail: (error as Error).message,
             source: "settings",
             ...statusNoticeErrorDetails(error)
           });
@@ -885,7 +867,7 @@ export const SessionPane = ({
   useEffect(() => {
     if (!isVisible || !windowVisible || !sessionId || !readNodeId || !unreadVisibleKey) return;
     void transport.chatTree.markRead({ sessionId, nodeId: readNodeId }).catch((error: Error) => {
-      setStatusNotice({ source: "chat-tree", message: "更新已读状态失败", detail: error.message });
+      setStatusNotice({ source: "chat-tree", message: t("session.markReadFailed"), detail: error.message });
     });
   }, [readNodeId, unreadVisibleKey, isVisible, windowVisible, sessionId, transport, setStatusNotice]);
   useEffect(() => {
@@ -1004,7 +986,7 @@ export const SessionPane = ({
     void transport.sessionBrowser.open(viewSessionId, { forceProviderHydration: true, includeWindow: false })
       .then(() => refreshChatTree())
       .catch((error) => setStatusNotice({
-        message: "刷新会话失败", detail: (error as Error).message,
+        message: t("session.refreshSessionFailed"), detail: (error as Error).message,
         source: "session-browser",
         ...statusNoticeErrorDetails(error)
       }));
@@ -1078,7 +1060,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: "读取引擎列表失败", detail: (error as Error).message,
+            message: t("session.readEnginesFailed"), detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1120,7 +1102,7 @@ export const SessionPane = ({
         if (!disposed) {
           setSettingsHydrated(true);
           setStatusNotice({
-            message: "读取设置失败", detail: (error as Error).message,
+            message: t("session.readSettingsFailed"), detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1154,7 +1136,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: "读取引擎能力失败", detail: (error as Error).message,
+            message: t("session.readEngineCapabilitiesFailed"), detail: (error as Error).message,
             persistent: true,
             source: "settings",
             ...statusNoticeErrorDetails(error)
@@ -1185,7 +1167,7 @@ export const SessionPane = ({
       .catch((error) => {
         if (!disposed) {
           setStatusNotice({
-            message: "订阅会话事件失败，界面可能不会实时更新", detail: (error as Error).message,
+            message: t("session.subscribeFailed"), detail: (error as Error).message,
             persistent: true,
             source: "subscription",
             ...statusNoticeErrorDetails(error)
@@ -1256,7 +1238,7 @@ export const SessionPane = ({
         <header className="awb-main__header">
           <div>
             <h2 title={displayedSession?.title}>
-              {sessionId ? truncateSessionHeading(displayedSession?.title) : "新会话"}
+              {sessionId ? truncateSessionHeading(displayedSession?.title) : t("session.newSession")}
             </h2>
           </div>
           {allowChatTree && <div className="awb-main__header-actions">
@@ -1264,8 +1246,8 @@ export const SessionPane = ({
               type="button"
               className={"awb-header-toggle" + (showChatTree ? " is-on" : "")}
               aria-pressed={showChatTree}
-              aria-label="对话树"
-              title="对话树"
+              aria-label={t("session.conversationTree")}
+              title={t("session.conversationTree")}
               onClick={toggleChatTree}
             >
               <GitBranch size={15} />
@@ -1309,7 +1291,7 @@ export const SessionPane = ({
           />
           </div>
           {allowChatTree && showChatTree && (
-            <aside className="awb-chat-tree-column" aria-label="对话树">
+            <aside className="awb-chat-tree-column" aria-label={t("session.conversationTree")}>
               <section className="awb-detail__graph">
                 {(renderChatTree ?? ((props) => <ChatTreePanel {...props} />))({
                   operations,

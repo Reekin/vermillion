@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ClipboardList } from "lucide-react";
 import type { WorkRequest, WorkItem, WorkbenchClient } from "@vermillion/workbench/client";
+import { useT } from "../../../i18n/react.js";
 import { Button, DetailSection, InlineNotice, OverflowMenu } from "./ui.js";
 import { Modal } from "./Modal.js";
 import { currentWorkStatus, workPhaseLabel, workSessionLabel } from "./task-labels.js";
@@ -18,12 +19,13 @@ type Props = {
 };
 
 export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item: associatedItem, hasDecision, onOpenWorkItem, onOpenSession }: Props) => {
+  const t = useT();
   const [detail, setDetail] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const item = request && !["ready", "cancelled"].includes(request.status) ? undefined : associatedItem;
   if (!request && !item) return null;
-  const title = item?.title || request?.scope?.trim() || sourceTitle || "开工准备";
+  const title = item?.title || request?.scope?.trim() || sourceTitle || t("work.preparation");
   const state = currentWorkStatus(item, request, hasDecision);
   const reason = item?.run.lastFailure ?? request?.failure ?? item?.run.waitReason ?? request?.waitReason;
   const phase = workPhaseLabel(item, request);
@@ -38,35 +40,36 @@ export const CurrentWorkBar = ({ client, workspaceId, sourceTitle, request, item
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
-  const primary = state.kind === "paused" || state.kind === "stopped" ? { label: "恢复任务", operation: "resume" as const }
-    : state.kind === "interrupted" ? { label: "继续", operation: "retry" as const }
-    : finished ? undefined : { label: item ? "暂停本工单" : "暂停准备", operation: "pause" as const };
+  const pauseLabel = item ? t("work.bar.pauseItem") : t("work.bar.pausePreparation");
+  const primary = state.kind === "paused" || state.kind === "stopped" ? { label: t("work.bar.resumeTask"), operation: "resume" as const }
+    : state.kind === "interrupted" ? { label: t("work.bar.continue"), operation: "retry" as const }
+    : finished ? undefined : { label: pauseLabel, operation: "pause" as const };
   return <>
-    <section className="vm-current-work" aria-label="当前工作">
+    <section className="vm-current-work" aria-label={t("work.bar.label")}>
       <div className="vm-current-work__summary">
         <ClipboardList size={16} className="text-muted-foreground" aria-hidden="true" />
         <span className="vm-current-work__title" title={title}>{title}</span>
         <span className="vm-current-work__state" data-state={state.kind}>{phase}</span>
-        <span className="text-caption text-muted-foreground">{activity}{state.kind === "paused" ? " · 已暂停" : hasDecision ? " · 等待决策" : ""}</span>
+        <span className="text-caption text-muted-foreground">{activity}{state.kind === "paused" ? " · " + t("work.state.paused") : hasDecision ? " · " + t("work.state.awaitingDecision") : ""}</span>
       </div>
       <div className="vm-current-work__actions">
         {primary && <Button size="sm" variant="primary" disabled={busy} onClick={() => void invoke(primary.operation)}>{primary.label}</Button>}
-        <Button size="sm" variant="ghost" outlined onClick={() => setDetail(true)}>查看</Button>
-        {!finished && <OverflowMenu label="更多工作操作" items={[
-          ...(state.kind !== "paused" && primary?.operation !== "pause" ? [{ label: item ? "暂停本工单" : "暂停准备", disabled: busy, onSelect: () => void invoke("pause") }] : []),
-          { label: item ? "取消本工单" : "取消本次工作", disabled: busy, onSelect: () => void invoke("cancel") }
+        <Button size="sm" variant="ghost" outlined onClick={() => setDetail(true)}>{t("work.bar.view")}</Button>
+        {!finished && <OverflowMenu label={t("work.bar.moreActions")} items={[
+          ...(state.kind !== "paused" && primary?.operation !== "pause" ? [{ label: pauseLabel, disabled: busy, onSelect: () => void invoke("pause") }] : []),
+          { label: item ? t("work.bar.cancelItem") : t("work.bar.cancelWork"), disabled: busy, onSelect: () => void invoke("cancel") }
         ]} />}
       </div>
     </section>
     {error && <InlineNotice tone="error">{error}</InlineNotice>}
     {detail && <Modal title={title} width={480} onClose={() => setDetail(false)}>
       <div className="space-y-3 px-4 pb-4">
-        <DetailSection title="任务阶段">{phase}</DetailSection>
-        <DetailSection title="会话活动">{activity}</DetailSection>
-        <DetailSection title="任务状态">{state.label}</DetailSection>
-        {reason && <DetailSection title="当前情况">{reason}</DetailSection>}
+        <DetailSection title={t("work.bar.phase")}>{phase}</DetailSection>
+        <DetailSection title={t("work.bar.activity")}>{activity}</DetailSection>
+        <DetailSection title={t("work.bar.status")}>{state.label}</DetailSection>
+        {reason && <DetailSection title={t("work.bar.situation")}>{reason}</DetailSection>}
         {request && <SupervisorDetails request={request} client={client} workspaceId={workspaceId} onOpenSession={onOpenSession} />}
-        {onOpenWorkItem && item && <Button size="sm" variant="ghost" outlined onClick={() => { setDetail(false); onOpenWorkItem(); }}>打开工单</Button>}
+        {onOpenWorkItem && item && <Button size="sm" variant="ghost" outlined onClick={() => { setDetail(false); onOpenWorkItem(); }}>{t("work.bar.openItem")}</Button>}
       </div>
     </Modal>}
   </>;

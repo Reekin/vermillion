@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkbenchClient, WorkItem, WorkRequest } from "@vermillion/workbench/client";
+import { setLocale } from "../src/i18n/index.js";
 import { CurrentWorkBar } from "../src/ui/app/components/CurrentWorkBar.js";
 import { SupervisorDetails } from "../src/ui/app/components/SupervisorDetails.js";
-afterEach(cleanup);
+afterEach(() => { cleanup(); setLocale("zh"); });
 
 const setup = (run: WorkItem["run"]) => {
   const request = vi.fn(async () => ({}));
@@ -22,6 +23,13 @@ describe("explicit task controls", () => {
     expect(screen.getByText("会话已结束 · 尚未交付")).toBeTruthy();
     await test.user.click(screen.getByRole("button", { name: "暂停本工单" }));
     expect(test.request).toHaveBeenCalledExactlyOnceWith("workItem.pause", { workspaceId: "workspace", workItemId: "item" });
+  });
+  it("switches its labels with the interface language", () => {
+    setup({});
+    act(() => setLocale("en"));
+    expect(screen.getByText("Running")).toBeTruthy();
+    expect(screen.getByText("Session ended · not delivered")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Pause work item" })).toBeTruthy();
   });
   it.each([{ paused: true }, { userStopped: true }])("uses resume for user intent %j", async (run) => {
     const test = setup(run);

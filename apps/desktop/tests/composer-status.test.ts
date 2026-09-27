@@ -4,8 +4,22 @@ import {
   resolveRecoveryNotice,
   resolveComposerStatusModel
 } from "../src/ui/chat-shell/composer-status.js";
+import { setLocale } from "../src/i18n/index.js";
 
 describe("resolveRecoveryNotice", () => {
+  it("words status in English when the interface language is English", () => {
+    setLocale("en");
+    try {
+      expect(resolveComposerStatusModel({ selectedEngineId: "codex" })).toEqual({
+        kind: "no_session",
+        label: "Ready",
+        detail: "New session engine: codex"
+      });
+    } finally {
+      setLocale("zh");
+    }
+  });
+
   it("preserves unrelated notices and clears only the recovered session's failure", () => {
     const failure = { status: "failed", message: "offline" };
     const notice = resolveRecoveryNotice(undefined, "a", failure, undefined)!;
