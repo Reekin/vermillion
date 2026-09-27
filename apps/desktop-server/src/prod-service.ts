@@ -1,3 +1,4 @@
+import type { Locale } from "@vermillion/shared";
 import { SessionRuntimeService } from "./runtime-service.js";
 import { SessionIndexStore } from "./session-index.js";
 import { SessionCatalogService } from "./session-catalog.js";
@@ -34,6 +35,8 @@ export type CreateWorkbenchRuntimeServiceOptions = {
   /** 随包附带的 pi 扩展入口，由应用壳解析后传入。 */
   piExtensionPath?: string;
   persistenceBaseDir?: string;
+  /** Interface language used when the registry has none yet (first launch): the system language. */
+  systemLocale?: Locale;
   pickWorkspaceDirectory?: () => Promise<{
     canceled: boolean;
     rootPath?: string;
@@ -52,7 +55,8 @@ export const createSessionRuntimeService = (
   let sessionIdentity: SessionIdentityRegistry | undefined;
   const workspaceRegistry = new WorkspaceRegistryService({
     baseDir: options.persistenceBaseDir,
-    now: options.now
+    now: options.now,
+    ...(options.systemLocale ? { defaultLocale: options.systemLocale } : {})
   });
   const sessionIndexStore = new SessionIndexStore({
     baseDir: options.persistenceBaseDir,

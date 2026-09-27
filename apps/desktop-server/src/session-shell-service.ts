@@ -297,6 +297,7 @@ export class SessionShellService {
     await registry.ready();
     const state = registry.getState();
     return {
+      locale: state.locale ?? "en",
       defaultNewSessionEngineId: state.defaultNewSessionEngineId,
       titleGenerationModelId: state.titleGenerationModelId,
       engineProgramPathsByEngineId: { ...state.engineProgramPathsByEngineId },
@@ -325,6 +326,7 @@ export class SessionShellService {
         engineId: input.defaultNewSessionEngineId
       });
     }
+    this.runtimeService.notifySettingsChanged();
     return this.getSettings();
   }
 

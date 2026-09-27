@@ -52,7 +52,8 @@ export const eventTypes = [
   "conversationGraph.updated",
   "participant.updated",
   "runtime.error",
-  "engine.configWarnings.updated"
+  "engine.configWarnings.updated",
+  "settings.updated"
 ] as const;
 
 export type EventType = (typeof eventTypes)[number];
@@ -333,6 +334,11 @@ const zEngineConfigWarningsUpdatedEvent = z.object({
   engineId: zEngineId
 });
 
+/** Global settings changed (from the settings page or the CLI); read them through settings.get. */
+const zSettingsUpdatedEvent = z.object({
+  type: z.literal("settings.updated")
+});
+
 const actorScopedEventTypes = new Set<EventType>([
   "tool.started",
   "tool.delta",
@@ -376,7 +382,8 @@ export const zEventSchema = z
     zConversationGraphUpdatedEvent,
     zParticipantUpdatedEvent,
     zRuntimeErrorEvent,
-    zEngineConfigWarningsUpdatedEvent
+    zEngineConfigWarningsUpdatedEvent,
+    zSettingsUpdatedEvent
   ])
   .superRefine((event, ctx) => {
     if (

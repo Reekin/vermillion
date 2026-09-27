@@ -1,6 +1,8 @@
 import { sessionItemId, type createSessionRuntimeService } from "@vermillion/desktop-server";
 import type { AgentRunner, RoleExecutionOverrides, SessionSteerResult, SourceAsker } from "@vermillion/workbench";
 import { mergeSessionExecutionProfile, resolveEngineExecutionPreference, writeSessionExecutionProfile } from "@vermillion/shared";
+import { translate } from "../i18n/index.js";
+import { interfaceLocale } from "./interface-locale.js";
 
 type SessionShell = ReturnType<typeof createSessionRuntimeService>;
 
@@ -13,7 +15,7 @@ type SourceAskRole = {
 
 type SourceAskRoleResolver = (workspaceId: string) => Promise<SourceAskRole>;
 
-/** 新建会话使用设置里的默认引擎；未设置时取注册顺序的第一个。 */
+/** New sessions use the default engine from settings; without one, the first registered engine. */
 const resolveDefaultEngineId = async (shell: SessionShell): Promise<string> => {
   const settings = await shell.getSettings();
   const engines = shell.listEngines();
@@ -28,7 +30,7 @@ const resolveDefaultEngineId = async (shell: SessionShell): Promise<string> => {
   return fallback;
 };
 
-/** 已有会话树的引擎在创建时定死，fork、恢复与投递沿着该引擎进行。 */
+/** A session tree's engine is fixed at creation; forks, resumes and deliveries stay on it. */
 const resolveSessionEngineId = async (
   shell: SessionShell,
   sessionId: string
@@ -69,7 +71,7 @@ export const createSessionSteerer = (shell: SessionShell) => async (target: stri
   const receipt = await shell.executeCommand({ commandId: createId(), command });
   if (!receipt.accepted || !receipt.turnId) return {
     sessionId, accepted: false,
-    error: receipt.error ?? { code: "message_rejected", message: "引擎未接受本次消息" }
+    error: receipt.error ?? { code: "message_rejected", message: "The engine did not accept this message." }
   };
   return {
     sessionId,
@@ -122,7 +124,7 @@ export const createSourceAsker = (
     if (!await shell.ensureSessionLoadedForRead(askSessionId)) {
       throw new Error("Source ask fork could not be loaded: " + askSessionId);
     }
-    await shell.setSessionTitle(askSessionId, "澄清 · " + input.question.slice(0, 40));
+    await shell.setSessionTitle(askSessionId, translate(await interfaceLocale(shell), "app.askSourceTitle", { question: input.question.slice(0, 40) }));
     const completed = new Promise<{ turnId: string; finishReason: string }>((resolve) => {
       unsubscribeCompleted = shell.subscribe((envelope) => {
         if (envelope.event.type === "turn.completed" && envelope.event.sessionId === askSessionId) {

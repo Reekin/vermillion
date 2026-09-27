@@ -32,7 +32,10 @@ import type {
   SessionWindowRpc
 } from "@vermillion/shared";
 import type { ChatTreeSendOperation, EngineModelCatalogRpc, TurnExecutionProfile } from "@vermillion/shared";
-import { describeToolStep, formatDurationZh, summarizeToolSteps } from "@vermillion/shared";
+import { describeToolStep, summarizeToolSteps } from "@vermillion/shared";
+import { t } from "../../i18n/index.js";
+import { formatDuration } from "../../i18n/format.js";
+import { toolSummaryText } from "../../i18n/tool-steps.js";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { buildProcessActivityEntries } from "./ProcessActivityView.js";
 import { recordUiOperation } from "../../diagnostics/ui-performance.js";
@@ -427,10 +430,10 @@ const buildRenderedTurnGroups = (
 const summarizeTurnProcess = (row: TranscriptRow, hiddenMessageCount: number): string => {
   const steps = buildProcessActivityEntries(row.toolCalls, row.terminalStreams).map((entry) => entry.step);
   const durationMs = turnDurationMs(row.turn);
-  return summarizeToolSteps(steps, {
+  return toolSummaryText(summarizeToolSteps(steps, {
     messageCount: hiddenMessageCount,
     ...(durationMs !== undefined ? { durationMs } : {})
-  }) || "查看执行过程";
+  })) || t("session.viewProcess");
 };
 
 const TranscriptPane = memo(
@@ -549,7 +552,7 @@ const TranscriptPane = memo(
                   // Completion time, with how long the turn took in parentheses.
                   const completed = formatMessageTime(visibleRow.turn.completedAt);
                   const durationMs = turnDurationMs(visibleRow.turn);
-                  const duration = durationMs !== undefined ? formatDurationZh(durationMs) : undefined;
+                  const duration = durationMs !== undefined ? formatDuration(durationMs) : undefined;
                   return completed && duration ? `${completed}（${duration}）` : completed ?? duration;
                 })()
               ].filter(Boolean).join(" · ") || undefined

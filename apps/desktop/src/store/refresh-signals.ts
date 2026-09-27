@@ -8,13 +8,15 @@ export type RendererRefreshSignals = {
   chatTree: number;
   engineExtensions: number;
   engineConfigWarnings: number;
+  settings: number;
 };
 
 export const createInitialRendererRefreshSignals = (): RendererRefreshSignals => ({
   sessionBrowser: 0,
   chatTree: 0,
   engineExtensions: 0,
-  engineConfigWarnings: 0
+  engineConfigWarnings: 0,
+  settings: 0
 });
 
 const increment = (value: number): number => value + 1;
@@ -41,6 +43,9 @@ export const advanceRendererRefreshSignals = (
 ): RendererRefreshSignals => {
   if (event.type === "engine.configWarnings.updated") {
     return { ...current, engineConfigWarnings: increment(current.engineConfigWarnings) };
+  }
+  if (event.type === "settings.updated") {
+    return { ...current, settings: increment(current.settings) };
   }
   const sessionBrowserChanged = invalidatesSessionBrowser(event);
   const chatTreeChanged = invalidatesChatTree(event);

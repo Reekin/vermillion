@@ -76,9 +76,10 @@ describe("workbench search", () => {
         const result = await service.search({ query: "NEEDLE" });
         // Work item hits are the shown parts of the detail, labelled by place.
         const workItemHits = result.hits.filter((hit) => hit.kind === "workItem");
-        expect(workItemHits.map((hit) => hit.context.find((line) => line.line === hit.line)!.label)).toEqual(["目标", "验收 1"]);
+        expect(workItemHits.map((hit) => hit.context.find((line) => line.line === hit.line)!.part))
+          .toEqual([{ kind: "objective" }, { kind: "acceptance", index: 1 }]);
         expect(workItemHits[0]).toMatchObject({ workItemId: item.workItemId });
-        expect(workItemHits[0]!.context.map((line) => line.label)).toEqual(["标题", "目标", "验收 1"]);
+        expect(workItemHits[0]!.context.map((line) => line.part?.kind)).toEqual(["title", "objective", "acceptance"]);
         expect((await service.search({ query: "contractRevision" })).hits).toEqual([]);
         const sessionHits = result.hits.filter((hit) => hit.kind === "session");
         // The command whose output alone mentions the query, and the raw response record, add nothing.
@@ -95,7 +96,9 @@ describe("workbench search", () => {
           expect(hit.column).toBe(shown.matches[0]!.start + 1);
         }
         const [userHit, toolHit, agentHit] = sessionHits;
-        expect(toolHit!.context.find((line) => line.line === toolHit!.line)!.text).toBe("读取 needle.md · 输出 2 行");
+        const toolLine = toolHit!.context.find((line) => line.line === toolHit!.line)!;
+        expect(toolLine.text).toBe("needle.md");
+        expect(toolLine.toolStep).toEqual({ kind: "read", result: { kind: "output", lines: 2 } });
         // Two matches in one reply still make one hit; neighbours are the shown messages around it.
         expect(agentHit!.context.find((line) => line.line === agentHit!.line)!.matches).toHaveLength(2);
         expect(agentHit!.context.map((line) => line.source)).toEqual(["tool", "agent", "agent"]);
@@ -107,9 +110,9 @@ describe("workbench search", () => {
         expect(metadataOnly.hits.filter((hit) => hit.kind === "session")).toEqual([]);
         const secondTurn = await service.search({ query: "anything else" });
         expect(secondTurn.hits).toMatchObject([{ kind: "session", source: "agent", turnId: "turn-2", turnNumber: 2 }]);
-        // A tool step matches on its object; the generated verb and result are not searched.
-        expect(toolHit!.context.find((line) => line.line === toolHit!.line)!.matches).toEqual([{ start: 3, end: 9 }]);
-        for (const generated of ["读取", "2 行", "目录", "条目"]) {
+        // A tool step matches on its object; the interface's action and result wording is never searched.
+        expect(toolLine.matches).toEqual([{ start: 0, end: 6 }]);
+        for (const generated of ["读取", "2 行", "目录", "2 lines"]) {
           const found = await service.search({ query: generated });
           expect(found.hits.filter((hit) => hit.kind === "session")).toEqual([]);
         }

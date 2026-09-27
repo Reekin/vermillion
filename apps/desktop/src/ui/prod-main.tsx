@@ -6,6 +6,7 @@ import {
   type DesktopTransport
 } from "../transport/desktop-transport.js";
 import { App } from "./app/App.js";
+import { setLocale } from "../i18n/index.js";
 import { RendererErrorBoundary } from "./RendererErrorBoundary.js";
 
 const root = document.getElementById("root");
@@ -73,12 +74,18 @@ try {
 }
 
 if (transport) {
+  const ready = transport;
   const store = createRendererStore();
-  ReactDOM.createRoot(root).render(
-    <React.StrictMode>
-      <RendererErrorBoundary transport={transport}>
-        <App sessionStore={store} transport={transport} />
-      </RendererErrorBoundary>
-    </React.StrictMode>
-  );
+  // The first frame is already in the saved interface language.
+  void ready.settings.get()
+    .then((settings) => setLocale(settings.locale), () => undefined)
+    .then(() => {
+      ReactDOM.createRoot(root).render(
+        <React.StrictMode>
+          <RendererErrorBoundary transport={ready}>
+            <App sessionStore={store} transport={ready} />
+          </RendererErrorBoundary>
+        </React.StrictMode>
+      );
+    });
 }
