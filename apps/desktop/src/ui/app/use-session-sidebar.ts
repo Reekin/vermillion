@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import type { RendererStore } from "../../store/store.js";
 import { useRendererStoreState } from "../chat-shell/use-renderer-store-state.js";
-import { compareSidebarSessions, SessionSidebarStore } from "./session-sidebar-store.js";
+import { compareSidebarSessions, sidebarQueryKey, SessionSidebarStore } from "./session-sidebar-store.js";
 
 export type { SidebarSession } from "./session-sidebar-store.js";
 
@@ -13,7 +13,7 @@ export type { SidebarSession } from "./session-sidebar-store.js";
 export const useSessionSidebar = (input: { transport: DesktopTransport; store: RendererStore; workspaceIds: string[]; kind?: "user" | "agent" }) => {
   const { transport, store, workspaceIds, kind } = input;
   const refreshSignal = useRendererStoreState(store).refreshSignals.sessionBrowser;
-  const queryKey = JSON.stringify([workspaceIds, kind]);
+  const queryKey = sidebarQueryKey({ workspaceIds, kind });
   const [sidebar, setSidebar] = useState(() => new SessionSidebarStore(transport, { workspaceIds, kind }));
   useEffect(() => {
     const current = sidebar.queryKey === queryKey ? sidebar : new SessionSidebarStore(transport, { workspaceIds, kind });

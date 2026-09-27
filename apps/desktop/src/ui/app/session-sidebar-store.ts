@@ -13,6 +13,10 @@ export type SidebarSession = Omit<SessionBrowserItemRpc, "subagents"> & {
 
 export type SidebarQuery = { workspaceIds: string[]; kind?: "user" | "agent" };
 
+// Workspace presentation order does not change which sessions belong to the query.
+export const sidebarQueryKey = ({ workspaceIds, kind }: SidebarQuery): string =>
+  JSON.stringify([[...workspaceIds].sort(), kind]);
+
 export type SidebarState = {
   workspaces: Record<string, WorkspaceSessions>;
   loading: boolean;
@@ -75,7 +79,7 @@ export class SessionSidebarStore {
     private readonly transport: DesktopTransport,
     private readonly query: SidebarQuery
   ) {
-    this.queryKey = JSON.stringify([query.workspaceIds, query.kind]);
+    this.queryKey = sidebarQueryKey(query);
   }
 
   public getState = (): SidebarState => this.state;
