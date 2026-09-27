@@ -177,10 +177,10 @@ describe("SessionPane", () => {
     const now = new Date(2026, 4, 4, 12, 0, 0).getTime();
     const at = (...parts: [number, number, number, number, number]) => new Date(...parts).toISOString();
 
-    expect(formatRelativeActivityAge(at(2026, 4, 4, 11, 59), now)).toBe("1 分钟前");
+    expect(formatRelativeActivityAge(at(2026, 4, 4, 11, 59), now)).toBe("1分钟前");
     expect(formatRelativeActivityAge(new Date(now - 20_000).toISOString(), now)).toBe("刚刚");
-    expect(formatRelativeActivityAge(at(2026, 4, 4, 11, 55), now)).toBe("5 分钟前");
-    expect(formatRelativeActivityAge(at(2026, 4, 4, 9, 30), now)).toBe("2 小时前");
+    expect(formatRelativeActivityAge(at(2026, 4, 4, 11, 55), now)).toBe("5分钟前");
+    expect(formatRelativeActivityAge(at(2026, 4, 4, 9, 30), now)).toBe("2小时前");
     expect(formatRelativeActivityAge(at(2026, 4, 3, 22, 10), now)).toBe("昨天 22:10");
     expect(formatRelativeActivityAge(at(2026, 4, 1, 8, 0), now)).toBe("5月1日");
     expect(formatRelativeActivityAge(at(2025, 11, 30, 8, 0), now)).toBe("2025年12月30日");

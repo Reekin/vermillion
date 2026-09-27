@@ -124,9 +124,14 @@ export const ChatTreePanel = ({
                 ? onOperationContextMenu?.(event, operationAction.operationId)
                 : onNodeContextMenu?.(event, entry.node.nodeId)}
               title={`${shortLabel(entry.node)}${status ? `\n${status}` : ""}${
-                entry.isCurrent ? "\nCurrent position." : "\nDouble-click to switch."
-              }${entry.node.status === "pending" ? "\nRunning." : ""}`}
-              aria-label={`${nodeMarkers[entry.node.nodeId] ? nodeMarkers[entry.node.nodeId] + ": " : ""}${shortLabel(entry.node)}${status ? `, ${status}` : ""}${entry.isCurrent ? ", current position" : ""}${entry.node.status === "pending" ? ", running" : entry.node.unread ? ", unread" : ""}`}
+                `\n${entry.isCurrent ? t("session.treeCurrentPosition") : t("session.treeDoubleClickToSwitch")}`
+              }${entry.node.status === "pending" ? `\n${t("session.statusRunning")}` : ""}`}
+              aria-label={`${nodeMarkers[entry.node.nodeId] ? nodeMarkers[entry.node.nodeId] + ": " : ""}${[
+                shortLabel(entry.node),
+                status,
+                entry.isCurrent ? t("session.treeCurrentPosition") : undefined,
+                entry.node.status === "pending" ? t("session.statusRunning") : entry.node.unread ? t("session.treeUnread") : undefined
+              ].filter(Boolean).join(t("common.listSeparator"))}`}
               aria-current={entry.isCurrent ? "step" : undefined}
             >
               <span className="awb-chat-tree__graph-node-dot">{nodeMarkers[entry.node.nodeId]}</span>

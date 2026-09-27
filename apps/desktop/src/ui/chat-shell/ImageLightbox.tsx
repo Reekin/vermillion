@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { writeClipboardImage } from "./clipboard.js";
-import { t } from "../../i18n/index.js";
+import { useT } from "../../i18n/react.js";
 
 export type ImageLightboxState = {
   src: string;
@@ -21,6 +21,7 @@ export const ImageLightbox = ({
   onClose,
   renderContextMenu
 }: ImageLightboxProps): ReactElement | null => {
+  const t = useT();
   const [menu, setMenu] = useState<{ x: number; y: number }>();
   const [notice, setNotice] = useState<{ message: string; error?: boolean }>();
 
@@ -63,9 +64,9 @@ export const ImageLightbox = ({
           type="button"
           className="awb-lightbox__close"
           onClick={onClose}
-          aria-label="Close image preview"
+          aria-label={t("session.closeImagePreview")}
         >
-          Close
+          {t("common.close")}
         </button>
         <img
           className="awb-lightbox__image"

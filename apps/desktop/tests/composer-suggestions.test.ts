@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveSlashSuggestionItems } from "../src/ui/chat-shell/composer/composer-suggestions.js";
+import { t } from "../src/i18n/index.js";
 
 describe("resolveSlashSuggestionItems", () => {
   it("builds slash items from server-returned capabilities plus local session actions", () => {
@@ -35,7 +36,7 @@ describe("resolveSlashSuggestionItems", () => {
         id: "slash:resume-session",
         kind: "slash",
         label: "/resume",
-        detail: "Reload the current thread window",
+        detail: t("session.slashResumeDetail"),
         action: "resume-session"
       },
       {
@@ -58,7 +59,7 @@ describe("resolveSlashSuggestionItems", () => {
         id: "slash:interrupt",
         kind: "slash",
         label: "/interrupt",
-        detail: "Interrupt the active turn",
+        detail: t("session.slashInterruptDetail"),
         action: "interrupt"
       }
     ]);

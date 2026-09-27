@@ -1,7 +1,7 @@
 import { startTransition, useState, type ReactElement } from "react";
-import type { ApprovalRequest } from "@vermillion/shared";
+import type { ApprovalKind, ApprovalRequest, ApprovalStatus } from "@vermillion/shared";
 import { Button, type ButtonVariant } from "./Button.js";
-import { t } from "../../i18n/index.js";
+import { t, type MessageKey } from "../../i18n/index.js";
 import { useT } from "../../i18n/react.js";
 import { ParticipantIdentityBadge } from "./ParticipantIdentityBadge.js";
 import {
@@ -27,6 +27,20 @@ export type ApprovalFlowViewProps = {
 };
 
 const defaultDirectory = buildParticipantDirectory([]);
+
+const statusKeys: Record<ApprovalStatus, MessageKey> = {
+  pending: "session.approvalPending",
+  approved: "session.approvalApproved",
+  denied: "session.approvalDenied",
+  deferred: "session.approvalDeferred"
+};
+
+const kindKeys: Record<ApprovalKind, MessageKey> = {
+  command: "session.approvalKindCommand",
+  file_change: "session.approvalKindFileChange",
+  tool: "session.approvalKindTool",
+  custom: "session.approvalKindCustom"
+};
 
 const canRespond = (approval: ApprovalRequest): boolean => approval.status === "pending";
 
@@ -176,10 +190,11 @@ export const ApprovalFlowView = ({
         const requestError = errorByRequestId[approval.requestId];
         const disabled = !onRespond || !canRespond(approval) || inFlight;
         const decisionLabels = decisionLabelsFor(approval);
+        const kindLabel = t(kindKeys[approval.approvalKind]);
         const identity = resolveParticipantIdentity(
           participantDirectory,
           approval.actor,
-          approval.approvalKind
+          kindLabel
         );
 
         return (
@@ -189,9 +204,9 @@ export const ApprovalFlowView = ({
                 <strong>{approvalTitle(approval)}</strong>
                 <ParticipantIdentityBadge identity={identity} compact />
               </div>
-              <span className={`awb-badge is-${approval.status}`}>{approval.status}</span>
+              <span className={`awb-badge is-${approval.status}`}>{t(statusKeys[approval.status])}</span>
             </header>
-            <p className="awb-approval-item__kind">{approval.approvalKind}</p>
+            <p className="awb-approval-item__kind">{kindLabel}</p>
             {approval.details && <p className="awb-approval-item__details">{approval.details}</p>}
             <div className="awb-approval-item__actions">
               {decisionLabels.length > 0 ? (

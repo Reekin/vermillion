@@ -10,7 +10,7 @@ import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { statusLabel, statusTone } from "./task-labels.js";
 import { Badge, InlineNotice, ListRow, SectionLabel, StatusPill, Toggle } from "./ui.js";
-import { useT } from "../../../i18n/react.js";
+import { useLocale, useT } from "../../../i18n/react.js";
 
 type Props = ChatTreePanelProps & {
   client: WorkbenchClient;
@@ -21,6 +21,7 @@ type Props = ChatTreePanelProps & {
 
 export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancelOperation, ...props }: Props) => {
   const t = useT();
+  const locale = useLocale();
   const [expandedTree, setExpandedTree] = useState<string>();
   const [menu, setMenu] = useState<SessionMenu<ChatTreeNodeActionInput["action"]> & { nodeId: string }>();
   const [operationMenu, setOperationMenu] = useState<{
@@ -89,7 +90,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
     return () => { active = false; unsubscribe(); };
   }, [client, workspaceId]);
   const current = records.workspaceId === workspaceId ? records : undefined;
-  const { tree, activeWorkers, hasWorkSessions, nodeMarkers } = useMemo(() => projectChatTreeWorkers(props.chatTree, current?.items ?? [], current?.requests ?? [], showAll), [props.chatTree, current, showAll]);
+  const { tree, activeWorkers, hasWorkSessions, nodeMarkers } = useMemo(() => projectChatTreeWorkers(props.chatTree, current?.items ?? [], current?.requests ?? [], showAll), [props.chatTree, current, showAll, locale]);
   return <><ChatTreePanel {...props} chatTree={tree} nodeMarkers={nodeMarkers}
     onNodeContextMenu={(event, nodeId) => {
       event.preventDefault();
@@ -98,7 +99,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
       setMenu({ sessionId: props.chatTree.sessionId, nodeId, x: event.clientX, y: event.clientY, actions: [
         { action: "copy_session_id", label: t("docs.tree.copySessionId") },
         { action: "copy_awb_session_id", label: t("docs.tree.copyInternalId") },
-        { action: "open_rollout", label: "Open rollout" },
+        { action: "open_rollout", label: t("docs.tree.openRollout") },
         { action: "hide_branch", label: t("docs.tree.deleteBranch"), disabled: !node.canHide }
       ] });
     }}

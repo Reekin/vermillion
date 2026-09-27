@@ -8,6 +8,7 @@ import { Modal } from "./Modal.js";
 import { Button, Field, InlineNotice, Select } from "./ui.js";
 import { t } from "../../../i18n/index.js";
 import { useT } from "../../../i18n/react.js";
+import { formatDuration } from "../../../i18n/format.js";
 
 const inheritGlobalValue = "__inherit_global__";
 const defaultValue = "__default__";
@@ -141,12 +142,12 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
     ? models.find((model) => model.modelId === globalDocument.model)?.displayName ?? globalDocument.model
     : inheritInputLabel;
   const globalReasoningLabel = globalDocument?.reasoningOptionId === null
-    ? "Default"
+    ? t("docs.roleEditor.default")
     : globalDocument?.reasoningOptionId
       ? globalReasoningOptions.find((option) => option.optionId === globalDocument.reasoningOptionId)?.displayName ?? globalDocument.reasoningOptionId
       : inheritInputLabel;
   const globalServiceTierLabel = globalDocument?.serviceTierId === null
-    ? "Standard"
+    ? t("docs.roleEditor.standardTier")
     : globalDocument?.serviceTierId
       ? globalServiceTiers.find((tier) => tier.tierId === globalDocument.serviceTierId)?.displayName ?? globalDocument.serviceTierId
       : inheritInputLabel;
@@ -174,7 +175,7 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
                   onChange={(value) => update({ reasoningOptionId: settingValue(value) })}
                   options={[
                     { value: isAppend ? inheritGlobalValue : "", label: isAppend ? t("docs.roleEditor.inheritGlobal", { value: globalReasoningLabel }) : inheritInputLabel },
-                    { value: defaultValue, label: defaultReasoning ? `Default (${defaultReasoning})` : "Default" },
+                    { value: defaultValue, label: defaultReasoning ? t("docs.roleEditor.defaultWith", { value: defaultReasoning }) : t("docs.roleEditor.default") },
                     ...(document.reasoningOptionId && !reasoningOptions.some((option) => option.optionId === document.reasoningOptionId) ? [{ value: document.reasoningOptionId, label: t("docs.roleEditor.currentFile", { value: document.reasoningOptionId }) }] : []),
                     ...reasoningOptions.map((option) => ({ value: option.optionId, label: option.displayName }))
                   ]} />
@@ -182,14 +183,14 @@ const RoleEditorForm = ({ client, transport, workspaceId, roleId, onClose }: {
                   onChange={(value) => update({ serviceTierId: settingValue(value) })}
                   options={[
                     { value: isAppend ? inheritGlobalValue : "", label: isAppend ? t("docs.roleEditor.inheritGlobal", { value: globalServiceTierLabel }) : inheritInputLabel },
-                    { value: defaultValue, label: "Standard" },
+                    { value: defaultValue, label: t("docs.roleEditor.standardTier") },
                     ...(document.serviceTierId && !serviceTiers.some((tier) => tier.tierId === document.serviceTierId) ? [{ value: document.serviceTierId, label: t("docs.roleEditor.currentFile", { value: document.serviceTierId }) }] : []),
                     ...serviceTiers.map((tier) => ({ value: tier.tierId, label: tier.displayName, hint: tier.description }))
                   ]} />
               </div>
               {roleId === "supervisor" && <Field kind="input" type="number" label={t("docs.roleEditor.interval")} min={1} step={1}
                 value={document.checkIntervalMinutes ?? (isGlobal ? 5 : "")} disabled={fieldDisabled}
-                placeholder={isAppend ? t("docs.roleEditor.inheritGlobal", { value: t("common.durationMinutes", { minutes: globalDocument?.checkIntervalMinutes ?? 5 }) }) : t("docs.roleEditor.defaultInterval", { minutes: 5 })}
+                placeholder={isAppend ? t("docs.roleEditor.inheritGlobal", { value: formatDuration((globalDocument?.checkIntervalMinutes ?? 5) * 60_000) }) : t("docs.roleEditor.defaultInterval", { minutes: 5 })}
                 onChange={(event) => update({ checkIntervalMinutes: event.target.value === "" ? undefined : Number(event.target.value) })} />}
               {catalogError && <InlineNotice tone="error">{t("docs.roleEditor.catalogFailed", { error: catalogError })}</InlineNotice>}
               <Field kind="textarea" label={t("docs.roleEditor.body")} rows={14} value={document.body} disabled={fieldDisabled} onChange={(event) => update({ body: event.target.value })} />

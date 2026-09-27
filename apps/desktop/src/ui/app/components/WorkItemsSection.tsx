@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { type AgentRun, type DecisionCard, type Scheduler, type WorkItem, type WorkbenchClient, type WorkflowAction, type WorkRequest } from "@vermillion/workbench/client";
 import { t } from "../../../i18n/index.js";
 import { formatDateTime, formatDuration, formatListTime, joinList } from "../../../i18n/format.js";
-import { useT } from "../../../i18n/react.js";
+import { useLocale, useT } from "../../../i18n/react.js";
 import { writeClipboardText } from "../../chat-shell/clipboard.js";
 import type { TaskTarget, WorkbenchState } from "../workbench-store.js";
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
@@ -198,10 +198,11 @@ type WorkItemsSectionProps = {
 const countTone: Record<BoardSection, StatusTone> = { attention: "attention", active: "running", ended: "neutral" };
 
 export const WorkItemsSection = ({ sourceTitles, client, workspaceId, scheduler, workItems, workRequests, runs, actions, decisions = [], onOpenSession, onOpenIssue, taskTarget, detailTarget, onDetailTargetConsumed, expandedWorkGroups, setWorkGroupExpanded }: WorkItemsSectionProps) => {
-  useT();
+  const locale = useLocale();
   const board = useRef<HTMLDivElement>(null);
   const located = useRef<TaskTarget | undefined>(undefined);
-  const entries = useMemo(() => workBoard({ requests: workRequests, items: workItems, decisions, actions }), [workRequests, workItems, decisions, actions]);
+  // Entries carry worded attention hints, so they are rebuilt on a language switch.
+  const entries = useMemo(() => workBoard({ requests: workRequests, items: workItems, decisions, actions }), [workRequests, workItems, decisions, actions, locale]);
   const counts = workBoardCounts(entries);
   const [filter, setFilter] = useState<BoardFilter>("open");
   const [query, setQuery] = useState("");

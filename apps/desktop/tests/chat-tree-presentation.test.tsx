@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
 import { ChatTreePanel } from "../src/ui/chat-shell/ChatTreePanel.js";
+import { setLocale } from "../src/i18n/index.js";
+
+beforeEach(() => setLocale("en"));
+afterEach(() => setLocale("zh"));
 
 describe("chat tree presentation slots", () => {
   it("renders supplied nodes and a footer without workbench context", () => {
@@ -13,15 +17,15 @@ describe("chat tree presentation slots", () => {
       footer={<div data-footer="branches">Branch list</div>} />);
     expect(html).toContain("has-marker");
     expect(html).toContain('class="awb-chat-tree__graph-node-dot">R</span>');
-    expect(html).toContain('aria-label="R: Selected branch, current position"');
+    expect(html).toContain('aria-label="R: Selected branch, Current position"');
     expect(html).toContain("Selected branch");
     expect(html.indexOf('data-footer="branches"')).toBeGreaterThan(html.indexOf("awb-chat-tree__graph-node-dot"));
   });
 
   it.each([
-    { status: "completed" as const, unread: true, expectedClass: "is-unread", absentClass: "is-running", label: "unread" },
-    { status: "pending" as const, unread: true, expectedClass: "is-running", absentClass: "is-unread", label: "running" },
-    { status: "pending" as const, unread: false, expectedClass: "is-running", absentClass: "is-unread", label: "running" }
+    { status: "completed" as const, unread: true, expectedClass: "is-unread", absentClass: "is-running", label: "Unread" },
+    { status: "pending" as const, unread: true, expectedClass: "is-running", absentClass: "is-unread", label: "Running" },
+    { status: "pending" as const, unread: false, expectedClass: "is-running", absentClass: "is-unread", label: "Running" }
   ])("renders $status/unread=$unread with only the $label state", ({ status, unread, expectedClass, absentClass, label }) => {
     const chatTree: ChatTreeSnapshotRpc = {
       sessionId: "source", engineId: "codex", fetchedAt: "now",

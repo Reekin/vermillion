@@ -797,12 +797,12 @@ export const MessageMarkdownView = memo(({
       <div className="awb-message__content">
         {!isRenderableMarkdownBlock(block) && (
           <p className="awb-message__empty">
-            This block references {block.kind}. View details on the right panel.
+            {t("session.blockReference", { kind: block.kind })}
           </p>
         )}
         {isRenderableMarkdownBlock(block) && isEmpty && (
           <p className="awb-message__empty">
-            {block.completedAt ? "(empty message)" : "(streaming...)"}
+            {block.completedAt ? t("session.emptyMessage") : t("session.awaitingReply")}
           </p>
         )}
         {isRenderableMarkdownBlock(block) && !isEmpty && (

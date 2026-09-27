@@ -46,25 +46,25 @@ export const ComposerQueue = ({
                   : t("session.queuedAttachmentsOnly"))}
             </strong>
             <span>
-              {item.skills.length} skill(s) · {item.attachments.length} attachment(s) ·{" "}
+              {t("session.queuedMeta", { skills: item.skills.length, attachments: item.attachments.length })} ·{" "}
               {formatQueuedTime(item.createdAt)}
             </span>
           </div>
           <div className="awb-composer-queue__actions">
             <Button variant="ghost" size="sm" onClick={() => onEdit(item.id)}>
-              Edit
+              {t("session.edit")}
             </Button>
             <Button variant="danger" size="sm" onClick={() => onDelete(item.id)}>
-              Delete
+              {t("common.delete")}
             </Button>
             {currentIntent === "send" ? (
               <Button variant="secondary" size="sm" onClick={() => void onSendNow(item.id)}>
-                Send now
+                {t("session.sendNow")}
               </Button>
             ) : null}
             {supportsSteer && currentIntent !== "send" ? (
               <Button variant="secondary" size="sm" onClick={() => void onSteerNow(item.id)}>
-                Steer now
+                {t("session.steerNow")}
               </Button>
             ) : null}
           </div>

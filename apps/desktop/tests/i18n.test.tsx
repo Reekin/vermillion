@@ -36,12 +36,12 @@ describe("interface language", () => {
     const summary = summarizeToolSteps([read, failed], { durationMs: 87_000 });
     expect(toolStepWords(read)).toEqual({ verb: "读取", object: "README.md", result: "输出 3 行" });
     expect(toolStepWords(failed).result).toBe("失败 · 退出码 2");
-    expect(toolSummaryText(summary)).toBe("读取 1 个文件 · 运行 1 条命令 · 1 步失败 · 1 分 27 秒");
+    expect(toolSummaryText(summary)).toBe("读取 1 个文件 · 运行 1 条命令 · 1 步失败 · 1分钟27秒");
     setLocale("en");
     expect(toolStepWords(read)).toEqual({ verb: "Read", object: "README.md", result: "3 lines" });
     expect(toolStepWords(failed).result).toBe("Failed · exit code 2");
-    expect(toolSummaryText(summary)).toBe("Read 1 file · Ran 1 command · 1 step failed · 1 min 27 sec");
-    expect(formatDuration(3_900_000)).toBe("1 hr 5 min");
+    expect(toolSummaryText(summary)).toBe("Read 1 file · Ran 1 command · 1 step failed · 1 min, 27 sec");
+    expect(formatDuration(3_900_000)).toBe("1 hr, 5 min");
     expect(translate("zh", "common.justNow")).toBe("刚刚");
   });
 

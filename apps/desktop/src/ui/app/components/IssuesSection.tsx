@@ -4,7 +4,7 @@ import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { Modal } from "./Modal.js";
 import { Badge, Button, Card, DetailSection, EmptyState, Field, InlineNotice, ListRow, Select } from "./ui.js";
 import { t } from "../../../i18n/index.js";
-import { formatDate, formatDateTime } from "../../../i18n/format.js";
+import { formatAgo, formatDate, formatDateTime } from "../../../i18n/format.js";
 import { useT } from "../../../i18n/react.js";
 
 const statusLabel = (status: Issue["status"]): string => ({
@@ -19,8 +19,8 @@ const evidenceLabel = (kind: Issue["evidence"][number]["kind"]): string => ({
 const relativeTime = (value: string) => {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000));
   if (minutes < 1) return t("common.justNow");
-  if (minutes < 60) return t("common.minutesAgo", { count: minutes });
-  if (minutes < 24 * 60) return t("common.hoursAgo", { count: Math.floor(minutes / 60) });
+  if (minutes < 60) return formatAgo(minutes, "minute");
+  if (minutes < 24 * 60) return formatAgo(Math.floor(minutes / 60), "hour");
   return formatDate(value);
 };
 

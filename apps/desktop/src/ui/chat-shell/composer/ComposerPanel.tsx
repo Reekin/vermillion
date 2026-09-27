@@ -304,7 +304,7 @@ export const ComposerPanel = ({
               className="awb-composer-skill__remove"
               onClick={() => onRemoveSkill(skill.id)}
             >
-              Remove
+              {t("session.remove")}
             </Button>
           </article>
         ))}
@@ -334,7 +334,7 @@ export const ComposerPanel = ({
               </button>
             ) : (
               <div className="awb-composer__attachment-icon" aria-hidden="true">
-                FILE
+                {t("session.fileBadge")}
               </div>
             )}
             <div className="awb-composer__attachment-copy">

@@ -9,6 +9,7 @@ import type {
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { RendererStore } from "../../../store/store.js";
 import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-signal.js";
+import { useSettingsSignal } from "../use-locale-sync.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
 import { Alert, Button, CollapsibleDetails, Field, InlineNotice, Select } from "./ui.js";
 import { engineWarningDetails, engineWarningReason } from "../output-log.js";
@@ -23,6 +24,7 @@ type SettingsPageProps = {
 export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => {
   const t = useT();
   const configWarningsSignal = useEngineConfigWarningsSignal(sessionStore);
+  const settingsSignal = useSettingsSignal(sessionStore);
   const [settings, setSettings] = useState<SessionSettingsRpc | undefined>(undefined);
   const [engines, setEngines] = useState<EngineDefinitionRpc[]>([]);
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
@@ -50,9 +52,9 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
   }, [reload]);
 
   useEffect(() => {
-    if (!configWarningsSignal) return;
+    if (!configWarningsSignal && !settingsSignal) return;
     void transport.settings.get().then(setSettings, () => undefined);
-  }, [configWarningsSignal, transport]);
+  }, [configWarningsSignal, settingsSignal, transport]);
 
   // 标题模型的可选值与输入器一致，取当前新会话引擎的模型目录。
   const titleEngineId =

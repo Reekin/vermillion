@@ -33,7 +33,7 @@ export const SessionActionFeedback = <TAction extends string = SessionActionDesc
           y={menu.y}
           onClose={onCloseMenu}
           items={[
-            ...(onOpenRename && renameTitle ? [{ key: "rename", label: "Rename", onSelect: () => onOpenRename(menu.sessionId, renameTitle) }] : []),
+            ...(onOpenRename && renameTitle ? [{ key: "rename", label: t("docs.sidebar.rename"), onSelect: () => onOpenRename(menu.sessionId, renameTitle) }] : []),
             ...menu.actions.map((action) => ({
               key: action.action,
               label: action.label,

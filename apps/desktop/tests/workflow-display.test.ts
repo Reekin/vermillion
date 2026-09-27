@@ -137,10 +137,10 @@ describe("execution and integration presentation", () => {
   });
 
   it("writes durations in readable Chinese units", () => {
-    expect(formatDuration(45_000)).toBe("45 秒");
-    expect(formatDuration(87_000)).toBe("1 分 27 秒");
-    expect(formatDuration(52 * 60_000)).toBe("52 分钟");
-    expect(formatDuration(185 * 60_000)).toBe("3 小时 5 分");
+    expect(formatDuration(45_000)).toBe("45秒");
+    expect(formatDuration(87_000)).toBe("1分钟27秒");
+    expect(formatDuration(52 * 60_000)).toBe("52分钟");
+    expect(formatDuration(185 * 60_000)).toBe("3小时5分钟");
   });
 
   it("follows the interface language", () => {

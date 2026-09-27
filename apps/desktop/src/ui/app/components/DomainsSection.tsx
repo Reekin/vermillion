@@ -4,7 +4,7 @@ import type { DomainConfig, DomainDefinition, Issue, PatrolRun, WorkbenchClient 
 import { Button, Card, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, MarkdownPreview, OverflowMenu, PanelHeader, Select, SettingRow, StatusIcon, StatusPill, Toggle, type StatusTone } from "./ui.js";
 import { Modal } from "./Modal.js";
 import { t } from "../../../i18n/index.js";
-import { formatClock, formatMonthDay } from "../../../i18n/format.js";
+import { formatAgo, formatClock, formatMonthDay } from "../../../i18n/format.js";
 import { useT } from "../../../i18n/react.js";
 
 const DOMAINS_DIR = ".vermillion/docs/domains/";
@@ -25,8 +25,8 @@ const clockTime = (value: string): string => `${formatDay(value)} ${formatClock(
 export const patrolTime = (value: string, now = Date.now()): string => {
   const minutes = Math.max(0, Math.floor((now - Date.parse(value)) / 60_000));
   if (minutes < 1) return t("common.justNow");
-  if (minutes < 60) return t("common.minutesAgo", { count: minutes });
-  if (minutes < 24 * 60) return t("common.hoursAgo", { count: Math.floor(minutes / 60) });
+  if (minutes < 60) return formatAgo(minutes, "minute");
+  if (minutes < 24 * 60) return formatAgo(Math.floor(minutes / 60), "hour");
   return clockTime(value);
 };
 

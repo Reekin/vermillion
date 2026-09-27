@@ -61,14 +61,14 @@ const SessionRow = memo(function SessionRow({ session, depth, expanded, selected
       leading={
         <>
           <StatusDot status={session.statusDot} />
-          {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
+          {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label={t("docs.sidebar.subsession")} />}
           {session.role && session.role !== "design-partner" && <Badge>{roleLabel(session.role) ?? session.role}</Badge>}
         </>
       }
       title={
         <>
           {session.title}
-          {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label="pinned" />}
+          {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label={t("docs.sidebar.pinned")} />}
         </>
       }
       meta={workspaceLabel}

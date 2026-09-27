@@ -30,7 +30,7 @@ describe("output log", () => {
   it("formats list times relative to now", () => {
     const now = new Date(2026, 8, 26, 14, 30, 0);
     expect(formatRelativeTime(new Date(2026, 8, 26, 14, 29, 40).toISOString(), now)).toBe("刚刚");
-    expect(formatRelativeTime(new Date(2026, 8, 26, 14, 20, 0).toISOString(), now)).toBe("10 分钟前");
+    expect(formatRelativeTime(new Date(2026, 8, 26, 14, 20, 0).toISOString(), now)).toBe("10分钟前");
     expect(formatRelativeTime(new Date(2026, 8, 25, 22, 10, 0).toISOString(), now)).toMatch(/^昨天 22:10$/);
   });
 

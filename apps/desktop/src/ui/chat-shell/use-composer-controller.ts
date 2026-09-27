@@ -878,7 +878,7 @@ export const useComposerController = (
         label: `$${skill.name}`,
         detail:
           skill.shortDescription ??
-          `${skill.description} · ${skill.scope} · ${skill.enabled ? "enabled" : "disabled"}`,
+          `${skill.description} · ${skill.scope} · ${skill.enabled ? t("session.skillEnabled") : t("session.skillDisabled")}`,
         insertionText: `[${`$${skill.name}`}](${skill.path})`,
         skill
       })

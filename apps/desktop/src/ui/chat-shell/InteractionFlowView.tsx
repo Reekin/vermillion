@@ -1,7 +1,7 @@
 import { startTransition, useState, type ReactElement } from "react";
-import type { RuntimeInteraction } from "@vermillion/shared";
+import type { RuntimeInteraction, RuntimeInteractionKind, RuntimeInteractionStatus } from "@vermillion/shared";
 import { Button } from "./Button.js";
-import { t } from "../../i18n/index.js";
+import { t, type MessageKey } from "../../i18n/index.js";
 import { useT } from "../../i18n/react.js";
 import { ParticipantIdentityBadge } from "./ParticipantIdentityBadge.js";
 import {
@@ -28,6 +28,20 @@ export type InteractionFlowViewProps = {
 };
 
 const defaultDirectory = buildParticipantDirectory([]);
+
+const statusKeys: Record<RuntimeInteractionStatus, MessageKey> = {
+  pending: "session.interactionPending",
+  accepted: "session.interactionAccepted",
+  declined: "session.interactionDeclined",
+  cancelled: "session.interactionCancelled",
+  submitted: "session.interactionSubmitted",
+  deferred: "session.interactionDeferred"
+};
+
+const kindKeys: Record<RuntimeInteractionKind, MessageKey> = {
+  mcp_elicitation: "session.interactionKindMcpElicitation",
+  tool_user_input: "session.interactionKindToolUserInput"
+};
 
 const canRespond = (interaction: RuntimeInteraction): boolean =>
   interaction.status === "pending";
@@ -144,10 +158,11 @@ export const InteractionFlowView = ({
         const inFlight = inFlightByRequestId[interaction.requestId] ?? false;
         const requestError = errorByRequestId[interaction.requestId];
         const disabled = !onRespond || !canRespond(interaction) || inFlight;
+        const kindLabel = t(kindKeys[interaction.interactionKind]);
         const identity = resolveParticipantIdentity(
           participantDirectory,
           interaction.actor,
-          interaction.interactionKind
+          kindLabel
         );
         const questions = Array.isArray(interaction.payload.questions)
           ? interaction.payload.questions
@@ -160,9 +175,9 @@ export const InteractionFlowView = ({
                 <strong>{interaction.title}</strong>
                 <ParticipantIdentityBadge identity={identity} compact />
               </div>
-              <span className={`awb-badge is-${interaction.status}`}>{interaction.status}</span>
+              <span className={`awb-badge is-${interaction.status}`}>{t(statusKeys[interaction.status])}</span>
             </header>
-            <p className="awb-approval-item__kind">{interaction.interactionKind}</p>
+            <p className="awb-approval-item__kind">{kindLabel}</p>
             {interaction.details && (
               <p className="awb-approval-item__details">{interaction.details}</p>
             )}
@@ -211,7 +226,7 @@ export const InteractionFlowView = ({
                   disabled={disabled}
                   onClick={() => void onAction(interaction, "submit")}
                 >
-                  Submit
+                  {t("session.submit")}
                 </Button>
               </div>
             ) : (
@@ -222,7 +237,7 @@ export const InteractionFlowView = ({
                   disabled={disabled}
                   onClick={() => void onAction(interaction, "submit")}
                 >
-                  Submit
+                  {t("session.submit")}
                 </Button>
                 <Button
                   variant="danger"
@@ -230,7 +245,7 @@ export const InteractionFlowView = ({
                   disabled={disabled}
                   onClick={() => void onAction(interaction, "decline")}
                 >
-                  Decline
+                  {t("session.decline")}
                 </Button>
                 <Button
                   variant="ghost"
@@ -238,7 +253,7 @@ export const InteractionFlowView = ({
                   disabled={disabled}
                   onClick={() => void onAction(interaction, "cancel")}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
             )}

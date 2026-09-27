@@ -82,6 +82,7 @@ export const docs = defineMessages(
     "docs.tree.showWorkSessions": "显示工单会话",
     "docs.tree.prepBlocked": "准备受阻",
     "docs.tree.cancelSend": "取消发送",
+    "docs.tree.openRollout": "打开 rollout",
 
     "docs.sidebar.toggleSubagents": (p: { expanded: boolean; title: string }) => `${p.expanded ? "折叠" : "展开"}子会话：${p.title}`,
     "docs.sidebar.eyebrow": "工作台",
@@ -92,6 +93,9 @@ export const docs = defineMessages(
     "docs.sidebar.draftTitle": "新对话",
     "docs.sidebar.draftMeta": "发送第一条消息后创建",
     "docs.sidebar.empty": "还没有会话。点新建会话开始。",
+    "docs.sidebar.rename": "重命名",
+    "docs.sidebar.subsession": "子会话",
+    "docs.sidebar.pinned": "已置顶",
 
     "docs.roles.title": "角色",
     "docs.roles.designPartner": "设计伙伴",
@@ -133,6 +137,9 @@ export const docs = defineMessages(
     "docs.roleEditor.defaultInterval": (p: { minutes: number }) => `默认 ${p.minutes} 分钟`,
     "docs.roleEditor.body": "Prompt 正文",
     "docs.roleEditor.footer": (p: { status: string }) => `保存到本 workspace · ${p.status}`,
+    "docs.roleEditor.default": "默认",
+    "docs.roleEditor.defaultWith": (p: { value: string }) => `默认（${p.value}）`,
+    "docs.roleEditor.standardTier": "标准",
 
     "docs.domains.template": `---
 standards:
@@ -336,6 +343,7 @@ standards:
     "docs.tree.showWorkSessions": "Show work item sessions",
     "docs.tree.prepBlocked": "Preparation blocked",
     "docs.tree.cancelSend": "Cancel send",
+    "docs.tree.openRollout": "Open rollout",
 
     "docs.sidebar.toggleSubagents": (p) => `${p.expanded ? "Collapse" : "Expand"} subsessions: ${p.title}`,
     "docs.sidebar.eyebrow": "Workbench",
@@ -346,6 +354,9 @@ standards:
     "docs.sidebar.draftTitle": "New chat",
     "docs.sidebar.draftMeta": "Created when you send the first message",
     "docs.sidebar.empty": "No sessions yet. Select New session to start.",
+    "docs.sidebar.rename": "Rename",
+    "docs.sidebar.subsession": "Subsession",
+    "docs.sidebar.pinned": "Pinned",
 
     "docs.roles.title": "Roles",
     "docs.roles.designPartner": "Design Partner",
@@ -387,6 +398,9 @@ standards:
     "docs.roleEditor.defaultInterval": (p) => `Default ${p.minutes} min`,
     "docs.roleEditor.body": "Prompt body",
     "docs.roleEditor.footer": (p) => `Saves to this workspace · ${p.status}`,
+    "docs.roleEditor.default": "Default",
+    "docs.roleEditor.defaultWith": (p) => `Default (${p.value})`,
+    "docs.roleEditor.standardTier": "Standard",
 
     "docs.domains.template": `---
 standards:

@@ -2,6 +2,7 @@ import type {
   ChatInteractionCapabilitiesRpc,
   ComposerSlashSuggestionRpc
 } from "@vermillion/shared";
+import { t } from "../../../i18n/index.js";
 import type { SlashSuggestionItem } from "./composer-types.js";
 
 const matchesSlashQuery = (label: string, query: string): boolean =>
@@ -40,7 +41,7 @@ export const resolveSlashSuggestionItems = (input: {
       id: "slash:resume-session",
       kind: "slash",
       label: "/resume",
-      detail: "Reload the current thread window",
+      detail: t("session.slashResumeDetail"),
       action: "resume-session"
     });
   }
@@ -54,7 +55,7 @@ export const resolveSlashSuggestionItems = (input: {
       id: "slash:interrupt",
       kind: "slash",
       label: "/interrupt",
-      detail: "Interrupt the active turn",
+      detail: t("session.slashInterruptDetail"),
       action: "interrupt"
     });
   }
