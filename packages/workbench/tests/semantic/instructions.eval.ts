@@ -29,15 +29,24 @@ const policies = [
     criteria: "reviewer 与 verifier 的角色正文分别标识，要求 spawn 时原样传入并附工单和 diff；model configuration JSON 仅用于核对，spawn_agent 参数 JSON 要填在工具调用顶层，不能塞进 message。两种角色都要说明这些要求。",
     paraphrase: "reviewer 角色正文：审阅成果。verifier 角色正文：执行验收。启动这两位子代理时，各自角色正文保持原样，并补上工单及 diff。各自的 model configuration JSON 只作核验参考；各自另列的 spawn_agent 参数 JSON 应作为调用的顶层参数提交，不放在 message 中。",
     broken: "reviewer subagent prompt：审阅成果。verifier subagent prompt：执行验收。model configuration JSON 仅用于核对。spawn_agent top-level parameters：把两位角色的参数 JSON 都复制进 message，工具顶层不要传模型参数，角色正文可省略，也不用附工单或 diff。"
+  },
+  {
+    name: "Shipped Worker role (Chinese and English) requires the CLI handoff",
+    criteria: "Worker 用 vermillion workItem.get 读取最新合同并按 refs 读取需求与规范；代码修改限于 scope.allowedPaths；业务进展、决策与成果通过工作台 CLI 登记，完成后用 workItem.submit 交接，自然语言说明或结束会话不能代替交接；决策问题、证据与交接说明使用工单合同的语言。",
+    paraphrase: "Read the current contract with vermillion workItem.get and the referenced docs at their pinned commits. Only change files inside scope.allowedPaths. Record progress, decisions and results through the workbench CLI and hand off with workItem.submit; a chat summary or ending the session is not a handoff. Write decision questions, evidence and handoff notes in the language of the contract.",
+    broken: "Worker 直接开始改代码，无需读取合同或 refs，可以修改仓库中任何文件。完成后在会话里写一段总结即可，不需要调用 workItem.submit；说明一律用英文。"
   }
 ];
 
 let verdicts: Awaited<ReturnType<typeof judgeSemantics>>;
+let sampleLabels: { policy: number; label: string; expected: boolean }[];
 beforeAll(async () => {
   const fixture = await setup();
   let opening: string;
   let role: string;
+  let chineseWorker: string;
   try {
+    chineseWorker = (await fixture.roles.resolve(fixture.root, "worker")).content;
     await fixture.roles.writeOverride(fixture.root, "worker", "# Worker\n执行工单。");
     await fixture.roles.writeOverride(fixture.root, "reviewer", "---\nmodel: reviewer-model\nreasoningOptionId: high\n---\n审阅成果。");
     await fixture.roles.writeOverride(fixture.root, "verifier", "---\nmodel: verifier-model\nreasoningOptionId: max\n---\n执行验收。");
@@ -49,26 +58,37 @@ beforeAll(async () => {
   } finally {
     await fixture.cleanup();
   }
-  const actual = [
-    [globalHelp(Object.keys(workbenchRpc)), methodHelp("workItem.list"), methodHelp("issue.list")].join("\n\n"),
-    methodHelp("app.start")!, opening, role
+  const englishFixture = await setup(undefined, "en");
+  let englishWorker: string;
+  try {
+    englishWorker = (await englishFixture.roles.resolve(englishFixture.root, "worker")).content;
+  } finally {
+    await englishFixture.cleanup();
+  }
+  const actual: string[][] = [
+    [[globalHelp(Object.keys(workbenchRpc)), methodHelp("workItem.list"), methodHelp("issue.list")].join("\n\n")],
+    [methodHelp("app.start")!], [opening], [role], [chineseWorker, englishWorker]
   ];
   // Expected labels stay local; the judge receives only opaque IDs, criteria and text.
-  const samples: SemanticSample[] = policies.flatMap((policy, index) =>
-    [actual[index]!, policy.paraphrase, policy.broken].map((text, variant) => ({
-      id: `sample-${index * 3 + variant}`, criteria: policy.criteria, text
-    }))
-  );
+  const variants = policies.flatMap((policy, index) => [
+    ...actual[index]!.map((text, production) => ({ policy: index, label: `production ${production + 1}`, expected: true, text })),
+    { policy: index, label: "equivalent wording", expected: true, text: policy.paraphrase },
+    { policy: index, label: "semantic regression", expected: false, text: policy.broken }
+  ]);
+  sampleLabels = variants;
+  const samples: SemanticSample[] = variants.map(({ policy, text }, index) => ({ id: `sample-${index}`, criteria: policies[policy]!.criteria, text }));
   // Avoid always presenting a passing sample first or a failing sample last.
-  const order = [8, 0, 10, 4, 2, 9, 6, 5, 1, 11, 3, 7];
-  verdicts = await judgeSemantics(order.map((index) => samples[index]!));
+  const stride = 7;
+  if (samples.length % stride === 0) throw new Error("Sample count must not be a multiple of the shuffle stride");
+  verdicts = await judgeSemantics(samples.map((_, index) => samples[(index * stride + 3) % samples.length]!));
 });
 
 for (const [index, policy] of policies.entries()) {
   it(policy.name, () => {
-    for (const [variant, label] of ["production", "equivalent wording", "semantic regression"].entries()) {
-      const result = verdicts.get(`sample-${index * 3 + variant}`)!;
-      expect(result.pass, `${label}: ${result.reason}\nEvidence: ${result.evidence}`).toBe(variant !== 2);
+    for (const [sample, { label, expected }] of sampleLabels.entries()) {
+      if (sampleLabels[sample]!.policy !== index) continue;
+      const result = verdicts.get(`sample-${sample}`)!;
+      expect(result.pass, `${label}: ${result.reason}\nEvidence: ${result.evidence}`).toBe(expected);
       console.info(`${policy.name} / ${label}: ${result.pass ? "accepted" : "rejected"} — ${result.reason}`);
     }
   });
