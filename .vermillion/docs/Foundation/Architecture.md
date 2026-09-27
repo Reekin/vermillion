@@ -21,7 +21,7 @@ Renderer 只通过 `@vermillion/workbench/client` 访问工作台契约。应用
 
 ## 持久化与事务
 
-全局 `~/.vermillion/` 保存 workspace 注册表、会话索引和全局角色文件。`workspace-registry.json` 是唯一 workspace 注册表，同时保存引擎设置：`defaultNewSessionEngineId`、`engineProgramPathsByEngineId`、`titleGenerationModelId`。默认角色随源码保存在 `packages/workbench/roles/`，打包后位于 `resources/app/roles/`，启动时由 `RoleService.ensureGlobal` 补齐全局目录中缺失的文件。
+全局 `~/.vermillion/` 保存 workspace 注册表、会话索引和全局角色文件。`workspace-registry.json` 是唯一 workspace 注册表，同时保存界面语言 `locale` 和引擎设置：`defaultNewSessionEngineId`、`engineProgramPathsByEngineId`、`titleGenerationModelId`。默认角色随源码按语言保存在 `packages/workbench/roles/zh/` 与 `roles/en/`，打包后位于 `resources/app/roles/<locale>/`，启动时由 `RoleService.ensureGlobal` 按当前 `locale` 补齐全局目录中缺失的文件。
 
 统一的 Markdown 编辑界面不决定存储位置：编辑目标携带文件归属，由对应服务读写（文档走 `DocsService`，Maintainer 巡检指令走其配置存储）。
 
@@ -98,3 +98,11 @@ Vermillion 将逐轮生效配置作为节点执行记录持久化，并通过已
 桌面与 CLI 使用同一工作台服务。桌面在 `<baseDir>/endpoint.json` 发布 loopback 端口，CLI 优先调用桌面服务；桌面未运行时在进程内运行同一个服务。
 
 桌面启动时将 `vermillion` CLI 放入 `<baseDir>/bin` 并加入本进程 PATH，引擎子进程继承该路径。角色文件解析与 developer 指令注入见[角色](../Workbench/Roles/PRD.md)。
+
+## 文案与语言
+
+工作台服务和会话引擎宿主不产出界面文案。等待原因、阻塞原因、失败说明、执行事件和可由用户处理的错误以稳定的 `code` 加参数返回并持久化；renderer 按界面语言从语言字典渲染，CLI 与诊断输出渲染为英文。引擎、Git 和命令给出的原文作为参数原样透传，不翻译。工具步骤描述（`packages/shared/src/tool-actions.ts`）同样只产出动作类别与计数，文字由界面渲染。
+
+工作台发给会话的派发、续做和通知消息，以及 CLI 帮助与报错，使用英文，不进入语言字典。
+
+Worker、监工等 agent 登记的说明与外部原文按文字保存和显示。已保存的文字记录走同一条文字显示路径，不做迁移，也不另设读取分支。

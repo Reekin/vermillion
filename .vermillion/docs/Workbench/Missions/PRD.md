@@ -90,7 +90,7 @@ worktree 由后台定期清理，默认每 5 分钟检查一次，工单刚结�
 
 ### 执行、审阅与验证
 
-执行与材料交接由 [Worker](../../../../packages/workbench/roles/worker.md)、[Reviewer](../../../../packages/workbench/roles/reviewer.md) 和 [Verifier](../../../../packages/workbench/roles/verifier.md) 指令规定。界面验收实例由工作台在独立桌面启动，不出现在用户操作屏幕上。
+执行与材料交接由 [Worker](../../../../packages/workbench/roles/zh/worker.md)、[Reviewer](../../../../packages/workbench/roles/zh/reviewer.md) 和 [Verifier](../../../../packages/workbench/roles/zh/verifier.md) 指令规定。界面验收实例由工作台在独立桌面启动，不出现在用户操作屏幕上。
 
 验证结果区分通过、发现缺陷、条件不足和未完成；条件不足与未完成不算产品缺陷，也不算通过。只有要求全部得到验证且符合文档终态时才能完成交付。有效的逐项观察和证据随续做保留，无关文档更新不使其失效；修复或需求变化只复核受影响部分。审阅与验证的交接、进度查询和续做由角色 prompt 规定。
 
@@ -138,6 +138,6 @@ Worker 轮次结束但没有提交或决策等交接时，工单保持未交付�
 
 Worker 可通过 `asksource` 询问开单来源；会话消息读取和通用 `steer` 的行为见[会话读取与通信](../Roles/PRD.md#会话)。来源位置使用工单记录的设计会话与开单 turn。
 
-工作与工单查询、准备完成登记、业务进展与依赖调整、提交成果、决策答复、暂停/恢复/取消、继续原 Worker、合入重试和结果登记都提供 CLI，与界面效果相同。操作返回实际结果和阻塞原因；派发或发送实际没有成功时，不能只记下请求就报告成功。
+工作与工单查询、准备完成登记、业务进展与依赖调整、提交成果、决策答复、暂停/恢复/取消、继续原 Worker、合入重试和结果登记都提供 CLI，与界面效果相同。合入相关方法统一以 merge 命名：`workItem.merge.retry`、`workItem.merge.takeover`、`workItem.merge.complete`。操作返回实际结果和阻塞原因；派发或发送实际没有成功时，不能只记下请求就报告成功。
 
 诊断分别展示业务阶段、固定会话及其真实运行状态、等待事项、依赖、自动推进开关、资源占用、成果和失败原因；工作诊断另外展示监工会话与检查情况。全局 CLI 帮助按对象与功能分组列出方法，明确区分 Issues 问题与建议记录、WorkItem 执行工单；单方法帮助列出适用状态、参数和示例，这两个列表方法说明各自的查询范围。

@@ -2,7 +2,9 @@
 
 设计伙伴、Worker、监工、Maintainer 和 Liaison 各有独立的角色说明（prompt），全局版本在 `~/.vermillion/roles/`，项目可在 `.vermillion/roles/` 覆盖（在项目内的md frontmatter中可以选择override或append），在 工作台 → 角色 编辑。
 
-默认角色随应用提供。应用启动时只补齐 `~/.vermillion/roles/` 中缺失的角色文件，不覆盖用户改过的全局版本。读取角色时，有项目文件就按它的方式处理：`override` 用项目正文替换全局正文，`append` 把项目正文接在全局正文后面；没有项目文件就用全局版本。
+默认角色随应用提供中文和英文两套，内容相同。应用启动时只补齐 `~/.vermillion/roles/` 中缺失的角色文件，按当前[界面语言](../../Overview/PRD.md#语言)选用对应语言的版本，不覆盖用户改过的全局版本；切换界面语言不改写已有的全局角色文件。读取角色时，有项目文件就按它的方式处理：`override` 用项目正文替换全局正文，`append` 把项目正文接在全局正文后面；没有项目文件就用全局版本。
+
+角色 prompt 要求 agent 用用户使用的语言回复，写文档时沿用 workspace 已有文档的语言。默认角色的维护方式见[角色规范](Standards.md)。
 
 每个会话记住自己的角色，fork 出的会话继承同一角色。设计伙伴的指令正文附带当前 workspaceId 和工作台 CLI 说明。
 
@@ -10,17 +12,17 @@
 
 引擎工具派出的 subagent（包括 Reviewer、Verifier）的指令和模型在派发时确定，此后不按上述规则重新注入。用户在工作台里直接向 subagent 发消息，或从它 fork 出会话继续对话时，只送达用户输入，不注入设计伙伴等角色正文、workspaceId 或工作台会话身份，也不改变它的模型配置（见[工作台 · 模型配置](../Think/PRD.md#模型配置)）。
 
-- **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/design-partner.md)。
-- **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/worker.md)。
-- **Reviewer**：审阅 Worker 的候选改动，由 Worker 拉起，指令见 [reviewer.md](../../../../packages/workbench/roles/reviewer.md)。
-- **Verifier**：按验收条目独立验收，由 Worker 拉起，指令见 [verifier.md](../../../../packages/workbench/roles/verifier.md)。
-- **监工**：工作进展检查与异常处置，指令见 [supervisor.md](../../../../packages/workbench/roles/supervisor.md)。
-- **Maintainer（领域 Owner）**：领域巡检、Issue 分诊与授权范围内自动开单，指令见 [maintainer.md](../../../../packages/workbench/roles/maintainer.md)。
-- **Liaison**：IM 反馈收集，指令见 [liaison.md](../../../../packages/workbench/roles/liaison.md)。
+- **设计伙伴**：需求讨论与项目设计，指令见 [design-partner.md](../../../../packages/workbench/roles/zh/design-partner.md)。
+- **Worker**：工单执行，指令见 [worker.md](../../../../packages/workbench/roles/zh/worker.md)。
+- **Reviewer**：审阅 Worker 的候选改动，由 Worker 拉起，指令见 [reviewer.md](../../../../packages/workbench/roles/zh/reviewer.md)。
+- **Verifier**：按验收条目独立验收，由 Worker 拉起，指令见 [verifier.md](../../../../packages/workbench/roles/zh/verifier.md)。
+- **监工**：工作进展检查与异常处置，指令见 [supervisor.md](../../../../packages/workbench/roles/zh/supervisor.md)。
+- **Maintainer（领域 Owner）**：领域巡检、Issue 分诊与授权范围内自动开单，指令见 [maintainer.md](../../../../packages/workbench/roles/zh/maintainer.md)。
+- **Liaison**：IM 反馈收集，指令见 [liaison.md](../../../../packages/workbench/roles/zh/liaison.md)。
 
 Maintainer 和 IM 接入属于扩展能力，不是基本执行循环的前提。
 
-开工准备使用独立的 [work-preparation.md](../../../../packages/workbench/roles/work-preparation.md)，沿用角色文件的全局、项目覆盖与追加规则，可通过角色编辑器及 role CLI 编辑。正文作为准备轮消息发送，附上本次范围及工单关联信息；准备分支继承原角色，不注入 Worker 指令。开工流程见[工作台 · 开工](../Think/PRD.md)。
+开工准备使用独立的 [work-preparation.md](../../../../packages/workbench/roles/zh/work-preparation.md)，沿用角色文件的全局、项目覆盖与追加规则，可通过角色编辑器及 role CLI 编辑。正文作为准备轮消息发送，附上本次范围及工单关联信息；准备分支继承原角色，不注入 Worker 指令。开工流程见[工作台 · 开工](../Think/PRD.md)。
 
 排到工单时，执行分支切换为 Worker 角色和 Worker 模型配置，再收到合同。分支之前的讨论历史保留，之后恢复或压缩上下文都仍是 Worker。`worker.md` 只描述执行已建立工单的职责。
 
@@ -88,7 +90,7 @@ CLI `vermillion asksource` 接收 `workspaceId`、`workItemId`、调用者 `sess
 
 临时会话使用该 workspace 解析后的设计伙伴角色与模型配置，不继承 Worker 的执行身份或工单归属。它回答本次问题，原设计讨论不会收到额外用户消息，也不改变用户查看位置。调用返回答复和临时会话标识；问答结束后归档临时 fork，失败和中断也执行回收，归档失败明确反馈。无有效来源位置或调用者不是对应 Worker 时明确拒绝，不冷启动无上下文的替代会话。
 
-询问是当前 Worker 执行中的工具操作，等待期间保留原执行归属，不计为未提交失败或重复派工。问答本身不修改合同、不新增工单，后续处置由 [Worker 指令](../../../../packages/workbench/roles/worker.md)规定。
+询问是当前 Worker 执行中的工具操作，等待期间保留原执行归属，不计为未提交失败或重复派工。问答本身不修改合同、不新增工单，后续处置由 [Worker 指令](../../../../packages/workbench/roles/zh/worker.md)规定。
 
 ## Maintainer 巡检指令
 
