@@ -11,11 +11,13 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:semantic": "pnpm --filter @vermillion/workbench test:semantic",
+    "roles:sync": "node scripts/roles-sync.mjs",
+    "roles:check": "node scripts/roles-sync.mjs --check",
     "test:ui": "node apps/desktop/tests/modal-dismiss-smoke.mjs && node apps/desktop/tests/renderer-selection-smoke.mjs && node apps/desktop/tests/session-sidebar-scroll-smoke.mjs",
     "dev": "pnpm --filter @vermillion/desktop dev",
     "start": "pnpm --filter @vermillion/desktop start",
     "prepare:worktree": "node scripts/prepare-worktree.mjs",
-    "package": "pnpm -r --workspace-concurrency=1 build && node ./scripts/package-unpack.mjs"
+    "package": "node scripts/roles-sync.mjs --check && pnpm -r --workspace-concurrency=1 build && node ./scripts/package-unpack.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

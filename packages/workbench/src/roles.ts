@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Locale } from "@vermillion/shared";
 import { zRoleExecutionOverrides, type ResolvedRole, type RoleExecutionOverrides, type RoleFile } from "./contracts.js";
 import { STATE_DIR } from "./docs.js";
 import { parseRoleDocument, DEFAULT_SUPERVISOR_CHECK_INTERVAL_MINUTES } from "./role-document.js";
@@ -34,10 +35,13 @@ const exists = async (path: string): Promise<boolean> => {
 
 const titleOf = (content: string): string => content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? "";
 
+/** First-launch rule of the desktop (localeFromLanguageTag): Chinese system language → zh, otherwise en. The CLI runs from dist and cannot load shared at runtime. */
+const systemLocale = (): Locale => Intl.DateTimeFormat().resolvedOptions().locale.toLowerCase().startsWith("zh") ? "zh" : "en";
+
 /** The header configures prompt composition and execution; it is never prompt text. */
 const parsePrompt = (content: string): { body: string; mode: "override" | "append"; modelConfig?: ResolvedRole["modelConfig"]; checkIntervalMinutes?: number } => {
   const { body, mode, model, reasoningOptionId, serviceTierId, checkIntervalMinutes } = parseRoleDocument(content);
-  if (mode === "global") throw new Error("角色 frontmatter 的 mode 必须为 override 或 append。");
+  if (mode === "global") throw new Error("Role frontmatter mode must be override or append.");
   const modelConfig = model !== undefined || reasoningOptionId !== undefined || serviceTierId !== undefined
     ? zRoleExecutionOverrides.parse({ modelId: model, reasoningOptionId, serviceTierId }) : undefined;
   return { body, mode, ...(modelConfig ? { modelConfig } : {}), ...(checkIntervalMinutes !== undefined ? { checkIntervalMinutes } : {}) };
@@ -60,7 +64,7 @@ const mergeExecutionConfig = (globalConfig: RoleExecutionOverrides | undefined, 
 export type RoleServiceOptions = {
   /** ~/.vermillion/roles: the user's editable copy of every role prompt. */
   globalDir: string;
-  /** Prompts shipped with the app; missing files are copied into globalDir on ensureGlobal(). Omit when running without the package (CLI). */
+  /** Prompts shipped with the app, one subdirectory per locale (zh/, en/); missing files are copied into globalDir on ensureGlobal(). Omit when running without the package (CLI). */
   defaultsDir?: string;
 };
 
@@ -71,14 +75,16 @@ export type RoleServiceOptions = {
 export class RoleService {
   constructor(private readonly options: RoleServiceOptions) {}
 
-  async ensureGlobal(): Promise<void> {
+  /** Seeds missing global roles in the interface language; existing global files are never rewritten. */
+  async ensureGlobal(locale: Locale = systemLocale()): Promise<void> {
     const { defaultsDir, globalDir } = this.options;
     if (!defaultsDir) return;
+    const localeDir = join(defaultsDir, locale);
     await mkdir(globalDir, { recursive: true });
-    for (const roleId of await listIds(defaultsDir)) {
+    for (const roleId of await listIds(localeDir)) {
       if (retiredRoles.has(roleId)) continue;
       const target = roleFile(globalDir, roleId);
-      if (!(await exists(target))) await writeFile(target, await readFile(roleFile(defaultsDir, roleId), "utf8"), "utf8");
+      if (!(await exists(target))) await writeFile(target, await readFile(roleFile(localeDir, roleId), "utf8"), "utf8");
     }
   }
 

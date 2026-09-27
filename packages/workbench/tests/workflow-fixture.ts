@@ -16,10 +16,10 @@ export const contract = { title: "Deliver result", objective: "A visible result"
 export const submission = { contractRevision: 0, evidence: { summary: "Result available", commands: [], assumptions: [], untested: [], outOfScopeFindings: [], attachments: [] },
   review: [], verify: { verdict: "pass" as const, items: [{ index: 0, status: "pass" as const, evidence: "Checked result" }] } };
 
-export async function setup(now?: () => string) {
+export async function setup(now?: () => string, locale: "zh" | "en" = "zh") {
   const root = await mkdtemp(join(tmpdir(), "verm-workflow-"));
   const roles = new RoleService({ globalDir: join(root, ".vermillion", "roles"), defaultsDir: join(process.cwd(), "roles") });
-  await roles.ensureGlobal();
+  await roles.ensureGlobal(locale);
   const workspaces = createMemoryWorkspaceSource();
   const options = { workspaces, roles, now };
   const service = new WorkbenchService(options);

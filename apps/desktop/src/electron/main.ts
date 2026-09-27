@@ -81,7 +81,7 @@ const currentDir = dirname(currentFilePath);
 const appRoot = resolve(currentDir, "..");
 const bundledPreloadPath = join(currentDir, "preload.cjs");
 const bundledRendererIndexPath = join(appRoot, "dist-web", "index.html");
-// Shipped role prompts: resources/app/roles in a release, packages/workbench/roles in the repo.
+// Shipped role prompts (zh/ and en/): resources/app/roles in a release, packages/workbench/roles in the repo.
 const roleDefaultsDir = [join(appRoot, "roles"), resolve(appRoot, "../../packages/workbench/roles")].find((dir) => existsSync(dir));
 // CLI entry: bundled in a release, built package output in the repo.
 const cliEntryPath = [join(appRoot, "cli", "vermillion.mjs"), resolve(appRoot, "../../packages/workbench/bin/vermillion.mjs")].find((path) => existsSync(path));
@@ -788,7 +788,7 @@ const boot = async (): Promise<void> => {
     if (!window.isDestroyed()) window.webContents.send(SESSION_IPC_READ_PROGRESS_CHANNEL, progress);
   });
   const roleService = new RoleService({ globalDir: join(persistenceBaseDir, "roles"), defaultsDir: roleDefaultsDir });
-  await roleService.ensureGlobal();
+  await roleService.ensureGlobal(await interfaceLocale(service));
   const agentRunner = createAgentRunner(service);
   const sessionSteerer = createSessionSteerer(service);
   const sourceAsker = createSourceAsker(service, async (workspaceId) => {
