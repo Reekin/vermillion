@@ -5,6 +5,7 @@ import { EditorView } from "@codemirror/view";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { tags } from "@lezer/highlight";
+import { t } from "../../../i18n/index.js";
 
 const theme = EditorView.theme({
   "&": { height: "100%", color: "var(--color-foreground)", backgroundColor: "var(--color-input)", fontSize: "var(--text-body)" },
@@ -39,7 +40,7 @@ export const SourceEditor = ({ path, value, onChange, initialLine, initialColumn
       parent: host.current!,
       state: EditorState.create({ doc: initial.current, extensions: [
         basicSetup, theme, syntaxHighlighting(highlighting), EditorView.lineWrapping, language.of([]),
-        EditorView.contentAttributes.of({ "aria-label": "源码", spellcheck: "false" }),
+        EditorView.contentAttributes.of({ "aria-label": t("docs.editor.source"), spellcheck: "false" }),
         EditorView.updateListener.of((update) => { if (update.docChanged) onChangeRef.current(update.state.doc.toString()); })
       ] })
     });

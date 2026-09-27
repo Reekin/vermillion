@@ -9,9 +9,12 @@ import type {
 import type { DesktopTransport } from "../../../transport/desktop-transport.js";
 import type { RendererStore } from "../../../store/store.js";
 import { useEngineConfigWarningsSignal } from "../use-engine-config-warnings-signal.js";
+import { useSettingsSignal } from "../use-locale-sync.js";
 import { resolveComposerModels } from "../../chat-shell/use-composer-controller.js";
 import { Alert, Button, CollapsibleDetails, Field, InlineNotice, Select } from "./ui.js";
 import { engineWarningDetails, engineWarningReason } from "../output-log.js";
+import { setLocale, type Locale } from "../../../i18n/index.js";
+import { useT } from "../../../i18n/react.js";
 
 type SettingsPageProps = {
   transport: DesktopTransport;
@@ -19,7 +22,9 @@ type SettingsPageProps = {
 };
 
 export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => {
+  const t = useT();
   const configWarningsSignal = useEngineConfigWarningsSignal(sessionStore);
+  const settingsSignal = useSettingsSignal(sessionStore);
   const [settings, setSettings] = useState<SessionSettingsRpc | undefined>(undefined);
   const [engines, setEngines] = useState<EngineDefinitionRpc[]>([]);
   const [modelCatalog, setModelCatalog] = useState<EngineModelCatalogRpc | undefined>(undefined);
@@ -47,9 +52,9 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
   }, [reload]);
 
   useEffect(() => {
-    if (!configWarningsSignal) return;
+    if (!configWarningsSignal && !settingsSignal) return;
     void transport.settings.get().then(setSettings, () => undefined);
-  }, [configWarningsSignal, transport]);
+  }, [configWarningsSignal, settingsSignal, transport]);
 
   // 标题模型的可选值与输入器一致，取当前新会话引擎的模型目录。
   const titleEngineId =
@@ -91,6 +96,7 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
       try {
         const updated = await transport.settings.update(input);
         setSettings(updated);
+        setLocale(updated.locale);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -127,30 +133,38 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
     <div className="flex flex-col gap-4 p-5">
       {error && <InlineNotice tone="error">{error}</InlineNotice>}
       <Select
-        label="新会话引擎"
+        label={t("app.settingsPage.language")}
+        className="max-w-md"
+        value={settings?.locale ?? ""}
+        disabled={!settings}
+        onChange={(value) => { if (value) void save({ locale: value as Locale }); }}
+        options={[{ value: "zh", label: t("app.settingsPage.languageZh") }, { value: "en", label: t("app.settingsPage.languageEn") }]}
+      />
+      <Select
+        label={t("app.settingsPage.engine")}
         className="max-w-md"
         value={settings?.defaultNewSessionEngineId ?? engines[0]?.engineId ?? ""}
         disabled={!settings}
-        hint="之后新建的会话使用该引擎；已有会话树保持创建时的引擎。"
+        hint={t("app.settingsPage.engineHint")}
         onChange={(value) => { if (value) void save({ defaultNewSessionEngineId: value }); }}
         options={engines.map((engine) => ({ value: engine.engineId, label: engine.displayName }))}
       />
       <Select
-        label="标题模型"
+        label={t("app.settingsPage.titleModel")}
         className="max-w-md"
         value={titleGenerationModelId ?? ""}
         disabled={!settings}
-        hint="会话首条消息用它生成标题；选项来自新会话引擎，留空用内置默认模型。"
+        hint={t("app.settingsPage.titleModelHint")}
         onChange={(value) => void save({ titleGenerationModelId: value || null })}
         options={[
-          { value: "", label: `默认（${DEFAULT_SESSION_TITLE_MODEL_ID}）` },
+          { value: "", label: t("app.settingsPage.titleModelDefault", { model: DEFAULT_SESSION_TITLE_MODEL_ID }) },
           ...(titleGenerationModelId && !titleModels.some((model) => model.modelId === titleGenerationModelId)
-            ? [{ value: titleGenerationModelId, label: `${titleGenerationModelId}（不在模型列表中）` }] : []),
+            ? [{ value: titleGenerationModelId, label: t("app.settingsPage.titleModelMissing", { model: titleGenerationModelId }) }] : []),
           ...titleModels.map((model) => ({ value: model.modelId, label: model.displayName }))
         ]}
       />
       {modelCatalogError && (
-        <InlineNotice tone="error">{`模型选项加载失败：${modelCatalogError}`}</InlineNotice>
+        <InlineNotice tone="error">{t("app.settingsPage.modelsFailed", { error: modelCatalogError })}</InlineNotice>
       )}
       <div className="flex max-w-2xl flex-col gap-3">
         {engines.map((engine) => {
@@ -161,7 +175,7 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
             : "";
           return (
             <div key={engine.engineId} className="flex flex-col gap-2">
-              <span className="eyebrow">{`${engine.displayName} 程序路径`}</span>
+              <span className="eyebrow">{t("app.settingsPage.programPath", { engine: engine.displayName })}</span>
               <div className="flex items-center gap-2">
                 <span
                   className="min-w-0 flex-1 truncate font-mono text-body text-foreground"
@@ -176,7 +190,7 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
                   disabled={!settings}
                   onClick={() => void pickProgramPath(engine.engineId)}
                 >
-                  选择
+                  {t("app.settingsPage.choose")}
                 </Button>
                 {customPath && (
                   <Button
@@ -185,13 +199,13 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
                     outlined
                     onClick={() => void clearProgramPath(engine.engineId)}
                   >
-                    恢复默认
+                    {t("app.settingsPage.restoreDefault")}
                   </Button>
                 )}
               </div>
               {resolution && !resolution.found && (
                 <InlineNotice tone="error" className="px-0 pb-0">
-                  {`未找到 ${resolution.path}，新建会话时该引擎无法启动。`}
+                  {t("app.settingsPage.programMissing", { path: resolution.path })}
                 </InlineNotice>
               )}
               {(settings?.engineConfigWarningsByEngineId?.[engine.engineId] ?? []).map((warning, index) => {
@@ -202,7 +216,7 @@ export const SettingsPage = ({ transport, sessionStore }: SettingsPageProps) => 
                   <Alert key={key} title={reason.title} next={reason.next}>
                     {details && (
                       <CollapsibleDetails
-                        title="技术详情"
+                        title={t("app.technicalDetails")}
                         open={openWarning === key}
                         onToggle={() => setOpenWarning((current) => (current === key ? undefined : key))}
                       >

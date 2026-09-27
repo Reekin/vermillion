@@ -11,6 +11,9 @@ import {
   Tray
 } from "electron";
 import { createSessionRuntimeService } from "@vermillion/desktop-server";
+import { localeFromLanguageTag } from "@vermillion/shared";
+import { translate } from "../i18n/index.js";
+import { interfaceLocale } from "./interface-locale.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -660,6 +663,10 @@ const boot = async (): Promise<void> => {
   let window = createMainWindow();
   const service = createSessionRuntimeService({
     persistenceBaseDir,
+    // First-launch interface language; VERMILLION_SYSTEM_LANGUAGE stands in for the OS language (acceptance instances).
+    systemLocale: localeFromLanguageTag(
+      process.env.VERMILLION_SYSTEM_LANGUAGE?.trim() || app.getPreferredSystemLanguages()[0] || app.getLocale()
+    ),
     ...(piExtensionPath ? { piExtensionPath } : {}),
     pickWorkspaceDirectory: async () => {
       const result = await dialog.showOpenDialog(window, {
@@ -737,13 +744,12 @@ const boot = async (): Promise<void> => {
       if (!isInBackground()) {
         return;
       }
-      void service
-        .getSessionBrowserItem(completed.sessionId)
-        .then((session) => {
+      void Promise.all([service.getSessionBrowserItem(completed.sessionId), interfaceLocale(service)])
+        .then(([session, locale]) => {
           // Agent sessions (steward / worker / supervisor) and any subagent they spawn finish turns all the time;
           // only the user's own top-level sessions are worth a desktop notification. Agent outcomes surface via Inbox.
           if (session && !session.role && !session.parentSessionId) {
-            showDesktopNotification(`「${session.title}」会话已完成`);
+            showDesktopNotification(translate(locale, "app.notify.sessionCompleted", { title: session.title }));
           }
         })
         .catch((error: unknown) => {
@@ -805,7 +811,7 @@ const boot = async (): Promise<void> => {
         modelConfig: role.modelConfig, title: "Issue · " + title,
         metadata: { role: "design-partner", issueId } });
       const sent = await agentRunner.send(opened.sessionId, content);
-      if (sent && "accepted" in sent && sent.accepted === false) throw new Error("会话消息未被引擎受理");
+      if (sent && "accepted" in sent && sent.accepted === false) throw new Error("The engine did not accept the session message.");
       return { sessionId: opened.sessionId, ...(sent?.turnId ? { turnId: sent.turnId } : {}) };
     },
     sessionSteerer: async ({ sessionId, content, messageId }) => {
@@ -910,13 +916,15 @@ const boot = async (): Promise<void> => {
       window.webContents.send(WORKBENCH_IPC_EVENT_CHANNEL, event);
     }
     if (event.type === "decisions.changed" || event.type === "workItems.changed") {
-      void readInbox().then((items) => {
+      void Promise.all([readInbox(), interfaceLocale(service)]).then(([items, locale]) => {
         if (!items) return;
         const baseline = knownInbox;
         knownInbox = new Set(items.map(inboxKey));
         const item = baseline && items.find((entry) => !baseline.has(inboxKey(entry)));
         if (item && isInBackground()) {
-          showDesktopNotification(item.kind === "decision" ? `需要你决定：${item.card.question}` : `已合入：${item.workItem.title}`);
+          showDesktopNotification(item.kind === "decision"
+            ? translate(locale, "app.notify.decision", { question: item.card.question })
+            : translate(locale, "app.notify.merged", { title: item.workItem.title }));
         }
       });
     }
@@ -929,7 +937,7 @@ const boot = async (): Promise<void> => {
       }
       return { ok: true, result: await writeVerifiedClipboardImage(clipboard, source) };
     }
-    if (["engine.listModels", "settings.get", "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.readProgress", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
+    if (["engine.listModels", "settings.get", "settings.update", "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.readProgress", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead"].includes(request.method)) {
       const response = await router.handleRequest({ ...request, id: randomUUID() });
       return response.ok
         ? { ok: true, result: response.result }

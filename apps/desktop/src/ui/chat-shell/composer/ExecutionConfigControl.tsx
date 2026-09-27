@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { ChevronDown } from "lucide-react";
+import { useT } from "../../../i18n/react.js";
 import type {
   EngineModelRpc,
   EngineReasoningOptionRpc,
@@ -66,6 +67,7 @@ export const ExecutionConfigControl = ({
   onReasoningOptionChange,
   onServiceTierChange
 }: ExecutionConfigControlProps): ReactElement => {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -96,10 +98,10 @@ export const ExecutionConfigControl = ({
   const tierId = selectedExecution?.serviceTierId ?? "";
   const reasoningLabel = reasoningId
     ? (reasoningOptions.find((option) => option.optionId === reasoningId)?.displayName ?? reasoningId)
-    : (defaultReasoningLabel ?? "默认");
+    : (defaultReasoningLabel ?? t("session.configDefault"));
   const tierLabel = tierId
     ? (serviceTiers.find((tier) => tier.tierId === tierId)?.displayName ?? tierId)
-    : "标准";
+    : t("session.configStandardTier");
   const details = [
     reasoningOptions.length > 0 ? reasoningLabel : undefined,
     serviceTiers.length > 0 ? tierLabel : undefined
@@ -110,22 +112,22 @@ export const ExecutionConfigControl = ({
       <button
         type="button"
         className="awb-configuration-control awb-execution-config__trigger"
-        aria-label="模型配置"
+        aria-label={t("session.modelConfig")}
         aria-haspopup="true"
         aria-expanded={open}
         disabled={disabled || loading || models.length === 0}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="awb-execution-config__model">
-          {loading ? "加载模型…" : (model?.displayName ?? "选择模型")}
+          {loading ? t("session.loadingModels") : (model?.displayName ?? t("session.selectModel"))}
         </span>
         {!loading && details ? <span className="awb-execution-config__details">{details}</span> : null}
         <ChevronDown size={13} aria-hidden="true" />
       </button>
       {open ? (
-        <div className="awb-execution-config__panel" role="dialog" aria-label="模型配置">
+        <div className="awb-execution-config__panel" role="dialog" aria-label={t("session.modelConfig")}>
           <OptionGroup
-            title="模型"
+            title={t("session.configModel")}
             options={models.map((candidate) => ({
               id: candidate.modelId,
               label: candidate.displayName,
@@ -136,9 +138,9 @@ export const ExecutionConfigControl = ({
           />
           {reasoningOptions.length > 0 ? (
             <OptionGroup
-              title="推理"
+              title={t("session.configReasoning")}
               options={[
-                { id: "", label: defaultReasoningLabel ? `默认 (${defaultReasoningLabel})` : "默认" },
+                { id: "", label: defaultReasoningLabel ? t("session.configDefaultWith", { label: defaultReasoningLabel }) : t("session.configDefault") },
                 ...reasoningOptions.map((option) => ({
                   id: option.optionId,
                   label: option.displayName,
@@ -151,9 +153,9 @@ export const ExecutionConfigControl = ({
           ) : null}
           {serviceTiers.length > 0 ? (
             <OptionGroup
-              title="速度"
+              title={t("session.configSpeed")}
               options={[
-                { id: "", label: "标准" },
+                { id: "", label: t("session.configStandardTier") },
                 ...serviceTiers.map((tier) => ({
                   id: tier.tierId,
                   label: tier.displayName,

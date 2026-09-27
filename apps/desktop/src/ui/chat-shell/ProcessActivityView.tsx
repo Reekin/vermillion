@@ -24,6 +24,9 @@ import {
 import type { ImageLightboxState } from "./ImageLightbox.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { normalizeTerminalOutput } from "./terminal-output.js";
+import { t } from "../../i18n/index.js";
+import { useT } from "../../i18n/react.js";
+import { toolStepWords } from "../../i18n/tool-steps.js";
 
 export type ProcessActivityViewProps = {
   toolCalls: ToolCall[];
@@ -103,7 +106,7 @@ const splitProcessImageOutput = (
   }
   const text = `${value.slice(0, imageStart)}${value.slice(closeIndex + 1)}`.trim();
   return {
-    alt: value.slice(imageStart + 2, altEnd).trim() || "图片预览",
+    alt: value.slice(imageStart + 2, altEnd).trim() || t("session.imagePreview"),
     src,
     text: text.length > 0 ? text : undefined
   };
@@ -131,9 +134,8 @@ const terminalStep = (stream: TerminalStream, output: string): ToolStep => {
   const failed = stream.status === "failed" || (typeof stream.exitCode === "number" && stream.exitCode !== 0);
   return {
     kind: "run",
-    verb: "运行",
-    object: "终端",
-    result: running ? "进行中" : failed ? "失败" : lines > 0 ? `输出 ${lines} 行` : "无输出",
+    object: { kind: "terminal" },
+    result: running ? { kind: "running" } : failed ? { kind: "failed" } : { kind: "output", lines },
     failed,
     running,
     targets: []
@@ -210,7 +212,9 @@ export const ProcessActivityItemView = ({
   entry: ProcessActivityEntry;
   onPreviewImage?: (input: ImageLightboxState) => void;
 }): ReactElement => {
+  useT();
   const { step } = entry;
+  const words = toolStepWords(step);
   const Icon = stepIcons[step.kind];
   const rawOutputText = entry.outputText?.trim();
   const inputText = entry.inputText?.trim();
@@ -222,11 +226,11 @@ export const ProcessActivityItemView = ({
   const row = (
     <>
       <Icon className="awb-process-step__icon" size={14} aria-hidden="true" />
-      <span className="awb-process-step__verb">{step.verb}</span>
-      <span className="awb-process-step__object">{step.object}</span>
+      <span className="awb-process-step__verb">{words.verb}</span>
+      <span className="awb-process-step__object">{words.object}</span>
       <span className="awb-process-step__result">
         {step.running ? <span className="awb-process-step__spinner" aria-hidden="true" /> : null}
-        {step.result}
+        {words.result}
       </span>
     </>
   );
@@ -275,10 +279,11 @@ export const ProcessActivityView = ({
   terminalStreams,
   onPreviewImage
 }: ProcessActivityViewProps): ReactElement => {
+  const t = useT();
   const entries = buildProcessActivityEntries(toolCalls, terminalStreams);
 
   if (entries.length === 0) {
-    return <p className="awb-detail__empty">这一轮没有执行步骤。</p>;
+    return <p className="awb-detail__empty">{t("session.noProcessSteps")}</p>;
   }
 
   return (

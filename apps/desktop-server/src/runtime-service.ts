@@ -321,6 +321,10 @@ export class SessionRuntimeService {
     this.publishRuntimeEvent({ type: "engine.configWarnings.updated", engineId });
   }
 
+  public notifySettingsChanged(): void {
+    this.publishRuntimeEvent({ type: "settings.updated" });
+  }
+
   public subscribe(
     listener: (envelope: EventEnvelope) => void,
     filter: RuntimeEventFilter = {}

@@ -2,6 +2,7 @@ import type {
   AgentParticipant,
   ParticipantRole
 } from "@vermillion/shared";
+import { t } from "../../i18n/index.js";
 
 export type ActorRefLike =
   | {
@@ -28,7 +29,7 @@ export type ParticipantDirectory = {
 const unique = (items: readonly string[]): string[] => [...new Set(items)];
 
 const formatCapabilities = (capabilities: readonly string[]): string =>
-  capabilities.length > 0 ? capabilities.join(", ") : "no declared capabilities";
+  capabilities.length > 0 ? capabilities.join(t("common.listSeparator")) : t("session.noDeclaredCapabilities");
 
 const formatRoleDetail = (role: ParticipantRole | undefined, fallback: string): string =>
   role ? `${role} · ${fallback}` : fallback;
@@ -54,7 +55,7 @@ export const buildParticipantDirectory = (
 export const resolveParticipantIdentity = (
   directory: ParticipantDirectory,
   actor: ActorRefLike,
-  fallbackLabel = "unknown actor"
+  fallbackLabel = t("session.unknownActor")
 ): ParticipantIdentity => {
   if (actor?.participantId) {
     const participant = directory.byParticipantId[actor.participantId];
@@ -94,7 +95,7 @@ export const resolveParticipantIdentity = (
 
     return {
       label: actor.engineId,
-      detail: "engine identity only",
+      detail: t("session.engineIdentityOnly"),
       kind: "engine",
       engineId: actor.engineId,
       capabilities: []
@@ -104,15 +105,15 @@ export const resolveParticipantIdentity = (
   if (fallbackLabel.trim()) {
     return {
       label: fallbackLabel,
-      detail: "role fallback",
+      detail: t("session.roleFallback"),
       kind: "role",
       capabilities: []
     };
   }
 
   return {
-    label: "unknown actor",
-    detail: "identity unavailable",
+    label: t("session.unknownActor"),
+    detail: t("session.identityUnavailable"),
     kind: "unknown",
     capabilities: []
   };

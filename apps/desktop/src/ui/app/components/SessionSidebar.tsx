@@ -8,6 +8,7 @@ import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { SessionRenameDialog } from "./SessionRenameDialog.js";
 import { Badge, Button, IconButton, ListRow, Select, StatusDot } from "./ui.js";
 import { roleLabel } from "./workflow-display.js";
+import { useT } from "../../../i18n/react.js";
 
 type SessionSidebarProps = {
   sessions: SidebarSession[];
@@ -42,13 +43,14 @@ type SessionRowProps = {
 
 /** One session row; subagents render as separate rows, so unchanged rows keep rendering untouched. */
 const SessionRow = memo(function SessionRow({ session, depth, expanded, selected, workspaceLabel, onToggleExpanded, onOpen, onOpenMenu }: SessionRowProps) {
+  const t = useT();
   return (
     <ListRow
       depth={depth}
       leadingAction={session.subagents.length > 0 ? (
         <IconButton
           icon={expanded ? ChevronDown : ChevronRight}
-          label={`${expanded ? "折叠" : "展开"}子会话：${session.title}`}
+          label={t("docs.sidebar.toggleSubagents", { expanded, title: session.title })}
           aria-expanded={expanded}
           onClick={() => onToggleExpanded(session.sessionId)}
         />
@@ -59,14 +61,14 @@ const SessionRow = memo(function SessionRow({ session, depth, expanded, selected
       leading={
         <>
           <StatusDot status={session.statusDot} />
-          {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label="subagent" />}
-          {session.role && session.role !== "design-partner" && <Badge>{roleLabel[session.role] ?? session.role}</Badge>}
+          {depth > 0 && <CornerDownRight size={11} className="shrink-0 text-faint-foreground" aria-label={t("docs.sidebar.subsession")} />}
+          {session.role && session.role !== "design-partner" && <Badge>{roleLabel(session.role) ?? session.role}</Badge>}
         </>
       }
       title={
         <>
           {session.title}
-          {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label="pinned" />}
+          {session.isPinned && <Pin size={11} className="ml-1 inline shrink-0 align-[-1px] text-faint-foreground" aria-label={t("docs.sidebar.pinned")} />}
         </>
       }
       meta={workspaceLabel}
@@ -90,6 +92,7 @@ const flattenRows = (sessions: SidebarSession[], expandedIds: ReadonlySet<string
 };
 
 export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, renameDialog, notice, onClearNotice }: SessionSidebarProps) => {
+  const t = useT();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const toggleExpanded = useCallback((sessionId: string) => setExpandedIds((current) => {
     const next = new Set(current);
@@ -146,24 +149,24 @@ export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, 
 
   return (
     <aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-border-strong bg-app-shell">
-      <header className="px-4 pt-3"><span className="eyebrow">工作台</span></header>
+      <header className="px-4 pt-3"><span className="eyebrow">{t("docs.sidebar.eyebrow")}</span></header>
       <div className="flex items-center gap-1 px-3 pb-2 pt-3">
         <Button variant={isDraft ? "secondary" : "accent"} size="sm" className="shrink-0" onClick={onNewChat}>
-          <Plus size={13} /> 新建会话
+          <Plus size={13} /> {t("docs.sidebar.newSession")}
         </Button>
-        <Select compact aria-label="筛选 workspace" className="min-w-0 flex-1" value={workspaceFilterId ?? ""} onChange={(value) => onWorkspaceFilter(value || undefined)}
-          options={[{ value: "", label: "全部" }, ...[...workspaceLabelById].map(([id, label]) => ({ value: id, label }))]} />
+        <Select compact aria-label={t("docs.sidebar.filter")} className="min-w-0 flex-1" value={workspaceFilterId ?? ""} onChange={(value) => onWorkspaceFilter(value || undefined)}
+          options={[{ value: "", label: t("docs.sidebar.all") }, ...[...workspaceLabelById].map(([id, label]) => ({ value: id, label }))]} />
       </div>
       <div className="px-3 pb-2">
         <Button variant="ghost" size="sm" className="w-full justify-start" onClick={onSearch}>
-          <Search size={13} /> 搜索
+          <Search size={13} /> {t("docs.sidebar.search")}
         </Button>
       </div>
       <ul ref={listRef} className="vm-session-list min-h-0 flex-1 overflow-auto">
         {isDraft && (
-          <li><ListRow selected title="新对话" meta="发送第一条消息后创建" /></li>
+          <li><ListRow selected title={t("docs.sidebar.draftTitle")} meta={t("docs.sidebar.draftMeta")} /></li>
         )}
-        {sessions.length === 0 && !isDraft && !loading && <li className="px-4 py-2 text-caption text-muted-foreground">还没有会话。点新建会话开始。</li>}
+        {sessions.length === 0 && !isDraft && !loading && <li className="px-4 py-2 text-caption text-muted-foreground">{t("docs.sidebar.empty")}</li>}
         {rows.map(({ session, depth, expanded }) => (
           <li key={session.sessionId} data-session-row={session.sessionId}>
             <SessionRow

@@ -15,12 +15,17 @@ const advance = (events: RuntimeEvent[]) =>
   );
 
 describe("renderer refresh signals", () => {
+  it("refreshes settings, including the interface language, on a settings change", () => {
+    expect(advance([{ type: "settings.updated" }])).toMatchObject({ settings: 1, sessionBrowser: 0 });
+  });
+
   it("refreshes engine config warnings only for their own event", () => {
     expect(advance([{ type: "engine.configWarnings.updated", engineId: "codex" }])).toEqual({
       sessionBrowser: 0,
       chatTree: 0,
       engineExtensions: 0,
-      engineConfigWarnings: 1
+      engineConfigWarnings: 1,
+      settings: 0
     });
   });
 
@@ -134,7 +139,8 @@ describe("renderer refresh signals", () => {
       sessionBrowser: 0,
       chatTree: 0,
       engineExtensions: 0,
-      engineConfigWarnings: 0
+      engineConfigWarnings: 0,
+      settings: 0
     });
   });
 
@@ -174,7 +180,8 @@ describe("renderer refresh signals", () => {
       sessionBrowser: 3,
       chatTree: 2,
       engineExtensions: 0,
-      engineConfigWarnings: 0
+      engineConfigWarnings: 0,
+      settings: 0
     });
   });
 
@@ -211,7 +218,8 @@ describe("renderer refresh signals", () => {
       sessionBrowser: 0,
       chatTree: 0,
       engineExtensions: 1,
-      engineConfigWarnings: 0
+      engineConfigWarnings: 0,
+      settings: 0
     });
   });
 

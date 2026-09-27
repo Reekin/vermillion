@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Modal } from "./Modal.js";
 import { Button, Field, InlineNotice } from "./ui.js";
+import { useT } from "../../../i18n/react.js";
 
 type SessionRenameDialogProps = {
   /** Current title; the input starts with it filled in and selected. */
@@ -13,13 +14,14 @@ type SessionRenameDialogProps = {
 
 /** Renames one session row. Blank titles and titles that keep the current name are not submitted. */
 export const SessionRenameDialog = ({ title, busy, error, onSubmit, onClose }: SessionRenameDialogProps) => {
+  const t = useT();
   const [value, setValue] = useState(title);
   const next = value.trim();
   const submit = () => {
     if (next && next !== title && !busy) onSubmit(next);
   };
   return (
-    <Modal title="重命名会话" onClose={onClose} width={460}>
+    <Modal title={t("docs.rename.title")} onClose={onClose} width={460}>
       <form
         className="space-y-3 p-4"
         onSubmit={(event) => {
@@ -28,7 +30,7 @@ export const SessionRenameDialog = ({ title, busy, error, onSubmit, onClose }: S
         }}
       >
         <Field
-          label="会话标题"
+          label={t("docs.rename.field")}
           autoFocus
           disabled={busy}
           value={value}
@@ -37,8 +39,8 @@ export const SessionRenameDialog = ({ title, busy, error, onSubmit, onClose }: S
         />
         {error && <InlineNotice tone="error">{error}</InlineNotice>}
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>取消</Button>
-          <Button variant="primary" type="submit" disabled={busy || !next || next === title}>{busy ? "保存中…" : "保存"}</Button>
+          <Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
+          <Button variant="primary" type="submit" disabled={busy || !next || next === title}>{busy ? t("docs.saving") : t("common.save")}</Button>
         </div>
       </form>
     </Modal>

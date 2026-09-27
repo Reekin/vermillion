@@ -1,4 +1,5 @@
 import type { ApprovalRequest, ChatSession } from "@vermillion/shared";
+import { t } from "../../i18n/index.js";
 
 export type ComposerStatusNotice = {
   message: string;
@@ -46,20 +47,20 @@ export const resolveRecoveryNotice = (
       value: executionRecovery,
       source: "session-browser",
       key: "executionRecoverySessionId",
-      summary: "会话重新连接失败，点「恢复」重试"
+      summary: t("session.reconnectFailed")
     },
     {
       value: chatTreeRefresh,
       source: "chat-tree",
       key: "chatTreeRefreshSessionId",
-      summary: "刷新会话树失败"
+      summary: t("session.treeRefreshFailed")
     }
   ] as const;
   for (const { value, source, key, summary } of recoveries) {
     if (!value || typeof value !== "object" || !("status" in value)) continue;
     if (value.status === "failed" && (!current || current.source === source)) {
       const message = "message" in value && typeof value.message === "string"
-        ? value.message : "未知错误";
+        ? value.message : t("session.unknownError");
       current = {
         message: summary,
         detail: message,
@@ -107,54 +108,54 @@ export const resolveComposerStatusModel = (
   if (input.activeSession?.status === "awaiting_approval" && pendingApproval) {
     return {
       kind: "awaiting_approval",
-      label: "等待审批",
-      detail: `等待审批：${pendingApproval.requestId}`
+      label: t("session.statusAwaitingApproval"),
+      detail: t("session.awaitingApprovalFor", { requestId: pendingApproval.requestId })
     };
   }
 
   if (input.activeSession?.status === "running") {
     return {
       kind: "running",
-      label: "运行中",
-      detail: input.supportsSteer ? "可补充到当前轮次" : "新消息会排队"
+      label: t("session.statusRunning"),
+      detail: input.supportsSteer ? t("session.runningCanSteer") : t("session.runningWillQueue")
     };
   }
 
   if (input.activeSession?.status === "error") {
     return {
       kind: "error",
-      label: "需要处理",
-      detail: `会话 ${input.activeSession.sessionId} 出现错误。`
+      label: t("session.statusNeedsAttention"),
+      detail: t("session.sessionErrored", { sessionId: input.activeSession.sessionId })
     };
   }
 
   if ((input.queuedCount ?? 0) > 0 && input.activeSession) {
     return {
       kind: "queue_pending",
-      label: `${input.queuedCount} 条排队`,
-      detail: "空闲后自动发送"
+      label: t("session.queuedCount", { count: input.queuedCount ?? 0 }),
+      detail: t("session.sendWhenIdle")
     };
   }
 
   if (input.activeSession) {
     return {
       kind: "idle",
-      label: "就绪",
-      detail: `会话 ${input.activeSession.sessionId}`
+      label: t("session.statusReady"),
+      detail: t("session.sessionId", { sessionId: input.activeSession.sessionId })
     };
   }
 
   if (input.selectedEngineId) {
     return {
       kind: "no_session",
-      label: "就绪",
-      detail: `新会话引擎：${input.selectedEngineId}`
+      label: t("session.statusReady"),
+      detail: t("session.newSessionEngine", { engineId: input.selectedEngineId })
     };
   }
 
   return {
     kind: "no_session",
-    label: "就绪"
+    label: t("session.statusReady")
   };
 };
 

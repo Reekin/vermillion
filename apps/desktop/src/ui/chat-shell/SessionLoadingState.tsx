@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import type { SessionReadProgress } from "@vermillion/shared";
-import { loadingDetail, loadingStages, type SessionLoadingStage, type SessionLoadingTimeline } from "./session-loading-progress.js";
+import { useT } from "../../i18n/react.js";
+import { loadingDetail, loadingStageLabel, loadingStages, type SessionLoadingStage, type SessionLoadingTimeline } from "./session-loading-progress.js";
 import "./session-loading-state.css";
 
 export const SessionLoadingState = ({ stage = "opening", timeline = {}, progress, failed = false, onRetry }: {
   stage?: SessionLoadingStage; timeline?: SessionLoadingTimeline; progress?: SessionReadProgress;
   failed?: boolean; onRetry?: () => void;
 }) => {
+  const t = useT();
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
     if (failed) return;
@@ -25,22 +27,22 @@ export const SessionLoadingState = ({ stage = "opening", timeline = {}, progress
         </div>
       </div>
       <div className="awb-session-loading__copy" role="status" aria-live="polite" aria-atomic="true">
-        <h3>{failed ? "暂时无法打开会话" : "正在加载会话"}</h3>
-        <p title={failed ? undefined : loadingDetail(stage, progress)}>{failed ? "请重试，或先查看其他会话。" : loadingDetail(stage, progress)}</p>
+        <h3>{failed ? t("session.openFailedTitle") : t("session.loadingSession")}</h3>
+        <p title={failed ? undefined : loadingDetail(stage, progress)}>{failed ? t("session.openFailedHint") : loadingDetail(stage, progress)}</p>
       </div>
-      <ol className="awb-session-loading__phases" aria-label="加载阶段与耗时">
-        {loadingStages.map(({ id, label }) => {
+      <ol className="awb-session-loading__phases" aria-label={t("session.loadingPhases")}>
+        {loadingStages.map((id) => {
           const timing = timeline[id];
           const done = timing?.end !== undefined;
           const active = !failed && id === stage && !done;
           const seconds = timing ? Math.max(0, ((timing.end ?? now) - timing.start) / 1000).toFixed(1) : undefined;
           return <li key={id} className={active ? "is-current" : done ? "is-done" : ""} aria-current={active ? "step" : undefined}>
-            <span className="awb-session-loading__phase-label"><i aria-hidden="true">{done ? "✓" : ""}</i>{label}</span>
-            <span className="awb-session-loading__time" aria-live="off">{seconds ? <>{seconds}<small>秒</small></> : "待开始"}</span>
+            <span className="awb-session-loading__phase-label"><i aria-hidden="true">{done ? "✓" : ""}</i>{loadingStageLabel(id)}</span>
+            <span className="awb-session-loading__time" aria-live="off">{seconds ? <>{seconds}<small>{t("session.secondsUnit")}</small></> : t("session.phaseNotStarted")}</span>
           </li>;
         })}
       </ol>
-      {failed && <button className="awb-transcript__load-earlier-button" type="button" onClick={onRetry}>重新加载</button>}
+      {failed && <button className="awb-transcript__load-earlier-button" type="button" onClick={onRetry}>{t("session.reload")}</button>}
     </div>
   );
 };

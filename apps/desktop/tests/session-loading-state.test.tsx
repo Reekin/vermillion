@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { SessionLoadingState } from "../src/ui/chat-shell/SessionLoadingState.js";
 import { advanceLoadingTimeline, loadingDetail } from "../src/ui/chat-shell/session-loading-progress.js";
+import { setLocale } from "../src/i18n/index.js";
 
 describe("session loading presentation", () => {
   it("presents actual stages without claiming a percentage", () => {
@@ -32,5 +33,14 @@ describe("session loading presentation", () => {
   it("shows actual member counts without a percentage", () => {
     expect(loadingDetail("history", { readId: "r", sessionId: "s", stage: "waiting-engine", completed: 7, total: 16 }))
       .toBe("等待引擎返回历史 · 已就绪 7 / 16 个会话");
+  });
+  it("describes loading progress in English", () => {
+    setLocale("en");
+    try {
+      expect(loadingDetail("history", { readId: "r", sessionId: "s", stage: "waiting-engine", completed: 7, total: 16 }))
+        .toBe("Waiting for engine history · 7 / 16 sessions ready");
+    } finally {
+      setLocale("zh");
+    }
   });
 });

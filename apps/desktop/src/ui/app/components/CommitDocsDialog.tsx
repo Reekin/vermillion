@@ -3,6 +3,7 @@ import type { DocChange } from "@vermillion/workbench/client";
 import { cn } from "../lib/cn.js";
 import { Modal } from "./Modal.js";
 import { Button, Field, InlineNotice } from "./ui.js";
+import { useT } from "../../../i18n/react.js";
 
 type CommitDocsDialogProps = {
   pending: DocChange[];
@@ -15,6 +16,7 @@ const stripDocsPrefix = (path: string): string => path.replace(/^\.vermillion\/d
 const statusMark: Record<DocChange["status"], string> = { added: "U", modified: "M", deleted: "D" };
 
 export const CommitDocsDialog = ({ pending, onClose, onCommit }: CommitDocsDialogProps) => {
+  const t = useT();
   const changeByPath = useMemo(() => new Map(pending.map((c) => [c.path, c])), [pending]);
   const listed = useMemo(() => pending.map((c) => c.path).sort(), [pending]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(pending.map((c) => c.path)));
@@ -45,7 +47,7 @@ export const CommitDocsDialog = ({ pending, onClose, onCommit }: CommitDocsDialo
   };
 
   return (
-    <Modal title="仅提交文档" onClose={onClose} width={560}>
+    <Modal title={t("docs.commit.title")} onClose={onClose} width={560}>
       <form
         className="p-4"
         onSubmit={(event) => {
@@ -53,14 +55,14 @@ export const CommitDocsDialog = ({ pending, onClose, onCommit }: CommitDocsDialo
           if (canSubmit && !busy) void submit();
         }}
       >
-        <Field label="提交说明" autoFocus value={message} onChange={(event) => setMessage(event.target.value)} placeholder="这次改了什么" />
+        <Field label={t("docs.commit.message")} autoFocus value={message} onChange={(event) => setMessage(event.target.value)} placeholder={t("docs.commit.placeholder")} />
 
         <div className="mt-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="eyebrow">本次提交的文件 {selectedPaths.length}/{listed.length}</span>
+            <span className="eyebrow">{t("docs.commit.files", { selected: selectedPaths.length, total: listed.length })}</span>
             <div className="flex gap-1">
-              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(listed))}>全选</Button>
-              <Button size="sm" variant="ghost" onClick={() => setSelected((current) => new Set(listed.filter((path) => !current.has(path))))}>反选</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(listed))}>{t("docs.commit.selectAll")}</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected((current) => new Set(listed.filter((path) => !current.has(path))))}>{t("docs.commit.invert")}</Button>
             </div>
           </div>
           <ul className="mt-1.5 max-h-44 overflow-auto rounded-lg border border-border">
@@ -81,9 +83,9 @@ export const CommitDocsDialog = ({ pending, onClose, onCommit }: CommitDocsDialo
 
         {error && <InlineNotice tone="error" className="mt-3 px-0 pb-0">{error}</InlineNotice>}
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
           <Button variant="primary" type="submit" disabled={busy || !canSubmit}>
-            {busy ? "提交中…" : "提交"}
+            {busy ? t("docs.commit.busy") : t("docs.commit.submit")}
           </Button>
         </div>
       </form>

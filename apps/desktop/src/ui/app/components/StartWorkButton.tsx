@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Button, InlineNotice } from "./ui.js";
 import type { ComposerActions } from "../../chat-shell/composer/composer-types.js";
 import type { WorkRequest } from "@vermillion/workbench/client";
+import { useT } from "../../../i18n/react.js";
 
 export const StartWorkButton = ({ sessionId, turnId, composer, onStart }: {
   sessionId?: string; turnId?: string;
   composer?: ComposerActions;
   onStart: (input: { sessionId: string; turnId?: string; message?: WorkRequest["message"] }) => Promise<void>;
 }) => {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const start = async () => {
@@ -23,6 +25,6 @@ export const StartWorkButton = ({ sessionId, turnId, composer, onStart }: {
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   };
-  return <><Button variant="primary" className="w-full" disabled={busy || (composer?.hasContent ? !composer.canSubmit : !sessionId || !turnId)} onClick={() => void start()}>{busy ? "开工中…" : composer?.hasContent ? "发送并开工" : "开工"}</Button>
+  return <><Button variant="primary" className="w-full" disabled={busy || (composer?.hasContent ? !composer.canSubmit : !sessionId || !turnId)} onClick={() => void start()}>{busy ? t("work.start.starting") : composer?.hasContent ? t("work.start.sendAndStart") : t("work.start.start")}</Button>
     {error && <InlineNotice tone="error">{error}</InlineNotice>}</>;
 };

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type { WorkbenchClient, WorkflowAction, WorkItem } from "@vermillion/workbench/client";
+import { useT } from "../../../i18n/react.js";
 import { actionStatusText, integrationFailureSummary } from "./workflow-display.js";
 import { Badge, Button, Field, InlineNotice, OverflowMenu } from "./ui.js";
 
@@ -13,6 +14,7 @@ export const IntegrationControls = ({ client, workspaceId, workItemId, action, i
   item?: WorkItem;
   showStatus?: boolean;
 }) => {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [takeoverOpen, setTakeoverOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -36,20 +38,20 @@ export const IntegrationControls = ({ client, workspaceId, workItemId, action, i
     {showStatus && <div className="flex flex-wrap items-center gap-2">
       <Badge>{actionStatusText(action, item)}</Badge>
     </div>}
-    {integrationFailureSummary(action) && <InlineNotice tone="error" className="px-0">最近失败：{integrationFailureSummary(action)}</InlineNotice>}
-    {action.status === "decision" && <p className="text-caption text-muted-foreground">合入受阻，可以立即重试或交给原 Worker 处理。</p>}
-    {action.agent && item?.run.lastFailure && <InlineNotice tone="error" className="px-0">执行失败：{item.run.lastFailure}</InlineNotice>}
-    {action.agent && <p className="whitespace-pre-wrap text-caption text-muted-foreground">{action.agent.note ? "用户说明：" + action.agent.note : "原 Worker 将处理本次合入。"}</p>}
+    {integrationFailureSummary(action) && <InlineNotice tone="error" className="px-0">{t("work.labelValue", { label: t("work.merge.lastFailure"), value: integrationFailureSummary(action)! })}</InlineNotice>}
+    {action.status === "decision" && <p className="text-caption text-muted-foreground">{t("work.merge.blockedHint")}</p>}
+    {action.agent && item?.run.lastFailure && <InlineNotice tone="error" className="px-0">{t("work.labelValue", { label: t("work.merge.executionFailed"), value: item.run.lastFailure })}</InlineNotice>}
+    {action.agent && <p className="whitespace-pre-wrap text-caption text-muted-foreground">{action.agent.note ? t("work.labelValue", { label: t("work.merge.userNote"), value: action.agent.note }) : t("work.merge.workerWillHandle")}</p>}
     {canAct && !takeoverOpen && <div className="flex flex-wrap gap-2">
-      <Button size="sm" variant="primary" disabled={busy} onClick={retry}>立即重试</Button>
-      <Button size="sm" disabled={busy} onClick={() => setTakeoverOpen(true)}>交给 Agent 合入</Button>
-      <OverflowMenu label="更多合入处置" items={[{ label: "取消工单", disabled: busy, onSelect: () => void run(() => client.request("workItem.cancel", { workspaceId, workItemId })) }]} />
+      <Button size="sm" variant="primary" disabled={busy} onClick={retry}>{t("work.merge.retryNow")}</Button>
+      <Button size="sm" disabled={busy} onClick={() => setTakeoverOpen(true)}>{t("work.merge.handToAgent")}</Button>
+      <OverflowMenu label={t("work.merge.moreActions")} items={[{ label: t("work.board.cancelItem"), disabled: busy, onSelect: () => void run(() => client.request("workItem.cancel", { workspaceId, workItemId })) }]} />
     </div>}
     {canAct && takeoverOpen && <form className="space-y-2" onSubmit={takeover}>
-      <Field kind="textarea" label="给 Agent 的说明（可选）" rows={2} value={note} onChange={(event) => setNote(event.target.value)} disabled={busy} autoFocus />
+      <Field kind="textarea" label={t("work.merge.agentNote")} rows={2} value={note} onChange={(event) => setNote(event.target.value)} disabled={busy} autoFocus />
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="primary" type="submit" disabled={busy}>确认交给 Agent</Button>
-        <Button size="sm" variant="ghost" type="button" disabled={busy} onClick={() => setTakeoverOpen(false)}>取消</Button>
+        <Button size="sm" variant="primary" type="submit" disabled={busy}>{t("work.merge.confirmHandToAgent")}</Button>
+        <Button size="sm" variant="ghost" type="button" disabled={busy} onClick={() => setTakeoverOpen(false)}>{t("common.cancel")}</Button>
       </div>
     </form>}
     {error && <InlineNotice tone="error" className="px-0 whitespace-pre-wrap">{error}</InlineNotice>}

@@ -5,9 +5,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import type { DocFile, WorkItem } from "./contracts.js";
 import { zSearchResult } from "./search-contract.js";
-import type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchSource, SearchStats } from "./search-contract.js";
+import type { SearchContextLine, SearchHit, SearchQuery, SearchResult, SearchSource, SearchStats, SearchToolStep, SearchWorkItemPart } from "./search-contract.js";
 import type { ToolAction, ToolCall } from "@vermillion/shared";
-import { describeToolStep } from "@vermillion/shared/tool-actions";
+import { describeToolStep, toolStepObjectText } from "@vermillion/shared/tool-actions";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -77,10 +77,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const asNonEmptyString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
 
+/** Empty when the session has no title of its own; the interface shows its "untitled" wording. */
 const displaySessionTitle = (title: string | undefined): string => {
   const value = title?.trim();
   if (!value || /^codex-thread:[0-9a-f-]+$/i.test(value) || /^rollout-.*\.jsonl$/i.test(value)) {
-    return "未命名会话";
+    return "";
   }
   return value;
 };
@@ -175,28 +176,28 @@ const searchTextDocument = (
 };
 
 /** What the work item detail shows, in its order; each part is one result with its place. */
-const workItemParts = (item: WorkItem): Array<{ label: string; text: string }> => [
-  { label: "标题", text: item.title },
-  { label: "目标", text: item.objective },
-  ...item.scope.inScope.map((text) => ({ label: "范围", text })),
-  ...item.scope.outOfScope.map((text) => ({ label: "不做", text })),
+const workItemParts = (item: WorkItem): Array<{ part: SearchWorkItemPart; text: string }> => [
+  { part: { kind: "title" }, text: item.title },
+  { part: { kind: "objective" }, text: item.objective },
+  ...item.scope.inScope.map((text) => ({ part: { kind: "inScope" }, text })),
+  ...item.scope.outOfScope.map((text) => ({ part: { kind: "outOfScope" }, text })),
   ...item.acceptance.flatMap((entry, index) => {
     const result = item.verify?.items.find((candidate) => candidate.index === index)?.evidence;
     return [
-      { label: "验收 " + (index + 1), text: entry.text },
-      ...(result ? [{ label: "验收 " + (index + 1) + " 结果", text: result }] : [])
+      { part: { kind: "acceptance", index: index + 1 }, text: entry.text },
+      ...(result ? [{ part: { kind: "acceptanceResult", index: index + 1 }, text: result }] : [])
     ];
   }),
-  ...item.review.map((entry, index) => ({ label: "审阅 " + (index + 1), text: entry.comment + "\n理由：" + entry.reason })),
-  ...item.decisions.map((text) => ({ label: "决策", text })),
-  ...(item.evidence?.summary ? [{ label: "成果", text: item.evidence.summary }] : [])
-].map((part) => ({ label: part.label, text: markdownToPlainText(part.text) })).filter((part) => part.text);
+  ...item.review.map((entry, index) => ({ part: { kind: "review", index: index + 1 }, text: entry.comment + "\n" + entry.reason })),
+  ...item.decisions.map((text) => ({ part: { kind: "decision" }, text })),
+  ...(item.evidence?.summary ? [{ part: { kind: "summary" }, text: item.evidence.summary }] : [])
+].map((entry) => ({ part: entry.part as SearchWorkItemPart, text: markdownToPlainText(entry.text) })).filter((entry) => entry.text);
 
-const partLine = (parts: Array<{ label: string; text: string }>, index: number, query: string): SearchContextLine | undefined => {
+const partLine = (parts: Array<{ part: SearchWorkItemPart; text: string }>, index: number, query: string): SearchContextLine | undefined => {
   const part = parts[index];
   if (!part) return undefined;
   const text = part.text.length > NEIGHBOUR_TEXT_CHARS ? part.text.slice(0, NEIGHBOUR_TEXT_CHARS) + "…" : part.text;
-  return { line: index + 1, text, matches: findMatches(text, query), label: part.label };
+  return { line: index + 1, text, matches: findMatches(text, query), part: part.part };
 };
 
 const searchWorkItem = (
@@ -222,7 +223,7 @@ const searchWorkItem = (
       column: matches[0]!.start + 1,
       context: [
         partLine(parts, index - 1, query),
-        { ...toContextLine(index + 1, part.text, query, matches[0]!.start), label: part.label },
+        { ...toContextLine(index + 1, part.text, query, matches[0]!.start), part: part.part },
         partLine(parts, index + 1, query)
       ].filter((line): line is SearchContextLine => Boolean(line)),
       workItemId: item.workItemId
@@ -669,9 +670,8 @@ const toolInput = (item: Record<string, unknown>): ToolInput | undefined => {
 };
 
 /**
- * "读取 README.md · 3 行": the step exactly as the message area lists it. Only the object (file,
- * command, query) comes from the record; the verb and result are generated, so only the object is
- * searchable.
+ * A tool step as the message area lists it: the object (file, command, query) is text from the
+ * record and is what search matches; the action and result are structure the interface words.
  */
 const toolStepText = (input: ToolInput, message: RolloutMessageRecord, id: string): Omit<RolloutMessage, "id"> => {
   const { exitCode, ...call } = input;
@@ -679,12 +679,13 @@ const toolStepText = (input: ToolInput, message: RolloutMessageRecord, id: strin
     { ...call, toolCallId: id, sessionId: "search", turnId: message.turnId ?? "search", startedAt: message.at },
     { ...(call.outputSummary ? { text: call.outputSummary } : {}), ...(exitCode !== undefined ? { exitCode } : {}) }
   );
-  const head = [step.verb, step.object].filter(Boolean).join(" ");
-  const objectStart = step.verb.length + 1;
   return {
-    text: step.result ? `${head} · ${step.result}` : head,
-    toolKind: step.kind,
-    searchable: step.object ? { start: objectStart, end: objectStart + step.object.length } : { start: 0, end: 0 }
+    text: toolStepObjectText(step.object),
+    toolStep: {
+      kind: step.kind,
+      ...(step.agentAction ? { agentAction: step.agentAction } : {}),
+      ...(step.result ? { result: step.result } : {})
+    }
   };
 };
 
@@ -692,17 +693,11 @@ export type RolloutMessage = {
   /** Item id when the rollout records one; shared ancestors in forks carry the same id. */
   id?: string;
   text: string;
-  toolKind?: string;
-  /** Part of `text` taken from the record; absent when all of it is. */
-  searchable?: { start: number; end: number };
+  toolStep?: SearchToolStep;
 };
 
-const messageMatches = (message: RolloutMessage, query: string): Array<{ start: number; end: number }> => {
-  if (!message.searchable) return findMatches(message.text, query);
-  const { start, end } = message.searchable;
-  return findMatches(message.text.slice(start, end), query)
-    .map((match) => ({ start: match.start + start, end: match.end + start }));
-};
+const messageMatches = (message: RolloutMessage, query: string): Array<{ start: number; end: number }> =>
+  findMatches(message.text, query);
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm);
 
@@ -754,8 +749,7 @@ export const readRolloutMessage = (lineText: string, message: RolloutMessageReco
   }
   const input = toolInput(item);
   if (!input) return undefined;
-  const step = toolStepText(input, message, id ?? String(message.line));
-  return step.text ? withId(step) : undefined;
+  return withId(toolStepText(input, message, id ?? String(message.line)));
 };
 
 const listRolloutFiles = async (root: string): Promise<string[]> => {
@@ -944,7 +938,8 @@ const searchRollouts = async (input: {
           const text = shownMessage.text.length > NEIGHBOUR_TEXT_CHARS
             ? (step < 0 ? "…" + shownMessage.text.slice(-NEIGHBOUR_TEXT_CHARS) : shownMessage.text.slice(0, NEIGHBOUR_TEXT_CHARS) + "…")
             : shownMessage.text;
-          return { line: record.line, text, matches: messageMatches({ ...shownMessage, text }, input.query).filter((match) => match.end <= text.length), source: record.source };
+          return { line: record.line, text, matches: messageMatches({ ...shownMessage, text }, input.query).filter((match) => match.end <= text.length), source: record.source,
+            ...(shownMessage.toolStep ? { toolStep: shownMessage.toolStep } : {}) };
         }
         return undefined;
       };
@@ -963,9 +958,8 @@ const searchRollouts = async (input: {
         const after = await neighbour(position, 1);
         const hitLine = {
           ...toContextLine(record.line, shownMessage.text, input.query, matches[0]!.start),
-          // Tool steps are short; only their object part is highlighted.
-          ...(shownMessage.searchable ? { matches } : {}),
-          source: record.source
+          source: record.source,
+          ...(shownMessage.toolStep ? { toolStep: shownMessage.toolStep } : {})
         };
         const turnNumber = record.turnId ? rolloutIndex.turnNumbers.get(record.turnId) : undefined;
         const hit = {
@@ -985,7 +979,7 @@ const searchRollouts = async (input: {
           sessionId: entry.sessionId,
           ...(record.turnId ? { turnId: record.turnId } : {}),
           source: record.source,
-          ...(shownMessage.toolKind ? { toolKind: shownMessage.toolKind } : {}),
+          ...(shownMessage.toolStep ? { toolKind: shownMessage.toolStep.kind } : {}),
           ...(turnNumber ? { turnNumber } : {}),
           ...(record.at ? { messageAt: record.at } : {})
         } satisfies SearchHit;

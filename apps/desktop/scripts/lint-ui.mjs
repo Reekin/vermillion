@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../src", import.meta.url));
 const scanned = ["ui/app", "features"].map((dir) => join(root, dir));
+// Interface copy lives in the language dictionaries (src/i18n/messages); these directories may not
+// contain Chinese text outside comments.
+const copyScanned = ["ui/app", "ui/chat-shell", "features"].map((dir) => join(root, dir));
 
 // Files that define the primitives and may use raw controls.
 const primitives = new Set(["ui/app/components/ui.tsx", "ui/app/components/ContextMenu.tsx", "ui/app/components/Modal.tsx"]);
@@ -44,6 +47,19 @@ const walk = (dir) =>
     return statSync(path).isDirectory() ? walk(path) : path.endsWith(".tsx") ? [path] : [];
   });
 
+const walkSources = (dir) =>
+  readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? walkSources(path) : /\.(tsx?|mjs)$/.test(path) ? [path] : [];
+  });
+
+/** Source with comments blanked out, keeping line breaks so reported lines stay accurate. */
+const withoutComments = (source) =>
+  source.replace(/\/\*[\s\S]*?\*\/|(^|[^:"'`\\])\/\/[^\n]*/g, (match, prefix = "") =>
+    prefix + match.slice(prefix.length).replace(/[^\n]/g, " "));
+
+const han = /\p{Script=Han}/u;
+
 const findings = [];
 for (const path of scanned.flatMap(walk)) {
   const file = relative(root, path).replaceAll("\\", "/");
@@ -53,6 +69,13 @@ for (const path of scanned.flatMap(walk)) {
       if (rule.skip?.(file)) continue;
       if (rule.test(line, lines[index + 1] ?? "")) findings.push(`${file}:${index + 1}  [${rule.id}] ${rule.message}`);
     }
+  });
+}
+
+for (const path of copyScanned.flatMap(walkSources)) {
+  const file = relative(root, path).replaceAll("\\", "/");
+  withoutComments(readFileSync(path, "utf8")).split(/\r?\n/).forEach((line, index) => {
+    if (han.test(line)) findings.push(`${file}:${index + 1}  [hard-coded-copy] Chinese text in code; put interface copy in src/i18n/messages and render it with t()`);
   });
 }
 

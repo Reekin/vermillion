@@ -1,5 +1,6 @@
 import { useMemo, type ReactElement } from "react";
 import type { CodexHookRunRpc } from "@vermillion/shared";
+import { useT } from "../../../i18n/react.js";
 
 export type CodexHookActivityExtensionProps = {
   runs: CodexHookRunRpc[];
@@ -30,6 +31,7 @@ const outputTextForRun = (run: CodexHookRunRpc): string | undefined => {
 export const CodexHookActivityExtension = ({
   runs
 }: CodexHookActivityExtensionProps): ReactElement | null => {
+  const t = useT();
   const sortedRuns = useMemo(
     () =>
       [...runs].sort((left, right) => {
@@ -49,10 +51,10 @@ export const CodexHookActivityExtension = ({
   }
 
   return (
-    <section className="vm-changes" aria-label="Hook 活动">
+    <section className="vm-changes" aria-label={t("session.hookActivity")}>
       <header className="vm-changes__header">
-        <span className="vm-changes__title">Hook 活动</span>
-        <span className="vm-changes__stats">{sortedRuns.length} 次</span>
+        <span className="vm-changes__title">{t("session.hookActivity")}</span>
+        <span className="vm-changes__stats">{t("session.hookRunCount", { count: sortedRuns.length })}</span>
       </header>
       <ul className="vm-changes__list">
         {sortedRuns.map((run) => {
@@ -69,7 +71,7 @@ export const CodexHookActivityExtension = ({
                     {detailForRun(run)}
                     <code>{run.sourcePath}</code>
                   </p>
-                  {outputText ? <pre className="vm-run__output">{outputText}</pre> : <p className="vm-run__meta">没有输出。</p>}
+                  {outputText ? <pre className="vm-run__output">{outputText}</pre> : <p className="vm-run__meta">{t("session.hookNoOutput")}</p>}
                 </div>
               </details>
             </li>

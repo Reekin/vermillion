@@ -1,10 +1,11 @@
 import type { ToolAction, ToolCall } from "./domain.js";
 
 /**
- * Engine-neutral wording of tool calls as steps ("读取 README.md · 输出 3 行") and a per-turn summary.
- * Only meaning the engine states is translated: its classified command actions, its tool types and
- * the summaries the adapters write. Commands the engine did not classify read as "运行 <command>";
- * tools without a known type keep their name. Results report output and exit codes as they are.
+ * Engine-neutral structure of tool calls as steps (action, object, result) and a per-turn summary.
+ * Only meaning the engine states is classified: its command actions, its tool types and the
+ * summaries the adapters write. Commands the engine did not classify are "run <command>"; tools
+ * without a known type keep their name. Results report output lines and exit codes as they are.
+ * Wording is left to the interface, which renders these structures in its own language.
  */
 
 export type ToolStepKind =
@@ -21,11 +22,32 @@ export type ToolStepKind =
   | "agent"
   | "other";
 
+export type ToolAgentAction = "spawn" | "message" | "resume" | "wait" | "close";
+
+/** What a step acts on; every text here comes from the record, never from generated wording. */
+export type ToolStepObject =
+  | { kind: "text"; text: string }
+  /** File base names, in the order the engine lists them. */
+  | { kind: "files"; names: string[] }
+  /** Directory paths shortened for display; `.` is the current directory. */
+  | { kind: "directories"; paths: string[] }
+  | { kind: "pattern"; pattern: string; path?: string }
+  | { kind: "agents"; count: number }
+  | { kind: "terminal" };
+
+export type ToolStepResult =
+  | { kind: "running" }
+  | { kind: "failed"; exitCode?: number }
+  /** Printed output lines; 0 means no output. */
+  | { kind: "output"; lines: number }
+  | { kind: "agents"; errored: number; completed: number };
+
 export type ToolStep = {
   kind: ToolStepKind;
-  verb: string;
-  object?: string;
-  result?: string;
+  /** Subagent steps: which subagent operation the call performs. */
+  agentAction?: ToolAgentAction;
+  object?: ToolStepObject;
+  result?: ToolStepResult;
   failed: boolean;
   running: boolean;
   /** Files touched (read/edit) used for summary counts. */
@@ -35,21 +57,6 @@ export type ToolStep = {
 export type ToolStepOutput = {
   text?: string;
   exitCode?: number;
-};
-
-const verbs: Record<ToolStepKind, string> = {
-  think: "思考",
-  read: "读取",
-  list: "列目录",
-  search: "搜索",
-  edit: "编辑",
-  run: "运行",
-  web: "网络搜索",
-  view: "查看图片",
-  generate: "生成图片",
-  compact: "压缩上下文",
-  agent: "子代理",
-  other: "调用"
 };
 
 const truncate = (value: string, max = 72): string =>
@@ -150,18 +157,32 @@ const baseName = (path: string): string => {
 const shortPath = (path: string): string => {
   const cleaned = stripQuotes(path).replace(/[\\/]+$/, "");
   if (!cleaned || cleaned === ".") {
-    return "当前目录";
+    return ".";
   }
   const parts = cleaned.split(/[\\/]/).filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : parts.join("/");
 };
 
-const joinTargets = (targets: string[]): string | undefined => {
-  if (targets.length === 0) {
-    return undefined;
+const textObject = (text: string | undefined): ToolStepObject | undefined =>
+  text ? { kind: "text", text: truncate(text) } : undefined;
+
+/**
+ * The object as plain text taken from the record (files and paths joined by ", ", a pattern in
+ * quotes); used where the step is matched as text, such as search.
+ */
+export const toolStepObjectText = (object: ToolStepObject | undefined): string => {
+  switch (object?.kind) {
+    case "text":
+      return object.text;
+    case "files":
+      return object.names.join(", ");
+    case "directories":
+      return object.paths.join(", ");
+    case "pattern":
+      return `"${object.pattern}"${object.path ? ` · ${object.path}` : ""}`;
+    default:
+      return "";
   }
-  const names = targets.map(baseName);
-  return names.length > 3 ? `${names.slice(0, 3).join("、")} 等 ${names.length} 个文件` : names.join("、");
 };
 
 /**
@@ -197,12 +218,12 @@ const kindForTool = (toolName: string): ToolStepKind | undefined => {
   }
 };
 
-const agentVerbs: Record<string, string> = {
-  "subagent.spawn": "启动子代理",
-  "subagent.message": "发消息给子代理",
-  "subagent.resume": "恢复子代理",
-  "subagent.wait": "等待子代理",
-  "subagent.close": "关闭子代理"
+const agentActions: Record<string, ToolAgentAction> = {
+  "subagent.spawn": "spawn",
+  "subagent.message": "message",
+  "subagent.resume": "resume",
+  "subagent.wait": "wait",
+  "subagent.close": "close"
 };
 
 /**
@@ -215,21 +236,22 @@ const describeAgentStep = (toolCall: ToolCall, running: boolean): ToolStep => {
   const targets = /^targets:\s*(.+)$/m.exec(input)?.[1]?.split(",").map((id) => id.trim()).filter(Boolean) ?? [];
   const task = firstLine(input.replace(/^(?:targets|model|reasoning):.*$/gm, ""));
   const sendsTask = toolCall.toolName === "subagent.spawn" || toolCall.toolName === "subagent.message";
-  const object = sendsTask && task ? task : targets.length > 0 ? `${targets.length} 个` : undefined;
+  const object: ToolStepObject | undefined = sendsTask && task ? textObject(task)
+    : targets.length > 0 ? { kind: "agents", count: targets.length } : undefined;
   const statuses = (toolCall.outputSummary ?? "").split(/\r?\n/)
     .map((line) => /^\S+:\s*([A-Za-z_]+)/.exec(line.trim())?.[1]?.toLowerCase())
     .filter((status): status is string => Boolean(status));
   const errored = statuses.filter((status) => status === "errored").length;
   const completed = statuses.filter((status) => status === "completed" || status === "shutdown").length;
   const failed = toolCall.status === "failed" || errored > 0;
-  const result = running ? "进行中"
+  const result: ToolStepResult | undefined = running ? { kind: "running" }
     : toolCall.toolName !== "subagent.wait" ? undefined
-      : errored > 0 ? `${errored} 个出错`
-        : completed > 0 ? `${completed} 个已完成` : "未完成";
+      : { kind: "agents", errored, completed };
+  const agentAction = agentActions[toolCall.toolName];
   return {
     kind: "agent",
-    verb: agentVerbs[toolCall.toolName] ?? verbs.agent,
-    ...(object ? { object: truncate(object) } : {}),
+    ...(agentAction ? { agentAction } : {}),
+    ...(object ? { object } : {}),
     ...(result ? { result } : {}),
     failed,
     running,
@@ -237,10 +259,10 @@ const describeAgentStep = (toolCall: ToolCall, running: boolean): ToolStep => {
   };
 };
 
-const failureResult = (exitCode: number | undefined): string =>
-  typeof exitCode === "number" ? `失败 · 退出码 ${exitCode}` : "失败";
+const failureResult = (exitCode: number | undefined): ToolStepResult =>
+  typeof exitCode === "number" ? { kind: "failed", exitCode } : { kind: "failed" };
 
-/** One readable step for a tool call: verb, object and result. */
+/** One step for a tool call: action kind, object and result. */
 export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}): ToolStep => {
   const running = toolCall.status === "running";
   const text = output.text ?? toolCall.outputSummary;
@@ -261,9 +283,8 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
               : firstLine(toolCall.inputSummary);
     return {
       kind: fixedKind,
-      verb: verbs[fixedKind],
-      ...(object ? { object: truncate(object) } : {}),
-      ...(running ? { result: "进行中" } : {}),
+      ...(object ? { object: textObject(object)! } : {}),
+      ...(running ? { result: { kind: "running" } as const } : {}),
       failed: toolCall.status === "failed",
       running,
       targets: []
@@ -275,9 +296,8 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
   if (!actions) {
     return {
       kind: "other",
-      verb: verbs.other,
-      object: toolCall.toolName,
-      ...(running ? { result: "进行中" } : failed ? { result: failureResult(output.exitCode) } : {}),
+      object: { kind: "text", text: toolCall.toolName },
+      ...(running ? { result: { kind: "running" } as const } : failed ? { result: failureResult(output.exitCode) } : {}),
       failed,
       running,
       targets: []
@@ -286,28 +306,29 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
 
   const kind = actions[0]!.kind;
   const targets = actions.map((action) => action.target).filter((target): target is string => Boolean(target));
-  let object: string | undefined;
+  let object: ToolStepObject | undefined;
   if (kind === "read" || kind === "edit") {
-    object = joinTargets(targets);
+    object = targets.length > 0 ? { kind: "files", names: targets.map(baseName) } : undefined;
   } else if (kind === "list") {
-    object = targets.length > 0 ? [...new Set(targets.map(shortPath))].join("、") : "当前目录";
+    object = { kind: "directories", paths: targets.length > 0 ? [...new Set(targets.map(shortPath))] : ["."] };
   } else if (kind === "search") {
     const first = actions[0]!;
-    object = first.target ? `“${stripQuotes(first.target)}”${first.path ? ` · ${shortPath(first.path)}` : ""}` : undefined;
+    object = first.target
+      ? { kind: "pattern", pattern: truncate(stripQuotes(first.target)), ...(first.path ? { path: shortPath(first.path) } : {}) }
+      : undefined;
   } else {
-    object = commandHead(actions[0]!.target ?? "");
+    object = textObject(commandHead(actions[0]!.target ?? ""));
   }
 
   const lines = outputLines(text);
-  const result = running ? "进行中"
+  const result: ToolStepResult | undefined = running ? { kind: "running" }
     : failed ? failureResult(output.exitCode)
       : kind === "edit" ? undefined
-        : lines > 0 ? `输出 ${lines} 行` : "无输出";
+        : { kind: "output", lines };
 
   return {
     kind,
-    verb: verbs[kind],
-    ...(object ? { object: truncate(object) } : {}),
+    ...(object ? { object } : {}),
     ...(result ? { result } : {}),
     failed,
     running,
@@ -315,61 +336,25 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
   };
 };
 
-/** "45 秒", "1 分 27 秒", "1 小时 5 分". */
-export const formatDurationZh = (durationMs: number): string => {
-  const seconds = Math.max(0, Math.round(durationMs / 1000));
-  if (seconds < 60) {
-    return `${seconds} 秒`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    const rest = seconds % 60;
-    return rest > 0 ? `${minutes} 分 ${rest} 秒` : `${minutes} 分钟`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const restMinutes = minutes % 60;
-  return restMinutes > 0 ? `${hours} 小时 ${restMinutes} 分` : `${hours} 小时`;
-};
-
 const summaryOrder: ToolStepKind[] = [
   "list", "read", "search", "edit", "run", "web", "view", "generate", "agent", "other", "compact", "think"
 ];
 
-const summaryPhrase = (kind: ToolStepKind, count: number): string => {
-  switch (kind) {
-    case "read":
-      return `读取 ${count} 个文件`;
-    case "edit":
-      return `编辑 ${count} 个文件`;
-    case "list":
-      return `列目录 ${count} 次`;
-    case "search":
-      return `搜索 ${count} 次`;
-    case "run":
-      return `运行 ${count} 条命令`;
-    case "web":
-      return `网络搜索 ${count} 次`;
-    case "view":
-      return `查看 ${count} 张图片`;
-    case "generate":
-      return `生成 ${count} 张图片`;
-    case "compact":
-      return "压缩上下文";
-    case "agent":
-      return `子代理操作 ${count} 次`;
-    case "think":
-      return `思考 ${count} 次`;
-    default:
-      return `调用 ${count} 个工具`;
-  }
+export type ToolStepSummary = {
+  /** Counts by action kind in display order; read/edit count distinct files. */
+  counts: Array<{ kind: ToolStepKind; count: number }>;
+  /** Set when no step was counted: how many process messages the turn showed. */
+  messageCount?: number;
+  failures: number;
+  durationMs?: number;
 };
 
-/** One-line summary of a finished turn's process: counts by action kind plus elapsed time. */
+/** Summary of a finished turn's process: counts by action kind, failures and elapsed time. */
 export const summarizeToolSteps = (
   steps: ToolStep[],
   options: { messageCount?: number; durationMs?: number } = {}
-): string => {
-  const parts: string[] = [];
+): ToolStepSummary => {
+  const counts: ToolStepSummary["counts"] = [];
   for (const kind of summaryOrder) {
     const matching = steps.filter((step) => step.kind === kind);
     if (matching.length === 0) {
@@ -377,17 +362,12 @@ export const summarizeToolSteps = (
     }
     const files = new Set(matching.flatMap((step) => step.targets.map(baseName)));
     const count = (kind === "read" || kind === "edit") && files.size > 0 ? files.size : matching.length;
-    parts.push(summaryPhrase(kind, count));
+    counts.push({ kind, count });
   }
-  if (parts.length === 0 && options.messageCount) {
-    parts.push(`${options.messageCount} 条过程消息`);
-  }
-  const failures = steps.filter((step) => step.failed).length;
-  if (failures > 0) {
-    parts.push(`${failures} 步失败`);
-  }
-  if (typeof options.durationMs === "number" && options.durationMs > 0) {
-    parts.push(formatDurationZh(options.durationMs));
-  }
-  return parts.join(" · ");
+  return {
+    counts,
+    ...(counts.length === 0 && options.messageCount ? { messageCount: options.messageCount } : {}),
+    failures: steps.filter((step) => step.failed).length,
+    ...(typeof options.durationMs === "number" && options.durationMs > 0 ? { durationMs: options.durationMs } : {})
+  };
 };

@@ -297,6 +297,7 @@ export class SessionShellService {
     await registry.ready();
     const state = registry.getState();
     return {
+      locale: state.locale ?? "en",
       defaultNewSessionEngineId: state.defaultNewSessionEngineId,
       titleGenerationModelId: state.titleGenerationModelId,
       engineProgramPathsByEngineId: { ...state.engineProgramPathsByEngineId },
@@ -325,6 +326,7 @@ export class SessionShellService {
         engineId: input.defaultNewSessionEngineId
       });
     }
+    this.runtimeService.notifySettingsChanged();
     return this.getSettings();
   }
 
@@ -577,7 +579,7 @@ export class SessionShellService {
     const displayTitle = (title: string | undefined): string => {
       const value = title?.trim();
       return !value || /^codex-thread:[0-9a-f-]+$/i.test(value) || /^rollout-.*\.jsonl$/i.test(value)
-        ? "未命名会话"
+        ? ""
         : value;
     };
     const activityAt = (entry: typeof entries[number]): string | undefined =>

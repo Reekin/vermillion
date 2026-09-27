@@ -2,6 +2,7 @@ import { Maximize2, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { IconButton } from "./ui.js";
 import { cn } from "../lib/cn.js";
+import { useT } from "../../../i18n/react.js";
 
 type ModalProps = {
   title: string;
@@ -19,6 +20,7 @@ type ModalProps = {
 
 /** Single modal frame for every overlay so they share position, backdrop and chrome. */
 export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, height, resizable = false, contentClassName, children, presentation = "modal", contained = false }: ModalProps) => {
+  const t = useT();
   const dialog = useRef<HTMLDivElement>(null);
   const pointerDownTarget = useRef<EventTarget | null>(null);
   useEffect(() => {
@@ -55,9 +57,9 @@ export const Modal = ({ title, titleContent, onClose, onExpand, width = 720, hei
           {presentation === "modal" && titleContent}
           {presentation === "modal" && <div className="ml-auto flex items-center gap-0.5">
             {onExpand && (
-              <IconButton icon={Maximize2} label="展开为页面" onClick={onExpand} />
+              <IconButton icon={Maximize2} label={t("docs.modal.expand")} onClick={onExpand} />
             )}
-            <IconButton icon={X} label="关闭" onClick={onClose} />
+            <IconButton icon={X} label={t("common.close")} onClick={onClose} />
           </div>}
         </header>
         <div className={cn("min-h-0 flex-1", contentClassName ?? "overflow-auto")}>{children}</div>

@@ -8,6 +8,7 @@ import { RolesSection } from "./RolesSection.js";
 import { WorkItemsSection } from "./WorkItemsSection.js";
 import { IssuesSection } from "./IssuesSection.js";
 import { Modal } from "./Modal.js";
+import { useT } from "../../../i18n/react.js";
 
 type WorkspacePagesProps = {
   store: WorkbenchStore;
@@ -20,10 +21,11 @@ type WorkspacePagesProps = {
 
 /** Compact editing-scope picker at the tab bar's right end: the name shows, the path is the option's second line. */
 export const WorkspaceSwitcher = ({ store }: { store: WorkbenchStore }) => {
+  const t = useT();
   const workspaces = store((s) => s.workspaces);
   const selected = store((s) => s.browsingWorkspaceId);
   const browseWorkspace = store((s) => s.browseWorkspace);
-  return <Select plain compact aria-label="切换 workspace" className="max-w-60" value={selected ?? ""} placeholder="选择 workspace"
+  return <Select plain compact aria-label={t("docs.workspace.switch")} className="max-w-60" value={selected ?? ""} placeholder={t("docs.workspace.placeholder")}
     options={workspaces.map((item) => ({ value: item.workspaceId, label: item.label, hint: item.rootPath }))} onChange={browseWorkspace} />;
 };
 
@@ -50,6 +52,7 @@ export const loadSourceTreeTitles = async (
 };
 
 export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget, onWorkItemTargetConsumed }: WorkspacePagesProps) => {
+  const t = useT();
   const client = store((s) => s.client);
   const activeWorkspaceId = store((s) => s.browsingWorkspaceId);
   const section = store((s) => s.workspaceSection);
@@ -95,10 +98,10 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
   return <section className="flex h-full min-h-0 min-w-0 flex-col">
     {error && <InlineNotice tone="error">{error}</InlineNotice>}
     {!activeWorkspaceId ? (
-      <EmptyState title="选择一个 workspace" action={<Button onClick={() => void add()}>添加 workspace</Button>} />
+      <EmptyState title={t("docs.workspace.chooseOne")} action={<Button onClick={() => void add()}>{t("docs.workspace.add")}</Button>} />
     ) : <div className="min-h-0 flex-1 overflow-auto">
       {section === "workItems" && <div>
-        {viewError ? <EmptyState title="工作加载失败" hint={viewError} /> : view && (
+        {viewError ? <EmptyState title={t("docs.workspace.workLoadFailed")} hint={viewError} /> : view && (
           <WorkItemsSection sourceTitles={sourceTitles} key={activeWorkspaceId} client={client} workspaceId={activeWorkspaceId} scheduler={view.scheduler} workItems={view.workItems} workRequests={view.workRequests} decisions={view.decisions} runs={view.runs} actions={view.actions} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)} expandedWorkGroups={expandedWorkGroups} setWorkGroupExpanded={setWorkGroupExpanded} taskTarget={taskTarget?.workspaceId === activeWorkspaceId ? taskTarget : undefined} detailTarget={(linkedWorkItemTarget ?? workItemTarget)?.workspaceId === activeWorkspaceId ? linkedWorkItemTarget ?? workItemTarget : undefined} onDetailTargetConsumed={() => { setLinkedWorkItemTarget(undefined); onWorkItemTargetConsumed?.(); }} onOpenIssue={(issueId) => store.getState().showIssue({ workspaceId: activeWorkspaceId, issueId })} />
         )}
       </div>}
@@ -120,16 +123,17 @@ export const WorkspacePages = ({ store, transport, pickDirectory, workItemTarget
         targetDomainId={linkedIssueDomain}
         targetIssueId={issueTarget?.workspaceId === activeWorkspaceId ? issueTarget.issueId : undefined} onTargetConsumed={() => store.setState({ issueTarget: undefined })} onOpenSession={(id, turnId) => showAgentSession(activeWorkspaceId, id, turnId)}
         onOpenWorkItem={(workItemId) => { setLinkedWorkItemTarget({ workspaceId: activeWorkspaceId, workItemId, nonce: Date.now() }); store.getState().setWorkspaceSection("workItems"); }} />}
-      {section === "automation" && <EmptyState title="自动化暂未提供" />}
+      {section === "automation" && <EmptyState title={t("docs.workspace.automationUnavailable")} />}
     </div>}
   </section>;
 };
 
 const ManageSection = ({ client, workspace }: { client: WorkbenchClient; workspace?: Workspace }) => {
+  const t = useT();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  if (!workspace) return <EmptyState title="选择一个 workspace" />;
+  if (!workspace) return <EmptyState title={t("docs.workspace.chooseOne")} />;
   const remove = async () => {
     setBusy(true); setError(undefined);
     try {
@@ -140,22 +144,22 @@ const ManageSection = ({ client, workspace }: { client: WorkbenchClient; workspa
     } finally { setBusy(false); }
   };
   return <div className="max-w-[720px] pb-4">
-    <PanelHeader title="管理" />
+    <PanelHeader title={t("docs.workspace.manage")} />
     <div className="flex items-center gap-3 px-4">
       <div className="min-w-0">
         <div className="truncate text-label text-strong">{workspace.label}</div>
         <div className="truncate font-mono text-caption text-muted-foreground">{workspace.rootPath}</div>
       </div>
-      <Button size="sm" className="ml-auto shrink-0" onClick={() => setConfirming(true)}>移除 workspace</Button>
+      <Button size="sm" className="ml-auto shrink-0" onClick={() => setConfirming(true)}>{t("docs.workspace.remove")}</Button>
     </div>
-    {confirming && <Modal title={"移除 " + workspace.label} onClose={() => setConfirming(false)} width={460}>
+    {confirming && <Modal title={t("docs.workspace.removeTitle", { label: workspace.label })} onClose={() => setConfirming(false)} width={460}>
       <div className="space-y-3 p-4">
-        <p className="text-caption text-muted-foreground">移除后工作台不再列出这个项目，磁盘上的文件不会被删除。之后可以重新添加。</p>
+        <p className="text-caption text-muted-foreground">{t("docs.workspace.removeBody")}</p>
         <p className="truncate font-mono text-caption text-muted-foreground">{workspace.rootPath}</p>
         {error && <InlineNotice tone="error" className="px-0">{error}</InlineNotice>}
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirming(false)}>取消</Button>
-          <Button variant="primary" disabled={busy} onClick={() => void remove()}>移除</Button>
+          <Button variant="ghost" onClick={() => setConfirming(false)}>{t("common.cancel")}</Button>
+          <Button variant="primary" disabled={busy} onClick={() => void remove()}>{t("docs.remove")}</Button>
         </div>
       </div>
     </Modal>}

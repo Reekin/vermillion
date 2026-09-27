@@ -1,6 +1,8 @@
 import { startTransition, useState, type ReactElement } from "react";
-import type { ApprovalRequest } from "@vermillion/shared";
+import type { ApprovalKind, ApprovalRequest, ApprovalStatus } from "@vermillion/shared";
 import { Button, type ButtonVariant } from "./Button.js";
+import { t, type MessageKey } from "../../i18n/index.js";
+import { useT } from "../../i18n/react.js";
 import { ParticipantIdentityBadge } from "./ParticipantIdentityBadge.js";
 import {
   buildParticipantDirectory,
@@ -26,7 +28,35 @@ export type ApprovalFlowViewProps = {
 
 const defaultDirectory = buildParticipantDirectory([]);
 
+const statusKeys: Record<ApprovalStatus, MessageKey> = {
+  pending: "session.approvalPending",
+  approved: "session.approvalApproved",
+  denied: "session.approvalDenied",
+  deferred: "session.approvalDeferred"
+};
+
+const kindKeys: Record<ApprovalKind, MessageKey> = {
+  command: "session.approvalKindCommand",
+  file_change: "session.approvalKindFileChange",
+  tool: "session.approvalKindTool",
+  custom: "session.approvalKindCustom"
+};
+
 const canRespond = (approval: ApprovalRequest): boolean => approval.status === "pending";
+
+/** Known Codex approval requests get dictionary titles; other engines' titles are shown as sent. */
+const approvalTitle = (approval: ApprovalRequest): string => {
+  switch (approval.metadata?.protocolMethod) {
+    case "item/fileChange/requestApproval":
+      return t("session.approvalTitleFileChange");
+    case "item/permissions/requestApproval":
+      return t("session.approvalTitlePermissions");
+    case "item/commandExecution/requestApproval":
+      return t("session.approvalTitleCommand");
+    default:
+      return approval.title;
+  }
+};
 
 const decisionLabel = (decision: unknown): string | undefined => {
   if (typeof decision === "string" && decision.trim().length > 0) {
@@ -54,16 +84,16 @@ const decisionFromLabel = (
 
 const decisionButtonLabel = (label: string): string => {
   if (label === "accept") {
-    return "批准";
+    return t("session.approve");
   }
   if (label === "acceptForSession") {
-    return "本会话内都批准";
+    return t("session.approveForSession");
   }
   if (label === "decline") {
-    return "拒绝";
+    return t("session.decline");
   }
   if (label === "cancel") {
-    return "稍后";
+    return t("session.later");
   }
   return label.replace(/([a-z])([A-Z])/g, "$1 $2");
 };
@@ -100,6 +130,7 @@ export const ApprovalFlowView = ({
   participantDirectory = defaultDirectory,
   onRespond
 }: ApprovalFlowViewProps): ReactElement => {
+  useT();
   const [inFlightByRequestId, setInFlightByRequestId] = useState<Record<string, boolean>>({});
   const [errorByRequestId, setErrorByRequestId] = useState<Record<string, string | undefined>>(
     {}
@@ -149,7 +180,7 @@ export const ApprovalFlowView = ({
   };
 
   if (approvals.length === 0) {
-    return <p className="awb-detail__empty">这一轮没有审批请求。</p>;
+    return <p className="awb-detail__empty">{t("session.noApprovals")}</p>;
   }
 
   return (
@@ -159,22 +190,23 @@ export const ApprovalFlowView = ({
         const requestError = errorByRequestId[approval.requestId];
         const disabled = !onRespond || !canRespond(approval) || inFlight;
         const decisionLabels = decisionLabelsFor(approval);
+        const kindLabel = t(kindKeys[approval.approvalKind]);
         const identity = resolveParticipantIdentity(
           participantDirectory,
           approval.actor,
-          approval.approvalKind
+          kindLabel
         );
 
         return (
           <article key={approval.requestId} className="awb-timeline-item awb-approval-item">
             <header className="awb-timeline-item__header">
               <div className="awb-timeline-item__meta">
-                <strong>{approval.title}</strong>
+                <strong>{approvalTitle(approval)}</strong>
                 <ParticipantIdentityBadge identity={identity} compact />
               </div>
-              <span className={`awb-badge is-${approval.status}`}>{approval.status}</span>
+              <span className={`awb-badge is-${approval.status}`}>{t(statusKeys[approval.status])}</span>
             </header>
-            <p className="awb-approval-item__kind">{approval.approvalKind}</p>
+            <p className="awb-approval-item__kind">{kindLabel}</p>
             {approval.details && <p className="awb-approval-item__details">{approval.details}</p>}
             <div className="awb-approval-item__actions">
               {decisionLabels.length > 0 ? (
@@ -203,7 +235,7 @@ export const ApprovalFlowView = ({
                     disabled={disabled}
                     onClick={() => void onAction(approval, "approve", "accept")}
                   >
-                    批准
+                    {t("session.approve")}
                   </Button>
                   <Button
                     variant="danger"
@@ -211,7 +243,7 @@ export const ApprovalFlowView = ({
                     disabled={disabled}
                     onClick={() => void onAction(approval, "deny", "decline")}
                   >
-                    拒绝
+                    {t("session.decline")}
                   </Button>
                   <Button
                     variant="ghost"
@@ -219,7 +251,7 @@ export const ApprovalFlowView = ({
                     disabled={disabled}
                     onClick={() => void onAction(approval, "defer")}
                   >
-                    稍后
+                    {t("session.later")}
                   </Button>
                 </>
               )}

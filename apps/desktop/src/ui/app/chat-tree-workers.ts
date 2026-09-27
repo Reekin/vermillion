@@ -1,5 +1,6 @@
 import type { ChatTreeSnapshotRpc } from "@vermillion/shared";
 import type { WorkItem, WorkRequest } from "@vermillion/workbench/client";
+import { t } from "../../i18n/index.js";
 import { workSessionLabel } from "./components/task-labels.js";
 
 const requestWorkerStatus = (status: WorkRequest["status"]): "preparing" | "failed" | "cancelled" | "closed" =>
@@ -42,7 +43,7 @@ export const projectChatTreeWorkers = (tree: ChatTreeSnapshotRpc | undefined, it
     if (request.workerSessionId && !treeSessionIds.has(request.workerSessionId)) continue;
     if (workers.some((worker) => worker.requestId === request.requestId || (request.workerSessionId && worker.sessionId === request.workerSessionId))) continue;
     const item = items.find((entry) => entry.requestId === request.requestId);
-    workers.push({ key: request.requestId, requestId: request.requestId, sessionId: request.workerSessionId, title: item?.title ?? request.scope ?? "开工准备", status: item?.status ?? requestWorkerStatus(request.status), failure: request.failure, activity: workSessionLabel(item, request), active: Boolean(request.activeTurnId && request.turnStatus !== "unknown"), nodeId: undefined, nodeIds: [] });
+    workers.push({ key: request.requestId, requestId: request.requestId, sessionId: request.workerSessionId, title: item?.title ?? request.scope ?? t("work.preparation"), status: item?.status ?? requestWorkerStatus(request.status), failure: request.failure, activity: workSessionLabel(item, request), active: Boolean(request.activeTurnId && request.turnStatus !== "unknown"), nodeId: undefined, nodeIds: [] });
   }
   const supervisors = relevantRequests.flatMap((request) => {
     const sessionId = request.supervisor?.sessionId;

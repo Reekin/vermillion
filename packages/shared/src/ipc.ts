@@ -91,7 +91,16 @@ const zWorkspaceRecordSchema = z.object({
   updatedAt: z.string().min(1)
 });
 
+/** Interface language of the desktop app. */
+export const zLocale = z.enum(["zh", "en"]);
+export type Locale = z.infer<typeof zLocale>;
+
+/** Maps a BCP 47 language tag (system language) to the interface language: Chinese stays Chinese, everything else is English. */
+export const localeFromLanguageTag = (tag: string | undefined): Locale =>
+  tag?.trim().toLowerCase().startsWith("zh") ? "zh" : "en";
+
 const zSessionSettingsSchema = z.object({
+  locale: zLocale,
   defaultNewSessionEngineId: z.string().min(1).optional(),
   /** 会话标题生成使用的模型；未设置时使用内置默认模型。 */
   titleGenerationModelId: z.string().min(1).optional(),
@@ -545,6 +554,7 @@ const zSettingsUpdateRequestSchema = z.object({
   id: zRequestId,
   method: z.literal("settings.update"),
   params: z.object({
+    locale: zLocale.optional(),
     defaultNewSessionEngineId: z.string().min(1).optional(),
     titleGenerationModelId: z.string().min(1).nullable().optional(),
     engineProgramPathsByEngineId: z

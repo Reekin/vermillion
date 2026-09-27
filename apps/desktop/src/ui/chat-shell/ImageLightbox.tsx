@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { writeClipboardImage } from "./clipboard.js";
+import { useT } from "../../i18n/react.js";
 
 export type ImageLightboxState = {
   src: string;
@@ -20,6 +21,7 @@ export const ImageLightbox = ({
   onClose,
   renderContextMenu
 }: ImageLightboxProps): ReactElement | null => {
+  const t = useT();
   const [menu, setMenu] = useState<{ x: number; y: number }>();
   const [notice, setNotice] = useState<{ message: string; error?: boolean }>();
 
@@ -62,9 +64,9 @@ export const ImageLightbox = ({
           type="button"
           className="awb-lightbox__close"
           onClick={onClose}
-          aria-label="Close image preview"
+          aria-label={t("session.closeImagePreview")}
         >
-          Close
+          {t("common.close")}
         </button>
         <img
           className="awb-lightbox__image"
@@ -81,9 +83,9 @@ export const ImageLightbox = ({
           onClose: () => setMenu(undefined),
           onCopy: () => {
             void writeClipboardImage(image.src)
-              .then(() => setNotice({ message: "图片已复制" }))
+              .then(() => setNotice({ message: t("session.imageCopied") }))
               .catch((error: unknown) => setNotice({
-                message: `复制图片失败：${error instanceof Error ? error.message : String(error)}`,
+                message: t("session.copyImageFailed", { error: error instanceof Error ? error.message : String(error) }),
                 error: true
               }));
           }

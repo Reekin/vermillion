@@ -10,6 +10,7 @@ import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { statusLabel, statusTone } from "./task-labels.js";
 import { Badge, InlineNotice, ListRow, SectionLabel, StatusPill, Toggle } from "./ui.js";
+import { useLocale, useT } from "../../../i18n/react.js";
 
 type Props = ChatTreePanelProps & {
   client: WorkbenchClient;
@@ -19,6 +20,8 @@ type Props = ChatTreePanelProps & {
 };
 
 export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancelOperation, ...props }: Props) => {
+  const t = useT();
+  const locale = useLocale();
   const [expandedTree, setExpandedTree] = useState<string>();
   const [menu, setMenu] = useState<SessionMenu<ChatTreeNodeActionInput["action"]> & { nodeId: string }>();
   const [operationMenu, setOperationMenu] = useState<{
@@ -40,9 +43,9 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
         try {
           await writeClipboardText(result.copiedText);
         } catch {
-          throw new Error("无法写入剪贴板，请重试。");
+          throw new Error(t("docs.tree.clipboardFailed"));
         }
-        setNotice({ text: "已复制 " + result.copiedText });
+        setNotice({ text: t("docs.tree.copied", { text: result.copiedText }) });
       } else if (result.action === "open_rollout") {
         await transport.file.runAction({ path: result.rolloutPath, action: "open" });
       }
@@ -56,7 +59,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
     setOperationMenu(undefined);
     try {
       await onCancelOperation(operationId, action);
-      setNotice({ text: action === "cancel" ? "已取消发送" : "已移除失败发送" });
+      setNotice({ text: action === "cancel" ? t("docs.tree.sendCancelled") : t("docs.tree.failedRemoved") });
     } catch (error) {
       setNotice({ text: (error as Error).message, error: true });
     }
@@ -87,17 +90,17 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
     return () => { active = false; unsubscribe(); };
   }, [client, workspaceId]);
   const current = records.workspaceId === workspaceId ? records : undefined;
-  const { tree, activeWorkers, hasWorkSessions, nodeMarkers } = useMemo(() => projectChatTreeWorkers(props.chatTree, current?.items ?? [], current?.requests ?? [], showAll), [props.chatTree, current, showAll]);
+  const { tree, activeWorkers, hasWorkSessions, nodeMarkers } = useMemo(() => projectChatTreeWorkers(props.chatTree, current?.items ?? [], current?.requests ?? [], showAll), [props.chatTree, current, showAll, locale]);
   return <><ChatTreePanel {...props} chatTree={tree} nodeMarkers={nodeMarkers}
     onNodeContextMenu={(event, nodeId) => {
       event.preventDefault();
       const node = props.chatTree?.nodes.find((item) => item.nodeId === nodeId);
       if (!node?.sessionId || !props.chatTree) return;
       setMenu({ sessionId: props.chatTree.sessionId, nodeId, x: event.clientX, y: event.clientY, actions: [
-        { action: "copy_session_id", label: "复制 session id" },
-        { action: "copy_awb_session_id", label: "复制内部 session id" },
-        { action: "open_rollout", label: "Open rollout" },
-        { action: "hide_branch", label: "删除分支", disabled: !node.canHide }
+        { action: "copy_session_id", label: t("docs.tree.copySessionId") },
+        { action: "copy_awb_session_id", label: t("docs.tree.copyInternalId") },
+        { action: "open_rollout", label: t("docs.tree.openRollout") },
+        { action: "hide_branch", label: t("docs.tree.deleteBranch"), disabled: !node.canHide }
       ] });
     }}
     onOperationContextMenu={(event, operationId) => {
@@ -108,14 +111,14 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
       setOperationMenu({ operationId, action: operation.status === "failed" ? "remove" : "cancel",
         x: event.clientX, y: event.clientY });
     }}
-    header={hasWorkSessions && <div className="border-b border-border px-3 py-2"><Toggle label="显示工单会话" checked={showAll} onChange={(checked) => setExpandedTree(checked ? treeId : undefined)} /></div>}
+    header={hasWorkSessions && <div className="border-b border-border px-3 py-2"><Toggle label={t("docs.tree.showWorkSessions")} checked={showAll} onChange={(checked) => setExpandedTree(checked ? treeId : undefined)} /></div>}
     renderNodeStatus={(status) => <Badge>{status}</Badge>}
     footer={(activeWorkers.length > 0 || current?.error) && <div className="max-h-60 shrink-0 overflow-auto border-t border-border">
       <SectionLabel>Worker</SectionLabel>
       {current?.error && <InlineNotice tone="error">{current.error}</InlineNotice>}
       <ul>{activeWorkers.map((worker) => <li key={worker.key}>
         <ListRow title={worker.title} meta={[worker.activity, worker.failure].filter(Boolean).join(" · ")} selected={worker.sessionId === props.chatTree?.currentSessionId}
-          trailing={<StatusPill tone={statusTone(worker.status === "failed" ? "decision" : worker.active ? "running" : "queued")}>{worker.status === "failed" ? "准备受阻" : statusLabel[worker.status]}</StatusPill>}
+          trailing={<StatusPill tone={statusTone(worker.status === "failed" ? "decision" : worker.active ? "running" : "queued")}>{worker.status === "failed" ? t("docs.tree.prepBlocked") : statusLabel(worker.status)}</StatusPill>}
           onClick={worker.sessionId ? () => worker.nodeId ? props.onJump?.(worker.nodeId) : onSelectSession(worker.sessionId!) : undefined} />
       </li>)}</ul>
     </div>} />
@@ -125,7 +128,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
     {operationMenu && <ContextMenu x={operationMenu.x} y={operationMenu.y}
       onClose={() => setOperationMenu(undefined)} items={[{
         key: operationMenu.action,
-        label: operationMenu.action === "cancel" ? "取消发送" : "移除",
+        label: operationMenu.action === "cancel" ? t("docs.tree.cancelSend") : t("docs.remove"),
         onSelect: () => { void runOperationAction(); }
       }]} />}
   </>;

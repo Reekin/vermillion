@@ -7,6 +7,8 @@ import {
   writeEngineExecutionPreference,
   zExecutionPreferencesByEngineIdSchema,
   zSessionExecutionProfileInputSchema,
+  zLocale,
+  type Locale,
   type SessionSettingsUpdateRpc,
   type ExecutionPreferencesByEngineId
 } from "@vermillion/shared";
@@ -34,6 +36,7 @@ const workspaceRegistryDocumentSchema = z.object({
   version: z.literal(1),
   workspaces: z.array(workspaceRecordSchema).default([]),
   pinnedSessionIds: z.array(z.string().min(1)).default([]),
+  locale: zLocale.optional(),
   defaultNewSessionEngineId: z.string().min(1).optional(),
   titleGenerationModelId: z.string().min(1).optional(),
   engineProgramPathsByEngineId: z.record(z.string(), z.string().min(1)).default({}),
@@ -69,6 +72,8 @@ export type WorkspaceRegistryServiceOptions = {
   baseDir?: string;
   now?: Clock;
   createWorkspaceId?: IdFactory;
+  /** Interface language written on first launch, when the registry has none yet (the system language). */
+  defaultLocale?: Locale;
 };
 
 export type WorkspaceRegistrationInput = {
@@ -148,6 +153,7 @@ export class WorkspaceRegistryService {
   private readonly filePath: string;
   private readonly now: Clock;
   private readonly createWorkspaceId: IdFactory;
+  private readonly defaultLocale: Locale;
   private document: WorkspaceRegistryDocument = {
     version: 1,
     workspaces: [],
@@ -167,6 +173,7 @@ export class WorkspaceRegistryService {
     this.filePath = join(baseDir, "workspace-registry.json");
     this.now = options.now ?? (() => new Date().toISOString());
     this.createWorkspaceId = options.createWorkspaceId ?? createOpaqueWorkspaceId;
+    this.defaultLocale = options.defaultLocale ?? "en";
   }
 
   public async ready(): Promise<void> {
@@ -330,6 +337,7 @@ export class WorkspaceRegistryService {
     await this.ready();
     this.document = {
       ...this.document,
+      ...(input.locale ? { locale: input.locale } : {}),
       ...(Object.hasOwn(input, "defaultNewSessionEngineId")
         ? { defaultNewSessionEngineId: input.defaultNewSessionEngineId }
         : {}),
@@ -419,7 +427,11 @@ export class WorkspaceRegistryService {
     this.document = parsed.data;
     this.revision += 1;
     this.sessionBrowserRevision += 1;
-    if (hadLegacySessionViewState || needsExecutionPreferenceMigration) {
+    const firstLaunchLocale = !this.document.locale;
+    if (firstLaunchLocale) {
+      this.document = { ...this.document, locale: this.defaultLocale };
+    }
+    if (hadLegacySessionViewState || needsExecutionPreferenceMigration || firstLaunchLocale) {
       await this.persist();
     }
   }

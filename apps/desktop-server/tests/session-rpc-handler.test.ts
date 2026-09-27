@@ -403,6 +403,7 @@ describe("createWorkbenchRpcHandler", () => {
       }),
       listSessions: () => [],
       getSettings: vi.fn().mockResolvedValue({
+        locale: "zh",
         defaultNewSessionEngineId: "pi",
         allowedModelIdsByEngineId: { codex: ["gpt-5.5-codex"] },
         customModelReasoningOptionIdsByEngineId: {
@@ -418,6 +419,7 @@ describe("createWorkbenchRpcHandler", () => {
         }
       }),
       updateSettings: vi.fn().mockResolvedValue({
+        locale: "zh",
         defaultNewSessionEngineId: "codex",
         allowedModelIdsByEngineId: { codex: [] },
         customModelReasoningOptionIdsByEngineId: {

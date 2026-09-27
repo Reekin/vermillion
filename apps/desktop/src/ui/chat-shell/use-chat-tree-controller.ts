@@ -11,6 +11,7 @@ import { createCoalescedRefresh } from "./coalesced-refresh.js";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import type { ChatSendInput } from "../../transport/desktop-transport.js";
 import { projectChatTreeSends } from "./chat-tree-send-projection.js";
+import { t } from "../../i18n/index.js";
 import {
   statusNoticeErrorDetails,
   type ComposerStatusNotice
@@ -323,7 +324,7 @@ export const useChatTreeController = (input: {
         outcome = "error";
         if (!isCurrent()) return;
         setFailedEntry(entry);
-        setTreeFailure({ entry, message: `刷新会话树失败：${(error as Error).message}` });
+        setTreeFailure({ entry, message: t("session.treeRefreshFailedWith", { error: (error as Error).message }) });
         throw error;
       } finally {
         if (isCurrent() && entry.loadingStage && entry.loadingTimeline?.[entry.loadingStage]) {
@@ -360,9 +361,9 @@ export const useChatTreeController = (input: {
     void refresh.catch((error) => {
       if (entryRef.current !== entry) return;
       setFailedEntry(entry);
-      setTreeFailure({ entry: entry!, message: `刷新会话树失败：${(error as Error).message}` });
+      setTreeFailure({ entry: entry!, message: t("session.treeRefreshFailedWith", { error: (error as Error).message }) });
       onStatusNotice({
-        message: "刷新会话树失败", detail: (error as Error).message,
+        message: t("session.treeRefreshFailed"), detail: (error as Error).message,
         source: "chat-tree",
         ...statusNoticeErrorDetails(error)
       });
@@ -444,7 +445,7 @@ export const useChatTreeController = (input: {
       } catch (error) {
         if (sessionIdRef.current !== sessionId) return;
         onStatusNotice({
-          message: "跳转节点失败", detail: (error as Error).message,
+          message: t("session.jumpNodeFailed"), detail: (error as Error).message,
           persistent: true,
           source: "chat-tree",
           ...statusNoticeErrorDetails(error)
@@ -453,7 +454,7 @@ export const useChatTreeController = (input: {
     },
     submitBranch: async (payload: Omit<ChatSendInput, "sessionId">): Promise<boolean> => {
       if (!sessionId || !chatTree) return false;
-      if (pendingSend) throw new Error("请等待该消息发送完成，或切换到其他节点提问。");
+      if (pendingSend) throw new Error(t("session.waitForPendingSend"));
       const nodeId = chatTree.currentNodeId;
       if (!nodeId || !isHistoricalChatTreePosition(chatTree)) return false;
       const navigation = ++navigationRef.current;

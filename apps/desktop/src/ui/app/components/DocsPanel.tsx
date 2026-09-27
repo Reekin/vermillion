@@ -8,6 +8,7 @@ import { CommitDocsDialog } from "./CommitDocsDialog.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { DiffDialog } from "./DiffDialog.js";
 import { DiscardDocsDialog } from "./DiscardDocsDialog.js";
+import { useT } from "../../../i18n/react.js";
 
 type DocsPanelProps = {
   store: WorkbenchStore;
@@ -49,6 +50,7 @@ const EMPTY_DOCS: DocFile[] = [];
 const EMPTY_CHANGES: DocChange[] = [];
 
 export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps) => {
+  const t = useT();
   const client = store((s) => s.client);
   const workspace = store((s) => s.workspaces.find((w) => w.workspaceId === s.browsingWorkspaceId));
   const docsSessionId = store((s) => s.docsSessionId);
@@ -89,7 +91,7 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
   }, [pending]);
 
   if (!workspace) {
-    return <EmptyState title="未选择 workspace" hint="在输入器里选择 workspace 后，这里显示它的文档。" />;
+    return <EmptyState title={t("docs.panel.noWorkspace")} hint={t("docs.panel.noWorkspaceHint")} />;
   }
 
   const toggle = (path: string) =>
@@ -141,11 +143,11 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
 
   return (
     <div className="flex h-full flex-col" onContextMenu={(event) => onContextMenu(event, ".vermillion/docs")}>
-      <PanelHeader title="文档">
-        {pending.length > 0 && <span className="font-mono text-micro text-accent-strong">{pending.length} 处变更</span>}
+      <PanelHeader title={t("docs.panel.title")}>
+        {pending.length > 0 && <span className="font-mono text-micro text-accent-strong">{t("docs.panel.changes", { count: pending.length })}</span>}
       </PanelHeader>
-      {viewError && <InlineNotice tone="error">工作区数据加载失败：<span className="break-all font-mono text-micro text-muted-foreground">{viewError}</span></InlineNotice>}
-      {view && !viewError && tree.length === 0 && <InlineNotice>还没有文档。会话中写入 .vermillion/docs 的文档会显示在这里。</InlineNotice>}
+      {viewError && <InlineNotice tone="error">{t("docs.panel.loadFailed")}<span className="break-all font-mono text-micro text-muted-foreground">{viewError}</span></InlineNotice>}
+      {view && !viewError && tree.length === 0 && <InlineNotice>{t("docs.panel.empty")}</InlineNotice>}
       <ul className="min-h-0 flex-1 overflow-auto pb-2">
         {tree.map((node) => renderNode(node, 0))}
       </ul>
@@ -159,13 +161,13 @@ export const DocsPanel = ({ store, onFileAction, primaryAction }: DocsPanelProps
           y={menu.y}
           onClose={() => setMenu(undefined)}
           items={[
-            { key: "commit", label: "提交", disabled: pending.length === 0, onSelect: () => setCommitOpen(true) },
-            { key: "discard", label: "丢弃变更", disabled: !pending.some((change) => change.path === menu.path || change.path.startsWith(menu.path + "/")), onSelect: () => setDiscardTarget({ workspaceId: workspace.workspaceId, path: menu.path, sessionId: docsSessionId }) },
+            { key: "commit", label: t("docs.commit.submit"), disabled: pending.length === 0, onSelect: () => setCommitOpen(true) },
+            { key: "discard", label: t("docs.discard.submit"), disabled: !pending.some((change) => change.path === menu.path || change.path.startsWith(menu.path + "/")), onSelect: () => setDiscardTarget({ workspaceId: workspace.workspaceId, path: menu.path, sessionId: docsSessionId }) },
             ...(docs.some((doc) => doc.path === menu.path) || changeByPath.has(menu.path)
-              ? [{ key: "diff", label: "查看差异", onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
+              ? [{ key: "diff", label: t("docs.panel.diff"), onSelect: () => setDiffTarget({ workspaceId: workspace.workspaceId, path: menu.path }) }]
               : []),
-            { key: "reveal", label: "在文件管理器中显示", onSelect: () => void onFileAction(absolute(menu.path), "reveal") },
-            { key: "open", label: "用默认编辑器打开", onSelect: () => void onFileAction(absolute(menu.path), "open") }
+            { key: "reveal", label: t("docs.panel.reveal"), onSelect: () => void onFileAction(absolute(menu.path), "reveal") },
+            { key: "open", label: t("docs.panel.openDefault"), onSelect: () => void onFileAction(absolute(menu.path), "open") }
           ]}
         />
       )}

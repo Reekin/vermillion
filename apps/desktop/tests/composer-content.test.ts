@@ -29,6 +29,7 @@ vi.mock("react", () => ({
     return hooks.slots[index] ??= { current: initial };
   },
   useMemo(compute: () => unknown) { return compute(); },
+  useSyncExternalStore(_subscribe: unknown, getSnapshot: () => unknown) { return getSnapshot(); },
   useEffect(effect: () => (() => void) | void, deps: unknown[]) {
     const index = hooks.cursor++;
     const previous = hooks.slots[index] as unknown[] | undefined;

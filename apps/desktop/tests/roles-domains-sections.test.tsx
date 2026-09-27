@@ -5,10 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineModelRpc } from "@vermillion/shared";
 import type { DomainDefinition, PatrolRun, RoleFile, WorkbenchClient } from "@vermillion/workbench/client";
 import type { DesktopTransport } from "../src/transport/desktop-transport.js";
+import { setLocale } from "../src/i18n/index.js";
 import { RolesSection, describeRoles, roleModelLabel } from "../src/ui/app/components/RolesSection.js";
 import { DomainsSection, groupPatrolRuns, resolveDocLink, skippedSummary } from "../src/ui/app/components/DomainsSection.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setLocale("zh");
+});
 
 const run = (id: string, startedAt: string, status: PatrolRun["status"], extra: Partial<PatrolRun> = {}): PatrolRun => ({
   patrolRunId: id, domainId: "work-execution", trigger: "scheduled", status, changedPaths: [], requirementRefs: [],
@@ -55,6 +59,18 @@ describe("role list presentation", () => {
     expect(request).toHaveBeenCalledWith("role.reset", { workspaceId: "ws", roleId: "worker" });
     await user.click(screen.getByRole("button", { name: "更多操作：Liaison" }));
     expect((await screen.findByRole<HTMLButtonElement>("menuitem", { name: "恢复全局" })).disabled).toBe(true);
+  });
+
+  it("renders role names, duties and modes in English", () => {
+    setLocale("en");
+    render(<RolesSection client={{ request: vi.fn() } as unknown as WorkbenchClient} transport={offlineTransport} workspaceId="ws" onEdit={vi.fn()} roles={[
+      { roleId: "design-partner", title: "设计伙伴", source: "global", mode: "global" },
+      { roleId: "worker", title: "Worker", source: "workspace", mode: "append" }
+    ]} />);
+    expect(screen.getByText("2 roles · 1 customized in this workspace")).toBeTruthy();
+    const partner = screen.getByRole("button", { name: "Edit role: Design Partner" });
+    expect(within(partner).getByText("Use global")).toBeTruthy();
+    expect(within(screen.getByRole("button", { name: "Edit role: Worker" })).getByText("Append")).toBeTruthy();
   });
 });
 
