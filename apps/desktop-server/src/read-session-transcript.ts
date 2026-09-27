@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import type {
   ChatSession,
   DomainSnapshot,
@@ -112,6 +113,45 @@ const latest = (values: string[]): string | undefined => {
   return values.sort((left, right) => right.localeCompare(left))[0];
 };
 
+const markdownImagePattern = /!\[((?:\\.|[^\]\\])*)\]\(([^)]*)\)/gu;
+const dataUriPattern = /^data:([^;,]*)((?:;[^;,]*)*),(.*)$/isu;
+
+const formatByteSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const describeImageTarget = (target: string): { details: string[]; location?: string } => {
+  const data = dataUriPattern.exec(target);
+  if (data) {
+    const body = data[3] ?? "";
+    const bytes = /;base64/iu.test(data[2] ?? "")
+      ? Math.floor((body.replace(/\s+/gu, "").replace(/=+$/u, "").length * 3) / 4)
+      : body.length;
+    return { details: [data[1]?.trim() || "unknown type", formatByteSize(bytes)] };
+  }
+  if (/^file:/iu.test(target)) {
+    try {
+      const path = fileURLToPath(target);
+      return { details: [path], location: path };
+    } catch {
+      return { details: [target], location: target };
+    }
+  }
+  return { details: [target], location: target };
+};
+
+// Image payloads (notably pasted screenshots as base64 data URIs) are replaced by a
+// one-line description so callers get readable text within the character budget.
+const describeMarkdownImages = (text: string): string =>
+  text.replace(markdownImagePattern, (_match, rawAlt: string, rawTarget: string) => {
+    const alt = rawAlt.replace(/\\(.)/gu, "$1").trim();
+    const { details, location } = describeImageTarget(rawTarget.trim());
+    const showAlt = alt && alt.toLowerCase() !== "image" && !location?.endsWith(alt);
+    return `[image: ${[...(showAlt ? [alt] : []), ...details].join(", ")}]`;
+  });
+
 type MessageAccumulator = {
   messageId: string;
   turnId: string;
@@ -216,7 +256,7 @@ const collectMessages = (
         turnId: message.turnId,
         sender: message.sender,
         ...(phases.length === 1 ? { phase: phases[0] } : {}),
-        text: sorted.map((block) => block.text!.trim()).join("\n\n"),
+        text: describeMarkdownImages(sorted.map((block) => block.text!.trim()).join("\n\n")),
         startedAt: earliest(sorted.map((block) => block.startedAt)),
         ...(completedAt ? { completedAt } : {})
       };

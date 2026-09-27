@@ -237,6 +237,51 @@ describe("buildReadSessionTranscript", () => {
     ]);
   });
 
+  it("describes markdown images instead of returning their encoded payload", () => {
+    const screenshot = `data:image/png;base64,${"A".repeat(4096)}`;
+    const text = [
+      "look at this",
+      `![image](${screenshot})`,
+      "![shot \\[1\\].png](file:///C:/Users/me/My%20Pics/shot%20%5B1%5D.png)",
+      "![image](C:\\tmp\\raw.png)",
+      "![diagram](https://example.com/d.png)"
+    ].join("\n\n");
+    const snapshot = baseSnapshot([
+      turn({ turnId: "turn-1", messageIds: ["user-1"] })
+    ], [
+      block({ blockId: "user-1", messageId: "user-1", turnId: "turn-1", role: "user", text })
+    ]);
+
+    const [message] = buildReadSessionTranscript({ snapshot, sessionId: "session-1" }).messages;
+
+    expect(message?.text).not.toContain("data:image");
+    expect(message?.text).toBe([
+      "look at this",
+      "[image: image/png, 3 KB]",
+      `[image: ${process.platform === "win32" ? "C:\\Users\\me\\My Pics\\shot [1].png" : "/C:/Users/me/My Pics/shot [1].png"}]`,
+      "[image: C:\\tmp\\raw.png]",
+      "[image: diagram, https://example.com/d.png]"
+    ].join("\n\n"));
+  });
+
+  it("keeps earlier message text when the newest message carries a large screenshot", () => {
+    const screenshot = `data:image/png;base64,${"A".repeat(200_000)}`;
+    const snapshot = baseSnapshot([
+      turn({ turnId: "turn-1", messageIds: ["old", "new"] })
+    ], [
+      block({ blockId: "old", messageId: "old", turnId: "turn-1", role: "assistant", text: "earlier reply", startedAt: "2026-06-06T00:01:01.000Z" }),
+      block({ blockId: "new", messageId: "new", turnId: "turn-1", role: "user", text: `why?\n\n![image](${screenshot})`, startedAt: "2026-06-06T00:01:02.000Z" })
+    ]);
+
+    const result = buildReadSessionTranscript({ snapshot, sessionId: "session-1" });
+
+    expect(result.truncatedByChars).toBe(false);
+    expect(result.messages.map((message) => message.text)).toEqual([
+      "earlier reply",
+      "why?\n\n[image: image/png, 146 KB]"
+    ]);
+  });
+
   it("reports a clear error for an unknown session", () => {
     expect(() => buildReadSessionTranscript({
       snapshot: baseSnapshot([], []),
