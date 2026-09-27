@@ -29,6 +29,7 @@ import type {
 import { readSessionExecutionProfile } from "@vermillion/shared";
 import type { DesktopTransport } from "../../transport/desktop-transport.js";
 import { t } from "../../i18n/index.js";
+import { useLocale } from "../../i18n/react.js";
 import {
   createComposerAttachments,
   extractPastedMessageImages,
@@ -848,6 +849,8 @@ export const useComposerController = (
     return extractComposerSuggestionQuery(draft, cursorPosition);
   }, [cursorPosition, draft, input.isOpeningSelectedSession]);
 
+  // Suggestion text is worded in the interface language.
+  const locale = useLocale();
   const suggestions = useMemo<ComposerSuggestionState | undefined>(() => {
     if (!suggestionQuery) {
       return undefined;
@@ -899,7 +902,8 @@ export const useComposerController = (
     highlightedSuggestionIndex,
     input.onResumeSession,
     isSkillsLoading,
-    suggestionQuery
+    suggestionQuery,
+    locale
   ]);
 
   useEffect(() => {
