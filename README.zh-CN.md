@@ -29,7 +29,7 @@ Inbox：决策卡 / 合入结果 ◄── Worker 在 worktree 中执行 ◄─�
 开工后，工作台从当前讨论节点 fork 出 Worker 分支，由它整理文档、建单、在独立 worktree 中执行、完成 review 和验证后提交合入。执行期间只有需要你拍板的问题会以决策卡进入 Inbox。派出工单后，你可以立刻转去讨论下一件事，不用在多个会话之间来回盯进度。
 * 当然，对于小活和需要你频繁给反馈的任务，你也完全可以不走开单流程，让主agent完成一切。
 
-![多张工单并行执行](docs/media/workitems.png)
+![多张工单并行执行](docs/media/workitems.zh-CN.png)
 
 ### 多引擎
 
