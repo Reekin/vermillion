@@ -12,7 +12,7 @@ import {
 } from "electron";
 import { createSessionRuntimeService } from "@vermillion/desktop-server";
 import { localeFromLanguageTag } from "@vermillion/shared";
-import { translate } from "../i18n/index.js";
+import { translate, translateServiceText } from "../i18n/index.js";
 import { interfaceLocale } from "./interface-locale.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -923,7 +923,7 @@ const boot = async (): Promise<void> => {
         const item = baseline && items.find((entry) => !baseline.has(inboxKey(entry)));
         if (item && isInBackground()) {
           showDesktopNotification(item.kind === "decision"
-            ? translate(locale, "app.notify.decision", { question: item.card.question })
+            ? translate(locale, "app.notify.decision", { question: translateServiceText(locale, item.card.question) })
             : translate(locale, "app.notify.merged", { title: item.workItem.title }));
         }
       });

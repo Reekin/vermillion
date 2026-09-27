@@ -20,7 +20,7 @@ describe("chat tree CLI operations", () => {
   it.each(["chatTree.submit", "chatTree.retry", "chatTree.operations", "chatTree.markRead"])("requires a running desktop for %s", async (method) => {
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     expect(await runCli([method, "{}"])).toBe(1);
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("需要运行 Vermillion 桌面应用"));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("requires the Vermillion desktop app to be running"));
     expect(await readdir(baseDir)).toEqual([]);
   });
 

@@ -1,5 +1,5 @@
-import { actionIsOpen, actionNote, isUserPaused, type AgentRun, type DecisionCard, type Execution, type WorkflowAction, type WorkItem, type WorkRequest } from "@vermillion/workbench/client";
-import { t } from "../../../i18n/index.js";
+import { actionIsOpen, actionNote, isUserPaused, type AgentRun, type DecisionCard, type Execution, type ServiceText, type WorkflowAction, type WorkItem, type WorkRequest } from "@vermillion/workbench/client";
+import { serviceText, t } from "../../../i18n/index.js";
 import { formatClock, joinList } from "../../../i18n/format.js";
 import { isOpenWorkItem, isOpenWorkRequest, isPreparingWork, statusLabel, workSessionLabel } from "./task-labels.js";
 import type { Step } from "./ui.js";
@@ -47,14 +47,15 @@ export const integrationShortStatus = (action: WorkflowAction, item?: WorkItem):
 
 export const integrationFailureSummary = (action: WorkflowAction): string | undefined => {
   if (action.kind !== "integration" || !action.failure) return undefined;
-  const files = action.failure.match(/following files would be overwritten by merge:\s*([\s\S]*?)(?:\r?\nPlease|$)/i)?.[1]
+  const failure = serviceText(action.failure);
+  const files = failure.match(/following files would be overwritten by merge:\s*([\s\S]*?)(?:\r?\nPlease|$)/i)?.[1]
     ?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (files?.length) return t("work.failure.dirtyMain", { files: joinList(files) });
-  if (/outside repository/i.test(action.failure)) return t("work.failure.outsideRepo");
-  if (/Worker must commit its worktree/i.test(action.failure)) return t("work.failure.workerUncommitted");
-  if (/conflict/i.test(action.failure)) return t("work.failure.conflictSummary");
-  const error = action.failure.split(/\r?\n/).find((line) => /^error:/i.test(line))?.replace(/^error:\s*/i, "").trim();
-  const summary = error || action.failure.split(/\r?\n/).find(Boolean)?.trim();
+  if (/outside repository/i.test(failure)) return t("work.failure.outsideRepo");
+  if (/Worker must commit its worktree/i.test(failure)) return t("work.failure.workerUncommitted");
+  if (/conflict/i.test(failure)) return t("work.failure.conflictSummary");
+  const error = failure.split(/\r?\n/).find((line) => /^error:/i.test(line))?.replace(/^error:\s*/i, "").trim();
+  const summary = error || failure.split(/\r?\n/).find(Boolean)?.trim();
   if (!summary) return undefined;
   return summary.length > 160 ? summary.slice(0, 157) + "…" : summary;
 };
@@ -64,7 +65,7 @@ export const actionStatusText = (action: WorkflowAction, item?: WorkItem) => int
 export const dispositionSummary = (action: WorkflowAction): string[] => action.history.flatMap((entry) => {
   const stage = entry.event.startsWith("failed:") ? entry.event.slice(7) : "";
   if (stages.has(stage)) return [t("work.disposition.attempted", { stage: stageLabel(stage as WorkflowAction["stage"]) })];
-  if (["contract.updated", "dependency.updated", "resolved"].includes(entry.event)) return [entry.message.split("\n")[0]!];
+  if (["contract.updated", "dependency.updated", "resolved"].includes(entry.event)) return [serviceText(entry.message).split("\n")[0]!];
   return [];
 });
 
@@ -106,7 +107,8 @@ const latestAction = (actions: WorkflowAction[], kind: WorkflowAction["kind"], w
   .filter((action) => action.workItemId === workItemId && action.kind === kind)
   .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 
-const rejectionSummary = (reason: string) => {
+const rejectionSummary = (value: ServiceText) => {
+  const reason = serviceText(value);
   const line = reason.split(/\r?\n/).map((entry) => entry.trim()).find(Boolean) ?? reason;
   if (/Worker must commit its worktree/i.test(reason)) return t("work.failure.workerUncommitted");
   if (/outside repository/i.test(reason)) return t("work.failure.outsideRepo");
@@ -114,29 +116,25 @@ const rejectionSummary = (reason: string) => {
   return line.length > 160 ? line.slice(0, 157) + "…" : line;
 };
 
-// The patterns below match Chinese text produced by the workbench service, written as escapes:
-// handedOffNote = "工单已进入 <status>", unrecoverable = "进程重启|无法恢复", noSubmission = "多轮未提交",
-// failedResolution = "转回原 Worker|冲突|失败|未通过", nextHint = "下一步[:：]".
-const handedOffNote = /\u5de5\u5355\u5df2\u8fdb\u5165\s+\w+/i;
-const unrecoverable = /\u8fdb\u7a0b\u91cd\u542f|\u65e0\u6cd5\u6062\u590d/;
-const noSubmission = /\u591a\u8f6e\u672a\u63d0\u4ea4/;
-const failedResolution = /\u8f6c\u56de\u539f Worker|\u51b2\u7a81|\u5931\u8d25|\u672a\u901a\u8fc7/i;
-const nextHint = /\s*\u4e0b\u4e00\u6b65[:\uff1a]/;
+/** The hint the workbench appends to a rejected call's message. */
+const nextHint = /\s*Next:/;
+const hasCode = (value: ServiceText, code: string) => typeof value !== "string" && value.code === code;
 
 const readableRunNote = (note?: string) => !note || /^(done|completed|ok)$/i.test(note.trim()) ? undefined
-  : handedOffNote.test(note) ? t("work.runNote.handedOff") : note;
+  : note;
 
 const truncate = (value: string, max: number) => value.length > max ? value.slice(0, max - 1) + "…" : value;
 
 export type ReadableFailure = { title: string; next: string; command?: string };
 
 /** Turns an engine, Git or scheduler failure into a cause and next step; the raw text stays in technical detail. */
-export const readableFailure = (text: string): ReadableFailure => {
+export const readableFailure = (value: ServiceText): ReadableFailure => {
+  // The workbench's own reasons are already readable in the interface language.
+  if (typeof value !== "string") return { title: serviceText(value), next: t("work.failure.unknownNext") };
+  const text = value;
   if (/is archived/i.test(text)) return { title: t("work.failure.archived"), next: t("work.failure.archivedNext"), command: text.match(/`(codex unarchive [^`]+)`/)?.[1] };
   if (/Historical execution is paused/i.test(text)) return { title: t("work.failure.historicalPaused"), next: t("work.failure.historicalPausedNext") };
-  if (unrecoverable.test(text)) return { title: t("work.failure.unrecoverable"), next: t("work.failure.unrecoverableNext") };
   if (/turn interrupted/i.test(text)) return { title: t("work.failure.interrupted"), next: t("work.failure.interruptedNext") };
-  if (noSubmission.test(text)) return { title: t("work.failure.noSubmission"), next: t("work.failure.noSubmissionNext") };
   if (/turn failed/i.test(text)) {
     const message = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1];
     return { title: message ? t("work.failure.modelWithMessage", { message: truncate(message.replace(/\\(.)/g, "$1"), 80) }) : t("work.failure.model"), next: t("work.failure.modelNext") };
@@ -147,7 +145,7 @@ export const readableFailure = (text: string): ReadableFailure => {
   return { title: t("work.failure.unknown"), next: t("work.failure.unknownNext") };
 };
 
-/** A rejected board action as one readable sentence: drops the RPC method prefix and the CLI's "下一步" hint. */
+/** A rejected board action as one readable sentence: drops the RPC method prefix and the "Next:" hint. */
 export const readableActionError = (caught: unknown) => {
   const message = caught instanceof Error ? caught.message : String(caught);
   const text = message.replace(/^\s*\[[\w.]+\]\s*/, "").split(nextHint)[0]!.trim();
@@ -168,8 +166,10 @@ export const pendingRequestDecisions = (request: WorkRequest, decisions: Decisio
   decisions.filter((card) => isPending(card) && card.requestId === request.requestId && !card.workItemId);
 
 const decisionAttention = (card: DecisionCard): Attention => ({
-  title: t("work.labelValue", { label: t("work.attention.awaitingAnswer"), value: card.question }), next: t("work.attention.decisionNext"), action: "decision"
+  title: t("work.labelValue", { label: t("work.attention.awaitingAnswer"), value: serviceText(card.question) }), next: t("work.attention.decisionNext"), action: "decision"
 });
+
+const isHistoricalPause = (value: ServiceText | undefined): value is string => typeof value === "string" && /Historical execution is paused/i.test(value);
 
 /** Why an open work item cannot continue without the user; undefined while it can proceed on its own. */
 export const workItemAttention = (item: WorkItem, actions: WorkflowAction[], decisions: DecisionCard[]): Attention | undefined => {
@@ -177,16 +177,17 @@ export const workItemAttention = (item: WorkItem, actions: WorkflowAction[], dec
   const card = pendingItemDecisions(item, decisions, actions)[0];
   if (card) return decisionAttention(card);
   if (item.run.paused) {
-    const known = item.run.waitReason && /Historical execution is paused/i.test(item.run.waitReason) ? readableFailure(item.run.waitReason) : undefined;
-    return { ...(known ?? { title: t("work.state.paused"), next: t("work.attention.pausedNext") }), action: "resume", raw: known ? item.run.waitReason : undefined };
+    const reason = item.run.waitReason;
+    const known = isHistoricalPause(reason) ? readableFailure(reason) : undefined;
+    return { ...(known ?? { title: t("work.state.paused"), next: t("work.attention.pausedNext") }), action: "resume", raw: known ? serviceText(reason) : undefined };
   }
   if (item.run.userStopped && !item.run.activeTurnId) return { title: t("work.attention.stopped"), next: t("work.attention.stoppedNext"), action: "resume" };
   const blocked = actions.find((action) => action.workItemId === item.workItemId && action.kind === "integration" && actionIsOpen(action) && action.status === "decision" && !action.agent);
   if (blocked) return {
     title: t("work.labelValue", { label: t("work.integration.blocked"), value: integrationFailureSummary(blocked) ?? t("work.attention.mergeBlockedDefault") }),
-    next: recoveryCondition(blocked), action: "detail", raw: blocked.kind === "integration" ? blocked.failure : undefined
+    next: recoveryCondition(blocked), action: "detail", raw: serviceText(blocked.failure)
   };
-  if (item.run.lastFailure && !item.run.activeTurnId) return { ...readableFailure(item.run.lastFailure), action: "retry", raw: item.run.lastFailure };
+  if (item.run.lastFailure && !item.run.activeTurnId) return { ...readableFailure(item.run.lastFailure), action: "retry", raw: serviceText(item.run.lastFailure) };
   if (item.run.turnStatus === "unknown") return { title: t("work.state.unconfirmed"), next: t("work.attention.unconfirmedNext"), action: "session" };
   return undefined;
 };
@@ -198,10 +199,11 @@ export const workRequestAttention = (request: WorkRequest, items: WorkItem[], de
   if (isPreparingWork(request)) {
     const card = pendingRequestDecisions(request, decisions)[0];
     if (card) return decisionAttention(card);
-    if (request.failure) return { ...readableFailure(request.failure), action: stopped ? "resume" : "retry", raw: request.failure };
+    if (request.failure) return { ...readableFailure(request.failure), action: stopped ? "resume" : "retry", raw: serviceText(request.failure) };
     if (request.paused) {
-      const known = request.waitReason && /Historical execution is paused/i.test(request.waitReason) ? readableFailure(request.waitReason) : undefined;
-      return { ...(known ?? { title: t("work.attention.preparationPaused"), next: t("work.attention.preparationNext") }), action: "resume", raw: known ? request.waitReason : undefined };
+      const reason = request.waitReason;
+      const known = isHistoricalPause(reason) ? readableFailure(reason) : undefined;
+      return { ...(known ?? { title: t("work.attention.preparationPaused"), next: t("work.attention.preparationNext") }), action: "resume", raw: known ? serviceText(reason) : undefined };
     }
     if (stopped) return { title: t("work.attention.preparationStopped"), next: t("work.attention.preparationNext"), action: "resume" };
     if (request.status === "failed") return { title: t("work.attention.preparationFailed"), next: t("work.attention.preparationFailedNext"), action: "retry" };
@@ -331,7 +333,7 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
     shortLabel: t("work.progress.queued"), title: t("work.progress.queuedTitle"), handler: t("work.role.workbench"), next: t("work.progress.queuedNext"), at: item.updatedAt
   };
   if (item.status === "running") return {
-    shortLabel: statusLabel("running"), title: workSessionLabel(item), reason: execute ? actionNote(execute) || undefined : undefined,
+    shortLabel: statusLabel("running"), title: workSessionLabel(item), reason: execute ? serviceText(actionNote(execute)) || undefined : undefined,
     handler: t("work.role.worker"), next: t("work.progress.runningNext"), at: execute?.updatedAt ?? item.updatedAt
   };
   return {
@@ -339,15 +341,16 @@ export const workItemProgress = (item: WorkItem, actions: WorkflowAction[], run?
   };
 };
 
-const eventFromHistory = (entry: { at: string; event: string; message: string }, kind: WorkflowAction["kind"]): WorkItemEvent | undefined => {
-  if (entry.event === "created") return { at: entry.at, title: kind === "integration" ? t("work.event.mergeStarted") : t("work.event.workerStarted"), detail: entry.message.split("\n")[0] };
+const eventFromHistory = (entry: { at: string; event: string; message: ServiceText }, kind: WorkflowAction["kind"]): WorkItemEvent | undefined => {
+  const message = serviceText(entry.message);
+  if (entry.event === "created") return { at: entry.at, title: kind === "integration" ? t("work.event.mergeStarted") : t("work.event.workerStarted"), detail: message.split("\n")[0] };
   if (entry.event.startsWith("failed:")) return { at: entry.at, title: kind === "integration" ? t("work.event.mergeCheckFailed") : t("work.event.workerProblem"), detail: rejectionSummary(entry.message) };
   if (entry.event === "resolved") {
-    if (kind === "integration" && failedResolution.test(entry.message)) return { at: entry.at, title: t("work.event.mergeCheckFailed"), detail: rejectionSummary(entry.message) };
-    const detail = kind === "execute" && handedOffNote.test(entry.message) ? t("work.runNote.handedOff") : entry.message.split("\n")[0];
+    if (kind === "integration" && hasCode(entry.message, "merge.voided")) return { at: entry.at, title: t("work.event.mergeCheckFailed"), detail: rejectionSummary(entry.message) };
+    const detail = kind === "execute" && hasCode(entry.message, "workItem.closedAs") ? t("work.runNote.handedOff") : message.split("\n")[0];
     return { at: entry.at, title: kind === "integration" ? t("work.event.mergeHandled") : t("work.event.turnEnded"), detail };
   }
-  if (["contract.updated", "dependency.updated"].includes(entry.event)) return { at: entry.at, title: t("work.event.contractChanged"), detail: entry.message.split("\n")[0] };
+  if (["contract.updated", "dependency.updated"].includes(entry.event)) return { at: entry.at, title: t("work.event.contractChanged"), detail: message.split("\n")[0] };
   return undefined;
 };
 

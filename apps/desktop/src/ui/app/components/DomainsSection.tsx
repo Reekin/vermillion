@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DomainConfig, DomainDefinition, Issue, PatrolRun, WorkbenchClient } from "@vermillion/workbench/client";
 import { Button, Card, Checkbox, EmptyState, Field, IconButton, InlineNotice, ListRow, MarkdownPreview, OverflowMenu, PanelHeader, Select, SettingRow, StatusIcon, StatusPill, Toggle, type StatusTone } from "./ui.js";
 import { Modal } from "./Modal.js";
-import { t } from "../../../i18n/index.js";
+import { serviceText, t } from "../../../i18n/index.js";
 import { formatAgo, formatClock, formatMonthDay } from "../../../i18n/format.js";
 import { useT } from "../../../i18n/react.js";
 
@@ -54,7 +54,7 @@ export const groupPatrolRuns = (runs: PatrolRun[]): PatrolEntry[] => {
 
 /** "9月14日 至 9月15日 连续 4 次无新变更，已跳过"; a single skip keeps its own summary. */
 export const skippedSummary = (runs: PatrolRun[]): string => {
-  if (runs.length === 1) return runs[0]!.summary || t("docs.domains.skippedOne");
+  if (runs.length === 1) return serviceText(runs[0]!.summary) || t("docs.domains.skippedOne");
   const oldest = formatDay(runs.at(-1)!.startedAt);
   const newest = formatDay(runs[0]!.startedAt);
   return t("docs.domains.skippedMany", { range: oldest === newest ? oldest : t("docs.domains.dayRange", { from: oldest, to: newest }), count: runs.length });
@@ -216,7 +216,7 @@ export const DomainsSection = ({ client, workspaceId, workspaceRoot, domains, pa
             <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onOpenIssues(selected.domainId)}>{t("docs.domains.relatedIssues")}</Button></h3>}>
           {runs.length ? <>
             <div className="vm-patrol-strip" aria-label={t("docs.domains.recentResults")}>
-              {[...recent].reverse().map((patrol) => <i key={patrol.patrolRunId} data-tone={patrolTone(patrol)} title={`${patrolTime(patrol.startedAt)} · ${patrol.summary ?? ""}`} />)}
+              {[...recent].reverse().map((patrol) => <i key={patrol.patrolRunId} data-tone={patrolTone(patrol)} title={`${patrolTime(patrol.startedAt)} · ${serviceText(patrol.summary) ?? ""}`} />)}
             </div>
             <ul>{groupPatrolRuns(runs).map((entry) => entry.kind === "skipped"
               ? <li key={entry.runs[0]!.patrolRunId} className="vm-patrol-entry">
@@ -263,7 +263,7 @@ const PatrolRow = ({ run, onOpenSession, onOpenIssues }: { run: PatrolRun; onOpe
   const t = useT();
   const tone = patrolTone(run);
   const icon = patrolIcon(tone);
-  const title = run.summary || (run.status === "queued" ? t("docs.domains.state.queued") : tone === "issue" ? t("docs.domains.issuesFound", { count: run.issueIds.length }) : icon.label);
+  const title = serviceText(run.summary) || (run.status === "queued" ? t("docs.domains.state.queued") : tone === "issue" ? t("docs.domains.issuesFound", { count: run.issueIds.length }) : icon.label);
   const meta = [patrolTrigger(run.trigger), run.changedPaths.length ? t("docs.domains.filesChanged", { count: run.changedPaths.length }) : undefined].filter(Boolean).join(" · ");
   return <li className="vm-patrol-entry">
     <StatusIcon tone={icon.tone} label={icon.label} />

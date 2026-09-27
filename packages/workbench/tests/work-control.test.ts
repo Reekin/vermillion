@@ -8,8 +8,8 @@ it("exposes a work immediately and pauses preparation without losing the request
     const request = await f.service.startWork(f.workspaceId, { sessionId: "design", turnId: "turn" });
     expect(request).toMatchObject({ status: "pending", formatVersion: 2 });
     const paused = await f.service.pauseWork(f.workspaceId, request.requestId);
-    expect(paused).toMatchObject({ requestId: request.requestId, paused: true, waitReason: "用户已暂停当前工作" });
-    expect((await f.service.diagnoseWork(f.workspaceId, request.requestId)).waiting).toContain("用户已暂停当前工作");
+    expect(paused).toMatchObject({ requestId: request.requestId, paused: true, waitReason: { code: "work.pausedByUser" } });
+    expect((await f.service.diagnoseWork(f.workspaceId, request.requestId)).waiting).toContainEqual({ code: "work.pausedByUser" });
     expect(await f.service.resumeWork(f.workspaceId, request.requestId)).toMatchObject({
       requestId: request.requestId, paused: false, status: "pending", dispatchRequested: true
     });
@@ -25,7 +25,7 @@ it("explicit preparation retry preserves uncertain delivery until the original r
     const resumed = await f.service.retryWork(f.workspaceId, request.requestId);
     expect(resumed).toMatchObject({ status: "pending", dispatchRequested: true });
     await f.service.updateWorkRequest(f.workspaceId, request.requestId, (current) => ({ ...current, pendingMessageId: "unknown" }));
-    await expect(f.service.retryWork(f.workspaceId, request.requestId)).rejects.toThrow("未确认");
+    await expect(f.service.retryWork(f.workspaceId, request.requestId)).rejects.toThrow("not confirmed");
   } finally { await f.cleanup(); }
 });
 
@@ -48,7 +48,7 @@ it("retains handoff registered concurrently with a whole-work pause", async () =
     await pausing;
     await f.service.finishPreparation(f.workspaceId, "prep", "end");
     expect((await f.service.listWorkRequests(f.workspaceId))[0]).toMatchObject({ paused: true, status: "ready", handoff: { workItemIds: [item.workItemId], turnId: "end" } });
-    await expect(f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "prep" })).rejects.toThrow("暂停");
+    await expect(f.service.startWorkItem(f.workspaceId, item.workItemId, { sessionId: "prep" })).rejects.toThrow("paused");
   } finally { await f.cleanup(); }
 });
 

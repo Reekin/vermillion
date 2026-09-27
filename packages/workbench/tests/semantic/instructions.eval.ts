@@ -14,27 +14,27 @@ const policies = [
   },
   {
     name: "CLI distinguishes Issues from execution work items",
-    criteria: "总帮助把 workItem.list 归于执行工单，把 issue.list 归于问题与建议。各自的方法帮助明确这两种对象不同，不能用 issue.list 查询结果判断有没有执行工单。",
-    paraphrase: "命令分类：执行任务用 workItem.list，问题和建议用 issue.list。\nworkItem.list 帮助：列出执行工单，不含问题建议记录。\nissue.list 帮助：只列问题建议，不包含执行工单；查不到 Issue 不能说明没有执行任务。",
-    broken: "命令分类：workItem.list 和 issue.list 都是执行工单查询。两者等价，issue.list 为空就代表没有执行工单。"
+    criteria: "The global help files workItem.list under execution work items and issue.list under problems and suggestions. Each method's help makes clear the two objects differ, so an issue.list result cannot tell whether execution work items exist.",
+    paraphrase: "Command groups: execution tasks use workItem.list; problems and suggestions use issue.list.\nworkItem.list help: lists execution work items, without problem or suggestion records.\nissue.list help: lists only problems and suggestions, never execution work items; finding no Issue says nothing about execution tasks.",
+    broken: "Command groups: workItem.list and issue.list both query execution work items. They are equivalent, and an empty issue.list means there are no execution work items."
   },
   {
     name: "app.start help explains source and release identities",
-    criteria: "说明源码 checkout 启动须指定 expectedRevision 且工作树干净，发布目录启动须指定 expectedBuildId；分别给出可辨认的命令示例，能分清两种身份参数用于哪一种候选。",
-    paraphrase: "启动源码候选前先保持 checkout 无改动：vermillion app.start '{\"targetPath\":\"X:/source\",\"expectedRevision\":\"<commit>\"}'。发布包的身份由构建值核对：vermillion app.start '{\"targetPath\":\"X:/release\",\"expectedBuildId\":\"sha256:<hash>\"}'。上述对应身份参数均必填。",
-    broken: "源码示例：vermillion app.start '{\"targetPath\":\"X:/source\",\"expectedBuildId\":\"hash\"}'。发布示例：vermillion app.start '{\"targetPath\":\"X:/release\",\"expectedRevision\":\"commit\"}'。工作树是否干净无关紧要。"
+    criteria: "Explains that starting a source checkout requires expectedRevision and a clean working tree, and starting a release directory requires expectedBuildId; gives a recognizable command example for each, so it is clear which identity parameter belongs to which kind of candidate.",
+    paraphrase: "Before starting a source candidate, keep the checkout free of changes: vermillion app.start '{\"targetPath\":\"X:/source\",\"expectedRevision\":\"<commit>\"}'. A release package is identified by its build value: vermillion app.start '{\"targetPath\":\"X:/release\",\"expectedBuildId\":\"sha256:<hash>\"}'. Each of these identity parameters is required.",
+    broken: "Source example: vermillion app.start '{\"targetPath\":\"X:/source\",\"expectedBuildId\":\"hash\"}'. Release example: vermillion app.start '{\"targetPath\":\"X:/release\",\"expectedRevision\":\"commit\"}'. Whether the working tree is clean does not matter."
   },
   {
     name: "Worker instructions distinguish session cwd and worktree operations",
-    criteria: "会话 cwd 留在 workspace 根目录，工单文件操作指向独立 worktree；说明如何显式指定操作目标（工具 workdir、git -C 或 worktree 内绝对路径），不能引导 Worker 在主分支直接修改工单文件。",
-    paraphrase: "会话以 workspace 根作为 cwd。开发成果写入分配的独立 worktree；每次工具操作用 workdir 指向该 worktree，Git 用 -C 指定它，也可使用其中文件的绝对路径。主分支只读。",
-    broken: "会话 cwd 保持 workspace 根目录。workdir、git -C、worktree 内的绝对路径都无需指定，直接在当前主分支修改工单文件即可。"
+    criteria: "The session cwd stays at the workspace root while work item file operations target the isolated worktree; explains how to name the target explicitly (tool workdir, git -C or absolute paths inside the worktree), and never leads the Worker to edit work item files directly on the main branch.",
+    paraphrase: "The session uses the workspace root as its cwd. Results go into the assigned isolated worktree; point every tool operation's workdir at that worktree, name it with -C for Git, or use absolute paths of files inside it. The main branch is read-only.",
+    broken: "The session cwd stays at the workspace root. There is no need to set workdir, git -C or absolute worktree paths; just edit the work item files on the current main branch."
   },
   {
     name: "Subagent instructions distinguish role text and spawn parameters",
-    criteria: "reviewer 与 verifier 的角色正文分别标识，要求 spawn 时原样传入并附工单和 diff；model configuration JSON 仅用于核对，spawn_agent 参数 JSON 要填在工具调用顶层，不能塞进 message。两种角色都要说明这些要求。",
-    paraphrase: "reviewer 角色正文：审阅成果。verifier 角色正文：执行验收。启动这两位子代理时，各自角色正文保持原样，并补上工单及 diff。各自的 model configuration JSON 只作核验参考；各自另列的 spawn_agent 参数 JSON 应作为调用的顶层参数提交，不放在 message 中。",
-    broken: "reviewer subagent prompt：审阅成果。verifier subagent prompt：执行验收。model configuration JSON 仅用于核对。spawn_agent top-level parameters：把两位角色的参数 JSON 都复制进 message，工具顶层不要传模型参数，角色正文可省略，也不用附工单或 diff。"
+    criteria: "The reviewer and verifier role texts are labeled separately and must be passed unchanged when spawning, together with the work item and diff; the model configuration JSON is only for checking, and the spawn_agent parameter JSON goes into the tool call's top-level parameters, never into message. Both roles state these requirements.",
+    paraphrase: "Reviewer role text: review the result. Verifier role text: run the verification. When starting these two subagents, keep each role text as it is and add the work item and diff. Each model configuration JSON is only a reference for checking; each separately listed spawn_agent parameter JSON is submitted as the call's top-level parameters, not inside message.",
+    broken: "reviewer subagent prompt: review the result. verifier subagent prompt: run the verification. The model configuration JSON is only for checking. spawn_agent top-level parameters: copy both roles' parameter JSON into message, pass no model parameters at the tool's top level, the role texts may be omitted, and there is no need to attach the work item or diff."
   },
   {
     name: "Shipped Worker role (Chinese and English) requires the CLI handoff",

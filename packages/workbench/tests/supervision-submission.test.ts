@@ -13,7 +13,7 @@ it("keeps invalid root results running until the same Worker resubmits a valid c
   await service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" });
   await writeFile(join(root, "result.txt"), "result\n");
   const dirty = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: "worker" });
-  expect(dirty).toMatchObject({ status: "running", run: { lastFailure: expect.stringContaining("未提交") } });
+  expect(dirty).toMatchObject({ status: "running", run: { lastFailure: expect.stringContaining("Uncommitted") } });
   expect((await service.listActions(workspaceId)).filter((action) => action.kind === "integration")).toEqual([]);
   expect((await service.listActions(workspaceId))[0]).toMatchObject({ notices: [] });
   await git(root, "add", "result.txt");
@@ -22,7 +22,7 @@ it("keeps invalid root results running until the same Worker resubmits a valid c
   const missingCommit = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: "worker" });
   expect(missingCommit).toMatchObject({ status: "running", run: { lastFailure: expect.stringContaining("evidence.commit") } });
   const closed = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: "worker", evidence: { ...submission.evidence, commit } });
-  expect(closed).toMatchObject({ status: "closed", merge: { commit }, rejections: [{ reason: expect.stringContaining("未提交") }, { reason: expect.stringContaining("evidence.commit") }] });
+  expect(closed).toMatchObject({ status: "closed", merge: { commit }, rejections: [{ reason: expect.stringContaining("Uncommitted") }, { reason: expect.stringContaining("evidence.commit") }] });
   expect(closed.run.lastFailure).toBeUndefined();
   expect(closed.evidence?.commit).toBe(commit);
 });

@@ -3,6 +3,7 @@ import type { RoleService } from "./roles.js";
 import type { WorkbenchService } from "./workbench-service.js";
 import type { SessionReceipt, TurnInspector } from "./execution-runtime.js";
 import { workerOpeningMessage } from "./execution-message.js";
+import { failureText, textError } from "./service-text.js";
 
 /** What the orchestrator needs from the session engine. Implemented in Electron main over SessionShellService. */
 export type AgentRunner = {
@@ -155,7 +156,7 @@ export class Orchestrator {
           if (patrol?.workspaceId === workspaceId) {
             const run = await this.service.getPatrolRun(workspaceId, patrol.patrolRunId);
             if (run.status === "running") await this.service.failPatrolRun(workspaceId, patrol.patrolRunId,
-              event.failure ?? "巡检轮次结束但未登记结果。");
+              event.failure ?? "The patrol turn ended without recording a result.");
             this.patrolsBySession.delete(event.sessionId);
             await this.runner.release(event.sessionId);
           }
@@ -244,9 +245,9 @@ export class Orchestrator {
           await this.service.updateAction(workspaceId, action, current => ({ ...current, sessionId, stage: "deliver" }));
         }
         if (!await this.runner.resume(sessionId, { cwd: root, modelConfig: role.modelConfig, metadata }))
-          throw new Error("无法恢复固定 Worker 会话：" + sessionId);
+          throw new Error("Cannot resume the fixed Worker session: " + sessionId);
         const content = [!action.deliveredAt ? workerOpeningMessage(workspaceId, { ...item!, run: { ...item!.run, sessionId } }, root) : undefined,
-          renderExecutionNotices(action.notices)].filter(Boolean).join("\n\n") || "继续当前工单，读取最新合同与已有成果后完成交接。";
+          renderExecutionNotices(action.notices)].filter(Boolean).join("\n\n") || "Continue this work item: read the latest contract and existing results, then finish the handoff.";
         return { sessionId, content };
       },
       send: (sessionId, content, messageId) => this.runner.isActive?.(sessionId)
@@ -254,7 +255,7 @@ export class Orchestrator {
         : this.runner.send(sessionId, content, { messageId })
     });
     if (explicit && !["delivered", "active"].includes(result.status))
-      throw new Error(result.reason ?? "当前业务请求不能派发。");
+      throw result.reason ? textError(result.reason) : new Error("This request cannot be dispatched now.");
   }
 
   private async prepareRequest(workspaceId: string, request: WorkRequest): Promise<void> {
@@ -269,7 +270,7 @@ export class Orchestrator {
         if (!sessionId) {
           const fork = current!.sourceTurnId ? await this.runner.fork({
             workspaceId, sourceSessionId: current!.sourceSessionId, sourceTurnId: current!.sourceTurnId,
-            title: "开工准备", modelConfig: role.modelConfig,
+            title: "Preparation", modelConfig: role.modelConfig,
             metadata: { role: "work-preparation", requestId: current!.requestId, sourceSessionId: current!.sourceSessionId }
           }) : { sessionId: current!.sourceSessionId, treeId: current!.treeId };
           sessionId = fork.sessionId;
@@ -277,13 +278,13 @@ export class Orchestrator {
             ...latest, workerSessionId: sessionId, treeId: fork.treeId ?? latest.treeId
           }));
         }
-        if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("无法恢复准备会话。");
+        if (!await this.runner.resume(sessionId, { cwd: root })) throw new Error("Cannot resume the preparation session.");
         const content = current!.dispatchRequested
-          ? "继续本次准备，保留已有成果，完成完整交接。\nrequestId: " + current!.requestId
+          ? "Continue this preparation, keep the existing results and finish the complete handoff.\nrequestId: " + current!.requestId
           : [current!.message?.content, role.content, "workspaceId: " + workspaceId, "sessionId: " + sessionId,
             "requestId: " + current!.requestId, "sourceSessionId: " + current!.sourceSessionId,
-            "开工范围: " + (current!.scope ?? "根据讨论确定范围"),
-            "结束前必须通过 work.prepare.complete 登记完整工单清单、文档依据和目录。"].filter(Boolean).join("\n\n");
+            "Scope: " + (current!.scope ?? "decide from the discussion"),
+            "Before ending, register the complete work item list, doc refs and directories with work.prepare.complete."].filter(Boolean).join("\n\n");
         return { sessionId, content };
       },
       send: (sessionId, content, messageId) => this.runner.send(sessionId, content, { ...request.message, messageId })
@@ -358,19 +359,19 @@ export class Orchestrator {
       const root = await this.service.workspaceRoot(workspaceId);
       const role = await this.roles.resolve(root, "supervisor");
       if (!sessionId) {
-        if (!request.workerSessionId || !request.handoff?.turnId) throw new Error("准备末端尚未登记，不能创建监工。");
+        if (!request.workerSessionId || !request.handoff?.turnId) throw new Error("The end of the preparation is not registered yet, so no Supervisor can be created.");
         sessionId = (await this.runner.fork({ workspaceId, sourceSessionId: request.workerSessionId,
-          sourceTurnId: request.handoff.turnId, title: "监工 · " + (request.scope ?? request.requestId),
+          sourceTurnId: request.handoff.turnId, title: "Supervisor · " + (request.scope ?? request.requestId),
           modelConfig: role.modelConfig, metadata: { role: "supervisor", requestId: request.requestId } })).sessionId;
         await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
           ...current, supervisor: { ...current.supervisor, sessionId }
         }));
       }
       if (!await this.runner.resume(sessionId, { cwd: root, modelConfig: role.modelConfig,
-        metadata: { role: "supervisor", requestId: request.requestId } })) throw new Error("无法恢复监工会话。");
+        metadata: { role: "supervisor", requestId: request.requestId } })) throw new Error("Cannot resume the Supervisor session.");
       if (supervisor.pendingMessageId) {
         const receipt = await this.runner.confirmMessage?.(sessionId, supervisor.pendingMessageId);
-        if (!receipt?.accepted) throw new Error("监工检查消息受理状态未确认。");
+        if (!receipt?.accepted) throw new Error("Whether the Supervisor check message was accepted is not confirmed.");
         await this.service.updateWorkRequest(workspaceId, request.requestId, (current) => ({
           ...current, supervisor: { ...current.supervisor, pendingMessageId: undefined, activeTurnId: receipt.turnId }
         }));
@@ -383,15 +384,15 @@ export class Orchestrator {
         ...latest, supervisor: { ...latest.supervisor, pendingMessageId: messageId, nextCheckAt: undefined, startedAt: this.now(), failure: undefined }
       }));
       const receipt = await this.runner.send(sessionId,
-        "检查本工作当前进展，按监工职责处理。\nworkspaceId: " + workspaceId +
+        "Check the current progress of this work and act as the Supervisor.\nworkspaceId: " + workspaceId +
         "\nrequestId: " + request.requestId + "\nsessionId: " + sessionId +
-        "\n业务处置调用携带 originatorSessionId: " + sessionId +
-        "\n先查询 work.diagnose 与关联 workItem，再读取 Worker 最近消息和活动。", { messageId });
+        "\nPass originatorSessionId in work item operations: " + sessionId +
+        "\nFirst query work.diagnose and the linked work items, then read the Workers' recent messages and activity.", { messageId });
       if (receipt?.accepted === false) {
         await this.service.updateWorkRequest(workspaceId, request.requestId, (latest) => ({
           ...latest, supervisor: { ...latest.supervisor, pendingMessageId: undefined }
         }));
-        throw new Error(receipt.error?.message ?? "引擎未受理监工检查。");
+        throw new Error(receipt.error?.message ?? "The engine did not accept the Supervisor check.");
       }
       await this.service.updateWorkRequest(workspaceId, request.requestId, (latest) => ({
         ...latest, supervisor: { ...latest.supervisor, activeTurnId: receipt?.turnId, pendingMessageId: undefined }
@@ -400,7 +401,7 @@ export class Orchestrator {
       const lastCheckedAt = this.now();
       const nextCheckAt = new Date(Date.parse(lastCheckedAt) + await this.supervisorIntervalMs(workspaceId)).toISOString();
       await this.service.updateWorkRequest(workspaceId, request.requestId, (latest) => ({
-        ...latest, supervisor: { ...latest.supervisor, failure: error instanceof Error ? error.message : String(error), lastCheckedAt, nextCheckAt }
+        ...latest, supervisor: { ...latest.supervisor, failure: failureText(error), lastCheckedAt, nextCheckAt }
       }));
       schedule(nextCheckAt);
     }
@@ -423,13 +424,13 @@ export class Orchestrator {
       const role = await this.service.resolveMaintainer(workspaceId, current.domainId);
       const metadata = { role: "maintainer", patrolRunId: current.patrolRunId, domainId: current.domainId };
       if (current.status === "running") {
-        if (!sessionId) throw new Error("运行中的巡检缺少会话。");
+        if (!sessionId) throw new Error("The running patrol has no session.");
         if (this.patrolsBySession.has(sessionId)) return;
         if (!await this.runner.resume(sessionId, { cwd: root, modelConfig: role.modelConfig,
-          title: "Maintainer · " + current.domainId, metadata })) throw new Error("无法恢复巡检会话：" + sessionId);
+          title: "Maintainer · " + current.domainId, metadata })) throw new Error("Cannot resume the patrol session: " + sessionId);
         this.patrolsBySession.set(sessionId, { workspaceId, patrolRunId: current.patrolRunId, sessionId });
         if (this.runner.isActive?.(sessionId)) return;
-        const receipt = await this.runner.send(sessionId, "巡检会话已恢复。重新核对当前记录，避免重复创建 Issue 或工单，然后继续尚未完成的巡检。\n\n" + await this.service.patrolMessage(workspaceId, current.patrolRunId));
+        const receipt = await this.runner.send(sessionId, "The patrol session was resumed. Re-check the current records so no Issue or work item is created twice, then continue the unfinished patrol.\n\n" + await this.service.patrolMessage(workspaceId, current.patrolRunId));
         await this.service.setPatrolTurn(workspaceId, current.patrolRunId, receipt?.turnId);
         return;
       }

@@ -1465,7 +1465,7 @@ export class CodexAppServerRuntimePort
     await this.rpc("thread/inject_items", {
       threadId,
       items: [{ type: "message", role: "developer", content: [{ type: "input_text", text:
-        "以下开发者指令定义当前角色，并取代此前角色的指令：\n\n" + text
+        "The following developer instructions define the current role and replace the previous role's instructions:\n\n" + text
       }] }]
     });
   }
@@ -1925,7 +1925,7 @@ export class CodexAppServerRuntimePort
   private async injectWorkbenchContext(threadId: string, params: CodexRuntimeRequest["params"], options: RuntimeOperationOptions): Promise<void> {
     if (typeof params.workspaceId !== "string") return;
     const text = [
-      "当前工作台会话（wrapper ID，用于 CLI）：",
+      "Current workbench session (wrapper ID, for the CLI):",
       `sessionId: ${params.sessionId}`,
       `workspaceId: ${params.workspaceId}`
     ].join("\n");

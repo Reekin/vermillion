@@ -60,7 +60,7 @@ it("cancelled preparation retains capacity until its real turn ends", async () =
   await service.updateWorkRequest(workspaceId, request.requestId, (current) => ({ ...current, status: "preparing", workerSessionId: "prep", activeTurnId: "preparation" }));
   await service.cancelWorkRequest(workspaceId, { requestId: request.requestId });
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
-  await expect(service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" })).rejects.toThrow("并发");
+  await expect(service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" })).rejects.toThrow("execution slot");
   await service.settleExecutionTurn(workspaceId, "prep", "preparation", "interrupted");
   await expect(service.startWorkItem(workspaceId, item.workItemId, { sessionId: "worker" })).resolves.toMatchObject({ status: "running" });
 });
@@ -78,7 +78,7 @@ it("a supervisor cannot undo a user stop, while user retry dispatches outside th
     await service.observeSessionTurn("worker", "second");
   });
   service.setExecutionStarter(starter);
-  await expect(service.retryWorkItem(workspaceId, item.workItemId, "supervisor")).rejects.toThrow("监工");
+  await expect(service.retryWorkItem(workspaceId, item.workItemId, "supervisor")).rejects.toThrow("Supervisor");
   await expect(service.retryWorkItem(workspaceId, item.workItemId, "user")).resolves.toMatchObject({ run: { activeTurnId: "second", userStopped: false } });
   await service.retryWorkItem(workspaceId, item.workItemId, "user");
   expect(starter).toHaveBeenCalledTimes(1);
@@ -87,7 +87,7 @@ it("a supervisor cannot undo a user stop, while user retry dispatches outside th
 it("an unrelated fork cannot claim or submit another Worker's task", async () => {
   const { service, workspaceId } = await fixture();
   const item = await service.createWorkItem(workspaceId, { ...contract, sessionId: "worker" });
-  await expect(service.startWorkItem(workspaceId, item.workItemId, { sessionId: "fork" })).rejects.toThrow("固定");
+  await expect(service.startWorkItem(workspaceId, item.workItemId, { sessionId: "fork" })).rejects.toThrow("fixed Worker session");
 });
 
 it.each(["runtime", "observed"] as const)("claims queued work in an already active fixed session (%s) without starting another turn", async (activity) => {
@@ -163,7 +163,7 @@ it("integration takeover delivers while the original Worker is still active and 
 
 it("session reading is a read-only port with an explicit offline failure", async () => {
   const f = await fixture();
-  await expect(f.service.readSession({ sessionId: "worker" })).rejects.toThrow("桌面");
+  await expect(f.service.readSession({ sessionId: "worker" })).rejects.toThrow("desktop");
   const reader = vi.fn(async () => ({ messages: [], activity: { state: "unknown" } }));
   const service = new WorkbenchService({ ...f.options, sessionReader: reader });
   services.push(service);
@@ -209,7 +209,7 @@ it("keeps an idle preparation answer pending while Worker capacity is occupied",
   const request = await service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
   await service.updateWorkRequest(f.workspaceId, request.requestId, (current) => ({ ...current, status: "preparing", workerSessionId: "prep" }));
   const card = await service.createDecision(f.workspaceId, { requestId: request.requestId, sessionId: "prep", question: "Scope?", context: "Choose", options: [] });
-  expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: true, deliveryFailure: expect.stringContaining("并发") });
+  expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: true, deliveryFailure: expect.stringContaining("execution slot") });
   expect(send).not.toHaveBeenCalled();
   await service.settleExecutionTurn(f.workspaceId, "worker", "occupied", "completed");
   expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: false });

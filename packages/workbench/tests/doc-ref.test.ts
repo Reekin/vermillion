@@ -28,8 +28,8 @@ describe("Markdown document references", () => {
   });
 
   it("requires a full path for duplicate headings and rejects descriptive labels", () => {
-    expect(() => locateMarkdownSection(content, "Item")).toThrow("不唯一");
-    expect(() => locateMarkdownSection(content, "Alpha（L3）")).toThrow("不存在");
-    expect(() => locateMarkdownSection(content, "Spec / Missing")).toThrow("不存在");
+    expect(() => locateMarkdownSection(content, "Item")).toThrow("ambiguous");
+    expect(() => locateMarkdownSection(content, "Alpha（L3）")).toThrow("does not exist");
+    expect(() => locateMarkdownSection(content, "Spec / Missing")).toThrow("does not exist");
   });
 });

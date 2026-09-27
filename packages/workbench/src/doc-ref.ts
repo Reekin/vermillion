@@ -7,7 +7,7 @@ export type MarkdownSection = {
 
 export class DocumentSectionError extends Error {
   constructor(readonly section: string, message: string) {
-    super(`文档段落“${section}”${message}`);
+    super(`Doc section "${section}" ${message}`);
   }
 }
 
@@ -16,7 +16,7 @@ type Heading = { index: number; level: number; text: string; path: string[] };
 const sectionPath = (section: string): string[] => {
   const parts = section.split(/\s+\/\s+/).map((part) => part.trim());
   if (!parts.length || parts.some((part) => !part)) {
-    throw new DocumentSectionError(section, "不是有效的标题路径；请使用实际标题，重复标题用完整祖先路径区分。");
+    throw new DocumentSectionError(section, "is not a valid heading path; use the actual headings and the full ancestor path for repeated headings.");
   }
   return parts;
 };
@@ -58,8 +58,8 @@ export const locateMarkdownSection = (content: string, section: string): Markdow
   const matches = requested.length === 1
     ? headings.filter((heading) => heading.text === requested[0])
     : headings.filter((heading) => samePath(heading.path, requested));
-  if (!matches.length) throw new DocumentSectionError(section, "不存在；section 必须使用文档中的实际标题。");
-  if (matches.length > 1) throw new DocumentSectionError(section, "不唯一；请使用完整祖先标题路径区分。");
+  if (!matches.length) throw new DocumentSectionError(section, "does not exist; section must use an actual heading of the doc.");
+  if (matches.length > 1) throw new DocumentSectionError(section, "is ambiguous; use the full ancestor heading path.");
   const heading = matches[0]!;
   const end = headings.find((next) => next.index > heading.index && next.level <= heading.level)?.index ?? lines.length;
   return {

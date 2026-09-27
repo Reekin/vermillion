@@ -1,4 +1,5 @@
 import type { Execution, WorkItem, WorkRequest } from "./contracts.js";
+import type { ServiceText } from "./service-text.js";
 
 /** Host facts used by business dispatch and read-only reconciliation. */
 export type TurnInspection = {
@@ -25,5 +26,5 @@ export type BusinessDispatch = {
 };
 export type BusinessDispatchResult = {
   status: "delivered" | "active" | "blocked" | "failed" | "unconfirmed" | "idle";
-  reason?: string;
+  reason?: ServiceText;
 };

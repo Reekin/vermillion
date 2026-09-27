@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { InboxItem, WorkItem } from "@vermillion/workbench/client";
-import { t } from "../../../i18n/index.js";
+import { serviceText, t } from "../../../i18n/index.js";
 import { useT } from "../../../i18n/react.js";
 import type { WorkbenchStore } from "../workbench-store.js";
 import { useWorkflowContext } from "../use-workflow-context.js";
@@ -85,8 +85,8 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
         </>
       }
     >
-      <p className="text-label font-medium text-strong">{card.question}</p>
-      {card.context && <p className="mt-1.5 whitespace-pre-wrap text-body text-muted-foreground">{card.context}</p>}
+      <p className="text-label font-medium text-strong">{serviceText(card.question)}</p>
+      {card.context && <p className="mt-1.5 whitespace-pre-wrap text-body text-muted-foreground">{serviceText(card.context)}</p>}
       {adjustments.length > 0 && (
         <div className="mt-3 rounded-md border border-border bg-input px-3 py-2">
           <div className="eyebrow mb-1">{t("work.inbox.adjusted")}</div>
@@ -104,7 +104,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
           return (
             <li key={option.key} className="flex items-start gap-3">
               <Button variant={recommended ? "primary" : "secondary"} disabled={busy} className="shrink-0" onClick={() => void answer(option.key)}>
-                {option.label}
+                {serviceText(option.label)}
               </Button>
               <div className="min-w-0 pt-1.5 text-caption text-muted-foreground">
                 {option.detail && <span>{option.detail}</span>}
@@ -126,7 +126,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       </form>
       </>}
       {answered && <DetailSection title={t("work.inbox.answerResult")}>
-        <p>{[card.options.find((option) => option.key === card.answer?.key)?.label, card.answer?.note].filter(Boolean).join(" · ")}</p>
+        <p>{[serviceText(card.options.find((option) => option.key === card.answer?.key)?.label), card.answer?.note].filter(Boolean).join(" · ")}</p>
         <p>{card.deliveryPending ? t("work.inbox.answerSaved") : t("work.inbox.answerDelivered")}</p>
         {card.deliveryFailure && <InlineNotice tone="error" className="px-0">{card.deliveryFailure}</InlineNotice>}
         {card.deliveryPending && <Button size="sm" disabled={busy} onClick={() => void answer()}>{t("work.inbox.retryDelivery")}</Button>}
@@ -143,7 +143,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       {contextError && <InlineNotice tone="error">{contextError}</InlineNotice>}
       {error && <InlineNotice tone="error" className="mt-3 whitespace-pre-wrap break-words">{error}</InlineNotice>}
       {(card.details || action?.history.length) && (
-        <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, card.decisionId)}>{[card.details, action?.history.map((entry) => entry.at + " " + entry.message).join("\n")].filter(Boolean).join("\n\n")}</CollapsibleDetails>
+        <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, card.decisionId)}>{[card.details, action?.history.map((entry) => entry.at + " " + serviceText(entry.message)).join("\n")].filter(Boolean).join("\n\n")}</CollapsibleDetails>
       )}
     </Card>
     {detailId && data && <WorkItemDialog client={client} workspaceId={item.workspaceId} workItemId={detailId} workItems={data.workItems} runs={data.runs} actions={data.actions} onClose={() => setDetailId(undefined)} onOpenSession={(id, turnId) => showAgentSession(item.workspaceId, id, turnId)} />}
@@ -170,7 +170,7 @@ const IntegrationCard = ({ store, item }: { store: WorkbenchStore; item: Extract
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" variant="ghost" outlined onClick={() => setDetailId(workItem.workItemId)}>{t("work.inbox.viewItem")}</Button>
       </div>
-      <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, item.workItem.workItemId)}>{currentAction.history.map((entry) => entry.at + " " + entry.message).join("\n")}</CollapsibleDetails>
+      <CollapsibleDetails open={showDetails} onToggle={() => toggleDetails(item.workspaceId, item.workItem.workItemId)}>{currentAction.history.map((entry) => entry.at + " " + serviceText(entry.message)).join("\n")}</CollapsibleDetails>
       {contextError && <InlineNotice tone="error">{contextError}</InlineNotice>}
     </Card>
     {detailId && data && <WorkItemDialog client={client} workspaceId={item.workspaceId} workItemId={detailId} workItems={data.workItems} runs={data.runs} actions={data.actions} onClose={() => setDetailId(undefined)} onOpenSession={(id, turnId) => showAgentSession(item.workspaceId, id, turnId)} />}

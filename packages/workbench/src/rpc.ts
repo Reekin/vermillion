@@ -39,6 +39,7 @@ import {
   type WorkbenchEvent
 } from "./contracts.js";
 import { zSearchCancel, zSearchCancelResult, zSearchQuery, zSearchResult, zSearchStartResult } from "./search-contract.js";
+import type { CodedText } from "./service-text.js";
 export type { SearchHit, SearchQuery, SearchResult } from "./search-contract.js";
 
 const zWs = z.object({ workspaceId: z.string().min(1) });
@@ -204,9 +205,9 @@ export const workbenchRpc = {
   "workItem.pause": { params: zWs.extend({ sessionId: z.string().min(1).optional(), workItemId: z.string().min(1).optional() }), result: z.object({ paused: z.boolean(), workItem: zWorkItem.optional() }) },
   "workItem.resume": { params: zWi.extend({ originatorSessionId: z.string().optional() }), result: zWorkItem },
   "workItem.retry": { params: zWi.extend({ originatorSessionId: z.string().optional() }), result: zWorkItem },
-  "workItem.integration.retry": { params: zWi.extend({ originatorSessionId: z.string().optional() }), result: zWorkItem },
-  "workItem.integration.takeover": { params: zWi.extend({ note: z.string().trim().optional(), originatorSessionId: z.string().optional() }), result: zWorkItem },
-  "workItem.integration.complete": { params: zWi.extend({ actionId: z.string().min(1), sessionId: z.string().min(1) }), result: zWorkItem },
+  "workItem.merge.retry": { params: zWi.extend({ originatorSessionId: z.string().optional() }), result: zWorkItem },
+  "workItem.merge.takeover": { params: zWi.extend({ note: z.string().trim().optional(), originatorSessionId: z.string().optional() }), result: zWorkItem },
+  "workItem.merge.complete": { params: zWi.extend({ actionId: z.string().min(1), sessionId: z.string().min(1) }), result: zWorkItem },
   "workItem.diagnose": { params: zWi, result: zDiagnosis },
   "runtime.info": { params: zEmpty, result: z.object({ buildId: z.string(), pid: z.number(), startedAt: z.string(), schedulerOnline: z.boolean() }) },
   "action.list": { params: zWs, result: z.array(zWorkflowAction) },
@@ -271,7 +272,8 @@ export type WorkbenchRpcParams<M extends WorkbenchRpcMethod> = z.infer<(typeof w
 export type WorkbenchRpcResult<M extends WorkbenchRpcMethod> = z.infer<(typeof workbenchRpc)[M]["result"]>;
 
 export type WorkbenchRpcRequest = { method: string; params: unknown };
-export type WorkbenchRpcResponse = { ok: true; result: unknown } | { ok: false; error: string };
+/** A failed call carries its English message and, for the workbench's own failures, the code the desktop translates. */
+export type WorkbenchRpcResponse = { ok: true; result: unknown } | { ok: false; error: string; text?: CodedText };
 
 export type WorkbenchClient = {
   request: <M extends WorkbenchRpcMethod>(method: M, params: WorkbenchRpcParams<M>) => Promise<WorkbenchRpcResult<M>>;
@@ -286,10 +288,10 @@ export const parseWorkbenchEvent = (value: unknown): WorkbenchEvent | undefined 
 export const createWorkbenchClient = (transport: {
   request: (request: WorkbenchRpcRequest) => Promise<WorkbenchRpcResponse>;
   onEvent: (listener: (raw: unknown) => void) => () => void;
-}): WorkbenchClient => ({
+}, describe?: (text: CodedText) => string): WorkbenchClient => ({
   request: async (method, params) => {
     const response = await transport.request({ method, params });
-    if (!response.ok) throw new Error("[" + method + "] " + response.error);
+    if (!response.ok) throw new Error(response.text && describe ? describe(response.text) : "[" + method + "] " + response.error);
     return workbenchRpc[method].result.parse(response.result) as never;
   },
   subscribe: (listener) =>

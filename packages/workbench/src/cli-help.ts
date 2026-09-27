@@ -2,82 +2,82 @@ import { z } from "zod";
 import { workbenchRpc, type WorkbenchRpcMethod } from "./rpc.js";
 
 const states: Partial<Record<WorkbenchRpcMethod, string>> = {
-  "docs.discardPreview": "只读预览：paths 可选 .vermillion/docs 内的文件或目录，返回当前变更文件。",
-  "docs.discard": "丢弃已确认文件的暂存和未暂存改动，恢复到 HEAD；新增文件删除。paths 必须传 discardPreview 返回的具体文件路径，不展开目录。返回实际处理的变更。",
-  "docs.rebase": "在一棵会话树里提交文档时与主分支冲突后使用；把该树的草稿同步到主分支，冲突文件留在草稿里带冲突标记，用 docs.write 解决后再 docs.commit。files 为空表示已同步。",
-  "worktree.list": "查询工单已登记的延迟清理候选。",
-  "worktree.cleanup": "立即尝试清理无未结束工单占用的候选和已合入的文档草稿；忙目录与有未合入修改的草稿保留至下次调用。只接受 workspaceId，不接受任意路径。",
-  "workItem.diagnose": "任何现存工单；只读，不触发调度。",
-  "workItem.list": "只读查询 workspace 的执行工单（WorkItem），包含已结束的工单；不返回 Issues 中的问题与建议。",
-  "work.cancel": "准备中的开工请求；通过 requestId 或准备分支 sessionId 取消本次开工及尚未执行的关联工单。",
-  "work.prepare.complete": "准备分支已登记本请求全部工单；在准备轮结束前登记完整 workItemIds 与文档 refs，交接后才开放执行。",
-  "work.diagnose": "现存工作；只读汇总准备、关联工单、等待原因和合法操作。",
-  "work.pause": "未结束的准备工作；暂停准备推进，保留会话和已登记工单。",
-  "work.resume": "已暂停的准备工作；恢复自动推进。",
-  "decision.answer": "尚未答复的决策；只有获得用户实际答复后才能提交 key 或 note。",
-  "runtime.info": "随时查询；连接桌面时返回该运行端的构建哈希，否则返回 CLI 本地运行端并标明 schedulerOnline=false。",
-  "workItem.start": "无阻塞的 queued 工单，或同一会话的 running 工单；遵守并发与资源限制。",
-  "workItem.submit": "当前 Worker 的 running 工单；提交真实证据、review 与逐条验收结果。",
-  "workItem.update": "未结束工单；调整合同并通过 note 说明具体修改。调整自己执行的工单时传当前 sessionId，工作台不会把调整回送给该会话。",
-  "docs.commit": "workspaceId 与提交说明；paths 限定本次提交的文档。传 sessionId 时先在会话树自己的草稿里提交再合入主分支，冲突会列出文件并提示用 docs.rebase 解决；在自己执行的工单里提交文档时传当前 sessionId，工作台不会把这次提交回送给该会话。",
-  "docs.write": "写入 .vermillion/docs 内的文档。传 sessionId 时写入该会话树的草稿，草稿在首次写入时自动建立，不影响主分支与其他会话树。",
-  "docs.read": "读取 .vermillion/docs 内的文档。传 sessionId 时读该会话树的草稿；传 commit 时读取该提交的版本，与草稿无关。",
-  "docs.list": "列出 .vermillion/docs 下的文件。传 sessionId 时列该会话树的草稿，草稿不存在时列主分支。",
-  "docs.pending": "列出当前未提交的文档变更。传 sessionId 时以该会话树的草稿为准。",
-  "docs.diff": "查看一个文档相对当前提交的差异。传 sessionId 时以该会话树的草稿为准。",
-  "workItem.cancel": "未结束工单；取消当前工作。",
-  "workItem.pause": "正在运行的 Worker 会话；登记用户暂停，配合会话 Stop 使用。",
-  "workItem.resume": "用户已暂停的工单；清除暂停并从原会话继续。",
-  "workItem.retry": "执行故障等待处理的工单；清零当前恢复计数并从未完成动作继续。",
-  "workItem.integration.retry": "合入失败且尚未交给 Agent 的工单；立即重试当前合入，由明确操作重新尝试。",
-  "workItem.integration.takeover": "合入失败且尚未交给 Agent 的工单；附说明实际交付原 Worker 处理。",
-  "workItem.integration.complete": "已接管合入的原 Worker；处理 worktree/rebase 后请求工作台在串行边界执行最终合入。",
-  "app.start": "本地构建并启动隔离候选；自动分配实例目录，重启时传先前返回的 dataDir；可用 fixture=session-tree 或 real-session。",
-  "app.stop": "按 dataDir、pid 与 instanceId 停止实例，确认进程退出和端口释放后删除目录；keepData=true 保留目录供重启或取证。",
-  "app.window": "本地控制 app.start 返回实例的窗口；status 查询，minimize 最小化，restore 恢复并激活。",
-  "asksource": "当前执行中工单的 Worker；从工单记录的开单位置临时询问来源设计伙伴并等待答复。",
+  "docs.discardPreview": "Read-only preview: paths optionally names files or directories inside .vermillion/docs; returns the currently changed files.",
+  "docs.discard": "Discards staged and unstaged changes of the confirmed files, restoring HEAD; added files are deleted. paths must be the concrete file paths returned by discardPreview; directories are not expanded. Returns the changes actually handled.",
+  "docs.rebase": "Use after committing docs in a session tree conflicted with the main branch. Brings the tree's draft onto the main branch; conflicting files stay in the draft with conflict markers, to be resolved with docs.write before docs.commit. Empty files means the draft is in sync.",
+  "worktree.list": "Lists the deferred cleanup candidates registered by work items.",
+  "worktree.cleanup": "Tries now to clean up candidates no unfinished work item holds, and merged doc drafts; busy directories and drafts with unmerged changes wait for the next call. Takes only workspaceId, never an arbitrary path.",
+  "workItem.diagnose": "Any existing work item; read-only and never triggers scheduling.",
+  "workItem.list": "Read-only list of the workspace's execution work items (WorkItem), including finished ones; does not return the problems and suggestions in Issues.",
+  "work.cancel": "A start-work request in preparation; cancels it and its unexecuted work items, by requestId or the preparation branch sessionId.",
+  "work.prepare.complete": "The preparation branch has created every work item of this request. Register the complete workItemIds and doc refs before the preparation turn ends; execution opens after the handoff.",
+  "work.diagnose": "Any existing work; read-only summary of the preparation, linked work items, waiting reasons and valid operations.",
+  "work.pause": "Unfinished preparation work; pauses its progress and keeps the session and registered work items.",
+  "work.resume": "Paused preparation work; resumes automatic progress.",
+  "decision.answer": "An unanswered decision; submit key or note only with the user's actual answer.",
+  "runtime.info": "Any time; with a desktop connected returns that runtime's build hash, otherwise the CLI's local runtime with schedulerOnline=false.",
+  "workItem.start": "A queued work item with nothing blocking it, or a running work item of the same session; respects concurrency and resource limits.",
+  "workItem.submit": "The current Worker's running work item; submits real evidence, review and per-item verification results.",
+  "workItem.update": "An unfinished work item; adjusts the contract with a note explaining the change. Pass the current sessionId when adjusting your own work item so the workbench does not send the change back to that session.",
+  "docs.commit": "workspaceId and a commit message; paths limits the docs committed. With sessionId, commits in the session tree's own draft first, then merges into the main branch; a conflict lists the files and points to docs.rebase. Pass the current sessionId when committing docs in your own work item so the workbench does not send the commit back to that session.",
+  "docs.write": "Writes a doc inside .vermillion/docs. With sessionId, writes to that session tree's draft, created on the first write, leaving the main branch and other session trees untouched.",
+  "docs.read": "Reads a doc inside .vermillion/docs. With sessionId, reads the session tree's draft; with commit, reads that commit's version regardless of drafts.",
+  "docs.list": "Lists the files under .vermillion/docs. With sessionId, lists the session tree's draft, or the main branch when there is no draft.",
+  "docs.pending": "Lists the uncommitted doc changes. With sessionId, the session tree's draft is used.",
+  "docs.diff": "Shows one doc's changes against the current commit. With sessionId, the session tree's draft is used.",
+  "workItem.cancel": "An unfinished work item; cancels the current work.",
+  "workItem.pause": "A running Worker session; records the user's pause, used together with the session Stop.",
+  "workItem.resume": "A work item the user paused; clears the pause and continues in the original session.",
+  "workItem.retry": "A work item waiting after an execution failure; resets the current recovery count and continues from the unfinished action.",
+  "workItem.merge.retry": "A work item whose merge failed and was not handed to an Agent; retries the current merge now, as an explicit operation.",
+  "workItem.merge.takeover": "A work item whose merge failed and was not handed to an Agent; delivers it to the original Worker with a note.",
+  "workItem.merge.complete": "The original Worker that took over a merge; after handling the worktree/rebase, asks the workbench to run the final merge at its serialized boundary.",
+  "app.start": "Builds and starts an isolated candidate locally; allocates an instance directory automatically, and takes the dataDir returned earlier on restart. fixture can be session-tree or real-session.",
+  "app.stop": "Stops an instance by dataDir, pid and instanceId, removing its directory once the process has exited and the port is free; keepData=true keeps the directory for a restart or evidence.",
+  "app.window": "Controls the window of an instance returned by app.start locally: status queries it, minimize minimizes it, restore restores and activates it.",
+  "asksource": "The Worker of a running work item; temporarily asks the source Design Partner at the position the work item was created from, and waits for the answer.",
   "steer": "Desktop must be online. Append to an active turn or start a new turn in the target session. sessionId accepts a workbench or engine session ID. CLI detects the sender from VERMILLION_SESSION_ID or CODEX_THREAD_ID; messages identify their source and are not user authorization. Without either variable, the source is CLI (no session).",
-  "workItem.rollback": "已合入且有可回滚提交的工单；提供用户要求回滚的 reason。",
-  "search.query": "只读查询；搜索已登记 workspace 的工单、文档和 Vermillion 会话，返回命中上下文。会话结果以消息为单位：只匹配用户消息、agent 回复和工具调用在消息区显示的文字，返回来源（source）、轮次（turnNumber）、时间（messageAt）及前后消息。",
-  "search.start": "只读查询；开始一次流式搜索，命中通过 search.hits 事件推送，结束时推送 search.completed。发起新的流式搜索会终止上一次。",
-  "search.cancel": "停止指定 queryId 的流式搜索及其扫描进程。",
-  "issue.discuss": "桌面在线；为 Issue 创建或返回已有设计伙伴讨论会话。",
-  "issue.list": "只读查询 Issues 中的问题与建议记录，可按领域和状态筛选；不返回执行工单（WorkItem）。",
-  "issue.update": "更新 Issue 分诊、证据或处理结果；关闭和重复需要处理原因。",
-  "domain.config.set": "用户管理领域巡检与自动开单授权；按领域独立保存。",
-  "role.list": "只读查询；列出 workspace 可用的角色，返回来源、定制方式 mode（global 沿用全局、append 追加正文、override 覆盖正文）以及合成后生效的 modelConfig，未包含的字段沿用输入器配置。",
-  "domain.instruction.write": "编辑领域专属 Maintainer developer instruction；保存到当前 workspace。",
-  "domain.remove": "删除领域定义、领域巡检指令与巡检配置；历史 Issue 和巡检记录保留。",
-  "workspace.directories": "只读查询；返回 workspace 中 Git 已跟踪文件所在的目录，供触发目录勾选。",
-  "domain.patrol.run": "手动排入一次真实领域巡检；桌面调度在线时启动 Maintainer 会话。",
-  "domain.patrol.scan": "扫描目录变更和定时到期条件；无事可查时记录跳过，不启动模型。",
-  "domain.patrol.complete": "当前 Maintainer 巡检会话登记结果和关联 Issue。",
-  "domain.issue.workItem.create": "当前 Maintainer 巡检会话；仅在领域授权、固定要求引用和证据均有效时自动创建关联修复工单。"
+  "workItem.rollback": "A merged work item with commits that can be rolled back; give the reason the user asked for the rollback.",
+  "search.query": "Read-only; searches work items, docs and Vermillion sessions of registered workspaces and returns matching context. Session results are per message: only the user messages, agent replies and tool call text shown in the message area match; returns the source, turnNumber, messageAt and neighbouring messages.",
+  "search.start": "Read-only; starts a streaming search. Hits arrive as search.hits events and search.completed ends it. Starting a new streaming search stops the previous one.",
+  "search.cancel": "Stops the streaming search with the given queryId and its scan processes.",
+  "issue.discuss": "Desktop online; creates the Issue's Design Partner discussion session, or returns the existing one.",
+  "issue.list": "Read-only list of the problem and suggestion records in Issues, filterable by domain and status; does not return execution work items (WorkItem).",
+  "issue.update": "Updates an Issue's triage, evidence or result; closing or marking a duplicate needs a resolution reason.",
+  "domain.config.set": "The user manages domain patrols and automatic work item authorization; saved per domain.",
+  "role.list": "Read-only; lists the roles available in the workspace with their source, customization mode (global follows the global role, append adds to its body, override replaces it) and the resulting modelConfig; fields it omits follow the composer settings.",
+  "domain.instruction.write": "Edits the domain's Maintainer developer instruction; saved to the current workspace.",
+  "domain.remove": "Deletes the domain definition, its patrol instruction and patrol settings; past Issues and patrol records stay.",
+  "workspace.directories": "Read-only; returns the directories of the workspace's Git-tracked files, for choosing trigger directories.",
+  "domain.patrol.run": "Queues a real domain patrol manually; the Maintainer session starts once the desktop scheduler is online.",
+  "domain.patrol.scan": "Scans directory changes and due schedules; records a skip without starting a model when there is nothing to check.",
+  "domain.patrol.complete": "The current Maintainer patrol session records its result and linked Issues.",
+  "domain.issue.workItem.create": "The current Maintainer patrol session; creates a linked fix work item only when the domain authorization, pinned requirement ref and evidence are all valid."
 };
 
 const methodGroups = [
-  { title: "工作区（项目目录）", prefixes: ["workspace"] },
-  { title: "会话与消息", prefixes: ["session", "sessionNavigation", "sessionBrowser", "chatTree", "clipboard", "steer", "asksource"] },
-  { title: "文档", prefixes: ["docs"] },
-  { title: "工作 Work（一次开工及准备过程）", prefixes: ["work"] },
-  { title: "执行工单 WorkItem（独立执行与验收的工单）", prefixes: ["workItem", "worktree"] },
-  { title: "Issues（问题与建议的分诊记录，不是执行工单）", prefixes: ["issue"] },
-  { title: "领域与巡检", prefixes: ["domain"] },
-  { title: "搜索", prefixes: ["search"] },
-  { title: "角色", prefixes: ["role"] },
-  { title: "决策与通知", prefixes: ["decision", "inbox"] },
-  { title: "调度与运行", prefixes: ["scheduler", "run", "runtime", "action"] },
-  { title: "应用与验收实例", prefixes: ["app"] }
+  { title: "Workspaces (project directories)", prefixes: ["workspace", "settings"] },
+  { title: "Sessions and messages", prefixes: ["session", "sessionNavigation", "sessionBrowser", "chatTree", "clipboard", "steer", "asksource"] },
+  { title: "Docs", prefixes: ["docs"] },
+  { title: "Work (one start of work and its preparation)", prefixes: ["work"] },
+  { title: "Execution work items, WorkItem (executed and verified independently)", prefixes: ["workItem", "worktree"] },
+  { title: "Issues (triage records of problems and suggestions, not execution work items)", prefixes: ["issue"] },
+  { title: "Domains and patrols", prefixes: ["domain"] },
+  { title: "Search", prefixes: ["search"] },
+  { title: "Roles", prefixes: ["role"] },
+  { title: "Decisions and notifications", prefixes: ["decision", "inbox"] },
+  { title: "Scheduling and runs", prefixes: ["scheduler", "run", "runtime", "action"] },
+  { title: "App and acceptance instances", prefixes: ["app"] }
 ];
 
 export function globalHelp(methods: string[]): string {
   const groups = new Map(methodGroups.map(({ title }) => [title, [] as string[]]));
-  groups.set("其他", []);
+  groups.set("Other", []);
   for (const method of methods) {
-    const title = methodGroups.find(({ prefixes }) => prefixes.includes(method.split(".")[0]!))?.title ?? "其他";
+    const title = methodGroups.find(({ prefixes }) => prefixes.includes(method.split(".")[0]!))?.title ?? "Other";
     groups.get(title)!.push(method);
   }
-  return "usage: vermillion [--target <app.start target file>] <method> [json-params]\n单方法帮助: vermillion <method> --help\n\nmethods:\n"
+  return "usage: vermillion [--target <app.start target file>] <method> [json-params]\nMethod help: vermillion <method> --help\n\nmethods:\n"
     + [...groups].filter(([, names]) => names.length).map(([title, names]) => `  ${title}\n${names.map((name) => `    ${name}`).join("\n")}`).join("\n") + "\n";
 }
 
@@ -102,39 +102,39 @@ function describe(schema: z.ZodTypeAny, sample = false, key = "value"): unknown 
 export function methodHelp(method: string): string | undefined {
   if (method === "app.start") return [
     "app.start",
-    "适用状态：本地构建并启动明确身份的隔离验收候选。源码 checkout 必须传 expectedRevision，且工作树干净；发布目录必须传 expectedBuildId。成功返回实际 buildId、instanceId、日志、完整隔离环境与定向 CLI 命令。",
-    "源码示例：",
+    "When to use: builds and starts an isolated acceptance candidate with an explicit identity locally. A source checkout needs expectedRevision and a clean working tree; a release directory needs expectedBuildId. On success returns the actual buildId, instanceId, logs, the full isolated environment and the targeted CLI command.",
+    "Source example:",
     "vermillion app.start '{\"targetPath\":\"X:/project-worktree\",\"expectedRevision\":\"<full-commit>\",\"port\":14961,\"fixture\":\"session-tree\"}'",
-    "发布示例：",
+    "Release example:",
     "vermillion app.start '{\"targetPath\":\"X:/release/vermillion\",\"expectedBuildId\":\"sha256:<hash>\",\"port\":14961}'",
-    "首次启动自动分配 dataDir；停止时传 keepData=true 保留目录，重启时把返回的 dataDir 传给 app.start。返回的 cli.executable 与 cli.args 绑定本次实例；重启不会改写旧实例的 target descriptor。",
+    "The first start allocates dataDir automatically; pass keepData=true when stopping to keep the directory, and pass the returned dataDir to app.start to restart. The returned cli.executable and cli.args are bound to this instance; a restart does not rewrite the old instance's target descriptor.",
     ""
   ].join("\n");
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
-    "settings.get": { params: "无", state: "桌面在线；返回全局设置、各引擎程序解析结果，以及 engineConfigWarningsByEngineId：引擎当前进程报告的配置警告（summary、details、path），没有警告的引擎不出现。", example: {} },
+    "settings.get": { params: "none", state: "Desktop online; returns the global settings, each engine's program resolution, and engineConfigWarningsByEngineId: configuration warnings (summary, details, path) reported by each engine's current process; engines without warnings are omitted.", example: {} },
     "settings.update": { params: "locale?: \"zh\" | \"en\"; defaultNewSessionEngineId?: string; titleGenerationModelId?: string | null", state: "Desktop online; updates global settings and returns the saved settings. A locale change switches the interface language immediately, without a restart.", example: { locale: "en" } },
-    "sessionBrowser.list": { params: "workspaceId: string; kind?: user | agent", state: "桌面在线；一次返回该 workspace 会话列表的全部行与当前 revision。", example: { workspaceId: "<workspaceId>" } },
-    "sessionBrowser.changes": { params: "workspaceId: string; revision: string; kind?: user | agent", state: "桌面在线；返回自该 revision 以来变化的行与被移除的行标识；revision 不可用时返回 full-required。", example: { workspaceId: "<workspaceId>", revision: "<revision>" } },
-    "sessionBrowser.open": { params: "sessionId: string; forceProviderHydration?: boolean; includeWindow?: boolean; readId?: string", state: "桌面在线；进入会话并核对当前历史。includeWindow=false 仅打开，不返回正文窗口；正文可通过 chatTree.get 按版本获取。readId 标识本次读取，可用 chatTree.cancelRead 取消。", example: { sessionId: "<sessionId>" } },
-    "sessionBrowser.rename": { params: "sessionId: string, title: 非空 string", state: "桌面在线；改会话标题，返回保存后的标题。列表中的会话都可用，未加载的历史会话改其索引记录。", example: { sessionId: "<sessionId>", title: "新标题" } },
-    "chatTree.get": { params: "sessionId: string; scope?: \"tree\" | \"path\"; knownWindows?: Record<string, { revision: string; cursor?: string }>; readId?: string", state: "桌面在线；默认读取完整树结构。scope=path 返回当前路径；knownWindows 声明已完整持有的成员历史版本与已应用事件水位，服务端省略已覆盖正文，省略不表示删除。未传 knownWindows 时返回路径成员全部正文。readId 标识本次读取，可用 chatTree.cancelRead 取消。", example: { sessionId: "<sessionId>" } },
-    "chatTree.cancelRead": { params: "readId: string", state: "桌面在线；取消对应的活跃读取，返回 cancelled。readId 每次请求独立分配；已完成或已取消的读取返回 false。", example: { readId: "<readId>" } },
-    "chatTree.readProgress": { params: "readId: string", state: "查询指定读取的实时阶段和当前路径成员完成数；读取结束或不存在时返回 progress:null。", example: { readId: "<readId>" } },
-    "chatTree.nodeAction": { params: "sessionId: string, nodeId: string, action: copy_session_id | copy_awb_session_id | open_rollout | hide_branch", state: "桌面在线；复制返回 copiedText，open_rollout 返回节点所属会话的文件，hide_branch 只对末端 fork 分支记录隐藏标记，不归档引擎会话。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", action: "copy_session_id" } },
-    "clipboard.writeImage": { params: "source: 非空 data:、file:、http: 或 https: 图片 URL", state: "桌面在线；将图片写入系统剪贴板并返回实际尺寸。", example: { source: "file:///C:/path/image.png" } },
+    "sessionBrowser.list": { params: "workspaceId: string; kind?: user | agent", state: "Desktop online; returns every row of the workspace's session list and the current revision at once.", example: { workspaceId: "<workspaceId>" } },
+    "sessionBrowser.changes": { params: "workspaceId: string; revision: string; kind?: user | agent", state: "Desktop online; returns the rows changed since that revision and the identifiers of removed rows; returns full-required when the revision is unavailable.", example: { workspaceId: "<workspaceId>", revision: "<revision>" } },
+    "sessionBrowser.open": { params: "sessionId: string; forceProviderHydration?: boolean; includeWindow?: boolean; readId?: string", state: "Desktop online; enters the session and checks its current history. includeWindow=false only opens it without returning the body window; read the body by version with chatTree.get. readId identifies this read so chatTree.cancelRead can cancel it.", example: { sessionId: "<sessionId>" } },
+    "sessionBrowser.rename": { params: "sessionId: string, title: non-empty string", state: "Desktop online; renames the session and returns the saved title. Works for every session in the list; for unloaded past sessions it changes their index record.", example: { sessionId: "<sessionId>", title: "New title" } },
+    "chatTree.get": { params: "sessionId: string; scope?: \"tree\" | \"path\"; knownWindows?: Record<string, { revision: string; cursor?: string }>; readId?: string", state: "Desktop online; reads the full tree structure by default. scope=path returns the current path; knownWindows declares the member history versions already held in full and the applied event cursor, and the service omits the covered bodies (omission does not mean deletion). Without knownWindows every body on the path is returned. readId identifies this read so chatTree.cancelRead can cancel it.", example: { sessionId: "<sessionId>" } },
+    "chatTree.cancelRead": { params: "readId: string", state: "Desktop online; cancels the active read and returns cancelled. Each request gets its own readId; finished or cancelled reads return false.", example: { readId: "<readId>" } },
+    "chatTree.readProgress": { params: "readId: string", state: "Queries the live stage of a read and how many members of the current path are done; returns progress:null once the read ended or does not exist.", example: { readId: "<readId>" } },
+    "chatTree.nodeAction": { params: "sessionId: string, nodeId: string, action: copy_session_id | copy_awb_session_id | open_rollout | hide_branch", state: "Desktop online; copy actions return copiedText, open_rollout returns the file of the node's session, hide_branch records a hidden mark only on a leaf fork branch without archiving the engine session.", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", action: "copy_session_id" } },
+    "clipboard.writeImage": { params: "source: non-empty data:, file:, http: or https: image URL", state: "Desktop online; writes the image to the system clipboard and returns its actual size.", example: { source: "file:///C:/path/image.png" } },
     "chatTree.markRead": { params: "sessionId: string, nodeId: string", state: "Desktop online; marks completed turns on the displayed node's ancestor path read. Returns readNodeIds.", example: { sessionId: "<sessionId>", nodeId: "<nodeId>" } },
-    "chatTree.submit": { params: "sessionId: string, nodeId: string, content: string; attachments?: Attachment[], execution?: TurnExecutionOptions", state: "桌面在线，sessionId 与 nodeId 指向现存会话节点。", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", content: "继续" } },
-    "chatTree.retry": { params: "operationId: 非空 string", state: "桌面在线，operationId 指向失败的发送操作。", example: { operationId: "<operationId>" } },
-    "chatTree.cancel": { params: "operationId: 非空 string", state: "桌面在线，operationId 指向正在创建或发送的虚态操作。", example: { operationId: "<operationId>" } },
-    "chatTree.remove": { params: "operationId: 非空 string", state: "桌面在线，operationId 指向失败或清理待重试的虚态操作。", example: { operationId: "<operationId>" } },
-    "chatTree.operations": { params: "sessionId: 非空 string", state: "桌面在线；只读查询指定会话的发送操作。", example: { sessionId: "<sessionId>" } }
+    "chatTree.submit": { params: "sessionId: string, nodeId: string, content: string; attachments?: Attachment[], execution?: TurnExecutionOptions", state: "Desktop online; sessionId and nodeId point to an existing session node.", example: { sessionId: "<sessionId>", nodeId: "<nodeId>", content: "Continue" } },
+    "chatTree.retry": { params: "operationId: non-empty string", state: "Desktop online; operationId points to a failed send operation.", example: { operationId: "<operationId>" } },
+    "chatTree.cancel": { params: "operationId: non-empty string", state: "Desktop online; operationId points to a pending operation that is being created or sent.", example: { operationId: "<operationId>" } },
+    "chatTree.remove": { params: "operationId: non-empty string", state: "Desktop online; operationId points to a failed pending operation or one waiting for cleanup before a retry.", example: { operationId: "<operationId>" } },
+    "chatTree.operations": { params: "sessionId: non-empty string", state: "Desktop online; read-only list of the session's send operations.", example: { sessionId: "<sessionId>" } }
   };
   const desktop = desktopHelp[method];
-  if (desktop) return `${method}\n适用状态：${desktop.state}\n参数：${desktop.params}\n示例：\nvermillion ${method} '${JSON.stringify(desktop.example)}'\n`;
+  if (desktop) return `${method}\nWhen to use: ${desktop.state}\nParameters: ${desktop.params}\nExample:\nvermillion ${method} '${JSON.stringify(desktop.example)}'\n`;
   if (!Object.hasOwn(workbenchRpc, method)) return undefined;
   const spec = workbenchRpc[method as WorkbenchRpcMethod];
   const state = states[method as WorkbenchRpcMethod] ?? (/(?:\.get|\.list|\.read|\.diff|\.pending|\.resolve)$/.test(method)
-    ? "只读查询；workspaceId 及所引用对象必须存在。"
-    : "参数需满足下列 RPC 约束；引用的对象必须存在，业务状态由运行端校验，拒绝时按返回原因处理后再调用。");
-  return `${method}\n适用状态：${state}\n参数（optional 可省略；<...> 替换为实际值）：\n${JSON.stringify(describe(spec.params), null, 2)}\n示例：\nvermillion ${method} '${JSON.stringify(describe(spec.params, true))}'\n`;
+    ? "Read-only; workspaceId and the referenced objects must exist."
+    : "Parameters must satisfy the RPC constraints below; referenced objects must exist. The runtime checks the business state; when it refuses, handle the returned reason before calling again.");
+  return `${method}\nWhen to use: ${state}\nParameters (optional ones can be omitted; replace <...> with actual values):\n${JSON.stringify(describe(spec.params), null, 2)}\nExample:\nvermillion ${method} '${JSON.stringify(describe(spec.params, true))}'\n`;
 }

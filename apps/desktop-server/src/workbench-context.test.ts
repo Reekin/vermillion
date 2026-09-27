@@ -51,7 +51,7 @@ it.each([undefined, "worker"])("delivers wrapper identity for role %s", async (r
     const injected = requests.find((request) => request.method === "thread/inject_items");
     expect(injected.params.items[0]).toMatchObject({ role: "developer" });
     expect(injected.params.items[0].content[0].text).toBe([
-      "当前工作台会话（wrapper ID，用于 CLI）：",
+      "Current workbench session (wrapper ID, for the CLI):",
       "sessionId: session-wrapper-context",
       "workspaceId: workspace-context"
     ].join("\n"));

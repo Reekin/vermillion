@@ -38,7 +38,7 @@ import "./app.css";
 import { SessionNavigationContext, renderSessionNavigation } from "./session-navigation.js";
 import type { SessionNavigation } from "@vermillion/workbench/client";
 import type { SearchHit } from "@vermillion/workbench/client";
-import { t } from "../../i18n/index.js";
+import { serviceText, t } from "../../i18n/index.js";
 import { useLocale } from "../../i18n/react.js";
 import { useLocaleSync } from "./use-locale-sync.js";
 
@@ -338,8 +338,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                       onOpenWorkItem={currentWorkItem ? () => store.getState().showTask({ workspaceId: sessionWorkspaceId, kind: "workItem", id: currentWorkItem.workItemId }) : undefined} />}
                     {currentDecisions.length > 0 && <section className="vm-decision-context" aria-label={t("app.decision.region")}>
                       {currentDecisions.length > 1 ? <Select aria-label={t("app.decision.pickLabel")} compact value={currentDecision?.decisionId ?? ""} placeholder={t("app.decision.pickPlaceholder")}
-                        options={currentDecisions.map((card) => ({ value: card.decisionId, label: card.question }))}
-                        onChange={(decisionId) => setDecisionMode({ sessionId: workSessionId, decisionId, ordinary: true })} /> : <p className="vm-decision-context__question">{currentDecision?.question}</p>}
+                        options={currentDecisions.map((card) => ({ value: card.decisionId, label: serviceText(card.question) }))}
+                        onChange={(decisionId) => setDecisionMode({ sessionId: workSessionId, decisionId, ordinary: true })} /> : <p className="vm-decision-context__question">{serviceText(currentDecision?.question)}</p>}
                       <div className="vm-decision-context__modes">
                         <Button size="sm" variant="ghost" disabled={!currentDecision} aria-pressed={answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: false })}>{t("app.decision.answerMode")}</Button>
                         <Button size="sm" variant="ghost" aria-pressed={!answeringDecision} onClick={() => setDecisionMode({ sessionId: workSessionId, decisionId: currentDecision?.decisionId, ordinary: true })}>{t("app.decision.ordinaryMode")}</Button>

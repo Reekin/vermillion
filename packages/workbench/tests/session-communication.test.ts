@@ -53,7 +53,7 @@ it("allows only the bound Worker to ask its work item's recorded source", async 
     workItemId: item.workItemId,
     sessionId: "other-session",
     question: "Try to ask"
-  })).rejects.toThrow("当前 Worker");
+  })).rejects.toThrow("current Worker");
 });
 
 it("routes generic steer through the session port and returns its delivery mode", async () => {

@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { promisify } from "node:util";
 import type { DocChange, DocFile, WorkItem } from "./contracts.js";
 import { locateMarkdownSection, sectionDiff } from "./doc-ref.js";
+import { ServiceError, text } from "./service-text.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,10 +17,9 @@ export class WorktreeMergeConflict extends Error {
 }
 
 /** A draft could not reach the main branch; the same files stay editable in the draft. */
-export class DocDraftConflict extends Error {
+export class DocDraftConflict extends ServiceError {
   constructor(readonly files: string[]) {
-    super("文档草稿与主分支冲突：" + files.join("、") +
-      "。调用 docs.rebase 把本会话的草稿同步到主分支，解决冲突标记后用 docs.write 保存并再次 docs.commit。");
+    super(text("error.docsConflict", { files: files.join(", ") }));
   }
 }
 
@@ -178,7 +178,7 @@ export class DocsService {
     } else {
       bytes = await readFile(join(this.rootPath, path));
     }
-    if (!isTextContent(bytes)) throw new Error("文档不是 UTF-8 文本文件，无法打开：" + path);
+    if (!isTextContent(bytes)) throw new Error("The doc is not a UTF-8 text file and cannot be opened: " + path);
     return bytes.toString("utf8");
   }
 
@@ -554,7 +554,7 @@ export class DocsService {
     if (registered) await git(this.rootPath, ["worktree", "remove", ...(discard ? ["--force"] : []), worktreePath]);
     else if (await exists(worktreePath)) {
       if ((await readdir(worktreePath)).length) {
-        if (!removalStarted) throw new Error("已注销的 worktree 目录仍有内容，保留以待检查：" + worktreePath);
+        if (!removalStarted) throw new Error("The unregistered worktree directory still has content and is kept for inspection: " + worktreePath);
         await rm(worktreePath, { recursive: true });
       } else await rmdir(worktreePath);
     }
@@ -624,17 +624,17 @@ export class DocsService {
   async rootResult(commit: string | undefined, base: string | undefined, allowedPaths: string[]): Promise<{ commit?: string; commits?: string[]; diffStat: string }> {
     const workspacePaths = this.workspacePaths(allowedPaths);
     if (!workspacePaths.length) {
-      if (commit) throw new WorktreeNotReady("根目录代码成果需要在 scope.allowedPaths 登记归属路径。");
+      if (commit) throw new WorktreeNotReady("Code results at the workspace root must list their paths in scope.allowedPaths.");
       return { diffStat: "" };
     }
     const paths = [...workspacePaths, ":(exclude).vermillion"];
     const dirty = await git(this.rootPath, ["diff", "--name-only", "HEAD", "--", ...paths]);
     const untracked = await git(this.rootPath, ["ls-files", "--others", "--exclude-standard", "--", ...paths]);
-    if (dirty.trim() || untracked.trim()) throw new WorktreeNotReady("根目录范围内仍有未提交成果，请先提交再登记 evidence.commit。");
-    if (!base) throw new WorktreeNotReady("根目录执行缺少起始提交，无法确认成果范围。");
+    if (dirty.trim() || untracked.trim()) throw new WorktreeNotReady("Uncommitted results remain within the scope at the workspace root. Commit them, then record evidence.commit.");
+    if (!base) throw new WorktreeNotReady("Execution at the workspace root has no base commit, so the result range cannot be determined.");
     if (!commit) {
       if ((await git(this.rootPath, ["diff", "--name-only", base, "HEAD", "--", ...paths])).trim())
-        throw new WorktreeNotReady("根目录代码成果需要在 evidence.commit 登记提交末端。");
+        throw new WorktreeNotReady("Code results at the workspace root must record their last commit in evidence.commit.");
       return { diffStat: "" };
     }
     const target = await this.resolveCommit(commit);
@@ -647,10 +647,10 @@ export class DocsService {
       const own = (await git(this.rootPath, [...args, "--", ...paths])).split("\0").filter(Boolean);
       if (!own.length) continue;
       const all = (await git(this.rootPath, args)).split("\0").filter(Boolean);
-      if (all.some((path) => !own.includes(path))) throw new WorktreeNotReady("提交混合本单与范围外改动，无法安全记录回滚：" + candidate);
+      if (all.some((path) => !own.includes(path))) throw new WorktreeNotReady("A commit mixes this work item's changes with changes outside its scope, so a rollback cannot be recorded safely: " + candidate);
       commits.push(candidate);
     }
-    if (!commits.length) throw new WorktreeNotReady("提交范围中没有属于本单的代码成果。");
+    if (!commits.length) throw new WorktreeNotReady("The commit range has no code results of this work item.");
     const stats = await Promise.all(commits.map((sha) => git(this.rootPath, ["show", "--format=", "--stat", sha])));
     return { commit: commits.at(-1), commits, diffStat: stats.join("\n") };
   }
@@ -667,7 +667,7 @@ export class DocsService {
     const { stdout } = await execFileAsync("git", ["show", revision + ":" + toPosix(path)], {
       cwd: this.rootPath, encoding: "buffer", maxBuffer: 16 * 1024 * 1024
     });
-    if (!isTextContent(stdout)) throw new Error("引用不是 UTF-8 文本文件：" + path);
+    if (!isTextContent(stdout)) throw new Error("The ref is not a UTF-8 text file: " + path);
     return stdout.toString("utf8");
   }
 
@@ -692,12 +692,12 @@ export class DocsService {
     let beforeContent: string;
     try { beforeContent = await this.readReference(ref.path, ref.commit); }
     catch (error) {
-      return { changed: false, invalid: `基准 ${ref.commit}：${error instanceof Error ? error.message : String(error)}` };
+      return { changed: false, invalid: `base ${ref.commit}: ${error instanceof Error ? error.message : String(error)}` };
     }
     let afterContent: string;
     try { afterContent = await this.readReference(ref.path, target); }
     catch (error) {
-      return { changed: false, invalid: `当前 ${target}：${error instanceof Error ? error.message : String(error)}` };
+      return { changed: false, invalid: `current ${target}: ${error instanceof Error ? error.message : String(error)}` };
     }
     if (!ref.section) {
       const diff = await this.committedDiff(ref.path, ref.commit, target);
@@ -706,12 +706,12 @@ export class DocsService {
     let before;
     try { before = locateMarkdownSection(beforeContent, ref.section); }
     catch (error) {
-      return { changed: false, invalid: `基准 ${ref.commit}：${error instanceof Error ? error.message : String(error)}` };
+      return { changed: false, invalid: `base ${ref.commit}: ${error instanceof Error ? error.message : String(error)}` };
     }
     let after;
     try { after = locateMarkdownSection(afterContent, ref.section); }
     catch (error) {
-      return { changed: false, invalid: `当前 ${target}：${error instanceof Error ? error.message : String(error)}` };
+      return { changed: false, invalid: `current ${target}: ${error instanceof Error ? error.message : String(error)}` };
     }
     return before.text === after.text
       ? { changed: false }

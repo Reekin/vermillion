@@ -163,5 +163,5 @@ it("recycles a merged draft and keeps one that still holds edits", async () => {
 
   expect(removed).toContain("tree-a");
   expect(removed).not.toContain("tree-b");
-  expect(cleanup.retained.some((entry) => entry.worktreePath.includes("tree-b") && entry.reason.includes("未合入"))).toBe(true);
+  expect(cleanup.retained.some((entry) => entry.worktreePath.includes("tree-b") && entry.reason.includes("unmerged"))).toBe(true);
 }, 20000);

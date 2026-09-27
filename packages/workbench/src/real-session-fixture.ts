@@ -107,8 +107,8 @@ const result = (dataDir: string, projectPath: string, codexHome: string): RealSe
 });
 
 /**
- * pi 的模型、认证与扩展都要落在隔离目录里；扩展包一并复制，
- * 免得孤立实例启动时去联网安装 pi-subagents。
+ * pi models, auth and extensions all live in the isolated directory; the extension packages are
+ * copied along so an isolated instance does not go online to install pi-subagents at startup.
  */
 const copyPiAgentState = async (source: string, target: string): Promise<void> => {
   await mkdir(target, { recursive: true });

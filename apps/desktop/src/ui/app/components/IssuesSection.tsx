@@ -3,7 +3,7 @@ import type { Issue, WorkbenchClient, WorkItem } from "@vermillion/workbench/cli
 import { CreateWorkItemDialog } from "./CreateWorkItemDialog.js";
 import { Modal } from "./Modal.js";
 import { Badge, Button, Card, DetailSection, EmptyState, Field, InlineNotice, ListRow, Select } from "./ui.js";
-import { t } from "../../../i18n/index.js";
+import { serviceText, t } from "../../../i18n/index.js";
 import { formatAgo, formatDate, formatDateTime } from "../../../i18n/format.js";
 import { useT } from "../../../i18n/react.js";
 
@@ -210,7 +210,7 @@ const IssueDialog = ({ client, workspaceId, issue, issues, workItems, onClose, o
         <DetailSection title={t("docs.issues.activity")}>
           <div className="space-y-1">
             {issue.activities.map((entry, index) => <div key={index} className="flex items-center gap-2">
-              <span className="min-w-0 flex-1">{formatDateTime(entry.at)} · {entry.message}{entry.workItemId ? " · " + entry.workItemId : ""}</span>
+              <span className="min-w-0 flex-1">{formatDateTime(entry.at)} · {serviceText(entry.message)}{entry.workItemId ? " · " + entry.workItemId : ""}</span>
               {entry.sessionId && <Button size="sm" variant="ghost" outlined className="shrink-0" onClick={() => {
                 onClose(); onOpenSession(entry.sessionId!);
               }}>{t("docs.issues.patrolSession")}</Button>}

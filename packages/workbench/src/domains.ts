@@ -36,9 +36,10 @@ export const parseDomainDefinition = (path: string, content: string, config: Dom
   const body = content.replace(/^---[ \t]*\r?\n[\s\S]*?^---[ \t]*(?:\r?\n|$)/m, "");
   const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || domainId;
   const afterTitle = body.replace(/^\s*#\s+.+\r?\n/, "");
-  const introduction = afterTitle.split(/^##\s+/m)[0]!.trim();
-  const coverage = body.match(/^##\s+覆盖什么\s*\r?\n([\s\S]*?)(?=^##\s+|$)/m)?.[1]?.trim() ?? "";
-  const summary = (introduction || coverage).replace(/\s+/g, " ");
+  // The first paragraph of prose after the title, whatever heading it sits under.
+  const summary = afterTitle.split(/\r?\n\s*\r?\n/)
+    .map((block) => block.split(/\r?\n/).filter((line) => !/^\s*#/.test(line)).join(" ").trim())
+    .find(Boolean)?.replace(/\s+/g, " ") ?? "";
   return { domainId, title, summary, path, standards: parseStandards(content), config };
 };
 
