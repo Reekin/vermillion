@@ -68,7 +68,7 @@ Reviewer 和 Verifier 是 Worker 拉起的 subagent，创建时使用各自角�
 
 ### 读取会话消息
 
-`vermillion.read_session` 按[会话标识](../../Foundation/Engines/PRD.md#会话标识)返回全部可见 user 和 agent 消息，包括 agent 的 commentary、最终回复以及进行中消息已生成的正文。每条消息保留消息 ID、所属 turn、发送者、阶段和时间戳；同时返回轮次状态及下述当前活动摘要，便于调用者结合最近消息判断进展。工具调用及其输出不作为 user/agent 消息混入。
+`vermillion.read_session` 按[会话标识](../../Foundation/Engines/PRD.md#会话标识)返回全部可见 user 和 agent 消息，包括 agent 的 commentary、最终回复以及进行中消息已生成的正文。每条消息保留消息 ID、所属 turn、发送者、阶段和时间戳；同时返回轮次状态及下述当前活动摘要，便于调用者结合最近消息判断进展。工具调用及其输出不作为 user/agent 消息混入。消息中的图片以简短描述返回：内嵌图片给出格式和大小，本地图片给出文件路径，不返回图片的原始编码。
 
 `limit` 按消息条数选取最近 N 条，再按时间正序返回；例如 10 或 20 条可用于查看最近进展。同一消息的流式片段合并为一条，不重复计数。未传 limit 时返回全部消息，现有 maxChars 字符预算仍可限制正文，截断须明确标记，字符预算优先保留最新消息。读取覆盖目标会话上下文中的用户与 agent 消息，共享历史不重复返回，不混入其他分支独有消息。
 
