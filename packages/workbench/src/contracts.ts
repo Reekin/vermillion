@@ -293,7 +293,7 @@ export const zDecisionCard = z.object({
   withdrawn: z.object({ reason: z.string().min(1), at: z.string(), sessionId: z.string() }).optional(),
   deliveryPending: z.boolean().optional(),
   messageId: z.string().optional(),
-  deliveryFailure: z.string().optional(),
+  deliveryFailure: zServiceText.optional(),
   /** Business decisions may be raised by a Worker or the supervisor. */
   kind: z.enum(["worker", "supervisor"]).optional(),
   /** One plain sentence: what is blocked. */

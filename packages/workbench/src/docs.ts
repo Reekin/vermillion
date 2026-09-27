@@ -23,7 +23,8 @@ export class DocDraftConflict extends ServiceError {
   }
 }
 
-export class WorktreeNotReady extends Error {}
+/** The Worker's result cannot be recorded yet; the reason is the workbench's own. */
+export class WorktreeNotReady extends ServiceError {}
 
 export class WorkspaceNotReady extends Error {}
 
@@ -359,7 +360,7 @@ export class DocsService {
     const target = await this.resolveCommit(targetCommit ?? branch);
     if (await this.isAncestor(target, before)) return { diffStat: "" };
     if (await git(worktreePath, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"])) {
-      throw new WorktreeNotReady("Worker must commit its worktree before integration.");
+      throw new WorktreeNotReady(text("result.worktreeUncommitted"));
     }
     return this.mergeCommit(target, message, before);
   }
@@ -624,17 +625,17 @@ export class DocsService {
   async rootResult(commit: string | undefined, base: string | undefined, allowedPaths: string[]): Promise<{ commit?: string; commits?: string[]; diffStat: string }> {
     const workspacePaths = this.workspacePaths(allowedPaths);
     if (!workspacePaths.length) {
-      if (commit) throw new WorktreeNotReady("Code results at the workspace root must list their paths in scope.allowedPaths.");
+      if (commit) throw new WorktreeNotReady(text("result.rootPathsMissing"));
       return { diffStat: "" };
     }
     const paths = [...workspacePaths, ":(exclude).vermillion"];
     const dirty = await git(this.rootPath, ["diff", "--name-only", "HEAD", "--", ...paths]);
     const untracked = await git(this.rootPath, ["ls-files", "--others", "--exclude-standard", "--", ...paths]);
-    if (dirty.trim() || untracked.trim()) throw new WorktreeNotReady("Uncommitted results remain within the scope at the workspace root. Commit them, then record evidence.commit.");
-    if (!base) throw new WorktreeNotReady("Execution at the workspace root has no base commit, so the result range cannot be determined.");
+    if (dirty.trim() || untracked.trim()) throw new WorktreeNotReady(text("result.rootUncommitted"));
+    if (!base) throw new WorktreeNotReady(text("result.rootNoBase"));
     if (!commit) {
       if ((await git(this.rootPath, ["diff", "--name-only", base, "HEAD", "--", ...paths])).trim())
-        throw new WorktreeNotReady("Code results at the workspace root must record their last commit in evidence.commit.");
+        throw new WorktreeNotReady(text("result.rootCommitMissing"));
       return { diffStat: "" };
     }
     const target = await this.resolveCommit(commit);
@@ -647,10 +648,10 @@ export class DocsService {
       const own = (await git(this.rootPath, [...args, "--", ...paths])).split("\0").filter(Boolean);
       if (!own.length) continue;
       const all = (await git(this.rootPath, args)).split("\0").filter(Boolean);
-      if (all.some((path) => !own.includes(path))) throw new WorktreeNotReady("A commit mixes this work item's changes with changes outside its scope, so a rollback cannot be recorded safely: " + candidate);
+      if (all.some((path) => !own.includes(path))) throw new WorktreeNotReady(text("result.rootMixedCommit", { commit: candidate }));
       commits.push(candidate);
     }
-    if (!commits.length) throw new WorktreeNotReady("The commit range has no code results of this work item.");
+    if (!commits.length) throw new WorktreeNotReady(text("result.rootEmpty"));
     const stats = await Promise.all(commits.map((sha) => git(this.rootPath, ["show", "--format=", "--stat", sha])));
     return { commit: commits.at(-1), commits, diffStat: stats.join("\n") };
   }

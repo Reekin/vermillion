@@ -31,7 +31,7 @@ describe("execution and integration presentation", () => {
   });
 
   it("explains the distinct returned-work stages from durable execution facts", () => {
-    const item = workItem({ workItemId: "one", status: "queued", rejections: [{ reason: "Worker must commit its worktree before integration.", at: "2026-01-01T00:00:00.000Z" }], run: { sessionId: "worker" } });
+    const item = workItem({ workItemId: "one", status: "queued", rejections: [{ reason: { code: "result.worktreeUncommitted" }, at: "2026-01-01T00:00:00.000Z" }], run: { sessionId: "worker" } });
     const execute = execution({ actionId: "worker", workItemId: "one", status: "pending", stage: "deliver", updatedAt: "2026-01-01T00:00:01.000Z" });
     const activeRun = agentRun({ runId: "run", sessionId: "worker", workItemId: "one", status: "running", turns: 1, startedAt: "2026-01-01T00:00:00.000Z" });
     const returned = workItemProgress(item, [execute], activeRun);
@@ -56,10 +56,10 @@ describe("execution and integration presentation", () => {
   });
 
   it("turns workflow history into readable events without internal stage names", () => {
-    const item = workItem({ workItemId: "one", status: "closed", rejections: [{ reason: "Worker must commit its worktree before integration.", at: "2026-01-01T00:00:02.000Z" }], merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:04.000Z" }, run: { sessionId: "worker" } });
+    const item = workItem({ workItemId: "one", status: "closed", rejections: [{ reason: { code: "result.worktreeUncommitted" }, at: "2026-01-01T00:00:02.000Z" }], merge: { commit: "abcdef0123456789", diffStat: "", mergedAt: "2026-01-01T00:00:04.000Z" }, run: { sessionId: "worker" } });
     const actions = [integration({ actionId: "merge-old", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", history: [
       { at: "2026-01-01T00:00:01.000Z", event: "created", message: "验收通过" },
-      { at: "2026-01-01T00:00:02.000Z", event: "failed:merge", message: "Worker must commit its worktree before integration." }
+      { at: "2026-01-01T00:00:02.000Z", event: "failed:merge", message: { code: "result.worktreeUncommitted" } }
     ] }), integration({ actionId: "merge-new", workItemId: "one", status: "done", stage: "merge", updatedAt: "2026-01-01T00:00:04.000Z", history: [
       { at: "2026-01-01T00:00:03.000Z", event: "created", message: "重新提交，验收通过" }
     ] })];

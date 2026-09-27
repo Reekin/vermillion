@@ -155,7 +155,7 @@ it("checks repository paths in a mixed root scope while ignoring external artifa
 
   const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
   expect(pending).toMatchObject({ status: "running" });
-  expect(pending.rejections[0]?.reason).toContain("Uncommitted");
+  expect(pending.rejections[0]?.reason).toEqual({ code: "result.rootUncommitted" });
   expect(pending.rejections[0]?.reason).not.toContain("outside repository");
   await git(root, "add", "owned.txt");
   await git(root, "commit", "-qm", "owned result");
@@ -188,7 +188,7 @@ it("rejects untracked scoped root code and reverts every owned commit while reta
   await writeFile(join(root, "result.txt"), "first\n");
   const pending = await service.submitWorkItem(workspaceId, item.workItemId, { ...submission, sessionId: item.run.sessionId });
   expect(pending.status).toBe("running");
-  expect(pending.rejections[0]?.reason).toContain("Uncommitted");
+  expect(pending.rejections[0]?.reason).toEqual({ code: "result.rootUncommitted" });
   await git(root, "add", "result.txt"); await git(root, "commit", "-qm", "implementation");
   const first = await git(root, "rev-parse", "HEAD");
   await service.writeDoc(workspaceId, ".vermillion/docs/retained.md", "retained docs\n");

@@ -211,8 +211,8 @@ const Decisions = ({ cards }: { cards: DecisionCard[] }) => {
       {cards.map((card) => <div key={card.decisionId}>
         <p className="text-caption text-muted-foreground">{card.withdrawn ? t("work.detail.withdrawn") : t("work.detail.answered")}</p>
         <Markdown>{serviceText(card.question)}</Markdown>
-        {card.answer && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answer"), (card.options.find((option) => option.key === card.answer?.key)?.label ?? card.answer.key) + (card.answer.note ? " · " + card.answer.note : ""))}</p>}
-        {card.deliveryPending && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answerUndelivered"), card.deliveryFailure ?? t("work.detail.awaitingReceipt"))}</p>}
+        {card.answer && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answer"), (serviceText(card.options.find((option) => option.key === card.answer?.key)?.label) ?? card.answer.key) + (card.answer.note ? " · " + card.answer.note : ""))}</p>}
+        {card.deliveryPending && <p className="mt-1 text-caption text-muted-foreground">{labelled(t("work.detail.answerUndelivered"), serviceText(card.deliveryFailure) ?? t("work.detail.awaitingReceipt"))}</p>}
       </div>)}
     </div>
   </section>;

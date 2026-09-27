@@ -138,6 +138,14 @@ export const serviceMessages = {
   "error.answerUnconfirmed": "Delivery of the answer is not confirmed yet.",
   "error.answerRejected": "The session did not accept the decision answer.",
   "error.answerUndelivered": "The decision answer is not delivered yet.",
+  "error.patrolActive": (p: { domain: string; patrolRunId: string }) => `Domain ${p.domain} already has a patrol queued or running: ${p.patrolRunId}`,
+  "result.worktreeUncommitted": "Worker must commit its worktree before integration.",
+  "result.rootPathsMissing": "Code results at the workspace root must list their paths in scope.allowedPaths.",
+  "result.rootUncommitted": "Uncommitted results remain within the scope at the workspace root. Commit them, then record evidence.commit.",
+  "result.rootNoBase": "Execution at the workspace root has no base commit, so the result range cannot be determined.",
+  "result.rootCommitMissing": "Code results at the workspace root must record their last commit in evidence.commit.",
+  "result.rootMixedCommit": (p: { commit: string }) => `A commit mixes this work item's changes with changes outside its scope, so a rollback cannot be recorded safely: ${p.commit}`,
+  "result.rootEmpty": "The commit range has no code results of this work item.",
   "error.docsConflict": (p: { files: string }) =>
     `The doc draft conflicts with the main branch: ${p.files}. Run docs.rebase to bring this session's draft onto the main branch, resolve the conflict markers, save with docs.write and run docs.commit again.`
 } satisfies Record<string, string | ((params: never) => string)>;

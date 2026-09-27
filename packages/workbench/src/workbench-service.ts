@@ -955,7 +955,7 @@ export class WorkbenchService {
   private async createPatrolRun(workspaceId: string, domain: DomainDefinition, trigger: PatrolRun["trigger"], changedPaths: string[], targetCommit: string, knownRuns?: PatrolRun[]): Promise<PatrolRun> {
     const { store, docs } = await this.context(workspaceId);
     const active = (knownRuns ?? await store.patrolRuns.list()).find((run) => run.domainId === domain.domainId && ["queued", "running"].includes(run.status));
-    if (active) throw new Error(`Domain ${domain.title} already has a patrol queued or running: ${active.patrolRunId}`);
+    if (active) throw serviceError("error.patrolActive", { domain: domain.title, patrolRunId: active.patrolRunId });
     await Promise.all([domain.path, ...domain.standards].map((path) => docs.read(path, targetCommit)));
     const now = this.now();
     const run: PatrolRun = {
@@ -1925,7 +1925,7 @@ export class WorkbenchService {
       try {
         await docs.rootResult(submitted.evidence?.commit, submitted.run.baseCommit, submitted.scope.allowedPaths);
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = failureText(error);
         return this.mutateRecord(workspaceId, workItemId, (record) => ({ ...record,
           item: { ...record.item, rejections: [...record.item.rejections, { reason, at: this.now() }], updatedAt: this.now() },
           execution: { ...record.execution, failure: reason, waitReason: reason,
@@ -2205,7 +2205,7 @@ export class WorkbenchService {
       try { await this.executionStarter!(workspaceId, workItemId, automatic); }
       catch (error) {
         const action = (await this.listActions(workspaceId)).find((entry) => entry.kind === "execute" && entry.workItemId === workItemId)!;
-        await this.failAction(workspaceId, action.actionId, error instanceof Error ? error.message : String(error));
+        await this.failAction(workspaceId, action.actionId, failureText(error));
         throw error;
       }
       const delivered = await this.getWorkItem(workspaceId, workItemId);
@@ -2521,8 +2521,8 @@ export class WorkbenchService {
         await store.decisions.put({ ...(await store.decisions.get(card.decisionId))!, deliveryPending: false, deliveryFailure: undefined });
       } catch (error) {
         const latest = (await store.decisions.get(card.decisionId))!;
-        const deliveryFailure = error instanceof Error ? error.message : String(error);
-        if (latest.deliveryFailure === deliveryFailure) return;
+        const deliveryFailure = failureText(error);
+        if (JSON.stringify(latest.deliveryFailure) === JSON.stringify(deliveryFailure)) return;
         await store.decisions.put({ ...latest, deliveryPending: true, deliveryFailure });
       }
       this.emit({ type: "decisions.changed", workspaceId });

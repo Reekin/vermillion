@@ -138,6 +138,14 @@ const zh: Translation<ServiceCatalog> = {
   "service.error.answerUnconfirmed": "答复交付结果尚未确认。",
   "service.error.answerRejected": "会话未接收决策答复。",
   "service.error.answerUndelivered": "决策答复尚未交付。",
+  "service.error.patrolActive": (p) => `领域 ${p.domain} 已有巡检等待或运行中：${p.patrolRunId}`,
+  "service.result.worktreeUncommitted": "Worker 需要先提交 worktree 中的改动才能合入。",
+  "service.result.rootPathsMissing": "根目录代码成果需要在 scope.allowedPaths 登记归属路径。",
+  "service.result.rootUncommitted": "根目录范围内仍有未提交成果，请先提交再登记 evidence.commit。",
+  "service.result.rootNoBase": "根目录执行缺少起始提交，无法确认成果范围。",
+  "service.result.rootCommitMissing": "根目录代码成果需要在 evidence.commit 登记提交末端。",
+  "service.result.rootMixedCommit": (p) => `提交混合本单与范围外改动，无法安全记录回滚：${p.commit}`,
+  "service.result.rootEmpty": "提交范围中没有属于本单的代码成果。",
   "service.error.docsConflict": (p) => `文档草稿与主分支冲突：${p.files}。调用 docs.rebase 把本会话的草稿同步到主分支，解决冲突标记后用 docs.write 保存并再次 docs.commit。`
 };
 

@@ -52,7 +52,7 @@ export const integrationFailureSummary = (action: WorkflowAction): string | unde
     ?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (files?.length) return t("work.failure.dirtyMain", { files: joinList(files) });
   if (/outside repository/i.test(failure)) return t("work.failure.outsideRepo");
-  if (/Worker must commit its worktree/i.test(failure)) return t("work.failure.workerUncommitted");
+  if (hasCode(action.failure, "result.worktreeUncommitted")) return t("work.failure.workerUncommitted");
   if (/conflict/i.test(failure)) return t("work.failure.conflictSummary");
   const error = failure.split(/\r?\n/).find((line) => /^error:/i.test(line))?.replace(/^error:\s*/i, "").trim();
   const summary = error || failure.split(/\r?\n/).find(Boolean)?.trim();
@@ -110,7 +110,7 @@ const latestAction = (actions: WorkflowAction[], kind: WorkflowAction["kind"], w
 const rejectionSummary = (value: ServiceText) => {
   const reason = serviceText(value);
   const line = reason.split(/\r?\n/).map((entry) => entry.trim()).find(Boolean) ?? reason;
-  if (/Worker must commit its worktree/i.test(reason)) return t("work.failure.workerUncommitted");
+  if (hasCode(value, "result.worktreeUncommitted")) return t("work.failure.workerUncommitted");
   if (/outside repository/i.test(reason)) return t("work.failure.outsideRepo");
   if (/conflict/i.test(reason)) return t("work.failure.conflictSummary");
   return line.length > 160 ? line.slice(0, 157) + "…" : line;
@@ -130,6 +130,7 @@ export type ReadableFailure = { title: string; next: string; command?: string };
 /** Turns an engine, Git or scheduler failure into a cause and next step; the raw text stays in technical detail. */
 export const readableFailure = (value: ServiceText): ReadableFailure => {
   // The workbench's own reasons are already readable in the interface language.
+  if (hasCode(value, "result.worktreeUncommitted")) return { title: t("work.failure.workerUncommitted"), next: t("work.failure.workerUncommittedNext") };
   if (typeof value !== "string") return { title: serviceText(value), next: t("work.failure.unknownNext") };
   const text = value;
   if (/is archived/i.test(text)) return { title: t("work.failure.archived"), next: t("work.failure.archivedNext"), command: text.match(/`(codex unarchive [^`]+)`/)?.[1] };
@@ -140,7 +141,6 @@ export const readableFailure = (value: ServiceText): ReadableFailure => {
     return { title: message ? t("work.failure.modelWithMessage", { message: truncate(message.replace(/\\(.)/g, "$1"), 80) }) : t("work.failure.model"), next: t("work.failure.modelNext") };
   }
   if (/conflict/i.test(text)) return { title: t("work.failure.conflict"), next: t("work.failure.conflictNext") };
-  if (/Worker must commit its worktree/i.test(text)) return { title: t("work.failure.workerUncommitted"), next: t("work.failure.workerUncommittedNext") };
   if (/Command failed:\s*git/i.test(text)) return { title: t("work.failure.git"), next: t("work.failure.gitNext") };
   return { title: t("work.failure.unknown"), next: t("work.failure.unknownNext") };
 };

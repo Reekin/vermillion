@@ -128,7 +128,7 @@ const DecisionCard = ({ store, item }: { store: WorkbenchStore; item: Extract<In
       {answered && <DetailSection title={t("work.inbox.answerResult")}>
         <p>{[serviceText(card.options.find((option) => option.key === card.answer?.key)?.label), card.answer?.note].filter(Boolean).join(" · ")}</p>
         <p>{card.deliveryPending ? t("work.inbox.answerSaved") : t("work.inbox.answerDelivered")}</p>
-        {card.deliveryFailure && <InlineNotice tone="error" className="px-0">{card.deliveryFailure}</InlineNotice>}
+        {card.deliveryFailure && <InlineNotice tone="error" className="px-0">{serviceText(card.deliveryFailure)}</InlineNotice>}
         {card.deliveryPending && <Button size="sm" disabled={busy} onClick={() => void answer()}>{t("work.inbox.retryDelivery")}</Button>}
       </DetailSection>}
       {action && <DetailSection title={answered ? t("work.inbox.currentHandling") : t("work.inbox.attemptedHandling")}>

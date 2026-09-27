@@ -209,7 +209,7 @@ it("keeps an idle preparation answer pending while Worker capacity is occupied",
   const request = await service.startWork(f.workspaceId, { sessionId: "design", turnId: "source" });
   await service.updateWorkRequest(f.workspaceId, request.requestId, (current) => ({ ...current, status: "preparing", workerSessionId: "prep" }));
   const card = await service.createDecision(f.workspaceId, { requestId: request.requestId, sessionId: "prep", question: "Scope?", context: "Choose", options: [] });
-  expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: true, deliveryFailure: expect.stringContaining("execution slot") });
+  expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: true, deliveryFailure: { code: "dispatch.concurrency" } });
   expect(send).not.toHaveBeenCalled();
   await service.settleExecutionTurn(f.workspaceId, "worker", "occupied", "completed");
   expect(await service.answerDecision(f.workspaceId, card.decisionId, { note: "Proceed" })).toMatchObject({ deliveryPending: false });
