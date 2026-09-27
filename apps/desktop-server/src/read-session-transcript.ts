@@ -113,7 +113,8 @@ const latest = (values: string[]): string | undefined => {
   return values.sort((left, right) => right.localeCompare(left))[0];
 };
 
-const markdownImagePattern = /!\[((?:\\.|[^\]\\])*)\]\(([^)]*)\)/gu;
+// Targets may contain balanced parentheses, e.g. file:///C:/Pictures/shot%20(1).png.
+const markdownImagePattern = /!\[((?:\\.|[^\]\\])*)\]\(((?:[^()]|\([^()]*\))*)\)/gu;
 const dataUriPattern = /^data:([^;,]*)((?:;[^;,]*)*),(.*)$/isu;
 
 const formatByteSize = (bytes: number): string => {

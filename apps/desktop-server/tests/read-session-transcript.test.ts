@@ -244,7 +244,8 @@ describe("buildReadSessionTranscript", () => {
       `![image](${screenshot})`,
       "![shot \\[1\\].png](file:///C:/Users/me/My%20Pics/shot%20%5B1%5D.png)",
       "![image](C:\\tmp\\raw.png)",
-      "![diagram](https://example.com/d.png)"
+      "![diagram](https://example.com/d.png)",
+      "![image](file:///C:/Pictures/shot%20(1).png) trailing"
     ].join("\n\n");
     const snapshot = baseSnapshot([
       turn({ turnId: "turn-1", messageIds: ["user-1"] })
@@ -260,7 +261,8 @@ describe("buildReadSessionTranscript", () => {
       "[image: image/png, 3 KB]",
       `[image: ${process.platform === "win32" ? "C:\\Users\\me\\My Pics\\shot [1].png" : "/C:/Users/me/My Pics/shot [1].png"}]`,
       "[image: C:\\tmp\\raw.png]",
-      "[image: diagram, https://example.com/d.png]"
+      "[image: diagram, https://example.com/d.png]",
+      `[image: ${process.platform === "win32" ? "C:\\Pictures\\shot (1).png" : "/C:/Pictures/shot (1).png"}] trailing`
     ].join("\n\n"));
   });
 
