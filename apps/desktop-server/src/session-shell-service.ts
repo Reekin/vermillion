@@ -1041,15 +1041,12 @@ export class SessionShellService {
 
   public async runChatTreeNodeAction(input: import("@vermillion/shared").ChatTreeNodeActionInput): Promise<SessionActionResult> {
     if (!this.wrapperChatTree) throw new Error("Wrapper session trees are unavailable.");
-    if (input.action === "hide_branch") {
-      const index = this.runtimeService.getSessionIndexStore?.();
-      if (!index) throw new Error("Session index is unavailable.");
-      await this.wrapperChatTree.hideBranch(input.sessionId, input.nodeId,
-        (sessionId) => index.hideSession(sessionId));
-      return { action: "hide_branch", hidden: true };
+    if (input.action === "hide_node") {
+      await this.wrapperChatTree.hideNode(input.sessionId, input.nodeId);
+      return { action: "hide_node", hidden: true };
     }
-    const target = await this.wrapperChatTree.getNodeTarget(input.sessionId, input.nodeId);
-    return this.runSessionAction({ sessionId: target.sessionId, action: input.action });
+    const sessionId = await this.wrapperChatTree.getNodeSession(input.sessionId, input.nodeId);
+    return this.runSessionAction({ sessionId, action: input.action });
   }
 
   public submitChatTreeSend(input: import("@vermillion/shared").ChatTreeSendInput) {

@@ -275,7 +275,7 @@ describe("SessionShellService", () => {
   });
 
   it("runs a rollout action against the session that owns the selected tree node", async () => {
-    const getNodeTarget = vi.fn().mockResolvedValue({ sessionId: "branch-session", canHide: false });
+    const getNodeSession = vi.fn().mockResolvedValue("branch-session");
     const runAction = vi.fn().mockResolvedValue({
       action: "open_rollout",
       rolloutPath: "C:/rollouts/branch.jsonl",
@@ -285,7 +285,7 @@ describe("SessionShellService", () => {
     const service = new SessionShellService({
       runtimeService: {} as never,
       sessionCatalog: {} as never,
-      wrapperChatTree: { getNodeTarget } as never,
+      wrapperChatTree: { getNodeSession } as never,
       sessionActions: { runAction } as never
     });
 
@@ -294,7 +294,7 @@ describe("SessionShellService", () => {
       nodeId: "branch-turn",
       action: "open_rollout"
     })).resolves.toMatchObject({ action: "open_rollout", rolloutDisplayPath: "branch.jsonl" });
-    expect(getNodeTarget).toHaveBeenCalledWith("tree-root", "branch-turn");
+    expect(getNodeSession).toHaveBeenCalledWith("tree-root", "branch-turn");
     expect(runAction).toHaveBeenCalledWith("branch-session", "open_rollout", {
       sessionId: "branch-session",
       action: "open_rollout"

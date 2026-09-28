@@ -41,7 +41,6 @@ type SessionCatalogSeed = {
   lastCompletedTurnAt?: string;
   lastUserMessageAt?: string;
   archivedAt?: string;
-  hiddenAt?: string;
   runtimeStatus?: ChatSession["status"];
   unreadState?: SessionIndexEntry["unreadState"];
   metadata?: Record<string, unknown>;
@@ -121,7 +120,7 @@ const isBrowserVisibleSeed = (
   seed: SessionCatalogSeed,
   runtimeSessionIds: ReadonlySet<string>
 ): boolean =>
-  !seed.hiddenAt && (runtimeSessionIds.has(seed.sessionId) || Boolean(seed.providerSessionId));
+  runtimeSessionIds.has(seed.sessionId) || Boolean(seed.providerSessionId);
 
 export class SessionCatalogService {
   private readonly runtimeService: SessionRuntimeService;
@@ -321,7 +320,6 @@ export class SessionCatalogService {
         lastCompletedTurnAt: entry.lastCompletedTurnAt,
         lastUserMessageAt: entry.lastUserMessageAt,
         archivedAt: entry.archivedAt,
-        hiddenAt: entry.hiddenAt,
         unreadState: entry.unreadState,
         metadata: entry.metadata
       });
@@ -341,7 +339,6 @@ export class SessionCatalogService {
         ...existing,
         ...runtimeSeed,
         archivedAt: runtimeSeed.archivedAt ?? existing?.archivedAt,
-        hiddenAt: existing?.hiddenAt,
         lastCompletedTurnAt: runtimeSeed.lastCompletedTurnAt ?? existing?.lastCompletedTurnAt,
         lastUserMessageAt: latest([
           runtimeSeed.lastUserMessageAt,

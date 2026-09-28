@@ -33,79 +33,62 @@ const setup = async () => {
       getRevision: () => "initial", getSessionHistoryRevision: () => "history", hasSessionWindow: () => false,
       subscribe: () => () => {}, notifyChatTreeChanged: vi.fn() } as never,
     capabilities: { forkSessionFromTurn: fork } as never });
-  return { baseDir, index, load, create };
+  return { baseDir, index, fork, create };
 };
 
-it("hides an entire fork but retains its shared prefix, early descendants and siblings after reload", async () => {
+const sendOperation = (operationId: string, nodeId: string) => ({ cancelRequested: false, operation: {
+  operationId, sessionId: "root", nodeId, content: operationId, attachments: [], status: "creating"
+} });
+
+it("hides a node with all later nodes, keeping earlier history and siblings after reload", async () => {
   const { baseDir, index, create } = await setup();
   const tree = create(index);
   await tree.get("root");
-  await tree.jump("root", "branch-2");
+  await tree.jump("root", "descendant-2");
   const operations = (tree as unknown as { operations: Map<string, unknown> }).operations;
-  operations.set("hide-op", { cancelRequested: false, operation: {
-    operationId: "hide-op", sessionId: "root", targetSessionId: "branch",
-    nodeId: "root-1", content: "hidden branch", attachments: [], status: "sent"
-  } });
-  expect(tree.listOperations("root")).toHaveLength(1);
-  expect(await tree.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canHide: false });
-  expect(await tree.getNodeTarget("root", "root-2")).toEqual({ sessionId: "root", canHide: false });
-  const hide = vi.fn(async (id: string) => index.hideSession(id));
-  expect(await tree.hideBranch("root", "branch-2", hide)).toEqual({ hidden: true });
-  expect(hide).toHaveBeenCalledExactlyOnceWith("branch");
-  // 隐藏只写工作台标记，引擎会话保持未归档。
-  expect(index.getEntry("branch")?.hiddenAt).toBeTruthy();
+  operations.set("hidden-op", sendOperation("hidden-op", "descendant-1"));
+  operations.set("kept-op", sendOperation("kept-op", "root-1"));
+  await expect(tree.hideNode("root", "root-1")).rejects.toThrow("root node");
+  expect(await tree.hideNode("root", "branch-1")).toEqual({ hidden: true });
+  // 只记录被隐藏的这一个节点，引擎会话保持未归档。
+  expect(index.getEntry("branch")?.hiddenTurnIds).toEqual(["branch-1"]);
+  expect(index.getEntry("descendant")?.hiddenTurnIds).toBeUndefined();
   expect(index.getEntry("branch")?.archivedAt).toBeUndefined();
-  // 父会话在 fork 后还有 root-2；查看位置必须回到分叉点 root-1，而不是父会话末端。
+  // 查看位置回到隐藏范围之前的 root-1，而不是父会话末端。
   expect(index.getTreeView("root")).toEqual({ sessionId: "root", nodeId: "root-1", followTip: false });
   expect((await tree.get("root")).visibleTurnIds).toEqual(["root-1"]);
-  expect(tree.listOperations("root")).toEqual([]);
+  expect(tree.listOperations("root").map((operation) => operation.operationId)).toEqual(["kept-op"]);
+  await expect(tree.jump("root", "branch-2")).rejects.toThrow("Unknown tree node");
   tree.dispose();
   const reloaded = new SessionIndexStore({ baseDir });
   await reloaded.ready();
   const cold = create(reloaded);
   try {
     const result = await cold.get("root");
-    expect(result.nodes.map((node) => node.nodeId)).toEqual(["root-1", "root-2", "branch-1", "sibling-1", "sibling-2", "descendant-1", "descendant-2"]);
+    expect(result.nodes.map((node) => node.nodeId)).toEqual(["root-1", "root-2", "sibling-1", "sibling-2"]);
     expect(result.windows).toBeUndefined();
-    expect(await cold.getNodeTarget("root", "branch-1")).toEqual({ sessionId: "branch", canHide: false });
-    await cold.jump("root", "branch-1");
-    expect(await cold.get("root")).toMatchObject({ currentSessionId: "descendant", visibleTurnIds: ["root-1", "branch-1"] });
-    // 查看路径带上被隐藏祖先的共享历史，但不带该分支被隐藏的末端。
-    const path = await cold.get("root", "path");
-    expect(path.windows!.map((window) => window.sessionId)).toEqual(["root", "branch", "descendant"]);
-    expect(path.windows!.flatMap((window) => window.snapshot.turns).map((turn) => turn.turnId)).not.toContain("branch-2");
-    await cold.jump("root", "descendant-2");
-    expect(await cold.prepareSend("root")).toEqual({ sessionId: "descendant" });
+    await expect(cold.getNodeSession("root", "branch-1")).rejects.toThrow("Unknown tree node");
     await cold.jump("root", "sibling-2");
     expect(await cold.prepareSend("root")).toEqual({ sessionId: "sibling" });
     expect(reloaded.listRelations()).toHaveLength(3);
   } finally { cold.dispose(); }
 });
 
-it("waits for unloaded tree members before deciding whether a node is terminal", async () => {
-  const { index, create, load } = await setup();
+it("forks from the last visible node when a session's tail is hidden", async () => {
+  const { index, create, fork } = await setup();
   const tree = create(index);
-  await tree.get("root");
-  await index.upsertRelation({ workspaceId: "workspace", parentSessionId: "branch", childSessionId: "descendant", relationType: "fork", sourceTurnId: "branch-2" });
-  // A fresh service must finish all member loads before resolving any action.
-  tree.dispose();
-  let finish!: () => void;
-  const gate = new Promise<void>((resolve) => { finish = resolve; });
-  load.mockClear();
-  load.mockImplementation(async (id) => { if (id === "descendant") await gate; return true; });
-  const cold = create(index);
   try {
-    const hide = vi.fn();
-    const pending = expect(cold.hideBranch("root", "branch-2", hide)).rejects.toThrow("Only a terminal fork");
-    await vi.waitFor(() => expect(load).toHaveBeenCalledWith(
-      "descendant",
-      expect.objectContaining({ force: false })
-    ));
-    expect(hide).not.toHaveBeenCalled();
-    finish();
-    await pending;
-    expect(hide).not.toHaveBeenCalled();
-  } finally { finish(); cold.dispose(); }
+    await tree.get("root");
+    await tree.selectSession("root");
+    await tree.hideNode("root", "root-2");
+    expect(index.getTreeView("root")).toEqual({ sessionId: "root", nodeId: "root-1", followTip: false });
+    // 正文窗口不带被隐藏的轮次。
+    const path = await tree.get("root", "path");
+    expect(path.windows!.flatMap((window) => window.snapshot.turns).map((turn) => turn.turnId)).toEqual(["root-1"]);
+    // 引擎里 root 仍以 root-2 结尾，从 root-1 继续提问必须 fork，隐藏的轮次不进入新分支上下文。
+    expect(await tree.prepareSend("root")).toEqual({ sessionId: "new-fork" });
+    expect(fork).toHaveBeenCalledExactlyOnceWith("root", "root-1");
+  } finally { tree.dispose(); }
 });
 
 it("reads archived cold history without resuming the engine session", async () => {

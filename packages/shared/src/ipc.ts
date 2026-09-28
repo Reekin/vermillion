@@ -321,7 +321,7 @@ const zSessionActionResultSchema = z.union([
     resumed: z.literal(true)
   }),
   z.object({
-    action: z.literal("hide_branch"),
+    action: z.literal("hide_node"),
     hidden: z.literal(true)
   }),
   z.object({
@@ -333,7 +333,6 @@ const zSessionActionResultSchema = z.union([
 const zChatTreeNodeSchema = z.object({
   nodeId: z.string().min(1),
   sessionId: zSessionId.optional(),
-  canHide: z.boolean().optional(),
   parentNodeId: z.string().min(1).optional(),
   label: z.string().min(1),
   turnId: zTurnId.optional(),
@@ -799,7 +798,7 @@ const zChatTreeOperationsRequestSchema = z.object({ id: zRequestId, method: z.li
 const zChatTreeNodeActionRequestSchema = z.object({
   id: zRequestId, method: z.literal("chatTree.nodeAction"),
   params: z.object({ sessionId: zSessionId, nodeId: zTurnId,
-    action: z.enum(["copy_session_id", "copy_awb_session_id", "open_rollout", "hide_branch"]) })
+    action: z.enum(["copy_session_id", "copy_awb_session_id", "open_rollout", "hide_node"]) })
 });
 
 const zDelegationGetRequestSchema = z.object({

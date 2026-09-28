@@ -100,7 +100,7 @@ export const WorkbenchChatTree = ({ client, transport, onSelectSession, onCancel
         { action: "copy_session_id", label: t("docs.tree.copySessionId") },
         { action: "copy_awb_session_id", label: t("docs.tree.copyInternalId") },
         { action: "open_rollout", label: t("docs.tree.openRollout") },
-        { action: "hide_branch", label: t("docs.tree.deleteBranch"), disabled: !node.canHide }
+        { action: "hide_node", label: t("docs.tree.hideNode"), disabled: !node.parentNodeId }
       ] });
     }}
     onOperationContextMenu={(event, operationId) => {

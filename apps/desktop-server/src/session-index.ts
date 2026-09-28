@@ -29,8 +29,8 @@ const sessionIndexEntrySchema = z.object({
   lastCompletedTurnAt: z.string().min(1).optional(),
   lastUserMessageAt: z.string().min(1).optional(),
   archivedAt: z.string().min(1).optional(),
-  /** 分支隐藏标记：只影响会话树展示，与引擎归档状态互不影响。 */
-  hiddenAt: z.string().min(1).optional(),
+  /** 本会话中被隐藏的自有轮次；只影响会话树展示，后继节点在投影时一并隐藏。 */
+  hiddenTurnIds: z.array(z.string().min(1)).optional(),
   lastTurnId: z.string().min(1).optional(),
   unreadState: unreadStateSchema.default("read"),
   latestCompletionNotice: completionNoticeSchema.optional(),
@@ -140,7 +140,7 @@ const isSameSessionEntry = (
   left.lastCompletedTurnAt === right.lastCompletedTurnAt &&
   left.lastUserMessageAt === right.lastUserMessageAt &&
   left.archivedAt === right.archivedAt &&
-  left.hiddenAt === right.hiddenAt &&
+  isDeepStrictEqual(left.hiddenTurnIds, right.hiddenTurnIds) &&
   left.lastTurnId === right.lastTurnId &&
   left.unreadState === right.unreadState &&
   isDeepStrictEqual(left.latestCompletionNotice, right.latestCompletionNotice) &&
@@ -324,7 +324,7 @@ export class SessionIndexStore {
         }
       }
     }
-    // 隐藏分支仍是普通会话，继续作为成员提供共享历史；归档会话不再参与会话树。
+    // 归档会话不再参与会话树。
     return members.filter((id) => !this.getEntry(id)?.archivedAt);
   }
 
@@ -440,7 +440,7 @@ export class SessionIndexStore {
       lastUserMessageAt:
         input.lastUserMessageAt ?? existing?.lastUserMessageAt,
       archivedAt: input.session.archivedAt ?? existing?.archivedAt,
-      hiddenAt: existing?.hiddenAt,
+      hiddenTurnIds: existing?.hiddenTurnIds,
       lastTurnId: input.session.lastTurnId,
       unreadState,
       latestCompletionNotice,
@@ -582,20 +582,18 @@ export class SessionIndexStore {
     return archived;
   }
 
-  /** 分支隐藏只改会话树展示，不触碰引擎会话和归档状态。 */
-  public async hideSession(
-    sessionId: string,
-    hiddenAt = this.now()
-  ): Promise<SessionIndexEntry | undefined> {
+  /** 节点隐藏只改会话树展示，不触碰引擎会话和归档状态。 */
+  public async hideTurn(sessionId: string, turnId: string): Promise<void> {
     await this.ready();
     const existing = this.getEntry(sessionId);
-    if (!existing || existing.hiddenAt) {
-      return existing;
-    }
-    const hidden = sessionIndexEntrySchema.parse({ ...existing, hiddenAt });
+    if (!existing) throw new Error(`Unknown session: ${sessionId}`);
+    if (existing.hiddenTurnIds?.includes(turnId)) return;
+    const hidden = sessionIndexEntrySchema.parse({
+      ...existing,
+      hiddenTurnIds: [...existing.hiddenTurnIds ?? [], turnId]
+    });
     const mutation = this.replaceEntryInMemory(existing, hidden);
     await this.persistMutation(mutation.changed);
-    return mutation.value;
   }
 
   /** 用户显式归档入口：把给定会话及其 fork / subagent 后代作为整棵树归档。 */
@@ -681,10 +679,7 @@ export class SessionIndexStore {
     notices: ReadonlyMap<string, CompletionNotice> = new Map()
   ): Promise<void> {
     await this.ready();
-    const memberIds = new Set(this.getTreeMembers(sessionId).filter((memberId) => {
-      const entry = this.getEntry(memberId);
-      return entry && !entry.hiddenAt;
-    }));
+    const memberIds = new Set(this.getTreeMembers(sessionId));
     let changed = false;
     const entries = this.document.entries.map((entry) => {
       if (!memberIds.has(entry.sessionId)) return entry;

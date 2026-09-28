@@ -578,7 +578,7 @@ describe("SessionIndexStore", () => {
     });
   });
 
-  it("acknowledges one fork tree atomically without clearing hidden branches or subagent trees", async () => {
+  it("acknowledges one fork tree atomically, including branches with hidden nodes, but not subagent trees", async () => {
     const baseDir = await createTempDir();
     const store = new SessionIndexStore({ baseDir });
     for (const sessionId of ["root", "branch", "hidden", "subagent"]) {
@@ -600,13 +600,14 @@ describe("SessionIndexStore", () => {
       childSessionId: "hidden", relationType: "fork" });
     await store.upsertRelation({ workspaceId: "workspace-1", parentSessionId: "root",
       childSessionId: "subagent", relationType: "subagent" });
-    await store.hideSession("hidden");
+    await store.hideTurn("hidden", "hidden-turn");
 
     await store.markTreeRead("branch");
 
     expect(store.getEntry("root")?.unreadState).toBe("read");
     expect(store.getEntry("branch")?.unreadState).toBe("read");
-    expect(store.getEntry("hidden")?.unreadState).toBe("unread_completed");
+    expect(store.getEntry("hidden")?.unreadState).toBe("read");
+    expect(store.getEntry("hidden")?.hiddenTurnIds).toEqual(["hidden-turn"]);
     expect(store.getEntry("subagent")?.unreadState).toBe("unread_completed");
   });
 

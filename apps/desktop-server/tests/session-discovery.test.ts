@@ -1743,9 +1743,10 @@ describe("Session discovery and reconciliation", () => {
       await index.upsertSession({ workspaceId: "workspace-1", session: {
         ...buildHydratedWindow(id).session
       }, providerKind: "codex-thread", providerSessionId: `thread-${id}` });
-      // 隐藏的分支仍是普通会话，只是它独有的尾部不再出现在会话树上。
-      if (["A", "B"].includes(id)) await index.hideSession(id, "2026-09-10T00:00:00Z");
     }
+    // 隐藏 A、B 的节点：它们仍是普通会话，继续为后代提供隐藏节点之前的共享历史。
+    await index.hideTurn("A", earlierRefork ? "a2" : "a-tail");
+    await index.hideTurn("B", "b-tail");
     const forkRelations: [string, string, string][] = [
       ["root", "A", "r"], ["A", "B", earlierRefork ? "a2" : "a1"],
       ["B", "C", earlierRefork ? "a1" : "b1"], ...(earlierRefork ? [] : [["A", "D", "a2"]] satisfies [string, string, string][])
@@ -1802,8 +1803,8 @@ describe("Session discovery and reconciliation", () => {
       expect(snapshot.messageBlocks.filter((block) => block.turnId === "a1")).toEqual([
         expect.objectContaining({ sessionId: "A", text: "a1" })
       ]);
-      expect(index.getEntry("A")).toMatchObject({ hiddenAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-A" });
-      expect(index.getEntry("B")).toMatchObject({ hiddenAt: "2026-09-10T00:00:00Z", providerSessionId: "thread-B" });
+      expect(index.getEntry("A")).toMatchObject({ hiddenTurnIds: [earlierRefork ? "a2" : "a-tail"], providerSessionId: "thread-A" });
+      expect(index.getEntry("B")).toMatchObject({ hiddenTurnIds: ["b-tail"], providerSessionId: "thread-B" });
       expect(index.getEntry("A")?.archivedAt).toBeUndefined();
       expect(index.getEntry("B")?.archivedAt).toBeUndefined();
       if (!earlierRefork) {

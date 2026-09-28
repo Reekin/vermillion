@@ -10,7 +10,6 @@ import { buildSessionWindowSnapshotFromPage, type SessionWindowSnapshot } from "
 export type ChatTreeNodeSnapshot = {
   nodeId: string;
   sessionId?: string;
-  canHide?: boolean;
   parentNodeId?: string;
   label: string;
   summary?: string;
@@ -45,8 +44,29 @@ type SendOperationState = {
 
 type TreeProjection = {
   tree: ChatTreeSnapshot;
+  /** 每个成员的完整引擎路径，包括被隐藏的轮次；发送时据此判断是否需要 fork。 */
   paths: Map<string, string[]>;
   turnsById: Map<string, Turn>;
+  /** 被隐藏的节点及其全部后继。 */
+  hidden: Set<string>;
+};
+
+type TreeView = { sessionId: string; nodeId?: string; followTip?: boolean };
+
+/** 解析查看位置；落在隐藏范围内时回到该路径上最后一个可见节点。 */
+const resolveView = ({ paths, hidden, turnsById }: Omit<TreeProjection, "tree">, view: TreeView): TreeView => {
+  const path = paths.get(view.sessionId) ?? [];
+  const nodeId = view.followTip === false ? view.nodeId : path.at(-1);
+  if (!nodeId || !hidden.has(nodeId)) return { sessionId: view.sessionId, nodeId, followTip: view.followTip !== false };
+  const fallback = path[path.findIndex((id) => hidden.has(id)) - 1];
+  return { sessionId: fallback ? turnsById.get(fallback)!.sessionId : view.sessionId, nodeId: fallback, followTip: false };
+};
+
+const viewPosition = (projection: Omit<TreeProjection, "tree">, view: TreeView) => {
+  const { sessionId, nodeId } = resolveView(projection, view);
+  const path = projection.paths.get(sessionId) ?? [];
+  const visibleTurnIds = nodeId ? path.slice(0, path.indexOf(nodeId) + 1) : [];
+  return { currentSessionId: sessionId, currentNodeId: nodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds };
 };
 
 /** `tree` 只给树结构，`path` 给当前查看路径的位置与正文窗口。 */
@@ -321,28 +341,17 @@ export class WrapperChatTreeService {
       }
       paths.set(memberId, [...prefix, ...turns.map((turn) => turn.turnId)]);
     }
-    // 隐藏分支继续提供共享历史，但自身不再是可选中、可发送的路径。
-    for (const memberId of members) {
-      if (index.getEntry(memberId)?.hiddenAt) paths.delete(memberId);
+    // 成员按祖先在前排列，节点顺序保证父节点先于子节点判定。
+    const hiddenTurnIds = new Set(members.flatMap((memberId) => index.getEntry(memberId)?.hiddenTurnIds ?? []));
+    const hidden = new Set<string>();
+    for (const node of nodes) {
+      if (hiddenTurnIds.has(node.nodeId) || (node.parentNodeId && hidden.has(node.parentNodeId))) hidden.add(node.nodeId);
     }
-    const retained = new Set([...paths.values()].flat());
-    const visibleNodes = nodes.filter((node) => retained.has(node.nodeId));
-    const parentIds = new Set(visibleNodes.map((node) => node.parentNodeId));
-    const forkIds = new Set(relations.filter((relation) => relation.relationType === "fork")
-      .map((relation) => relation.childSessionId));
-    const complete = treeMembers.every((id) => loaded.has(id));
-    for (const node of visibleNodes) {
-      const owner = turnsById.get(node.nodeId)!.sessionId;
-      Object.assign(node, { sessionId: owner, canHide: complete && !parentIds.has(node.nodeId) &&
-        forkIds.has(owner) && !index.getEntry(owner)?.hiddenAt });
-    }
+    const visibleNodes = nodes.filter((node) => !hidden.has(node.nodeId));
+    for (const node of visibleNodes) node.sessionId = turnsById.get(node.nodeId)!.sessionId;
     const view = index.getTreeView(treeId);
-    const stored = view && paths.has(view.sessionId) ? view : undefined;
-    const currentSessionId = stored?.sessionId ?? (paths.has(sessionId) ? sessionId : paths.keys().next().value ?? treeId);
-    // Legacy views did not distinguish automatic cursors from explicit jumps; resume tip following.
-    const currentNodeId = stored?.followTip === false ? stored.nodeId : paths.get(currentSessionId)?.at(-1);
-    const currentPath = paths.get(currentSessionId) ?? [];
-    const visibleTurnIds = currentNodeId ? currentPath.slice(0, currentPath.indexOf(currentNodeId) + 1) : [];
+    const position = viewPosition({ paths, turnsById, hidden }, view && paths.has(view.sessionId) ? view
+      : { sessionId: paths.has(sessionId) ? sessionId : paths.keys().next().value ?? treeId });
     const windows = !withWindows ? undefined : members.flatMap((memberId) => {
       const memberSession = sessionsById.get(memberId);
       if (!memberSession) return [];
@@ -353,7 +362,7 @@ export class WrapperChatTreeService {
         session: memberSession,
         conversation: snapshot.conversations.find((item) =>
           item.conversationId === memberSession.conversationId)!,
-        turns: (turnsBySessionId.get(memberId) ?? []).filter((turn) => retained.has(turn.turnId)),
+        turns: (turnsBySessionId.get(memberId) ?? []).filter((turn) => !hidden.has(turn.turnId)),
         sessionRelations: snapshot.sessionRelations.filter((item) =>
           item.parentSessionId === memberId || item.childSessionId === memberId),
         participants: snapshot.participants.filter((item) =>
@@ -367,14 +376,13 @@ export class WrapperChatTreeService {
       return [window];
     });
     const tree: ChatTreeSnapshot = {
-      sessionId, treeId, currentSessionId, memberSessionIds: treeMembers,
+      sessionId, treeId, memberSessionIds: treeMembers, ...position,
       workspaceId: index.getEntry(treeId)?.workspaceId ?? index.getEntry(sessionId)?.workspaceId,
       engineId: snapshot.sessions.find((item) => item.sessionId === treeId)!.engineId,
-      currentNodeId, visibleTurnIds, visibleNodeIds: visibleTurnIds,
-      nodes: visibleNodes.map((node) => ({ ...node, isCurrent: node.nodeId === currentNodeId })),
+      nodes: visibleNodes.map((node) => ({ ...node, isCurrent: node.nodeId === position.currentNodeId })),
       windows, fetchedAt: new Date().toISOString()
     };
-    return { tree, paths, turnsById };
+    return { tree, paths, turnsById, hidden };
   }
 
   private publishedProjection(sessionId: string): TreeProjection {
@@ -384,27 +392,17 @@ export class WrapperChatTreeService {
   }
 
   /** 查看位置变更产生新的投影，已发布投影本身不被就地改写。 */
-  private applyPublishedView(
-    sessionId: string,
-    view: { sessionId: string; nodeId?: string; followTip?: boolean }
-  ): void {
+  private applyPublishedView(sessionId: string, view: TreeView): void {
     const projection = this.publishedProjection(sessionId);
-    const path = projection.paths.get(view.sessionId) ?? [];
-    const currentNodeId = view.followTip === false ? view.nodeId : path.at(-1);
-    const visibleTurnIds = currentNodeId
-      ? path.slice(0, path.indexOf(currentNodeId) + 1)
-      : [];
+    const position = viewPosition(projection, view);
     this.treeState(sessionId).published = {
       ...projection,
       tree: {
         ...projection.tree,
-        currentSessionId: view.sessionId,
-        currentNodeId,
-        visibleTurnIds,
-        visibleNodeIds: visibleTurnIds,
+        ...position,
         nodes: projection.tree.nodes.map((node) => ({
           ...node,
-          isCurrent: node.nodeId === currentNodeId
+          isCurrent: node.nodeId === position.currentNodeId
         }))
       }
     };
@@ -430,8 +428,8 @@ export class WrapperChatTreeService {
       throw state.error ?? new Error(`Unable to load tree: ${sessionId}`);
     }
     if (!this.options.sessionIndexStore.getTreeView(sessionId)) {
-      const tree = this.publishedProjection(sessionId).tree;
-      const view = { sessionId: tree.currentSessionId!, nodeId: tree.currentNodeId, followTip: true };
+      const projection = this.publishedProjection(sessionId);
+      const view = resolveView(projection, { sessionId: projection.tree.currentSessionId! });
       await this.options.sessionIndexStore.setTreeView(sessionId, view);
       signal?.throwIfAborted();
       this.applyPublishedView(sessionId, view);
@@ -536,53 +534,48 @@ export class WrapperChatTreeService {
 
   public async selectSession(sessionId: string): Promise<void> {
     await this.get(sessionId);
-    const { paths } = this.publishedProjection(sessionId);
-    const view = {
-      sessionId, nodeId: paths.get(sessionId)?.at(-1), followTip: true
-    };
+    const view = resolveView(this.publishedProjection(sessionId), { sessionId });
     await this.options.sessionIndexStore.setTreeView(sessionId, view);
     this.applyPublishedView(sessionId, view);
-    this.options.runtimeService.notifyChatTreeChanged(sessionId, paths.get(sessionId) ?? []);
+    this.options.runtimeService.notifyChatTreeChanged(sessionId, this.publishedProjection(sessionId).tree.visibleTurnIds ?? []);
   }
 
-  public async getNodeTarget(sessionId: string, nodeId: string): Promise<{ sessionId: string; canHide: boolean }> {
+  /** 节点所在的会话；只接受当前可见的节点。 */
+  public async getNodeSession(sessionId: string, nodeId: string): Promise<string> {
     await this.options.sessionIndexStore.ready();
     await this.get(sessionId);
-    const { tree, turnsById } = this.publishedProjection(sessionId);
-    if (!tree.nodes.some((node) => node.nodeId === nodeId)) throw new Error(`Unknown tree node: ${nodeId}`);
-    const owner = turnsById.get(nodeId)!.sessionId;
-    const index = this.options.sessionIndexStore;
-    return { sessionId: owner, canHide: !index.getEntry(owner)?.hiddenAt &&
-      index.listRelations().some((relation) => relation.relationType === "fork" && relation.childSessionId === owner) &&
-      !tree.nodes.some((node) => node.parentNodeId === nodeId) };
+    const node = this.publishedProjection(sessionId).tree.nodes.find((item) => item.nodeId === nodeId);
+    if (!node) throw new Error(`Unknown tree node: ${nodeId}`);
+    return node.sessionId!;
   }
 
-  public async hideBranch(sessionId: string, nodeId: string, hide: (memberId: string) => Promise<unknown>): Promise<{ hidden: true }> {
-    const target = await this.getNodeTarget(sessionId, nodeId);
-    if (!target.canHide) throw new Error("Only a terminal fork node can be hidden.");
-    await hide(target.sessionId);
-    for (const [operationId, state] of this.operations) {
-      if (state.operation.targetSessionId === target.sessionId) this.operations.delete(operationId);
+  /** 只记录这一个节点；它的后继在投影时一并隐藏。 */
+  public async hideNode(sessionId: string, nodeId: string): Promise<{ hidden: true }> {
+    const owner = await this.getNodeSession(sessionId, nodeId);
+    if (!this.publishedProjection(sessionId).tree.nodes.find((node) => node.nodeId === nodeId)?.parentNodeId) {
+      throw new Error("The root node cannot be hidden.");
     }
     const index = this.options.sessionIndexStore;
-    if (index.getTreeView(sessionId)?.sessionId === target.sessionId) {
-      // 隐藏当前查看的分支后回到它分出来的共享祖先。
-      const fork = index.listRelations().find((relation) =>
-        relation.relationType === "fork" && relation.childSessionId === target.sessionId);
-      if (fork) {
-        const view = { sessionId: fork.parentSessionId, nodeId: fork.sourceTurnId, followTip: false };
-        await index.setTreeView(sessionId, view);
-        this.applyPublishedView(sessionId, view);
+    await index.hideTurn(owner, nodeId);
+    const state = this.treeState(sessionId);
+    const projection = this.buildProjection(sessionId, state.members);
+    state.published = projection;
+    for (const [operationId, entry] of this.operations) {
+      if (projection.hidden.has(entry.operation.nodeId) || projection.hidden.has(entry.operation.turnId ?? "")) {
+        this.operations.delete(operationId);
       }
     }
+    // 查看位置落在隐藏范围内时，持久化回退后的位置。
+    const view = index.getTreeView(sessionId);
+    if (view) await index.setTreeView(sessionId, resolveView(projection, view));
     this.changed(sessionId);
     return { hidden: true };
   }
 
   public async jump(sessionId: string, nodeId: string): Promise<{ jumped: boolean }> {
     // The graph is already loaded when a user picks a node; no engine operation belongs here.
-    const { tree, paths, turnsById } = this.publishedProjection(sessionId);
-    const member = this.resolveSendSource(tree.currentSessionId!, nodeId, paths, turnsById);
+    const projection = this.publishedProjection(sessionId);
+    const member = this.resolveSendSource(projection, projection.tree.currentSessionId!, nodeId);
     const view = { sessionId: member, nodeId, followTip: false };
     await this.options.sessionIndexStore.setTreeView(sessionId, view);
     this.applyPublishedView(sessionId, view);
@@ -597,9 +590,9 @@ export class WrapperChatTreeService {
     if (target && turnsById.get(target)?.status !== "completed") {
       throw new Error("Wait for this turn to finish before branching.");
     }
-    let member = nodeId ? this.resolveSendSource(sessionId, nodeId, paths, turnsById) : tree.currentSessionId!;
+    let member = nodeId ? this.resolveSendSource(projection, sessionId, nodeId) : tree.currentSessionId!;
     if (target && !paths.get(member)?.includes(target)) {
-      member = this.resolveSendSource(sessionId, target, paths, turnsById);
+      member = this.resolveSendSource(projection, sessionId, target);
     }
     if (target && paths.get(member)?.at(-1) !== target) {
       member = await this.options.capabilities.forkSessionFromTurn(member, target);
@@ -625,14 +618,10 @@ export class WrapperChatTreeService {
     return { readNodeIds: turns.map((turn) => turn.turnId) };
   }
 
-  private resolveSendSource(sessionId: string, nodeId: string, paths: Map<string, string[]>, turnsById: Map<string, Turn>): string {
-    if (paths.get(sessionId)?.includes(nodeId)) return sessionId;
-    const source = turnsById.get(nodeId)?.sessionId;
-    if (!source) throw new Error(`Unknown tree node: ${nodeId}`);
-    if (paths.has(source)) return source;
-    const surviving = [...paths].find(([, ids]) => ids.includes(nodeId))?.[0];
-    if (!surviving) throw new Error(`Unknown tree node: ${nodeId}`);
-    return surviving;
+  private resolveSendSource({ paths, turnsById, hidden }: TreeProjection, sessionId: string, nodeId: string): string {
+    const owner = turnsById.get(nodeId)?.sessionId;
+    if (!owner || hidden.has(nodeId)) throw new Error(`Unknown tree node: ${nodeId}`);
+    return paths.get(sessionId)?.includes(nodeId) ? sessionId : owner;
   }
 
   private changed(sessionId: string): void {
@@ -723,11 +712,11 @@ export class WrapperChatTreeService {
       if (!operation.targetSessionId) {
         await this.get(operation.sessionId);
         if (state.cancelRequested) return;
-        const { paths, turnsById } = this.publishedProjection(operation.sessionId);
-        if (turnsById.get(operation.nodeId)?.status !== "completed") {
+        const projection = this.publishedProjection(operation.sessionId);
+        if (projection.turnsById.get(operation.nodeId)?.status !== "completed") {
           throw new Error("Wait for this turn to finish before branching.");
         }
-        const source = this.resolveSendSource(operation.sessionId, operation.nodeId, paths, turnsById);
+        const source = this.resolveSendSource(projection, operation.sessionId, operation.nodeId);
         operation.targetSessionId = await this.options.capabilities.forkSessionFromTurn(
           source,
           operation.nodeId
