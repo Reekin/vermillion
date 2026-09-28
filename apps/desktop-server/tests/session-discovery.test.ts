@@ -3077,6 +3077,13 @@ describe("Session discovery and reconciliation", () => {
       "codex-thread:thread-process:search-1",
       "codex-thread:thread-process:compact-1"
     ]);
+    expect(hydrated?.turns[0]?.transcriptItemIds).toEqual([
+      "tool:codex-thread:thread-process:reason-1",
+      "tool:codex-thread:thread-process:reason-empty",
+      "tool:codex-thread:thread-process:search-1",
+      "tool:codex-thread:thread-process:compact-1",
+      "message:codex-thread:thread-process:msg-1"
+    ]);
     const reasoningTool = hydrated?.toolCalls.find(
       (toolCall) =>
         toolCall.toolCallId === "codex-thread:thread-process:reason-1"

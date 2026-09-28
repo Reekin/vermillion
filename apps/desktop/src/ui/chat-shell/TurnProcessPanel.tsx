@@ -4,6 +4,7 @@ import type {
   RuntimeInteraction
 } from "@vermillion/shared";
 import type { ReactElement } from "react";
+import { compareTranscriptItems } from "./transcript-order.js";
 import { useT } from "../../i18n/react.js";
 import type { ImageLightboxState } from "./ImageLightbox.js";
 import {
@@ -38,24 +39,6 @@ export type TurnProcessPanelProps = {
     payload?: Record<string, unknown>;
   }) => Promise<void>;
   onRespondInteraction?: (input: InteractionResponseInput) => Promise<void>;
-};
-
-const compareIsoDateAsc = (left?: string, right?: string): number => {
-  if (!left && !right) {
-    return 0;
-  }
-  if (!left) {
-    return 1;
-  }
-  if (!right) {
-    return -1;
-  }
-  const leftDate = Date.parse(left);
-  const rightDate = Date.parse(right);
-  if (Number.isNaN(leftDate) || Number.isNaN(rightDate)) {
-    return left.localeCompare(right);
-  }
-  return leftDate - rightDate;
 };
 
 type TurnHistoryItem =
@@ -116,7 +99,7 @@ const buildHiddenMessageItems = (
   }));
 };
 
-const buildTurnHistoryItems = (
+export const buildTurnHistoryItems = (
   row: TurnTranscriptRow,
   hiddenRows: TurnTranscriptRow[]
 ): TurnHistoryItem[] =>
@@ -124,7 +107,7 @@ const buildTurnHistoryItems = (
     ...buildHiddenMessageItems(hiddenRows),
     ...buildProcessActivityEntries(row.toolCalls, row.terminalStreams).map((entry) => ({
       kind: "activity" as const,
-      id: `activity:${entry.id}`,
+      id: entry.id,
       startedAt: entry.startedAt,
       entry
     })),
@@ -140,13 +123,7 @@ const buildTurnHistoryItems = (
       startedAt: interaction.requestedAt,
       interaction
     }))
-  ].sort((left, right) => {
-    const byDate = compareIsoDateAsc(left.startedAt, right.startedAt);
-    if (byDate !== 0) {
-      return byDate;
-    }
-    return left.id.localeCompare(right.id);
-  });
+  ].sort(compareTranscriptItems(row.turn));
 
 export const TurnProcessPanel = ({
   row,
@@ -216,6 +193,7 @@ export const TurnProcessPanel = ({
       {renderStandaloneActivity &&
         (row.toolCalls.length > 0 || row.terminalStreams.length > 0) && (
           <ProcessActivityView
+            turn={row.turn}
             toolCalls={row.toolCalls}
             terminalStreams={row.terminalStreams}
             onPreviewImage={onPreviewImage}

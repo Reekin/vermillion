@@ -826,6 +826,11 @@ const hydrateCodexTurnEntities = async (input: {
       messageIds,
       toolCallIds,
       terminalIds,
+      transcriptItemIds: hydratedItems.flatMap((item) => {
+        const id = sessionItemId(entry.sessionId, engineItemKey(item));
+        if (isUserMessageItem(item) || isAgentMessageItem(item)) return [`message:${id}`];
+        return [`tool:${id}`];
+      }),
       approvalRequestIds: []
     });
 

@@ -665,6 +665,7 @@ export class SessionReconciliationService {
         actor: currentTurn.actor ?? turn.actor,
         finalMessageId: currentTurn.finalMessageId ?? turn.finalMessageId,
         executionProfile: currentTurn.executionProfile ?? turn.executionProfile,
+        transcriptItemIds: mergeTurnIds(turn.transcriptItemIds ?? [], currentTurn.transcriptItemIds ?? []),
         messageIds: mergeTurnIds(turn.messageIds, currentTurn.messageIds),
         toolCallIds: mergeTurnIds(turn.toolCallIds, currentTurn.toolCallIds),
         terminalIds: mergeTurnIds(turn.terminalIds, currentTurn.terminalIds),

@@ -18,10 +18,12 @@ import {
   describeToolStep,
   type TerminalStream,
   type ToolCall,
+  type Turn,
   type ToolStep,
   type ToolStepKind
 } from "@vermillion/shared";
 import type { ImageLightboxState } from "./ImageLightbox.js";
+import { compareTranscriptItems } from "./transcript-order.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { normalizeTerminalOutput } from "./terminal-output.js";
 import { t } from "../../i18n/index.js";
@@ -29,6 +31,7 @@ import { useT } from "../../i18n/react.js";
 import { toolStepWords } from "../../i18n/tool-steps.js";
 
 export type ProcessActivityViewProps = {
+  turn?: Turn;
   toolCalls: ToolCall[];
   terminalStreams: TerminalStream[];
   onPreviewImage?: (input: ImageLightboxState) => void;
@@ -275,12 +278,14 @@ export const ProcessActivityItemView = ({
 };
 
 export const ProcessActivityView = ({
+  turn,
   toolCalls,
   terminalStreams,
   onPreviewImage
 }: ProcessActivityViewProps): ReactElement => {
   const t = useT();
   const entries = buildProcessActivityEntries(toolCalls, terminalStreams);
+  if (turn) entries.sort(compareTranscriptItems(turn));
 
   if (entries.length === 0) {
     return <p className="awb-detail__empty">{t("session.noProcessSteps")}</p>;

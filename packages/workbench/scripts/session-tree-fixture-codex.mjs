@@ -82,6 +82,15 @@ const plainTurn = makeTurn(
   "Fixture plain history is ready to read."
 );
 
+// Interleaved history exercises transcript order without item timestamps.
+plainTurn.items.splice(1, 0,
+  { type: "agentMessage", id: "before-generation", text: "First, generate the reference image.", phase: "commentary", memoryCitation: null, timestamp: new Date((now + 120) * 1000).toISOString() },
+  { type: "imageGeneration", id: "generated-image", status: "completed", revisedPrompt: "Reference image", result: "" },
+  { type: "agentMessage", id: "before-inspection", text: "Next, inspect the generated image.", phase: "commentary", memoryCitation: null, timestamp: new Date((now + 180) * 1000).toISOString() },
+  { type: "imageView", id: "viewed-image", path: `${projectPath}/reference.png` },
+  { type: "agentMessage", id: "after-inspection", text: "Inspection finished; the steps remain interleaved.", phase: "commentary", memoryCitation: null }
+);
+
 const threads = [
   makeThread("fixture-parent", "Fixture parent session", "Fixture parent question", "appServer", parentTurn),
   makeThread(

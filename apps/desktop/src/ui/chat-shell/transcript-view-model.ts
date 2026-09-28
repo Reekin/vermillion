@@ -8,6 +8,7 @@ import type {
   Turn
 } from "@vermillion/shared";
 import type { DomainReadModel } from "@vermillion/core";
+import { compareTranscriptItems } from "./transcript-order.js";
 import { selectMessageBlocksForMessage } from "../../store/selectors.js";
 import type { RendererStoreState } from "../../store/types.js";
 import {
@@ -460,7 +461,7 @@ const buildRunningTurnRows = (
 ): TurnTranscriptRow[] => {
   const messageEntries = splitBlocksByMessage(blocks).map((group, index) => ({
     kind: "message" as const,
-    id: `message:${index}:${group.blocks[0]?.blockId ?? index}`,
+    id: `message:${group.blocks[0]?.messageId ?? index}`,
     startedAt: group.blocks[0]?.startedAt,
     group,
     index
@@ -481,6 +482,7 @@ const buildRunningTurnRows = (
         entry.group.blocks[0]?.messageId === messageId
     )
   );
+  const compareItems = compareTranscriptItems(turn);
   const entries = [...messageEntries, ...processEntries].sort((left, right) => {
     const leftPhase =
       left.kind === "message" &&
@@ -497,11 +499,7 @@ const buildRunningTurnRows = (
     if (leftPhase !== rightPhase) {
       return leftPhase - rightPhase;
     }
-    const byDate = compareIsoDateAsc(left.startedAt, right.startedAt);
-    if (byDate !== 0) {
-      return byDate;
-    }
-    return left.id.localeCompare(right.id);
+    return compareItems(left, right);
   });
 
   if (entries.length === 0) {

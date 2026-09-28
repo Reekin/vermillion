@@ -137,6 +137,7 @@ export const zTurnSchema = z.object({
   completedAt: zIsoDateTime.optional(),
   actor: zTurnActorRef,
   finalMessageId: zMessageId.optional(),
+  transcriptItemIds: z.array(z.string()).optional(),
   messageIds: z.array(zMessageId).default([]),
   toolCallIds: z.array(zToolCallId).default([]),
   terminalIds: z.array(zTerminalId).default([]),

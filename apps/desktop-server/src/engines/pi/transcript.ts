@@ -116,6 +116,7 @@ export const buildPiTurnEntities = (input: {
       status: "completed",
       startedAt,
       messageIds: [],
+      transcriptItemIds: [],
       toolCallIds: [],
       terminalIds: [],
       approvalRequestIds: [],
@@ -153,6 +154,7 @@ export const buildPiTurnEntities = (input: {
         (block) => block.type === "image"
       ).length;
       draft.messageIds.push(messageId);
+      draft.transcriptItemIds?.push(`message:${messageId}`);
       messageBlocks.push(
         parseMessageBlock({
           blockId: `${messageId}:md`,
@@ -186,6 +188,7 @@ export const buildPiTurnEntities = (input: {
       const phase = messagePhase(message.content);
       const text = messageText(message.content);
       draft.messageIds.push(messageId);
+      draft.transcriptItemIds?.push(`message:${messageId}`);
       draft.completedAt = entry.timestamp;
       if (text) {
         messageBlocks.push(
@@ -214,6 +217,7 @@ export const buildPiTurnEntities = (input: {
         }
         const toolCallId = scoped(block.id);
         draft.toolCallIds.push(toolCallId);
+        draft.transcriptItemIds?.push(`tool:${toolCallId}`);
         toolCalls.push(
           parseToolCall({
             toolCallId,

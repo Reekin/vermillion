@@ -36,6 +36,7 @@ type SessionRecordInput = {
 };
 
 type TurnRecordInput = {
+  transcriptItemIds?: string[];
   turnId: string;
   sessionId: string;
   status?: "started" | "streaming" | "completed";
@@ -886,6 +887,7 @@ export class DomainProjector {
       completedAt: input.completedAt ?? existing?.completedAt,
       actor: input.actor ?? existing?.actor,
       finalMessageId: input.finalMessageId ?? existing?.finalMessageId,
+      transcriptItemIds: input.transcriptItemIds ?? existing?.transcriptItemIds,
       messageIds: input.messageIds ?? existing?.messageIds ?? [],
       toolCallIds: input.toolCallIds ?? existing?.toolCallIds ?? [],
       terminalIds: input.terminalIds ?? existing?.terminalIds ?? [],
@@ -973,30 +975,21 @@ export class DomainProjector {
     timestamp: string
   ): void {
     const turn = this.store.getTurn(turnId);
-    if (!turn || (turn[key] ?? []).includes(valueId)) {
+    if (!turn) {
       return;
     }
 
+    const itemKind = {
+      messageIds: "message",
+      toolCallIds: "tool",
+      terminalIds: "terminal",
+      approvalRequestIds: "approval",
+      interactionRequestIds: "interaction"
+    }[key];
+    if (turn.transcriptItemIds?.includes(`${itemKind}:${valueId}`)) return;
     this.upsertTurnRecord({
-      turnId,
-      sessionId: turn.sessionId,
-      status: turn.status,
-      finishReason: turn.finishReason,
-      startedAt: turn.startedAt,
-      completedAt: turn.completedAt,
-      actor: turn.actor,
-      finalMessageId: turn.finalMessageId,
-      messageIds: key === "messageIds" ? [...turn.messageIds, valueId] : turn.messageIds,
-      toolCallIds: key === "toolCallIds" ? [...turn.toolCallIds, valueId] : turn.toolCallIds,
-      terminalIds: key === "terminalIds" ? [...turn.terminalIds, valueId] : turn.terminalIds,
-      approvalRequestIds:
-        key === "approvalRequestIds"
-          ? [...turn.approvalRequestIds, valueId]
-          : turn.approvalRequestIds,
-      interactionRequestIds:
-        key === "interactionRequestIds"
-          ? [...(turn.interactionRequestIds ?? []), valueId]
-          : turn.interactionRequestIds
+      ...turn,
+      transcriptItemIds: [...(turn.transcriptItemIds ?? []), `${itemKind}:${valueId}`]
     });
     this.upsertSessionRecord({
       sessionId: turn.sessionId,

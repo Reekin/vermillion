@@ -633,6 +633,7 @@ export class DomainStore {
     return this.upsertTurn({
       ...existing,
       ...parsedTurn,
+      transcriptItemIds: mergeUniqueStrings(parsedTurn.transcriptItemIds ?? [], existing.transcriptItemIds ?? []),
       messageIds: mergeUniqueStrings(existing.messageIds, parsedTurn.messageIds),
       toolCallIds: mergeUniqueStrings(
         existing.toolCallIds,
