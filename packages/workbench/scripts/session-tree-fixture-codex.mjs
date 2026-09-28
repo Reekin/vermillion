@@ -82,7 +82,7 @@ const plainTurn = makeTurn(
   "Fixture plain history is ready to read."
 );
 
-// Interleaved history exercises transcript order without item timestamps.
+// Interleaved history exercises transcript order with incomplete item timestamps.
 plainTurn.items.splice(1, 0,
   { type: "agentMessage", id: "before-generation", text: "First, generate the reference image.", phase: "commentary", memoryCitation: null, timestamp: new Date((now + 120) * 1000).toISOString() },
   { type: "imageGeneration", id: "generated-image", status: "completed", revisedPrompt: "Reference image", result: "" },
@@ -190,7 +190,7 @@ const handle = (request) => {
       send({ id: request.id, result: { authMethod: "apikey", authToken: null, requiresOpenaiAuth: false } });
       return;
     case "config/read":
-      send({ id: request.id, result: { config: { developer_instructions: null } } });
+      send({ id: request.id, result: { config: { developer_instructions: null, sqlite_home: projectPath } } });
       return;
     case "skills/list":
       send({ id: request.id, result: { data: [] } });
