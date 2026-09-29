@@ -333,7 +333,12 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
     const session = domain.getSession(branch.sessionId);
     const waiting = session?.status === "awaiting_approval" ? t("session.statusAwaitingApproval") : undefined;
     const time = formatRelativeActivityAge(session?.updatedAt);
-    if (worker) return { marker: "W", title: worker.title, time, detail: [worker.activity, waiting ?? branch.lastLabel].filter(Boolean).join(" · ") };
+    // A preparation branch goes on to run its request's first work item, so it is marked P until preparation completes and W after.
+    if (worker) {
+      const status = relevantWork?.requests.find((request) => request.requestId === worker.requestId)?.status;
+      const preparing = status === "pending" || status === "preparing";
+      return { marker: preparing ? "P" : "W", title: worker.title, time, detail: [worker.activity, waiting ?? branch.lastLabel].filter(Boolean).join(" · ") };
+    }
     if (branch.sessionId === snapshot?.treeId) {
       return { title: [t("mobile.branches.mainline"), treeSession?.title].filter(Boolean).join(" · "), time, detail: waiting ?? branch.lastLabel };
     }
