@@ -100,6 +100,8 @@
   color: var(--awb-ink);
   font: 500 var(--awb-text-caption) var(--awb-font-sans);
 }
+/* Visually compact; the ::after area keeps the 44pt touch target. */
+.awb-mobile-stop, .awb-mobile-send { min-width: 0; min-height: 0; }
 .awb-mobile-stop::after, .awb-mobile-send::after { content: ""; position: absolute; inset: -8px; }
 .awb-mobile-stop:disabled { opacity: var(--awb-control-disabled-opacity); }
 .awb-mobile-composer__error { margin: 0 0 6px; color: var(--awb-ink-strong); font-size: var(--awb-text-caption); overflow-wrap: anywhere; }

@@ -348,7 +348,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
     <section className="vm-mobile-layer" data-level="list" data-covered={covered && !dragging ? "" : undefined} aria-hidden={covered || undefined}
       style={dragging ? { transform: `translateX(calc(-28% + ${(swipe.offset ?? 0) * 0.28}px))`, transition: "none" } : undefined}>
       <ListHeader title={listTab === "inbox" ? "Inbox" : t("mobile.sessionsTab")} desktopName={desktopName} connected={connected}>
-        {listTab === "sessions" && workspaces.length > 1 && <ChoiceChips label={t("mobile.workspaceFilter")} value={workspaceFilter} onChange={setWorkspaceFilter}
+        {listTab === "sessions" && workspaces.length > 0 && <ChoiceChips label={t("mobile.workspaceFilter")} value={workspaceFilter} onChange={setWorkspaceFilter}
           items={[{ value: "", label: t("mobile.allWorkspaces") }, ...workspaces.map((w) => ({ value: w.workspaceId, label: w.label }))]} />}
       </ListHeader>
       <div className="vm-mobile-scroll">
