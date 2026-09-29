@@ -80,7 +80,8 @@ async function cli(method, params = {}) {
 }
 async function browser(...argv) {
   const launchFlags = !browserConfigured && argv[0] === "open"
-    ? ["--config", browserConfig, ...(args.insecure ? ["--ignore-https-errors"] : [])] : [];
+    // The phone page follows the browser language; this smoke reads the Chinese interface.
+    ? ["--config", browserConfig, "--args", "--lang=zh-CN,--accept-lang=zh-CN", ...(args.insecure ? ["--ignore-https-errors"] : [])] : [];
   if (argv[0] === "open") browserConfigured = true;
   const stdout = await run(args.browser, [...launchFlags, ...browserFlags, ...argv], `Browser ${argv[0]}`, browserEnv);
   let result;
@@ -106,7 +107,7 @@ try {
   assert.ok(descriptor.instanceId && descriptor.dataDir && Number.isInteger(descriptor.pid), "Invalid isolated app.start target descriptor");
   await access(args.browser);
   const help = await run(args.browser, ["--help"], "Browser compatibility check", browserEnv, 10_000);
-  for (const flag of ["--session", "--json", "--config", "--ignore-https-errors"]) assert.ok(help.includes(flag), `agent-browser must support ${flag}`);
+  for (const flag of ["--session", "--json", "--config", "--args", "--ignore-https-errors"]) assert.ok(help.includes(flag), `agent-browser must support ${flag}`);
   for (const method of ["remote.pair", "remote.device.list", "remote.device.revoke", "session.read"]) {
     await run(process.execPath, [cliPath, method, "--help"], `CLI compatibility ${method}`, process.env, 10_000);
   }
@@ -118,8 +119,9 @@ try {
   const oldMessages = new Set(baseline.messages.map((message) => message.messageId));
   browserStarted = true;
   await browser("open", url.href);
-  await browser("set", "viewport", "390", "844");
+  await browser("set", "viewport", "375", "667");
   await browser("wait", "--text", "连接桌面");
+  await visible("navigator.language.toLowerCase().startsWith('zh') && document.documentElement.lang === 'zh-CN'");
   await capture("pairing");
   const pairing = await cli("remote.pair");
   assert.ok(typeof pairing.code === "string", "Pairing code missing");
