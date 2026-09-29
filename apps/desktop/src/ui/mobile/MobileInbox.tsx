@@ -47,9 +47,9 @@ function InboxCard({ item, client, refresh, openSession }: {
       {item.card.workItemId && <p className="mb-2 break-words text-caption text-muted-foreground">{related?.title ?? item.card.workItemId}</p>}
       <h2 className="vm-selectable break-words text-title-sm font-medium text-strong">{serviceText(item.card.question)}</h2>
       <p className="vm-selectable mt-2 whitespace-pre-wrap break-words text-body text-muted-foreground">{serviceText(item.card.context)}</p>
-      {(item.card.adjustments ?? []).map((adjustment) => <p key={adjustment.at} className="mt-2 whitespace-pre-wrap text-body text-foreground">{adjustment.note}</p>)}
+      {(item.card.adjustments ?? []).map((adjustment) => <p key={adjustment.at} className="vm-selectable mt-2 whitespace-pre-wrap text-body text-foreground">{adjustment.note}</p>)}
       {item.card.answer ? <div className="mt-4 space-y-2">
-        <p className="whitespace-pre-wrap break-words text-body text-foreground">{[
+        <p className="vm-selectable whitespace-pre-wrap break-words text-body text-foreground">{[
           serviceText(item.card.options.find((option) => option.key === item.card.answer?.key)?.label),
           item.card.answer.note
         ].filter(Boolean).join(" · ")}</p>
@@ -62,7 +62,7 @@ function InboxCard({ item, client, refresh, openSession }: {
             <Button className="w-full justify-start whitespace-normal text-left" aria-pressed={choice === option.key} disabled={busy}
               variant={choice === option.key ? "primary" : "secondary"} onClick={() => setChoice(choice === option.key ? undefined : option.key)}>{serviceText(option.label)}</Button>
             {option.detail && <p className="vm-selectable mt-1 whitespace-pre-wrap break-words text-caption text-muted-foreground">{serviceText(option.detail)}</p>}
-            {option.key === item.card.recommended && item.card.recommendation && <p className="mt-1 whitespace-pre-wrap text-caption text-foreground">{t("mobile.recommendation", { reason: serviceText(item.card.recommendation) })}</p>}
+            {option.key === item.card.recommended && item.card.recommendation && <p className="vm-selectable mt-1 whitespace-pre-wrap text-caption text-foreground">{t("mobile.recommendation", { reason: serviceText(item.card.recommendation) })}</p>}
           </div>)}
         </div>
         <Field kind="textarea" label={t("mobile.answerNote")} placeholder={t("mobile.answerPlaceholder")} rows={3} value={note} disabled={busy} onChange={(event) => setNote(event.target.value)} />
@@ -78,7 +78,7 @@ function InboxCard({ item, client, refresh, openSession }: {
         <Button className="mt-3" variant="primary" disabled={busy} onClick={() => void run()}>{t("work.inbox.acknowledge")}</Button>
       </> : <>
         <p className="mt-2 text-body text-foreground">{actionStatusText(item.action, item.workItem)}</p>
-        <p className="mt-2 whitespace-pre-wrap break-words text-body text-muted-foreground">{integrationFailureSummary(item.action) ?? serviceText(item.action.message)}</p>
+        <p className="vm-selectable mt-2 whitespace-pre-wrap break-words text-body text-muted-foreground">{integrationFailureSummary(item.action) ?? serviceText(item.action.message)}</p>
         <CollapsibleDetails open={details} onToggle={() => setDetails(!details)}>{item.action.history.map((entry) => serviceText(entry.message)).join("\n")}</CollapsibleDetails>
       </>}
     </>}

@@ -138,6 +138,14 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
         }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { fail(error) }
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { fail(error) }
+        /// iOS may end a kept page's web process in the background; reload it at the list level instead of showing a blank page.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            Task { @MainActor in
+                self.level = "list"
+                self.owner?.levelChanged(self.desktop.id, "list")
+                self.load(target: "")
+            }
+        }
         private func fail(_ error: Error) {
             if (error as NSError).code == NSURLErrorCancelled { return }
             Task { @MainActor in self.owner?.failed(self.desktop.id, error.localizedDescription) }

@@ -28,6 +28,8 @@ import UserNotifications
                                              body: ["code": code, "name": UIDevice.current.name])
         let result = try JSONDecoder().decode(Pair.self, from: data)
         let desktop = Desktop(origin: origin, deviceId: result.device.deviceId, name: result.desktopName, token: result.token)
+        // A kept page injects the credential it was created with; a new pairing needs a new page.
+        DesktopPages.shared.remove(desktop.id)
         var next = desktops.filter { $0.id != desktop.id }; next.append(desktop)
         try Credentials.save(next); desktops = next
         await refresh()

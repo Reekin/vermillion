@@ -12,7 +12,7 @@ import { formatRelativeActivityAge } from "../chat-shell/SessionPane.js";
 import { useRendererStoreState } from "../chat-shell/use-renderer-store-state.js";
 import { useSessionSidebar, type SidebarSession } from "../app/use-session-sidebar.js";
 import { roleLabel } from "../app/components/workflow-display.js";
-import { statusLabel } from "../app/components/task-labels.js";
+import { projectChatTreeWorkers } from "../app/chat-tree-workers.js";
 import { Badge, BottomSheet, Button, ChoiceChips, EmptyState, Field, InlineNotice, ListRow, StatusDot, TabBar } from "../app/components/ui.js";
 import { describeServiceError, t } from "../../i18n/index.js";
 import { useT } from "../../i18n/react.js";
@@ -320,18 +320,20 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
 
   const snapshot = tree?.sessionId === sessionId ? tree?.snapshot : undefined;
   const relevantWork = work && work.workspaceId === snapshot?.workspaceId ? work : undefined;
-  const supervisors = useMemo(() => new Set((relevantWork?.requests ?? []).flatMap((request) => request.supervisor?.sessionId ? [request.supervisor.sessionId] : [])), [relevantWork]);
+  // Worker and preparation labels come from the same projection as the desktop session tree.
+  const projection = useMemo(() => projectChatTreeWorkers(snapshot, relevantWork?.items ?? [], relevantWork?.requests ?? [], true),
+    [snapshot, relevantWork]);
+  const supervisors = useMemo(() => new Set(Object.entries(projection.nodeMarkers).flatMap(([nodeId, marker]) =>
+    marker === "M" ? snapshot?.nodes.filter((node) => node.nodeId === nodeId).map((node) => node.sessionId!) ?? [] : [])), [projection, snapshot]);
   const branches = useMemo(() => snapshot ? treeBranches(snapshot, supervisors) : [], [snapshot, supervisors]);
   const treeSession = sessionId ? sidebar.findSession(snapshot?.treeId ?? sessionId) ?? cache?.sessions.find((entry) => entry.sessionId === sessionId) : undefined;
   const domain = store.getDomainReadModel();
   const describeBranch = (branch: TreeBranch): BranchDetail => {
-    const item = relevantWork?.items.find((entry) => entry.run.sessionId === branch.sessionId);
-    const request = relevantWork?.requests.find((entry) => entry.workerSessionId === branch.sessionId);
+    const worker = projection.workers.find((entry) => entry.sessionId === branch.sessionId);
     const session = domain.getSession(branch.sessionId);
     const waiting = session?.status === "awaiting_approval" ? t("session.statusAwaitingApproval") : undefined;
-    const time = formatRelativeActivityAge(session?.updatedAt ?? item?.updatedAt);
-    if (item) return { marker: "W", title: item.title, time, detail: [statusLabel(item.status), waiting ?? branch.lastLabel].filter(Boolean).join(" · ") };
-    if (request) return { marker: t("mobile.branches.preparation"), title: request.scope || t("work.preparation"), time, detail: waiting ?? branch.lastLabel };
+    const time = formatRelativeActivityAge(session?.updatedAt);
+    if (worker) return { marker: "W", title: worker.title, time, detail: [worker.activity, waiting ?? branch.lastLabel].filter(Boolean).join(" · ") };
     if (branch.sessionId === snapshot?.treeId) {
       return { title: [t("mobile.branches.mainline"), treeSession?.title].filter(Boolean).join(" · "), time, detail: waiting ?? branch.lastLabel };
     }
@@ -339,13 +341,13 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   };
   const workspaceLabel = (id?: string) => workspaces.find((w) => w.workspaceId === id)?.label;
 
-  if (connection === "unauthorized") return <EmptyState title={t("mobile.unauthorized")} hint={t("mobile.unauthorizedHint")} action={<Button onClick={reset}>{t("mobile.repair")}</Button>} />;
+  if (connection === "unauthorized") return <EmptyState title={t("mobile.unauthorized")} hint={t("mobile.unauthorizedHint")} action={<Button onClick={inApp() ? () => postNative({ type: "exit" }) : reset}>{inApp() ? t("mobile.desktops") : t("mobile.repair")}</Button>} />;
   const covered = Boolean(sessionId) && !leaving;
   const dragging = swipe.offset !== undefined;
   return <>
     <section className="vm-mobile-layer" data-level="list" data-covered={covered && !dragging ? "" : undefined} aria-hidden={covered || undefined}
       style={dragging ? { transform: `translateX(calc(-28% + ${(swipe.offset ?? 0) * 0.28}px))`, transition: "none" } : undefined}>
-      <ListHeader title={listTab === "inbox" ? "Inbox" : t("mobile.session")} desktopName={desktopName} connected={connected}>
+      <ListHeader title={listTab === "inbox" ? "Inbox" : t("mobile.sessionsTab")} desktopName={desktopName} connected={connected}>
         {listTab === "sessions" && workspaces.length > 1 && <ChoiceChips label={t("mobile.workspaceFilter")} value={workspaceFilter} onChange={setWorkspaceFilter}
           items={[{ value: "", label: t("mobile.allWorkspaces") }, ...workspaces.map((w) => ({ value: w.workspaceId, label: w.label }))]} />}
       </ListHeader>
@@ -360,14 +362,15 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
               </li>)}</ul>}
       </div>
       <TabBar label={t("mobile.navigation")} selected={listTab} onSelect={selectTab} items={[
-        { id: "sessions", label: t("mobile.session"), icon: MessageSquare },
+        { id: "sessions", label: t("mobile.sessionsTab"), icon: MessageSquare },
         { id: "inbox", label: "Inbox", icon: InboxIcon, badge: items.length }
       ]} />
     </section>
     {sessionId && <section className="vm-mobile-layer" data-level="session" data-leaving={leaving ? "" : undefined} {...swipe.handlers}
       style={dragging ? { transform: `translateX(${swipe.offset}px)`, transition: "none" } : undefined}>
       <MobileSessionPane sessionId={sessionId} store={store} transport={transport} reloadSignal={reloadSignal} disabled={!connected}
-        onVisiblePathChange={onVisiblePathChange} draftCache={runtime.drafts} branchSessionId={branchSessionId}
+        onVisiblePathChange={onVisiblePathChange} draftCache={runtime.drafts}
+        branchSessionId={branchSessionId ?? (treeSession && treeSession.sessionId !== sessionId ? sessionId : undefined)}
         title={treeSession?.title ?? domain.getSession(sessionId)?.title ?? t("mobile.session")}
         workspaceLabel={workspaceLabel(snapshot?.workspaceId ?? treeSession?.workspaceId)}
         backLabel={t("mobile.back")} onBack={closeSession}

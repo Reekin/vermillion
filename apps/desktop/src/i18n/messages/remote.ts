@@ -55,6 +55,7 @@ export const remote = defineMessages(
     "remote.apnsKeyFilter": "APNs 密钥",
 
     "mobile.desktops": "桌面",
+    "mobile.sessionsTab": "会话",
     "mobile.runningAwaitingApproval": "运行中 · 等待审批",
     "mobile.branches.open": (p: { count: number }) => `分支（${p.count}）`,
     "mobile.branches.title": "分支",
@@ -63,7 +64,6 @@ export const remote = defineMessages(
     "mobile.branches.empty": "暂无分支",
     "mobile.branches.failed": "分支读取失败",
     "mobile.branches.mainline": "主线",
-    "mobile.branches.preparation": "准备",
     "mobile.defaultDeviceName": "手机浏览器",
     "mobile.pairFailed": "配对失败",
     "mobile.cannotConnect": "无法连接桌面",
@@ -151,6 +151,7 @@ export const remote = defineMessages(
     "remote.apnsKeyFilter": "APNs key",
 
     "mobile.desktops": "Desktops",
+    "mobile.sessionsTab": "Sessions",
     "mobile.runningAwaitingApproval": "Running · awaiting approval",
     "mobile.branches.open": (p) => `Branches (${p.count})`,
     "mobile.branches.title": "Branches",
@@ -159,7 +160,6 @@ export const remote = defineMessages(
     "mobile.branches.empty": "No branches",
     "mobile.branches.failed": "Branches failed to load",
     "mobile.branches.mainline": "Main",
-    "mobile.branches.preparation": "Prep",
     "mobile.defaultDeviceName": "Phone browser",
     "mobile.pairFailed": "Pairing failed",
     "mobile.cannotConnect": "Cannot reach the desktop",
