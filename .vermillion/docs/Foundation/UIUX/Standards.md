@@ -19,7 +19,8 @@
 | 标题下的一句说明或错误 | `InlineNotice` |
 | 需要用户操作才能继续的异常或等待：原因、下一步和操作 | `Alert` |
 | 表单输入、文本域 | `Field` |
-| 单选下拉（含 workspace、模型等选择） | `Select` |
+| 单选下拉 | `Select` | 
+| 会话筛选和输入器的 workspace 搜索列表 | `WorkspaceMenu`（`WorkspacePicker.tsx`），调用方提供选择含义与目录操作 |
 | 同一列表的视图切换（进行中 / 已结束 / 全部） | `SegmentedControl` |
 | 开关类设置 | `Toggle` |
 | 只有图标的按钮 | `IconButton`（必带 `label`） |
