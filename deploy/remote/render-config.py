@@ -26,11 +26,13 @@ def main():
     parser.add_argument("--tls-dir", type=Path, default=Path("/etc/vermillion-remote/tls"))
     args = parser.parse_args()
     host = args.host
+    sni_default = None
     try:
         ip = ipaddress.ip_address(host)
         if not ip.is_global:
             parser.error("--host must be a public IP address")
         host = f"[{ip}]" if ip.version == 6 else str(ip)
+        sni_default = str(ip)
     except ValueError:
         if len(host) > 253 or "." not in host or not all(
             re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
@@ -79,7 +81,12 @@ def main():
     ]
     # Explicit ACME prevents Caddy's local-IP certificate defaults. HTTP-01 uses
     # port 80 even when each desktop's HTTPS endpoint uses a different port.
-    caddy = ["{", "\tadmin off", "\tauto_https disable_redirects", "}"]
+    caddy = ["{", "\tadmin off", "\tauto_https disable_redirects"]
+    # Clients send no SNI for IP addresses; on NAT cloud hosts the local address is
+    # private, so Caddy needs the public IP to select the issued certificate.
+    if sni_default:
+        caddy.append(f"\tdefault_sni {sni_default}")
+    caddy.append("}")
     for public, backend in mappings:
         caddy += [f"https://{host}:{public} {{", "\ttls {",
                   "\t\tissuer acme {", "\t\t\tdir https://acme-v02.api.letsencrypt.org/directory",
