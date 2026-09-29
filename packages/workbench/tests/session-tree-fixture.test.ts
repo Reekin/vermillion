@@ -68,7 +68,7 @@ describe("session-tree fixture preparation", () => {
       child.stdin.write(JSON.stringify({ id: 1, method: "config/read", params: { includeLayers: false, cwd: null } }) + "\n");
       child.stdin.write(JSON.stringify({ id: 2, method: "skills/list", params: {} }) + "\n");
       await expect.poll(() => responses).toEqual([
-        { id: 1, result: { config: { developer_instructions: null } } },
+        { id: 1, result: { config: { developer_instructions: null, sqlite_home: "I:/fixture-project" } } },
         { id: 2, result: { data: [] } }
       ]);
     } finally {
