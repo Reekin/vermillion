@@ -73,14 +73,14 @@
 
 .awb-mobile-composer {
   flex: none;
-  padding: 8px max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  padding: 6px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   border-top: 1px solid var(--awb-rule);
   background: var(--awb-bg);
 }
 .awb-mobile-runbar {
   display: flex;
-  min-height: 32px;
-  margin-bottom: 6px;
+  min-height: 24px;
+  margin-bottom: 4px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -90,15 +90,15 @@
 .awb-mobile-runbar > span { display: inline-flex; min-width: 0; align-items: center; gap: 6px; }
 /* Stop and Send are 44pt hit boxes around a smaller drawn control; negative margins keep the rows compact. */
 .awb-mobile-stop, .awb-mobile-send { display: grid; min-width: 44px; min-height: 44px; place-items: center; color: var(--awb-ink); }
-.awb-mobile-stop { margin: -8px -4px; padding: 0 4px; }
+.awb-mobile-stop { margin: -10px -4px; padding: 0 4px; }
 .awb-mobile-stop > span {
   display: inline-flex;
-  height: 28px;
+  height: 24px;
   align-items: center;
   gap: 5px;
   padding: 0 10px;
   border: 1px solid var(--awb-control-border);
-  border-radius: 14px;
+  border-radius: 12px;
   font: 500 var(--awb-text-caption) var(--awb-font-sans);
 }
 .awb-mobile-stop:disabled { opacity: var(--awb-control-disabled-opacity); }
@@ -107,7 +107,7 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 4px 4px 4px 14px;
+  padding: 3px 3px 3px 14px;
   border: 1px solid var(--awb-control-border);
   border-radius: 20px;
   background: var(--awb-input);
@@ -117,8 +117,8 @@
   flex: 1;
   min-width: 0;
   min-height: 32px;
-  max-height: calc(5 * 1.45em + 12px);
-  padding: 6px 0;
+  max-height: calc(5 * 1.45em + 8px);
+  padding: 4px 0;
   overflow-y: auto;
   resize: none;
   border: 0;
