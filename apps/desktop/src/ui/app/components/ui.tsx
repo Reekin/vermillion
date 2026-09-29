@@ -9,6 +9,7 @@
  * Fields        Field (input / textarea / number), Select, SegmentedControl, Toggle, Checkbox, Stepper, SettingRow
  * Structure     PageHeader, PanelHeader, Tabs, TabList, ListRow, Card, DisclosureCard, CollapsibleDetails, EmptyState, StatusBar
  * Overlays      HoverCard, Modal (Modal.tsx), ContextMenu (ContextMenu.tsx), DiffDialog (DiffDialog.tsx)
+ * Phone         TabBar, ChoiceChips, BottomSheet
  */
 import type {
   ButtonHTMLAttributes,
@@ -17,7 +18,7 @@ import type {
   ReactNode,
   TextareaHTMLAttributes
 } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Ban, Check, ChevronDown, ChevronRight, CircleAlert, CircleDashed, CircleX, Info, LoaderCircle, Minus, MoreHorizontal, Plus, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Select as BaseSelect } from "@base-ui/react/select";
@@ -631,3 +632,65 @@ export const EmptyState = ({ title, hint, action }: { title: string; hint?: stri
     {action && <div className="mt-3">{action}</div>}
   </div>
 );
+
+// ---- Phone ----
+
+/** Bottom tab bar switching the list-level pages of the phone view. `badge` counts items waiting for the user. */
+export const TabBar = <T extends string>({ label, items, selected, onSelect }: {
+  label: string; items: Array<{ id: T; label: string; icon: LucideIcon; badge?: number }>; selected: T; onSelect: (id: T) => void;
+}) => (
+  <nav className="vm-tabbar" aria-label={label}>
+    {items.map(({ id, label: text, icon: Icon, badge }) => (
+      <button key={id} type="button" className="vm-tabbar__tab" aria-current={id === selected ? "page" : undefined} onClick={() => onSelect(id)}>
+        <span className="vm-tabbar__icon">
+          <Icon size={22} strokeWidth={1.7} aria-hidden="true" />
+          {badge ? <span className="vm-tabbar__badge">{badge}</span> : null}
+        </span>
+        <span>{text}</span>
+      </button>
+    ))}
+  </nav>
+);
+
+/** One row of single-choice chips that scrolls sideways, e.g. the workspace filter on the phone. */
+export const ChoiceChips = <T extends string>({ label, items, value, onChange }: {
+  label: string; items: Array<{ value: T; label: string }>; value: T; onChange: (value: T) => void;
+}) => (
+  <div role="radiogroup" aria-label={label} className="vm-choice-chips">
+    {items.map((item) => (
+      <button key={item.value} type="button" role="radio" aria-checked={item.value === value} onClick={() => onChange(item.value)}><span>{item.label}</span></button>
+    ))}
+  </div>
+);
+
+/** Sheet rising from the bottom over a scrim. Tapping the scrim or dragging the handle down closes it. */
+export const BottomSheet = ({ title, meta, onClose, children }: { title: ReactNode; meta?: ReactNode; onClose: () => void; children: ReactNode }) => {
+  const [offset, setOffset] = useState(0);
+  const drag = useRef<{ startY: number; startAt: number } | undefined>(undefined);
+  const end = (clientY: number) => {
+    const start = drag.current;
+    drag.current = undefined;
+    if (!start) return;
+    const distance = clientY - start.startY;
+    const velocity = distance / Math.max(1, performance.now() - start.startAt);
+    if (distance > 80 || velocity > 0.6) onClose();
+    else setOffset(0);
+  };
+  return (
+    <div className="vm-sheet" role="presentation">
+      <div className="vm-sheet__scrim" onClick={onClose} />
+      <section role="dialog" aria-modal="true" className="vm-sheet__panel" data-dragging={drag.current ? "" : undefined}
+        style={offset ? { transform: `translateY(${offset}px)` } : undefined}>
+        <div className="vm-sheet__handle"
+          onPointerDown={(event) => { drag.current = { startY: event.clientY, startAt: performance.now() }; event.currentTarget.setPointerCapture(event.pointerId); }}
+          onPointerMove={(event) => { if (drag.current) setOffset(Math.max(0, event.clientY - drag.current.startY)); }}
+          onPointerUp={(event) => end(event.clientY)}
+          onPointerCancel={() => { drag.current = undefined; setOffset(0); }}>
+          <span className="vm-sheet__grab" />
+          <header className="vm-sheet__header"><h2>{title}</h2>{meta && <span>{meta}</span>}</header>
+        </div>
+        <div className="vm-sheet__body">{children}</div>
+      </section>
+    </div>
+  );
+};

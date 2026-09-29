@@ -33,17 +33,18 @@ final class PairingUITests: XCTestCase {
         capture("Two paired desktops", app: app)
         for gateway in gateways {
             app.buttons.containing(.staticText, identifier: gateway.name).firstMatch.tap()
-            XCTAssertTrue(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inbox'")).firstMatch.waitForExistence(timeout: 30))
+            XCTAssertTrue(app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS 'Inbox'")).firstMatch.waitForExistence(timeout: 30))
             XCTAssertFalse(app.webViews.textFields["配对码"].exists)
             capture("Authenticated web page " + gateway.name, app: app)
-            app.webViews.buttons["桌面列表"].tap()
+            // The page has no native bar; its own back row returns to the list, and a later visit reuses the kept page.
+            app.webViews.buttons["桌面"].tap()
             XCTAssertTrue(app.navigationBars["桌面列表"].waitForExistence(timeout: 5))
         }
         // A cold app process still uses Keychain credentials.
         app.terminate(); app.launch()
         XCTAssertTrue(app.buttons.containing(.staticText, identifier: gateways[0].name).firstMatch.waitForExistence(timeout: 20))
         app.buttons.containing(.staticText, identifier: gateways[0].name).firstMatch.tap()
-        XCTAssertTrue(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inbox'")).firstMatch.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS 'Inbox'")).firstMatch.waitForExistence(timeout: 30))
         capture("Keychain after process restart", app: app)
     }
 
@@ -64,7 +65,8 @@ final class PairingUITests: XCTestCase {
         let notification = springboard.staticTexts[title].firstMatch
         XCTAssertTrue(notification.waitForExistence(timeout: 120))
         notification.tap()
-        XCTAssertTrue(app.navigationBars[desktop].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.navigationBars["桌面列表"].waitForExistence(timeout: 5))
+        XCTAssertTrue(desktop.isEmpty || app.webViews.firstMatch.waitForExistence(timeout: 15))
         XCTAssertTrue(app.webViews.staticTexts[marker].firstMatch.waitForExistence(timeout: 30))
         capture("Tapped notification target", app: app)
     }

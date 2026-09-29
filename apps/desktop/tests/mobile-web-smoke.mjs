@@ -130,13 +130,13 @@ try {
   await browser("find", "label", "设备名称", "fill", deviceName);
   await browser("find", "label", "配对码", "fill", pairing.code);
   await browser("find", "role", "button", "click", "--name", "配对", "--exact");
-  await browser("wait", "--text", "会话列表");
+  await visible("document.querySelector('.vm-tabbar') !== null");
   await until("paired smoke device", async () => {
     deviceId = (await cli("remote.device.list")).find((device) => device.name === deviceName)?.deviceId;
     return !!deviceId;
   });
   check("Browser GUI paired with the bound isolated desktop");
-  await visible("document.querySelector('.vm-mobile-layout ul li') !== null");
+  await visible("document.querySelector('.vm-mobile-scroll ul li') !== null");
   await capture("session-list");
   check("Session list rendered actual desktop conversations");
   const conversationUrl = new URL(url.href);
@@ -165,8 +165,11 @@ try {
   await visible(`Array.from(document.querySelectorAll('.awb-message.is-assistant')).some(node => node.innerText.includes(${JSON.stringify(replyText)}))`);
   await capture("agent-reply");
   check("New completed agent reply confirmed by session.read and rendered assistant bubble, excluding user echo");
+  // Inbox is a list-level tab: leave the conversation first, as a user does.
+  await browser("find", "role", "button", "click", "--name", "返回", "--exact");
+  await visible("document.querySelector('.vm-tabbar') !== null && !document.querySelector('[data-level=\"session\"]')");
   await browser("find", "role", "button", "click", "--name", "Inbox");
-  await visible("location.hash.startsWith('#/inbox') && !document.body.innerText.includes('正在读取 Inbox') && !document.body.innerText.includes('Inbox 加载失败') && (document.body.innerText.includes('没有待处理事项') || document.querySelector('.vm-mobile-layout ul li'))");
+  await visible("location.hash.startsWith('#/inbox') && !document.body.innerText.includes('正在读取 Inbox') && !document.body.innerText.includes('Inbox 加载失败') && (document.body.innerText.includes('没有待处理事项') || document.querySelector('.vm-mobile-scroll ul li'))");
   await capture("inbox");
   check("Inbox opened from mobile navigation");
 } catch (error) {

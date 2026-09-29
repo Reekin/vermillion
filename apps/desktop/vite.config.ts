@@ -6,7 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 const fromHere = (relativePath: string) =>
   fileURLToPath(new URL(relativePath, import.meta.url));
 
-export default defineConfig({
+// The phone page is built as its own graph so it never loads the desktop shell's shared chunk.
+export default defineConfig(({ mode }) => ({
   base: "./",
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -21,12 +22,13 @@ export default defineConfig({
   },
   build: {
     outDir: "dist-web",
-    emptyOutDir: true,
+    emptyOutDir: mode !== "mobile",
     rollupOptions: {
-      input: {
-        main: fromHere("./index.html"),
-        mobile: fromHere("./mobile.html")
-      }
+      input: mode === "mobile" ? { mobile: fromHere("./mobile.html") } : { main: fromHere("./index.html") },
+      // The phone page never edits source; let the shared UI barrel's code editor drop out of its graph.
+      ...(mode === "mobile" ? {
+        treeshake: { moduleSideEffects: (id: string) => !/[\\/](@codemirror|@lezer|codemirror)[\\/]|SourceEditor\.tsx$/.test(id) }
+      } : {})
     }
   }
-});
+}));

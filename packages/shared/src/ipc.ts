@@ -748,7 +748,9 @@ const zChatTreeGetRequestSchema = z.object({
     scope: z.enum(["tree", "path"]).optional(),
     /** Complete member baselines actually held by the caller, with applied event watermarks. */
     knownWindows: z.record(z.object({ revision: z.string().min(1), cursor: z.string().min(1).optional() })).optional(),
-    readId: z.string().min(1).optional()
+    readId: z.string().min(1).optional(),
+    /** path only: read this member's branch tip instead of the saved view, without changing the saved view. */
+    viewSessionId: zSessionId.optional()
   })
 });
 

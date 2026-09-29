@@ -1,16 +1,13 @@
 import SwiftUI
 import UserNotifications
 
-struct Destination: Identifiable {
-    let id = UUID()
-    let desktop: Desktop
-    var target: String = ""
-}
-
 @MainActor final class DesktopStore: ObservableObject {
     static let shared = DesktopStore()
     @Published var desktops: [Desktop] = []
-    @Published var destination: Destination?
+    /// Navigation stack of the desktop list: empty, or the id of the desktop being shown.
+    @Published var path: [String] = []
+    /// The last desktop and route opened, for notification routing checks.
+    private(set) var lastOpened: (desktopId: String, target: String)?
     @Published var error: String?
     @Published var pairingURL: URL?
     private var pushToken: String?
@@ -49,7 +46,15 @@ struct Destination: Identifiable {
             }
         }
     }
+    /// Pushes a desktop's page; a notification target routes it to that session or Inbox item.
+    func open(_ desktop: Desktop, target: String = "") {
+        lastOpened = (desktop.id, target)
+        DesktopPages.shared.show(desktop, target: target)
+        if path != [desktop.id] { path = [desktop.id] }
+    }
     func remove(_ desktop: Desktop) async {
+        path.removeAll { $0 == desktop.id }
+        DesktopPages.shared.remove(desktop.id)
         await serializePush {
             var unregisterFailed = false
             do { try await self.pushRequest(desktop, "DELETE", nil) }
@@ -99,7 +104,7 @@ struct Destination: Identifiable {
               let desktop = desktops.first(where: { $0.origin == origin }) else {
             error = RemoteError.invalidNotification.localizedDescription; return
         }
-        destination = Destination(desktop: desktop, target: target)
+        open(desktop, target: target)
     }
 }
 
@@ -144,11 +149,11 @@ struct DesktopList: View {
     @State private var adding = false
     @State private var removing: Desktop?
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $store.path) {
             List {
                 if store.desktops.isEmpty { Text("添加桌面后即可查看会话和 Inbox。").foregroundStyle(.secondary) }
                 ForEach(store.desktops) { desktop in
-                    Button { store.destination = Destination(desktop: desktop) } label: {
+                    Button { store.open(desktop) } label: {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(desktop.name)
@@ -175,9 +180,8 @@ struct DesktopList: View {
                 .refreshable { await store.refresh(); await store.registerPush() }
                 .sheet(isPresented: $adding) { PairingView(store: store, initial: store.pairingURL) }
                 .onChange(of: store.pairingURL) { _, url in if url != nil { adding = true } }
-                .fullScreenCover(item: $store.destination) { destination in
-                    DesktopWebScreen(destination: destination) { store.destination = nil }
-                        .id(destination.id)
+                .navigationDestination(for: String.self) { id in
+                    if let desktop = store.desktops.first(where: { $0.id == id }) { DesktopWebScreen(desktop: desktop, store: store) }
                 }
                 .confirmationDialog("移除这台桌面？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
                     Button("移除桌面", role: .destructive) { if let desktop = removing { Task { await store.remove(desktop) } }; removing = nil }

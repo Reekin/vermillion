@@ -10,3 +10,4 @@ export function parseMobileRoute(hash: string): MobileRoute {
 }
 
 export const sessionHash = (sessionId: string) => "#/session/" + encodeURIComponent(sessionId);
+export const listHash = (page: "sessions" | "inbox") => "#/" + page;

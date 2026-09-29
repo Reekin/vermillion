@@ -45,8 +45,8 @@ function InboxCard({ item, client, refresh, openSession }: {
   </>}>
     {item.kind === "decision" ? <>
       {item.card.workItemId && <p className="mb-2 break-words text-caption text-muted-foreground">{related?.title ?? item.card.workItemId}</p>}
-      <h2 className="break-words text-title-sm font-medium text-strong">{serviceText(item.card.question)}</h2>
-      <p className="mt-2 whitespace-pre-wrap break-words text-body text-muted-foreground">{serviceText(item.card.context)}</p>
+      <h2 className="vm-selectable break-words text-title-sm font-medium text-strong">{serviceText(item.card.question)}</h2>
+      <p className="vm-selectable mt-2 whitespace-pre-wrap break-words text-body text-muted-foreground">{serviceText(item.card.context)}</p>
       {(item.card.adjustments ?? []).map((adjustment) => <p key={adjustment.at} className="mt-2 whitespace-pre-wrap text-body text-foreground">{adjustment.note}</p>)}
       {item.card.answer ? <div className="mt-4 space-y-2">
         <p className="whitespace-pre-wrap break-words text-body text-foreground">{[
@@ -61,7 +61,7 @@ function InboxCard({ item, client, refresh, openSession }: {
           {item.card.options.map((option) => <div key={option.key}>
             <Button className="w-full justify-start whitespace-normal text-left" aria-pressed={choice === option.key} disabled={busy}
               variant={choice === option.key ? "primary" : "secondary"} onClick={() => setChoice(choice === option.key ? undefined : option.key)}>{serviceText(option.label)}</Button>
-            {option.detail && <p className="mt-1 whitespace-pre-wrap break-words text-caption text-muted-foreground">{serviceText(option.detail)}</p>}
+            {option.detail && <p className="vm-selectable mt-1 whitespace-pre-wrap break-words text-caption text-muted-foreground">{serviceText(option.detail)}</p>}
             {option.key === item.card.recommended && item.card.recommendation && <p className="mt-1 whitespace-pre-wrap text-caption text-foreground">{t("mobile.recommendation", { reason: serviceText(item.card.recommendation) })}</p>}
           </div>)}
         </div>
@@ -70,10 +70,10 @@ function InboxCard({ item, client, refresh, openSession }: {
       </form>}
       {item.card.details && <CollapsibleDetails open={details} onToggle={() => setDetails(!details)}>{item.card.details}</CollapsibleDetails>}
     </> : <>
-      <h2 className="break-words text-title-sm font-medium text-strong">{item.workItem.title}</h2>
+      <h2 className="vm-selectable break-words text-title-sm font-medium text-strong">{item.workItem.title}</h2>
       {item.kind === "merged" ? <>
-        <p className="mt-2 whitespace-pre-wrap break-words text-body text-foreground">{item.workItem.evidence?.summary}</p>
-        <ul className="mt-3 space-y-2">{item.workItem.verify?.items.map((entry) => <li key={entry.index} className="whitespace-pre-wrap break-words text-body text-muted-foreground">{entry.evidence}</li>)}</ul>
+        <p className="vm-selectable mt-2 whitespace-pre-wrap break-words text-body text-foreground">{item.workItem.evidence?.summary}</p>
+        <ul className="mt-3 space-y-2">{item.workItem.verify?.items.map((entry) => <li key={entry.index} className="vm-selectable whitespace-pre-wrap break-words text-body text-muted-foreground">{entry.evidence}</li>)}</ul>
         <CollapsibleDetails open={details} onToggle={() => setDetails(!details)}>{technicalDetails(item.workItem)}</CollapsibleDetails>
         <Button className="mt-3" variant="primary" disabled={busy} onClick={() => void run()}>{t("work.inbox.acknowledge")}</Button>
       </> : <>
@@ -96,7 +96,7 @@ export function MobileInbox({ items, error, loading, route, client, refresh, ope
   if (loading && !items.length) return <EmptyState title={t("mobile.loadingInbox")} />;
   if (!items.length) return <EmptyState title={t("work.inbox.nothingPending")} />;
   const missing = route.itemKey && !items.some((item) => item.workspaceId === route.workspaceId && inboxKey(item) === route.itemKey);
-  return <div className="min-h-0 flex-1 overflow-auto">
+  return <div>
     {missing && <InlineNotice className="pt-3">{t("mobile.itemHandled")}</InlineNotice>}
     <ul className="space-y-3 p-3">{items.map((item) => <li key={item.workspaceId + "/" + inboxKey(item)}
       ref={item.workspaceId === route.workspaceId && inboxKey(item) === route.itemKey ? selected : undefined}>
