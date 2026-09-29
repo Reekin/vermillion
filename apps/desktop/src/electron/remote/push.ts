@@ -1,3 +1,4 @@
+import { serviceError } from "@vermillion/workbench";
 import { createPrivateKey, randomUUID, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { connect, type ClientHttp2Stream, type OutgoingHttpHeaders } from "node:http2";
@@ -14,29 +15,29 @@ export const pushConfigured = (config: RemoteConfig): boolean =>
 export async function sendApnsRequest(request: ApnsRequest): Promise<ApnsReply> {
   return new Promise((resolve, reject) => {
     const client = connect(request.origin);
-    const timer = setTimeout(() => fail(new Error("APNs 请求超时")), 15_000);
+    const timer = setTimeout(() => fail(serviceError("remote.apnsTimeout")), 15_000);
     let settled = false;
     const finish = () => { settled = true; clearTimeout(timer); client.destroy(); };
     const fail = (error: Error) => { if (!settled) { finish(); reject(error); } };
     client.on("error", fail);
-    client.on("close", () => { if (!settled) fail(new Error("APNs 连接已关闭")); });
+    client.on("close", () => { if (!settled) fail(serviceError("remote.apnsClosed")); });
     client.once("connect", () => {
       let stream: ClientHttp2Stream;
       try { stream = client.request(request.headers); }
-      catch (error) { fail(error instanceof Error ? error : new Error("APNs 请求无效")); return; }
+      catch (error) { fail(error instanceof Error ? error : serviceError("remote.apnsInvalidRequest")); return; }
       let status = 0, body = "", apnsId = String(request.headers["apns-id"]);
       stream.setEncoding("utf8");
       stream.on("response", (headers) => { status = Number(headers[":status"]); apnsId = String(headers["apns-id"] ?? apnsId); });
       stream.on("data", (chunk: string) => {
         body += chunk;
-        if (body.length > 8192) fail(new Error("APNs 响应过大"));
+        if (body.length > 8192) fail(serviceError("remote.apnsResponseTooLarge"));
       });
       stream.on("error", fail);
       stream.on("end", () => {
         if (settled) return;
         let reason: string | undefined;
         try { reason = body ? (JSON.parse(body) as { reason?: string }).reason : undefined; }
-        catch { fail(new Error("APNs 返回无效响应")); return; }
+        catch { fail(serviceError("remote.apnsInvalidResponse")); return; }
         finish(); resolve({ status, apnsId, reason });
       });
       stream.end(request.body);
@@ -58,7 +59,7 @@ export class ApnsSender {
     const settings = JSON.stringify([config.apnsKeyPath, config.apnsKeyId, config.apnsTeamId]);
     if (this.cached?.settings === settings && issuedAt - this.cached.issuedAt < 3000 && issuedAt >= this.cached.issuedAt) return this.cached.token;
     const key = createPrivateKey(await readFile(config.apnsKeyPath));
-    if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") throw new Error("APNs 密钥必须是 P-256 EC 私钥");
+    if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") throw serviceError("remote.apnsKeyInvalid");
     const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
     const value = encode({ alg: "ES256", kid: config.apnsKeyId }) + "." + encode({ iss: config.apnsTeamId, iat: issuedAt });
     const token = value + "." + sign("sha256", Buffer.from(value), { key, dsaEncoding: "ieee-p1363" }).toString("base64url");
@@ -66,9 +67,9 @@ export class ApnsSender {
     return token;
   }
   async send(config: RemoteConfig, registration: PushRegistration, desktopUrl: string, message: PushMessage): Promise<ApnsReply> {
-    if (!pushConfigured(config)) throw new Error("请配置 APNs 密钥路径、Key ID、Team ID 和 App Bundle ID");
+    if (!pushConfigured(config)) throw serviceError("remote.apnsNotConfigured");
     const body = JSON.stringify({ aps: { alert: { title: config.desktopName.slice(0, 100), body: message.body.slice(0, 240) }, sound: "default" }, desktopUrl, target: message.target });
-    if (Buffer.byteLength(body) > 4096) throw new Error("APNs 通知超过 4096 字节");
+    if (Buffer.byteLength(body) > 4096) throw serviceError("remote.apnsTooLarge");
     return this.request({
       origin: registration.environment === "sandbox" ? "https://api.sandbox.push.apple.com" : "https://api.push.apple.com",
       headers: { ":method": "POST", ":path": "/3/device/" + registration.token, authorization: "bearer " + await this.authorization(config),

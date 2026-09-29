@@ -103,7 +103,7 @@ describe("remote device pairing", () => {
     await withDevices(async (devices, directory) => {
       const pairing = devices.pair(publicUrl, "Test desktop");
       const result = await devices.exchange(pairing.code, " Phone ");
-      await expect(devices.exchange(pairing.code, "Other phone")).rejects.toThrow("配对码无效或已过期");
+      await expect(devices.exchange(pairing.code, "Other phone")).rejects.toThrow("The pairing code is invalid or expired.");
       const content = await readFile(join(directory, "devices.json"), "utf8");
       expect(content.includes(result.token)).toBe(false);
       const stored = JSON.parse(content);
@@ -125,7 +125,7 @@ describe("remote device pairing", () => {
       const pairing = devices.pair(publicUrl, "Test desktop");
       expect(pairing.expiresAt).toBe("2026-09-26T00:10:00.000Z");
       advance(600_000);
-      await expect(devices.exchange(pairing.code, "Phone")).rejects.toThrow("配对码无效或已过期");
+      await expect(devices.exchange(pairing.code, "Phone")).rejects.toThrow("The pairing code is invalid or expired.");
       expect(devices.list()).toEqual([]);
     });
   });
@@ -137,7 +137,7 @@ describe("remote device pairing", () => {
       await devices.exchange(pairing.code, "Phone");
       pairing = devices.pair(publicUrl, "Test desktop");
       for (let n = 0; n < 5; n++) await expect(devices.exchange("wrong", "Phone")).rejects.toThrow();
-      await expect(devices.exchange(pairing.code, "Phone")).rejects.toThrow("配对码无效或已过期");
+      await expect(devices.exchange(pairing.code, "Phone")).rejects.toThrow("The pairing code is invalid or expired.");
       expect(devices.list()).toHaveLength(1);
     });
   });
@@ -177,7 +177,7 @@ describe("remote gateway over HTTP and WebSocket", () => {
       expect(response.status).toBe(200);
       const { token } = await response.json() as { token: string };
       expect((await exchange()).status).toBe(400);
-      for (const headers of [{}, { authorization: "Bearer invalid" }, { authorization: `Basic ${token}` }]) {
+      for (const headers of [{}, { authorization: "Bearer invalid" }, { authorization: `Basic ${token}` }] as Record<string, string>[]) {
         expect((await fetch(`${f.http}/api/summary`, { headers })).status).toBe(401);
       }
       expect(f.summary).not.toHaveBeenCalled();

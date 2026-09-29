@@ -16,7 +16,7 @@ it("shows persisted pending answers instead of offering a replacement answer", (
   const html = render({ ...decision, card: { ...decision.card, answer: { key: "keep", note: "原答复", at: "2026-09-26T01:00:00Z" },
     deliveryPending: true, deliveryFailure: "执行会话未连接" } });
   expect(html).toContain("原答复");
-  expect(html).toContain("答复已登记，等待交付");
+  expect(html).toContain("答复已保存，等待送达执行会话");
   expect(html).toContain("执行会话未连接");
   expect(html).toContain("重试送达");
   expect(html).not.toContain("<textarea");

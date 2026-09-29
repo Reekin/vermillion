@@ -41,7 +41,7 @@ it("signs verifiable ES256 JWTs, caches concurrent requests and routes APNs envi
   await sender.send(config, { ...registration, environment: "production" }, config.publicUrl, message);
   expect(requests[2]!.origin).toBe("https://api.push.apple.com");
   expect(requests[2]!.headers.authorization).not.toBe(request.headers.authorization);
-  await expect(sender.send(zRemoteConfig.parse(base), registration, config.publicUrl, message)).rejects.toThrow("请配置 APNs");
+  await expect(sender.send(zRemoteConfig.parse(base), registration, config.publicUrl, message)).rejects.toThrow("Configure the APNs");
 });
 
 it("uses HTTP/2 and returns APNs acceptance and rejection details", async () => {
@@ -86,13 +86,13 @@ it("reports missing credentials and invalidates rejected tokens through the CLI 
     const device = await service.devices.exchange(pairing.code, "test phone");
     await service.devices.registerPush(device.device.deviceId, { token: "aa".repeat(32), environment: "sandbox" });
     const request = { method: "remote.push.test", params: { deviceId: device.device.deviceId } };
-    expect(await service.handleRequest(request)).toMatchObject({ ok: false, error: expect.stringContaining("请配置 APNs") });
+    expect(await service.handleRequest(request)).toMatchObject({ ok: false, error: expect.stringContaining("Configure the APNs") });
     const sender = vi.spyOn(ApnsSender.prototype, "send").mockResolvedValue({ status: 200, apnsId: "test-acceptance" });
     expect(await service.handleRequest(request)).toEqual({ ok: true, result: { accepted: true, apnsId: "test-acceptance" } });
     sender.mockResolvedValue({ status: 410, apnsId: "test-invalid", reason: "Unregistered" });
     expect(await service.handleRequest(request)).toMatchObject({ ok: false, error: "APNs 410: Unregistered" });
     expect(service.devices.list()[0]?.pushAvailable).toBe(false);
-    expect(service.status().pushError).toBe("APNs 410: Unregistered");
+    expect(service.status().pushError).toEqual({ code: "remote.apnsRejected", params: { status: 410, reason: "Unregistered" } });
   } finally { await service.dispose(); }
 });
 

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { workbenchRpc, zRemoteConfig, type RemoteConfig, type WorkbenchRpcResponse } from "@vermillion/workbench";
+import { failureText, serviceError, ServiceError, text, workbenchRpc, zRemoteConfig, type ServiceText, type RemoteConfig, type WorkbenchRpcResponse } from "@vermillion/workbench";
 import { RemoteDevices } from "./devices.js";
 import { startRemoteGateway, type GatewayOptions } from "./gateway.js";
 import { RemoteTunnel } from "./tunnel.js";
@@ -12,8 +12,8 @@ export class RemoteAccessService {
   private config: RemoteConfig = zRemoteConfig.parse({ enabled: false, serverAddr: "", frpToken: "", publicUrl: "", desktopName: hostname(), frpcPath: "" });
   private gateway?: Awaited<ReturnType<typeof startRemoteGateway>>;
   private tunnel: RemoteTunnel;
-  private error?: string;
-  private pushError?: string;
+  private error?: ServiceText;
+  private pushError?: ServiceText;
   private readonly sender = new ApnsSender();
   private operations: Promise<unknown> = Promise.resolve();
   constructor(private readonly directory: string, private readonly options: Omit<GatewayOptions, "devices" | "publicUrl" | "desktopName">) {
@@ -41,12 +41,12 @@ export class RemoteAccessService {
     this.error = undefined;
     if (!this.config.enabled) return;
     try {
-      if (!this.config.serverAddr.trim() || !this.config.frpToken) throw new Error("请填写 VPS 地址和 frp token");
+      if (!this.config.serverAddr.trim() || !this.config.frpToken) throw serviceError("remote.addressRequired");
       const url = new URL(this.publicUrl());
-      if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("公网地址必须是 HTTPS 源地址");
+      if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw serviceError("remote.publicUrlInvalid");
       this.gateway = await startRemoteGateway({ ...this.options, devices: this.devices, publicUrl: url.origin, desktopName: this.config.desktopName });
       await this.tunnel.start(this.config, this.gateway.port);
-    } catch (error) { this.error = error instanceof Error ? error.message : "远程访问启动失败"; }
+    } catch (error) { this.error = error instanceof Error ? failureText(error) : text("remote.startFailed"); }
   }
   private async configure(patch?: Partial<RemoteConfig>): Promise<RemoteConfig> {
     if (!patch) return this.getConfig();
@@ -72,35 +72,37 @@ export class RemoteAccessService {
           case "remote.status": result = this.status(); break;
           case "remote.configure": result = await this.configure(params.patch); break;
           case "remote.pair":
-            if (!this.gateway) throw new Error("请先开启并配置远程访问");
+            if (!this.gateway) throw serviceError("remote.notConfigured");
             result = this.devices.pair(this.publicUrl(), this.config.desktopName); break;
           case "remote.device.list": result = this.devices.list(); break;
-          case "remote.push.test": result = await this.sendPush(params.deviceId!, { body: "测试推送", target: "#/inbox" }); break;
+          case "remote.push.test": result = await this.sendPush(params.deviceId!, { body: "Vermillion test notification", target: "#/inbox" }); break;
           case "remote.device.revoke":
             this.gateway?.revoke(params.deviceId!);
             await this.devices.revoke(params.deviceId!); result = {}; break;
           default: throw new Error("Unknown remote method");
         }
         return { ok: true, result: definition.result.parse(result) };
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Remote operation failed" }; }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Remote operation failed", ...(error instanceof ServiceError ? { text: error.text } : {}) };
+      }
     });
     this.operations = run;
     return run;
   }
   private async sendPush(deviceId: string, message: PushMessage): Promise<{ accepted: true; apnsId: string }> {
     try {
-      if (!this.config.enabled) throw new Error("请先开启远程访问");
+      if (!this.config.enabled) throw serviceError("remote.notEnabled");
       const target = this.devices.pushTargets().find((entry) => entry.deviceId === deviceId);
-      if (!target) throw new Error("设备尚未登记推送，或已被移除");
+      if (!target) throw serviceError("remote.pushNotRegistered");
       const reply = await this.sender.send(this.getConfig(), target.push, new URL(this.publicUrl()).origin, message);
       if (reply.status === 410 || reply.reason === "Unregistered" || reply.reason === "BadDeviceToken") {
         await this.devices.invalidatePush(deviceId, target.push);
       }
-      if (reply.status !== 200) throw new Error(`APNs ${reply.status}: ${reply.reason ?? "请求失败"}`);
+      if (reply.status !== 200) throw serviceError("remote.apnsRejected", { status: reply.status, reason: reply.reason ?? "request failed" });
       this.pushError = undefined;
       return { accepted: true, apnsId: reply.apnsId };
     } catch (error) {
-      this.pushError = error instanceof Error ? error.message : "推送失败";
+      this.pushError = error instanceof Error ? failureText(error) : text("remote.pushFailed");
       throw error;
     }
   }

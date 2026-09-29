@@ -1,3 +1,4 @@
+import { ServiceError } from "@vermillion/workbench";
 import { createServer, type IncomingMessage } from "node:http";
 import { readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
@@ -87,7 +88,7 @@ export async function startRemoteGateway(options: GatewayOptions) {
       res.writeHead(200, { "content-type": contentTypes[extname(file)] ?? "application/octet-stream" }).end(await readFile(file));
     } catch (error) {
       if (res.headersSent) { res.end(); return; }
-      reply((error as NodeJS.ErrnoException).code === "ENOENT" ? 404 : 400, { error: error instanceof Error ? error.message : "Request failed" });
+      reply((error as NodeJS.ErrnoException).code === "ENOENT" ? 404 : 400, { error: error instanceof Error ? error.message : "Request failed", ...(error instanceof ServiceError ? { text: error.text } : {}) });
     }
   });
   server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });

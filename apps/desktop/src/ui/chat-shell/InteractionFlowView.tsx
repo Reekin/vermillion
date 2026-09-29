@@ -22,7 +22,6 @@ export type InteractionResponseInput = {
 };
 
 export type InteractionFlowViewProps = {
-  chineseLabels?: boolean;
   interactions: RuntimeInteraction[];
   participantDirectory?: ParticipantDirectory;
   onRespond?: (input: InteractionResponseInput) => Promise<void>;
@@ -72,7 +71,6 @@ const parseJsonObject = (value: string): Record<string, unknown> | undefined => 
 };
 
 export const InteractionFlowView = ({
-  chineseLabels = false,
   interactions,
   participantDirectory = defaultDirectory,
   onRespond

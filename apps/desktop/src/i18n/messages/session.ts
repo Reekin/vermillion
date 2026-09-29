@@ -209,7 +209,10 @@ export const session = defineMessages(
     "session.slashResumeDetail": "重新加载当前会话",
     "session.slashInterruptDetail": "中断当前轮次",
     "session.skillEnabled": "已启用",
-    "session.skillDisabled": "已停用"
+    "session.skillDisabled": "已停用",
+    "session.approveWithRule": "批准并记住规则",
+    "session.applyNetworkRule": "应用网络规则",
+    "session.toolAndTerminalOutput": (p: { count: number }) => `工具与终端输出 · ${p.count}`
   },
   {
     "session.imagePreview": "Image preview",
@@ -417,6 +420,9 @@ export const session = defineMessages(
     "session.slashResumeDetail": "Reload the current session",
     "session.slashInterruptDetail": "Interrupt the active turn",
     "session.skillEnabled": "Enabled",
-    "session.skillDisabled": "Disabled"
+    "session.skillDisabled": "Disabled",
+    "session.approveWithRule": "Approve and remember rule",
+    "session.applyNetworkRule": "Apply network rule",
+    "session.toolAndTerminalOutput": (p) => `Tool and terminal output · ${p.count}`
   }
 );

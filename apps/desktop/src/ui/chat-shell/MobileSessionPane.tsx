@@ -9,6 +9,7 @@ import { useRendererConversationParticipants, useRendererSessionSelection, useRe
 import { useTranscriptViewportController } from "./use-transcript-viewport-controller.js";
 import { createCoalescedRefresh } from "./coalesced-refresh.js";
 import { toggleProcessVisibility, type ProcessVisibilityOverride } from "./process-visibility.js";
+import { t } from "../../i18n/index.js";
 import "./mobile-session.css";
 
 export type MobileSessionPaneProps = {
@@ -108,8 +109,8 @@ const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, d
   const currentTurn = (session?.lastTurnId ? domain.getTurn(session.lastTurnId) : undefined) ?? turns.at(-1);
   const completedVisibleKey = turns.filter((turn) => turn.status === "completed").map((turn) => turn.turnId).join("\n");
   const running = Boolean(currentTurn && currentTurn.status !== "completed");
-  const status = session?.status === "awaiting_approval" ? "等待审批"
-    : session?.status === "error" ? "失败" : running ? "运行中" : path ? "就绪" : "正在加载";
+  const status = session?.status === "awaiting_approval" ? t("session.statusAwaitingApproval")
+    : session?.status === "error" ? t("mobile.statusFailed") : running ? t("session.statusRunning") : path ? t("session.statusReady") : t("common.loading");
   const viewport = useTranscriptViewportController({
     displayedSessionId: sessionId, isOpeningSelectedSession: !path,
     windowStartTurnId: turns[0]?.turnId, windowEndTurnId: currentTurn?.turnId,
@@ -153,7 +154,7 @@ const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, d
       const receipt = running && currentTurn
         ? await transport.chat.steer({ sessionId: targetSessionId, turnId: currentTurn.turnId, content })
         : await transport.chat.send({ sessionId: targetSessionId, content });
-      if (!receipt.accepted) throw new Error("消息未被接受，请稍后重试。");
+      if (!receipt.accepted) throw new Error(t("mobile.notAccepted"));
       if (mounted.current) {
         setDraft((value) => value === draft ? "" : value);
         viewportRef.current.scrollToBottom(sessionId);
@@ -177,14 +178,14 @@ const MobileSessionContent = ({ sessionId, store, transport, reloadSignal = 0, d
       onRespondInteraction={disabled ? undefined : async (input) => { await transport.interaction.respond(input); await refresh(); }}
     />
     <form className="awb-mobile-composer" onSubmit={(event) => { event.preventDefault(); send(); }}>
-      <div className="awb-mobile-composer__status" role="status">{disabled ? "离线" : status}</div>
+      <div className="awb-mobile-composer__status" role="status">{disabled ? t("mobile.offline") : status}</div>
       {error && !disabled && <p className="awb-mobile-composer__error" role="alert">{error}</p>}
-      <textarea aria-label="消息" placeholder="发送消息" value={draft} rows={3}
+      <textarea aria-label={t("mobile.message")} placeholder={t("mobile.messagePlaceholder")} value={draft} rows={3}
         onChange={(event) => setDraft(event.target.value)} />
       <div className="awb-mobile-composer__actions">
         {running && currentTurn && <button type="button" disabled={disabled || busy}
-          onClick={() => { void runAction(() => transport.chat.interrupt({ sessionId: targetSessionId, turnId: currentTurn.turnId })); }}>停止</button>}
-        <button type="submit" disabled={disabled || busy || !path || !draft.trim()}>{busy ? "处理中" : "发送"}</button>
+          onClick={() => { void runAction(() => transport.chat.interrupt({ sessionId: targetSessionId, turnId: currentTurn.turnId })); }}>{t("session.stop")}</button>}
+        <button type="submit" disabled={disabled || busy || !path || !draft.trim()}>{busy ? t("mobile.processing") : t("session.send")}</button>
       </div>
     </form>
   </div>;

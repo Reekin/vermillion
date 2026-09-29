@@ -21,7 +21,6 @@ export type ApprovalResponseInput = {
 };
 
 export type ApprovalFlowViewProps = {
-  chineseLabels?: boolean;
   approvals: ApprovalRequest[];
   participantDirectory?: ParticipantDirectory;
   onRespond?: (input: ApprovalResponseInput) => Promise<void>;
@@ -90,6 +89,12 @@ const decisionButtonLabel = (label: string): string => {
   if (label === "acceptForSession") {
     return t("session.approveForSession");
   }
+  if (label === "acceptWithExecpolicyAmendment") {
+    return t("session.approveWithRule");
+  }
+  if (label === "applyNetworkPolicyAmendment") {
+    return t("session.applyNetworkRule");
+  }
   if (label === "decline") {
     return t("session.decline");
   }
@@ -127,7 +132,6 @@ const decisionLabelsFor = (approval: ApprovalRequest): string[] => {
 };
 
 export const ApprovalFlowView = ({
-  chineseLabels = false,
   approvals,
   participantDirectory = defaultDirectory,
   onRespond
@@ -226,7 +230,7 @@ export const ApprovalFlowView = ({
                       )
                     }
                   >
-                    {chineseLabels ? ({ accept: "批准", acceptForSession: "本会话始终批准", acceptWithExecpolicyAmendment: "批准并记住规则", applyNetworkPolicyAmendment: "应用网络规则", decline: "拒绝", cancel: "取消执行" }[decision] ?? decisionButtonLabel(decision)) : decisionButtonLabel(decision)}
+                    {decisionButtonLabel(decision)}
                   </Button>
                 ))
               ) : (

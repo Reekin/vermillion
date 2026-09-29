@@ -147,7 +147,31 @@ export const serviceMessages = {
   "result.rootMixedCommit": (p: { commit: string }) => `A commit mixes this work item's changes with changes outside its scope, so a rollback cannot be recorded safely: ${p.commit}`,
   "result.rootEmpty": "The commit range has no code results of this work item.",
   "error.docsConflict": (p: { files: string }) =>
-    `The doc draft conflicts with the main branch: ${p.files}. Run docs.rebase to bring this session's draft onto the main branch, resolve the conflict markers, save with docs.write and run docs.commit again.`
+    `The doc draft conflicts with the main branch: ${p.files}. Run docs.rebase to bring this session's draft onto the main branch, resolve the conflict markers, save with docs.write and run docs.commit again.`,
+
+  "remote.frpcNotFound": "No executable frpc was found; choose the program path.",
+  "remote.caRequired": "Choose the frp server CA certificate that verifies the VPS.",
+  "remote.frpcExited": (p: { code: string }) => `frpc exited (${p.code}).`,
+  "remote.tunnelFailed": "The tunnel failed to start.",
+  "remote.addressRequired": "Enter the VPS address and the frp token.",
+  "remote.publicUrlInvalid": "The public address must be an HTTPS origin.",
+  "remote.startFailed": "Remote access failed to start.",
+  "remote.notConfigured": "Enable and configure remote access first.",
+  "remote.notEnabled": "Enable remote access first.",
+  "remote.pushNotRegistered": "The device has not registered for push, or it was removed.",
+  "remote.apnsRejected": (p: { status: number; reason: string }) => `APNs ${p.status}: ${p.reason}`,
+  "remote.pushFailed": "The push failed.",
+  "remote.apnsTimeout": "The APNs request timed out.",
+  "remote.apnsClosed": "The APNs connection closed.",
+  "remote.apnsInvalidRequest": "The APNs request is invalid.",
+  "remote.apnsResponseTooLarge": "The APNs response is too large.",
+  "remote.apnsInvalidResponse": "APNs returned an invalid response.",
+  "remote.apnsKeyInvalid": "The APNs key must be a P-256 EC private key.",
+  "remote.apnsNotConfigured": "Configure the APNs key path, Key ID, Team ID and App Bundle ID.",
+  "remote.apnsTooLarge": "The APNs notification exceeds 4096 bytes.",
+  "remote.deviceRemoved": "The device was removed; pair it again.",
+  "remote.pairCodeInvalid": "The pairing code is invalid or expired.",
+  "remote.deviceNameInvalid": "Enter a device name of at most 100 characters."
 } satisfies Record<string, string | ((params: never) => string)>;
 
 export type ServiceMessages = typeof serviceMessages;

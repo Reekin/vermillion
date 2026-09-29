@@ -571,7 +571,6 @@ export const TranscriptPane = memo(
                   {isProcessExpanded && (
                     <TurnProcessPanel
                       row={visibleRow}
-                      chineseLabels={compactProcess}
                       hiddenRows={hiddenRows}
                       participantDirectory={participantDirectory}
                       onPreviewImage={onPreviewImage}
@@ -586,7 +585,6 @@ export const TranscriptPane = memo(
                 <div className="awb-turn__process awb-turn__process--inline">
                   <TurnProcessPanel
                     row={visibleRow}
-                    chineseLabels={compactProcess}
                     hiddenRows={[]}
                     collapseActivity={compactProcess}
                     participantDirectory={participantDirectory}

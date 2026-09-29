@@ -63,7 +63,7 @@ describe("remote browser client", () => {
     const c = await connected();
     expect(createWorkbenchClient(c.workbench)).toBeDefined();
     const a = c.workbench.request({ method: "inbox.list", params: {} });
-    const b = c.session.request({ id: "list", method: "session.list", params: {} });
+    const b = c.session.request({ id: "list", method: "session.list", params: { includeArchived: false } });
     const frames = latest().sent.slice(1);
     latest().reply(frames[1], { sessions: [] });
     latest().reply(frames[0], { items: ["inbox"] });
@@ -238,7 +238,7 @@ describe("remote browser client", () => {
     try {
       await c.connect();
       expect(c.getConnectionState()).toBe("connected");
-      expect(await c.session.request({ id: "real-list", method: "session.list", params: {} }))
+      expect(await c.session.request({ id: "real-list", method: "session.list", params: { includeArchived: false } }))
         .toMatchObject({ result: { sessions: [] } });
       expect(await c.workbench.request({ method: "inbox.list", params: {} }))
         .toEqual({ ok: true, result: { items: ["actual gateway"] } });

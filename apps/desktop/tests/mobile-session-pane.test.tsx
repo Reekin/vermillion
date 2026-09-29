@@ -45,7 +45,7 @@ describe("mobile conversation", () => {
     expect(mobile).toContain('<details class="awb-mobile-activity">');
     expect(mobile).not.toContain('<details class="awb-mobile-activity" open');
     expect(mobile.indexOf("Allow command")).toBeGreaterThan(mobile.indexOf("</details>"));
-    expect(mobile).toContain("Approve");
+    expect(mobile).toContain("批准");
     expect(render(false)).not.toContain("awb-mobile-activity");
   });
 });

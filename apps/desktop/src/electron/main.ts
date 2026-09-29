@@ -1009,8 +1009,9 @@ const boot = async (): Promise<void> => {
     }
   );
   ipcMain.handle(SESSION_IPC_PICK_REMOTE_PROGRAM_CHANNEL, async (_event, kind: unknown) => {
-    const result = await dialog.showOpenDialog(window, { title: kind === "apns" ? "选择 APNs 密钥" : "选择 frpc 程序", properties: ["openFile"],
-      ...(kind === "apns" ? { filters: [{ name: "APNs 密钥", extensions: ["p8"] }] } : {}) });
+    const locale = await interfaceLocale(service);
+    const result = await dialog.showOpenDialog(window, { title: translate(locale, kind === "apns" ? "remote.pickApnsKey" : "remote.pickFrpc"), properties: ["openFile"],
+      ...(kind === "apns" ? { filters: [{ name: translate(locale, "remote.apnsKeyFilter"), extensions: ["p8"] }] } : {}) });
     return { canceled: result.canceled, path: result.filePaths[0] };
   });
   ipcMain.handle(

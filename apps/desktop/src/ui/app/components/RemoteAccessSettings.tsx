@@ -5,11 +5,11 @@ import type { RemoteConfig, RemoteDevice, RemotePair, RemoteStatus } from "@verm
 import { createRendererWorkbenchClient } from "../workbench-client.js";
 import { Modal } from "./Modal.js";
 import { Badge, Button, Field, IconButton, InlineNotice, ListRow, PanelHeader, Toggle } from "./ui.js";
+import { intlLocale, serviceText, t } from "../../../i18n/index.js";
+import { useT } from "../../../i18n/react.js";
 
-const stateLabels: Record<RemoteStatus["state"], string> = {
-  disabled: "已关闭", connecting: "连接中", connected: "隧道已连接", error: "连接失败"
-};
-const formatTime = (value?: string) => value ? new Date(value).toLocaleString() : "尚未连接";
+const stateLabel = (state: RemoteStatus["state"]) => t(`remote.state.${state}`);
+const formatTime = (value?: string) => value ? new Date(value).toLocaleString(intlLocale()) : t("remote.neverConnected");
 
 function ConfigField({ label, value, type = "text", placeholder, onSave }: {
   label: string; value: string | number; type?: "text" | "password" | "number";
@@ -27,6 +27,7 @@ function ConfigField({ label, value, type = "text", placeholder, onSave }: {
 }
 
 export function RemoteAccessSettings() {
+  const t = useT();
   const client = useMemo(createRendererWorkbenchClient, []);
   const section = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -114,7 +115,7 @@ export function RemoteAccessSettings() {
     const countdown = setInterval(updateRemaining, 1000);
     void QRCode.toDataURL(pair.qrContent, { width: 240, margin: 2 }).then((url) => {
       if (!disposed) setQrImage(url);
-    }).catch(() => { if (!disposed) setError("二维码生成失败，请使用公网地址和配对码配对。"); });
+    }).catch(() => { if (!disposed) setError(t("remote.qrFailed")); });
     const timer = setTimeout(() => setExpired(true), Math.max(0, Date.parse(pair.expiresAt) - Date.now()));
     return () => { disposed = true; clearTimeout(timer); clearInterval(countdown); };
   }, [pair]);
@@ -137,7 +138,7 @@ export function RemoteAccessSettings() {
   const savePort = (key: "serverPort" | "remotePort" | "publicPort", value: string) => {
     const port = Number(value);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      setError("端口须为 1 到 65535 之间的整数。");
+      setError(t("remote.portInvalid"));
       return;
     }
     save({ [key]: port });
@@ -167,7 +168,7 @@ export function RemoteAccessSettings() {
     setTestingPush(deviceId); setPushResult(undefined);
     try {
       await client.request("remote.push.test", { deviceId });
-      setPushResult("APNs 已受理测试推送");
+      setPushResult(t("remote.pushAccepted"));
     } catch (cause) { setPushResult(cause instanceof Error ? cause.message : String(cause)); }
     finally { setTestingPush(undefined); }
   };
@@ -192,78 +193,78 @@ export function RemoteAccessSettings() {
     finally { setRemoving(false); }
   };
 
-  return <section ref={section} className="flex max-w-2xl flex-col gap-3 border-t border-border pt-2" aria-label="远程访问">
-    <PanelHeader title="远程访问" className="-ml-4" align="start">
-      {status && <Badge>{stateLabels[status.state]}</Badge>}
+  return <section ref={section} className="flex max-w-2xl flex-col gap-3 border-t border-border pt-2" aria-label={t("remote.title")}>
+    <PanelHeader title={t("remote.title")} className="-ml-4" align="start">
+      {status && <Badge>{stateLabel(status.state)}</Badge>}
     </PanelHeader>
     {(error || refreshError) && <InlineNotice tone="error" className="px-0 pb-0">{error || refreshError}</InlineNotice>}
-    {status?.error && <InlineNotice tone="error" className="px-0 pb-0">{status.error}</InlineNotice>}
-    {!config && !refreshError && <InlineNotice className="px-0 pb-0">正在读取远程访问设置…</InlineNotice>}
+    {status?.error && <InlineNotice tone="error" className="px-0 pb-0">{serviceText(status.error)}</InlineNotice>}
+    {!config && !refreshError && <InlineNotice className="px-0 pb-0">{t("remote.loading")}</InlineNotice>}
     {config && <>
-      <Toggle label="开启远程访问" checked={config.enabled} disabled={saving} onChange={(enabled) => save({ enabled })} />
+      <Toggle label={t("remote.enable")} checked={config.enabled} disabled={saving} onChange={(enabled) => save({ enabled })} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <ConfigField label="VPS 地址" value={config.serverAddr} onSave={(serverAddr) => save({ serverAddr: serverAddr.trim() })} />
-        <ConfigField label="frp 服务端口" type="number" value={config.serverPort} onSave={(value) => savePort("serverPort", value)} />
-        <ConfigField label="frp token" type="password" value={config.frpToken} onSave={(frpToken) => save({ frpToken })} />
-        <ConfigField label="桌面在 VPS 上的端口" type="number" value={config.remotePort} onSave={(value) => savePort("remotePort", value)} />
-        <ConfigField label="公网 HTTPS 端口" type="number" value={config.publicPort} onSave={(value) => savePort("publicPort", value)} />
-        <ConfigField label="公网地址" value={config.publicUrl} placeholder={defaultPublicUrl} onSave={(publicUrl) => save({ publicUrl: publicUrl.trim() })} />
-        <ConfigField label="桌面名称" value={config.desktopName} onSave={(desktopName) => save({ desktopName: desktopName.trim() })} />
+        <ConfigField label={t("remote.serverAddr")} value={config.serverAddr} onSave={(serverAddr) => save({ serverAddr: serverAddr.trim() })} />
+        <ConfigField label={t("remote.serverPort")} type="number" value={config.serverPort} onSave={(value) => savePort("serverPort", value)} />
+        <ConfigField label={t("remote.frpToken")} type="password" value={config.frpToken} onSave={(frpToken) => save({ frpToken })} />
+        <ConfigField label={t("remote.remotePort")} type="number" value={config.remotePort} onSave={(value) => savePort("remotePort", value)} />
+        <ConfigField label={t("remote.publicPort")} type="number" value={config.publicPort} onSave={(value) => savePort("publicPort", value)} />
+        <ConfigField label={t("remote.publicUrl")} value={config.publicUrl} placeholder={defaultPublicUrl} onSave={(publicUrl) => save({ publicUrl: publicUrl.trim() })} />
+        <ConfigField label={t("remote.desktopName")} value={config.desktopName} onSave={(desktopName) => save({ desktopName: desktopName.trim() })} />
       </div>
-      <ConfigField label="frp 服务端 CA 证书路径" value={config.trustedCaFile} onSave={(trustedCaFile) => save({ trustedCaFile: trustedCaFile.trim() })} />
+      <ConfigField label={t("remote.trustedCa")} value={config.trustedCaFile} onSave={(trustedCaFile) => save({ trustedCaFile: trustedCaFile.trim() })} />
       <div className="flex flex-col gap-2">
-        <span className="eyebrow">frpc 程序路径</span>
+        <span className="eyebrow">{t("remote.frpcPath")}</span>
         <div className="flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate font-mono text-body text-foreground" title={status?.frpcPath || config.frpcPath || "frpc（PATH）"}>
-            {status?.frpcPath || config.frpcPath || "frpc（PATH）"}
+          <span className="min-w-0 flex-1 truncate font-mono text-body text-foreground" title={status?.frpcPath || config.frpcPath || t("remote.frpcFromPath")}>
+            {status?.frpcPath || config.frpcPath || t("remote.frpcFromPath")}
           </span>
-          <Button variant="ghost" size="sm" outlined disabled={saving} onClick={() => void pickProgram()}>选择</Button>
-          {config.frpcPath && <Button variant="ghost" size="sm" outlined disabled={saving} onClick={() => save({ frpcPath: "" })}>恢复默认</Button>}
+          <Button variant="ghost" size="sm" outlined disabled={saving} onClick={() => void pickProgram()}>{t("app.settingsPage.choose")}</Button>
+          {config.frpcPath && <Button variant="ghost" size="sm" outlined disabled={saving} onClick={() => save({ frpcPath: "" })}>{t("app.settingsPage.restoreDefault")}</Button>}
         </div>
       </div>
       <div className="flex items-center gap-3">
         <Button disabled={!config.enabled || status?.state !== "connected" || pairing || saving} onClick={() => void beginPair()}>
-          {pairing ? "正在生成…" : "配对新设备"}
+          {pairing ? t("remote.generating") : t("remote.pairDevice")}
         </Button>
-        {status && <span className="text-caption text-muted-foreground">{status.connectedDevices} 台设备已连接</span>}
+        {status && <span className="text-caption text-muted-foreground">{t("remote.connectedDevices", { count: status.connectedDevices })}</span>}
       </div>
-      {pairedName && !pair && <InlineNotice className="px-0 pb-0">{`${pairedName} 已配对`}</InlineNotice>}
-      <PanelHeader title="推送" className="-ml-4" align="start"><Badge>{status?.pushConfigured ? "已配置" : "未配置"}</Badge></PanelHeader>
+      {pairedName && !pair && <InlineNotice className="px-0 pb-0">{t("remote.paired", { name: pairedName })}</InlineNotice>}
+      <PanelHeader title={t("remote.push")} className="-ml-4" align="start"><Badge>{status?.pushConfigured ? t("remote.pushConfigured") : t("remote.pushNotConfigured")}</Badge></PanelHeader>
       <div className="flex items-end gap-2">
-        <div className="min-w-0 flex-1"><ConfigField label="APNs 密钥文件（.p8）" value={config.apnsKeyPath} onSave={(apnsKeyPath) => save({ apnsKeyPath: apnsKeyPath.trim() })} /></div>
-        <Button variant="ghost" size="sm" outlined disabled={saving} onClick={() => void pickPushKey()}>选择密钥</Button>
+        <div className="min-w-0 flex-1"><ConfigField label={t("remote.apnsKey")} value={config.apnsKeyPath} onSave={(apnsKeyPath) => save({ apnsKeyPath: apnsKeyPath.trim() })} /></div>
+        <Button variant="ghost" size="sm" outlined disabled={saving} onClick={() => void pickPushKey()}>{t("remote.chooseKey")}</Button>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <ConfigField label="Key ID" value={config.apnsKeyId} onSave={(apnsKeyId) => save({ apnsKeyId: apnsKeyId.trim() })} />
         <ConfigField label="Team ID" value={config.apnsTeamId} onSave={(apnsTeamId) => save({ apnsTeamId: apnsTeamId.trim() })} />
         <ConfigField label="App Bundle ID" value={config.apnsBundleId} onSave={(apnsBundleId) => save({ apnsBundleId: apnsBundleId.trim() })} />
       </div>
-      <InlineNotice className="min-h-8 px-0 pb-0">{pushResult || status?.pushError || "在已登记推送的设备旁发送测试通知"}</InlineNotice>
-      <PanelHeader title="已配对设备" className="-ml-4" />
-      {devices.length === 0 && <InlineNotice className="px-0 pb-0">尚无已配对设备</InlineNotice>}
+      <InlineNotice className="min-h-8 px-0 pb-0">{pushResult || serviceText(status?.pushError) || t("remote.pushHint")}</InlineNotice>
+      <PanelHeader title={t("remote.devices")} className="-ml-4" />
+      {devices.length === 0 && <InlineNotice className="px-0 pb-0">{t("remote.noDevices")}</InlineNotice>}
       {devices.map((device) => <ListRow key={device.deviceId} title={device.name}
-        meta={<><span className="block">{`配对：${formatTime(device.pairedAt)}`}</span><span className="block">{`最近连接：${formatTime(device.lastConnectedAt)}`}</span></>}
-        trailing={<div className="flex items-center gap-2"><Badge>{device.pushAvailable ? "推送可用" : "推送不可用"}</Badge>
+        meta={<><span className="block">{t("remote.pairedAt", { time: formatTime(device.pairedAt) })}</span><span className="block">{t("remote.lastConnected", { time: formatTime(device.lastConnectedAt) })}</span></>}
+        trailing={<div className="flex items-center gap-2"><Badge>{device.pushAvailable ? t("remote.pushAvailable") : t("remote.pushUnavailable")}</Badge>
           <Button variant="ghost" size="sm" outlined disabled={!device.pushAvailable || !status?.pushConfigured || !config.enabled || Boolean(testingPush) || saving}
-            onClick={() => void testPush(device.deviceId)}>{testingPush === device.deviceId ? "正在发送…" : "发送测试推送"}</Button></div>}
-        hoverActions={<IconButton icon={X} label={`移除 ${device.name}`} onClick={() => setRemoveDevice(device)} />} />)}
+            onClick={() => void testPush(device.deviceId)}>{testingPush === device.deviceId ? t("remote.sendingPush") : t("remote.testPush")}</Button></div>}
+        hoverActions={<IconButton icon={X} label={t("remote.removeDeviceLabel", { name: device.name })} onClick={() => setRemoveDevice(device)} />} />)}
     </>}
-    {pair && <Modal title="配对新设备" width={360} onClose={() => setPair(undefined)}>
+    {pair && <Modal title={t("remote.pairDevice")} width={360} onClose={() => setPair(undefined)}>
       <div className="flex flex-col items-center gap-3 p-5">
-        {pairedName ? <InlineNotice>{`${pairedName} 已配对`}</InlineNotice> : expired ? <>
-          <InlineNotice>配对码已过期</InlineNotice><Button disabled={pairing} onClick={() => void beginPair()}>重新生成</Button>
+        {pairedName ? <InlineNotice>{t("remote.paired", { name: pairedName })}</InlineNotice> : expired ? <>
+          <InlineNotice>{t("remote.codeExpired")}</InlineNotice><Button disabled={pairing} onClick={() => void beginPair()}>{t("remote.regenerate")}</Button>
         </> : <>
-          {qrImage && <img src={qrImage} alt="远程访问配对二维码" width={240} height={240} />}
+          {qrImage && <img src={qrImage} alt={t("remote.qrAlt")} width={240} height={240} />}
           <span className="font-mono text-title text-strong">{pair.code}</span>
           <span className="break-all text-caption text-muted-foreground">{publicUrl}</span>
-          <InlineNotice>{`剩余约 ${remainingMinutes} 分钟，仅可使用一次`}</InlineNotice>
+          <InlineNotice>{t("remote.codeRemaining", { minutes: remainingMinutes })}</InlineNotice>
         </>}
       </div>
     </Modal>}
-    {removeDevice && <Modal title="移除设备" width={360} onClose={() => { if (!removing) setRemoveDevice(undefined); }}>
+    {removeDevice && <Modal title={t("remote.removeDevice")} width={360} onClose={() => { if (!removing) setRemoveDevice(undefined); }}>
       <div className="flex flex-col gap-3 p-5">
-        <p className="text-body text-foreground">{`移除 ${removeDevice.name} 后，该设备会立即断开，再次连接需要重新配对。`}</p>
-        <div className="flex gap-2"><Button disabled={removing} onClick={() => void revoke()}>移除</Button><Button variant="ghost" disabled={removing} onClick={() => setRemoveDevice(undefined)}>取消</Button></div>
+        <p className="text-body text-foreground">{t("remote.removeDeviceConfirm", { name: removeDevice.name })}</p>
+        <div className="flex gap-2"><Button disabled={removing} onClick={() => void revoke()}>{t("remote.remove")}</Button><Button variant="ghost" disabled={removing} onClick={() => setRemoveDevice(undefined)}>{t("common.cancel")}</Button></div>
       </div>
     </Modal>}
   </section>;

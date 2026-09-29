@@ -1,17 +1,18 @@
+import { failureText, serviceError, text, type ServiceText } from "@vermillion/workbench";
 import { spawn, type ChildProcess } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 
 export type TunnelConfig = { serverAddr: string; serverPort: number; frpToken: string; remotePort: number; frpcPath: string; trustedCaFile: string };
-export type TunnelStatus = { state: "disabled" | "connecting" | "connected" | "error"; error?: string; frpcPath?: string };
+export type TunnelStatus = { state: "disabled" | "connecting" | "connected" | "error"; error?: ServiceText; frpcPath?: string };
 export async function resolveFrpc(program: string): Promise<string> {
   const name = program || (process.platform === "win32" ? "frpc.exe" : "frpc");
   const candidates = isAbsolute(name) ? [name] : (process.env.PATH ?? "").split(delimiter).filter(Boolean).map((dir) => join(dir, name));
   for (const candidate of candidates) {
     try { await access(candidate, process.platform === "win32" ? constants.F_OK : constants.X_OK); return candidate; } catch { /* Continue PATH lookup. */ }
   }
-  throw new Error("未找到可执行的 frpc，请选择程序路径");
+  throw serviceError("remote.frpcNotFound");
 }
 
 export class RemoteTunnel {
@@ -26,7 +27,7 @@ export class RemoteTunnel {
     this.status = { state: "connecting" };
     try {
       const program = await resolveFrpc(config.frpcPath);
-      if (!config.trustedCaFile) throw new Error("请选择 frp 服务端 CA 证书，校验 VPS 身份");
+      if (!config.trustedCaFile) throw serviceError("remote.caRequired");
       await access(config.trustedCaFile, constants.R_OK);
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       const file = join(this.directory, "frpc.toml");
@@ -60,13 +61,13 @@ export class RemoteTunnel {
         child.once("close", (code) => {
           if (this.child === child) this.child = undefined;
           if (!this.stopped) {
-            this.status = { state: "error", error: this.status.error ?? `frpc 已退出（${code ?? "signal"}）`, frpcPath: program };
+            this.status = { state: "error", error: this.status.error ?? text("remote.frpcExited", { code: String(code ?? "signal") }), frpcPath: program };
             this.retry = setTimeout(launch, 5000);
           }
         });
       };
       launch();
-    } catch (error) { this.status = { state: "error", error: error instanceof Error ? error.message : "隧道启动失败" }; }
+    } catch (error) { this.status = { state: "error", error: error instanceof Error ? failureText(error) : text("remote.tunnelFailed") }; }
   }
   async stop(): Promise<void> {
     this.stopped = true;

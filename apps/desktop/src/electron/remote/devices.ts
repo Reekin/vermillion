@@ -1,3 +1,4 @@
+import { serviceError } from "@vermillion/workbench";
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ export class RemoteDevices {
   }
   async registerPush(deviceId: string, push?: PushRegistration): Promise<void> {
     const device = this.devices.find((d) => d.deviceId === deviceId);
-    if (!device) throw new Error("设备已移除，请重新配对");
+    if (!device) throw serviceError("remote.deviceRemoved");
     // A re-paired installation still has the same APNs token; only its current credential owns delivery.
     if (push) for (const other of this.devices) {
       if (other.deviceId !== deviceId && other.push?.token === push.token && other.push.environment === push.environment) {
@@ -58,13 +59,13 @@ export class RemoteDevices {
     const pairing = this.pairing;
     if (!pairing || pairing.expiresAt <= this.now()) {
       this.pairing = undefined;
-      throw new Error("配对码无效或已过期");
+      throw serviceError("remote.pairCodeInvalid");
     }
     if (code !== pairing.code) {
       if (++pairing.attempts >= 5) this.pairing = undefined;
-      throw new Error("配对码无效或已过期");
+      throw serviceError("remote.pairCodeInvalid");
     }
-    if (typeof name !== "string" || !name.trim() || name.length > 100) throw new Error("请输入设备名称（最多 100 字）");
+    if (typeof name !== "string" || !name.trim() || name.length > 100) throw serviceError("remote.deviceNameInvalid");
     this.pairing = undefined;
     const token = randomBytes(32).toString("base64url");
     const device: RemoteDevice = { deviceId: randomUUID(), name: name.trim(), pairedAt: new Date(this.now()).toISOString(), pushAvailable: false };

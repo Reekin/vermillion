@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zServiceText } from "./service-text.js";
 
 const zPort = z.number().int().min(1).max(65535);
 
@@ -21,12 +22,12 @@ export const zRemoteConfig = z.object({
 
 export const zRemoteStatus = z.object({
   state: z.enum(["disabled", "connecting", "connected", "error"]),
-  error: z.string().optional(),
+  error: zServiceText.optional(),
   gatewayPort: zPort.optional(),
   connectedDevices: z.number().int().nonnegative(),
   frpcPath: z.string().optional(),
   pushConfigured: z.boolean(),
-  pushError: z.string().optional()
+  pushError: zServiceText.optional()
 });
 
 export const zRemotePair = z.object({

@@ -146,7 +146,31 @@ const zh: Translation<ServiceCatalog> = {
   "service.result.rootCommitMissing": "根目录代码成果需要在 evidence.commit 登记提交末端。",
   "service.result.rootMixedCommit": (p) => `提交混合本单与范围外改动，无法安全记录回滚：${p.commit}`,
   "service.result.rootEmpty": "提交范围中没有属于本单的代码成果。",
-  "service.error.docsConflict": (p) => `文档草稿与主分支冲突：${p.files}。调用 docs.rebase 把本会话的草稿同步到主分支，解决冲突标记后用 docs.write 保存并再次 docs.commit。`
+  "service.error.docsConflict": (p) => `文档草稿与主分支冲突：${p.files}。调用 docs.rebase 把本会话的草稿同步到主分支，解决冲突标记后用 docs.write 保存并再次 docs.commit。`,
+
+  "service.remote.frpcNotFound": "未找到可执行的 frpc，请选择程序路径",
+  "service.remote.caRequired": "请选择 frp 服务端 CA 证书，校验 VPS 身份",
+  "service.remote.frpcExited": (p) => `frpc 已退出（${p.code}）`,
+  "service.remote.tunnelFailed": "隧道启动失败",
+  "service.remote.addressRequired": "请填写 VPS 地址和 frp token",
+  "service.remote.publicUrlInvalid": "公网地址必须是 HTTPS 源地址",
+  "service.remote.startFailed": "远程访问启动失败",
+  "service.remote.notConfigured": "请先开启并配置远程访问",
+  "service.remote.notEnabled": "请先开启远程访问",
+  "service.remote.pushNotRegistered": "设备尚未登记推送，或已被移除",
+  "service.remote.apnsRejected": (p) => `APNs ${p.status}：${p.reason}`,
+  "service.remote.pushFailed": "推送失败",
+  "service.remote.apnsTimeout": "APNs 请求超时",
+  "service.remote.apnsClosed": "APNs 连接已关闭",
+  "service.remote.apnsInvalidRequest": "APNs 请求无效",
+  "service.remote.apnsResponseTooLarge": "APNs 响应过大",
+  "service.remote.apnsInvalidResponse": "APNs 返回无效响应",
+  "service.remote.apnsKeyInvalid": "APNs 密钥必须是 P-256 EC 私钥",
+  "service.remote.apnsNotConfigured": "请配置 APNs 密钥路径、Key ID、Team ID 和 App Bundle ID",
+  "service.remote.apnsTooLarge": "APNs 通知超过 4096 字节",
+  "service.remote.deviceRemoved": "设备已移除，请重新配对",
+  "service.remote.pairCodeInvalid": "配对码无效或已过期",
+  "service.remote.deviceNameInvalid": "请输入设备名称（最多 100 字）"
 };
 
 export const service = { zh, en };
