@@ -37,7 +37,7 @@ final class PairingUITests: XCTestCase {
             XCTAssertFalse(app.webViews.textFields["配对码"].exists)
             capture("Authenticated web page " + gateway.name, app: app)
             // The page has no native bar; its own back row returns to the list, and a later visit reuses the kept page.
-            app.webViews.buttons["桌面"].tap()
+            app.webViews.buttons.matching(NSPredicate(format: "label IN %@", ["桌面", "Desktops"])).firstMatch.tap()
             XCTAssertTrue(app.navigationBars["桌面列表"].waitForExistence(timeout: 5))
         }
         // A cold app process still uses Keychain credentials.
