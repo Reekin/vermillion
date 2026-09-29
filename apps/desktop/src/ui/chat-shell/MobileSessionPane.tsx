@@ -244,13 +244,13 @@ const MobileComposer = ({ draft, onDraft, onSend, canSend, placeholder, error, r
   return <form className="awb-mobile-composer" onSubmit={(event) => { event.preventDefault(); if (canSend) onSend(); }}>
     {run && <div className="awb-mobile-runbar" role="status">
       <span><i className="awb-mobile-dot" data-status="running" />{run.label}</span>
-      <button type="button" className="awb-mobile-stop" disabled={run.stopping} onClick={run.onStop}><Square size={9} fill="currentColor" />{t("session.stop")}</button>
+      <button type="button" className="awb-mobile-stop" disabled={run.stopping} onClick={run.onStop}><span><Square size={9} fill="currentColor" />{t("session.stop")}</span></button>
     </div>}
     {error && <p className="awb-mobile-composer__error" role="alert">{error}</p>}
     <div className="awb-mobile-field">
       <textarea ref={field} rows={1} aria-label={t("mobile.message")} placeholder={placeholder} value={draft}
         onChange={(event) => onDraft(event.target.value)} />
-      <button type="submit" className="awb-mobile-send" aria-label={t("session.send")} disabled={!canSend}><ArrowUp size={18} strokeWidth={2.2} /></button>
+      <button type="submit" className="awb-mobile-send" aria-label={t("session.send")} disabled={!canSend}><span><ArrowUp size={18} strokeWidth={2.2} /></span></button>
     </div>
   </form>;
 };

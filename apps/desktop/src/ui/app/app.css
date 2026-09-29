@@ -595,8 +595,7 @@ button.vm-row-cells__title:hover { text-decoration: underline; text-underline-of
 
 /* Large-title header of the list level; the back row appears only inside the App. */
 .vm-mobile-hero { flex: none; padding: calc(env(safe-area-inset-top) + 6px) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
-.vm-mobile-hero__back { position: relative; display: inline-flex; min-width: 0; min-height: 36px; align-items: center; gap: 2px; margin-left: -6px; color: var(--awb-ink-muted); font-size: var(--awb-text-label); }
-.vm-mobile-hero__back::after { content: ""; position: absolute; inset: -4px -8px; }
+.vm-mobile-hero__back { display: inline-flex; min-height: 44px; align-items: center; gap: 2px; margin: -4px 0 -4px -6px; padding-right: 8px; color: var(--awb-ink-muted); font-size: var(--awb-text-label); }
 .vm-mobile-hero__row { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; }
 .vm-mobile-hero h1 { min-width: 0; color: var(--awb-ink-strong); font-size: 26px; font-weight: 600; line-height: 1.2; }
 .vm-mobile-hero__status { display: inline-flex; min-width: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--awb-ink-muted); font-size: var(--awb-text-micro); white-space: nowrap; }

@@ -88,8 +88,10 @@
   font-size: var(--awb-text-caption);
 }
 .awb-mobile-runbar > span { display: inline-flex; min-width: 0; align-items: center; gap: 6px; }
-.awb-mobile-stop {
-  position: relative;
+/* Stop and Send are 44pt hit boxes around a smaller drawn control; negative margins keep the rows compact. */
+.awb-mobile-stop, .awb-mobile-send { display: grid; min-width: 44px; min-height: 44px; place-items: center; color: var(--awb-ink); }
+.awb-mobile-stop { margin: -8px -4px; padding: 0 4px; }
+.awb-mobile-stop > span {
   display: inline-flex;
   height: 28px;
   align-items: center;
@@ -97,12 +99,8 @@
   padding: 0 10px;
   border: 1px solid var(--awb-control-border);
   border-radius: 14px;
-  color: var(--awb-ink);
   font: 500 var(--awb-text-caption) var(--awb-font-sans);
 }
-/* Visually compact; the ::after area keeps the 44pt touch target. */
-.awb-mobile-stop, .awb-mobile-send { min-width: 0; min-height: 0; }
-.awb-mobile-stop::after, .awb-mobile-send::after { content: ""; position: absolute; inset: -8px; }
 .awb-mobile-stop:disabled { opacity: var(--awb-control-disabled-opacity); }
 .awb-mobile-composer__error { margin: 0 0 6px; color: var(--awb-ink-strong); font-size: var(--awb-text-caption); overflow-wrap: anywhere; }
 .awb-mobile-field {
@@ -130,9 +128,8 @@
   font: 16px/1.45 var(--awb-font-sans);
 }
 .awb-mobile-field textarea::placeholder { color: var(--awb-ink-faint); }
-.awb-mobile-send {
-  position: relative;
-  flex: none;
+.awb-mobile-send { flex: none; width: 44px; height: 44px; margin: -6px; }
+.awb-mobile-send > span {
   display: grid;
   width: 32px;
   height: 32px;
@@ -141,4 +138,4 @@
   background: var(--awb-ink-strong);
   color: var(--awb-bg);
 }
-.awb-mobile-send:disabled { background: var(--awb-panel-elevated); color: var(--awb-ink-faint); }
+.awb-mobile-send:disabled > span { background: var(--awb-panel-elevated); color: var(--awb-ink-faint); }
