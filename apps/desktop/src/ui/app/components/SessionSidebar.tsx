@@ -4,9 +4,11 @@ import { formatRelativeActivityAge } from "../../chat-shell/index.js";
 import type { SidebarSession } from "../use-session-sidebar.js";
 import type { SessionMenu, SessionRenameController } from "../use-session-actions.js";
 import type { SessionActionDescriptorRpc } from "@vermillion/shared";
+import type { Workspace } from "@vermillion/workbench/client";
+import { WorkspaceMenu } from "./WorkspacePicker.js";
 import { SessionActionFeedback } from "./SessionActionFeedback.js";
 import { SessionRenameDialog } from "./SessionRenameDialog.js";
-import { Badge, Button, IconButton, ListRow, Select, StatusDot } from "./ui.js";
+import { Badge, Button, IconButton, ListRow, StatusDot } from "./ui.js";
 import { roleLabel } from "./workflow-display.js";
 import { useT } from "../../../i18n/react.js";
 
@@ -16,6 +18,8 @@ type SessionSidebarProps = {
   selectedSessionId: string | undefined;
   isDraft: boolean;
   workspaceLabelById: Map<string, string>;
+  workspaces: Workspace[];
+  onOpenDirectory: (path: string) => void;
   workspaceFilterId: string | undefined;
   onWorkspaceFilter: (id: string | undefined) => void;
   onOpen: (sessionId: string) => void;
@@ -91,7 +95,7 @@ const flattenRows = (sessions: SidebarSession[], expandedIds: ReadonlySet<string
   return rows;
 };
 
-export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, workspaceLabelById, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, renameDialog, notice, onClearNotice }: SessionSidebarProps) => {
+export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, workspaceLabelById, workspaces, onOpenDirectory, workspaceFilterId, onWorkspaceFilter, onOpen, onNewChat, onSearch, menu, onOpenMenu, onCloseMenu, onRunAction, renameDialog, notice, onClearNotice }: SessionSidebarProps) => {
   const t = useT();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const toggleExpanded = useCallback((sessionId: string) => setExpandedIds((current) => {
@@ -154,8 +158,8 @@ export const SessionSidebar = ({ sessions, loading, selectedSessionId, isDraft, 
         <Button variant={isDraft ? "secondary" : "accent"} size="sm" className="shrink-0" onClick={onNewChat}>
           <Plus size={13} /> {t("docs.sidebar.newSession")}
         </Button>
-        <Select compact aria-label={t("docs.sidebar.filter")} className="min-w-0 flex-1" value={workspaceFilterId ?? ""} onChange={(value) => onWorkspaceFilter(value || undefined)}
-          options={[{ value: "", label: t("docs.sidebar.all") }, ...[...workspaceLabelById].map(([id, label]) => ({ value: id, label }))]} />
+        <WorkspaceMenu label={t("docs.sidebar.filter")} workspaces={workspaces} value={workspaceFilterId}
+          emptyLabel={t("docs.sidebar.all")} onChange={onWorkspaceFilter} onOpenDirectory={onOpenDirectory} />
       </div>
       <div className="px-3 pb-2">
         <Button variant="ghost" size="sm" className="w-full justify-start" onClick={onSearch}>

@@ -33,6 +33,7 @@ try {
   const noop = () => {};
   const props = {
     loading: false, isDraft: false, workspaceLabelById: new Map([["w", "workspace"]]),
+    workspaces: [], onOpenDirectory: noop,
     workspaceFilterId: "w", onWorkspaceFilter: noop, onOpen: noop, onNewChat: noop, onSearch: noop,
     menu: undefined, onOpenMenu: noop, onCloseMenu: noop, onRunAction: noop,
     renameDialog: { state: undefined, open: noop, close: noop, submit: noop },

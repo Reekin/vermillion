@@ -269,6 +269,15 @@ export const App = ({ sessionStore, transport }: AppProps) => {
     [transport]
   );
 
+  const onOpenDirectory = useCallback(async (path: string) => {
+    try {
+      const result = await transport.file.runAction({ path, action: "open" });
+      if (!result.ok) throw new Error(result.errorMessage);
+    } catch (error) {
+      reportNotice({ severity: "error", source: "workspace-action", message: t("docs.picker.openDirectoryFailed"), detail: error instanceof Error ? error.message : String(error) });
+    }
+  }, [transport, reportNotice]);
+
   return (
     <SessionNavigationContext.Provider value={navigation}>
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-page-canvas text-foreground">
@@ -282,6 +291,8 @@ export const App = ({ sessionStore, transport }: AppProps) => {
             selectedSessionId={sessionId}
             isDraft={sessionId === undefined}
             workspaceLabelById={workspaceLabelById}
+            workspaces={workspaces}
+            onOpenDirectory={onOpenDirectory}
             workspaceFilterId={workspaceFilterId}
             onWorkspaceFilter={(id) => {
               setWorkspaceFilterId(id);
@@ -355,7 +366,7 @@ export const App = ({ sessionStore, transport }: AppProps) => {
                     }
                   } : undefined}
                   composerExtras={<>
-                    <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} />
+                    <WorkspacePicker store={store} pickDirectory={pickDirectory} lockedWorkspaceId={sessionId ? sessionWorkspaceId : undefined} onOpenDirectory={onOpenDirectory} />
                     {discussionIssue && sessionWorkspaceId && <Button size="sm" variant="ghost" outlined onClick={() => store.getState().showIssue({ workspaceId: sessionWorkspaceId, issueId: discussionIssue.issueId })}>Issue</Button>}
                   </>}
                 />

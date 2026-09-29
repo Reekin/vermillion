@@ -39,6 +39,8 @@ const render = (sessions: SidebarSession[]): string =>
       selectedSessionId={undefined}
       isDraft={false}
       workspaceLabelById={new Map()}
+      workspaces={[]}
+      onOpenDirectory={() => {}}
       workspaceFilterId={undefined}
       onWorkspaceFilter={() => {}}
       onOpen={() => {}}
