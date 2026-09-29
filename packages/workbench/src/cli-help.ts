@@ -111,6 +111,7 @@ export function methodHelp(method: string): string | undefined {
     ""
   ].join("\n");
   const desktopHelp: Record<string, { params: string; state: string; example: object }> = {
+    "file.runAction": { params: "path: non-empty absolute path; action: \"open\" | \"reveal\"", state: "Desktop online; opens a file or directory with its default application, or reveals it in the file manager. Returns the host action result, including any error.", example: { path: "C:/project", action: "open" } },
     "settings.get": { params: "none", state: "Desktop online; returns the global settings, each engine's program resolution, and engineConfigWarningsByEngineId: configuration warnings (summary, details, path) reported by each engine's current process; engines without warnings are omitted.", example: {} },
     "settings.update": { params: "locale?: \"zh\" | \"en\"; defaultNewSessionEngineId?: string; titleGenerationModelId?: string | null", state: "Desktop online; updates global settings and returns the saved settings. A locale change switches the interface language immediately, without a restart.", example: { locale: "en" } },
     "sessionBrowser.list": { params: "workspaceId: string; kind?: user | agent", state: "Desktop online; returns every row of the workspace's session list and the current revision at once.", example: { workspaceId: "<workspaceId>" } },

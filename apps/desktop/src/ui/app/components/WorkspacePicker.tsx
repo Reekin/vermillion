@@ -15,7 +15,7 @@ type WorkspacePickerProps = {
   onOpenDirectory: (path: string) => void;
 };
 
-const rowClass = "flex h-8 w-full items-center gap-2 px-2.5 text-left text-label text-foreground outline-none hover:bg-surface-hover data-[highlighted]:bg-surface-hover";
+const rowClass = "flex h-8 w-full items-center gap-2 px-2.5 text-left text-label text-foreground outline-none hover:bg-surface-hover focus-visible:bg-surface-hover";
 
 /** Sits in the composer's configuration row; decides where the next new chat is created. */
 export const WorkspacePicker = ({ store, pickDirectory, lockedWorkspaceId, onOpenDirectory }: WorkspacePickerProps) => {
@@ -82,6 +82,7 @@ export const WorkspaceMenu = ({ workspaces: liveWorkspaces, value, onChange, emp
               <input
                 data-ui-raw="search box inside popover"
                 autoFocus
+                aria-label={t("docs.picker.search")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {

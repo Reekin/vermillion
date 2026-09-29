@@ -13,7 +13,7 @@ import { globalHelp, methodHelp } from "./cli-help.js";
 import { createFileSessionSearchSource, defaultCodexRolloutsDir } from "./search.js";
 import { renderServiceTexts } from "./service-text.js";
 
-const desktopSessionMethods = ["settings.get", "settings.update", "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.readProgress", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead", "clipboard.writeImage"];
+const desktopSessionMethods = ["settings.get", "settings.update", "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "sessionBrowser.rename", "chatTree.get", "chatTree.cancelRead", "chatTree.readProgress", "chatTree.nodeAction", "chatTree.submit", "chatTree.retry", "chatTree.cancel", "chatTree.remove", "chatTree.operations", "chatTree.markRead", "clipboard.writeImage", "file.runAction"];
 
 /** Shipped role prompts sit next to this module's parent dir both in the repo (packages/workbench/roles) and in the release (resources/app/roles). */
 const shippedRoleDefaultsDir = (): string | undefined => {
