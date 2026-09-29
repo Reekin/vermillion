@@ -43,6 +43,7 @@ import UserNotifications
                 let summary = try JSONDecoder().decode(Summary.self, from: data)
                 guard let i = desktops.firstIndex(where: { $0.id == desktop.id }) else { continue }
                 desktops[i].name = summary.desktopName; desktops[i].online = true; desktops[i].inboxCount = summary.inboxCount
+                DesktopPages.shared.preload(desktops[i])
             } catch {
                 if let i = desktops.firstIndex(where: { $0.id == desktop.id }) { desktops[i].online = false }
             }

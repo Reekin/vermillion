@@ -33,6 +33,8 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
         page.load(target: "")
         return page.webView
     }
+    /// Starts loading a desktop's page ahead of use, so entering it later shows a warm, interactive page.
+    func preload(_ desktop: Desktop) { _ = webView(for: desktop) }
     /// Shows `target` (a validated `#/…` route) in the desktop's page; an empty target keeps where the page was.
     func show(_ desktop: Desktop, target: String) {
         guard !target.isEmpty else { return }
@@ -62,7 +64,7 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
         if visible == id { PopGate.allowsPop = level != "session" }
     }
 
-    final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, UIScrollViewDelegate {
+    final class Page: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let desktop: Desktop
         let webView: WKWebView
         weak var owner: DesktopPages?
@@ -77,7 +79,9 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
             configuration.userContentController.addUserScript(WKUserScript(
                 source: RemotePolicy.injection(origin: desktop.origin, token: desktop.token),
                 injectionTime: .atDocumentStart, forMainFrameOnly: true))
-            webView = WKWebView(frame: .zero, configuration: configuration)
+            // The page loads before it is attached; lay it out at the screen size from the start so the first
+            // interactive layout matches what the user sees.
+            webView = WKWebView(frame: UIScreen.main.bounds, configuration: configuration)
             super.init()
             configuration.userContentController.add(self, name: "vermillion")
             webView.navigationDelegate = self
@@ -86,11 +90,10 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
             webView.isOpaque = false
             webView.backgroundColor = UIColor(red: 21 / 255, green: 21 / 255, blue: 23 / 255, alpha: 1)
             webView.underPageBackgroundColor = webView.backgroundColor
-            // The page lays itself out to the visible area; the outer scroll view neither bounces nor zooms.
+            // The page lays itself out to the visible area and its viewport forbids zoom; the outer scroll view does not bounce.
             webView.scrollView.contentInsetAdjustmentBehavior = .never
             webView.scrollView.isScrollEnabled = false
             webView.scrollView.bounces = false
-            webView.scrollView.delegate = self
         }
         func load(target: String) {
             loaded = false
@@ -100,10 +103,9 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
         func close() {
             webView.stopLoading()
             webView.configuration.userContentController.removeScriptMessageHandler(forName: "vermillion")
-            webView.navigationDelegate = nil; webView.uiDelegate = nil; webView.scrollView.delegate = nil
+            webView.navigationDelegate = nil; webView.uiDelegate = nil
             webView.removeFromSuperview()
         }
-        func viewForZooming(in scrollView: UIScrollView) -> UIView? { nil }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             decisionHandler(RemotePolicy.matches(navigationAction.request.url, origin: desktop.origin) ? .allow : .cancel)
@@ -174,16 +176,27 @@ struct DesktopWebScreen: View {
     }
 }
 
+/// Hosts the desktop's kept web view. SwiftUI may build more than one host for the same screen during a
+/// push; the web view lives in only one of them, so a host without it must not take touches.
+private final class WebViewHost: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        subviews.isEmpty ? nil : super.hitTest(point, with: event)
+    }
+    func attach(_ webView: WKWebView) {
+        guard webView.superview !== self else { return }
+        webView.removeFromSuperview()
+        webView.frame = bounds
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(webView)
+    }
+}
+
 private struct PooledWebView: UIViewRepresentable {
     let desktop: Desktop
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
-        let webView = DesktopPages.shared.webView(for: desktop)
-        webView.removeFromSuperview()
-        webView.frame = container.bounds
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        container.addSubview(webView)
-        return container
+    func makeUIView(context: Context) -> WebViewHost {
+        let host = WebViewHost()
+        host.attach(DesktopPages.shared.webView(for: desktop))
+        return host
     }
-    func updateUIView(_ container: UIView, context: Context) {}
+    func updateUIView(_ host: WebViewHost, context: Context) { host.attach(DesktopPages.shared.webView(for: desktop)) }
 }
