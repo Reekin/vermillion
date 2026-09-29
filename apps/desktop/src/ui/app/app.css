@@ -580,6 +580,8 @@ button.vm-row-cells__title:hover { text-decoration: underline; text-underline-of
 .vm-mobile :is(input, select, textarea) { font-size: 16px; }
 /* Zero specificity: any component rule sizing its own control (with a larger ::after tap area) wins. */
 :where(.vm-mobile) :where(button, input, select) { min-height: 44px; min-width: 44px; }
+/* Shared buttons size themselves by class, so they get the touch minimum at class level too. */
+.vm-mobile .awb-button { min-height: 44px; }
 .vm-mobile-pair { max-width: 440px; margin: auto; padding: calc(env(safe-area-inset-top) + 48px) 24px 48px; }
 .vm-mobile-layer { position: absolute; inset: 0; display: flex; min-height: 0; flex-direction: column; background: var(--awb-bg); transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .vm-mobile-layer[data-level="list"][data-covered] { transform: translateX(-28%); }
