@@ -125,4 +125,4 @@ Worker、监工等 agent 登记的说明与外部原文按文字保存和显示�
 
 远程设置、设备记录（凭据哈希、名称、APNs device token 与环境、最近连接时间）和 frpc 配置保存在全局 `<baseDir>/remote/`，不写入 workspace 注册表。`remote.*` 方法由主进程处理，经 local endpoint 供 CLI 调用，设置页通过同一组方法读写。
 
-iOS App 位于 `apps/ios`（XcodeGen 描述工程）：SwiftUI 实现桌面列表、配对与推送登记，配对凭据存钥匙串；进入桌面时用 WKWebView 加载该桌面网关提供的手机网页，并在页面脚本执行前注入该桌面的凭据；APNs device token 登记到每台已配对桌面；点击通知时按推送携带的桌面与目标打开对应页面。
+iOS App 位于 `apps/ios`（XcodeGen 描述工程）：SwiftUI 实现桌面列表、配对与推送登记，配对凭据存钥匙串；进入桌面时以导航推入方式显示全屏 WKWebView，加载该桌面网关提供的手机网页，并在页面脚本执行前注入该桌面的凭据，桌面页面内的导航由网页负责，App 不叠加原生导航栏。每台桌面的 WKWebView 在离开后保留，使用持久网页缓存；网页通过消息通道请求返回桌面列表。APNs device token 登记到每台已配对桌面；点击通知时按推送携带的桌面与目标打开对应页面。
