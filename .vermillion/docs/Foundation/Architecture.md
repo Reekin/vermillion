@@ -117,7 +117,7 @@ Worker、监工等 agent 登记的说明与外部原文按文字保存和显示�
 
 远程网关属于桌面主进程（`apps/desktop/src/electron/remote/`），开启远程访问时在 loopback 随机端口启动。HTTP 提供手机网页静态资源、配对与推送登记接口；一条 WebSocket 连接承载会话 RPC、会话事件推送、工作台 RPC 与 `WorkbenchEvent`。网关复用 renderer 所用的同一个 session router 与工作台 RPC handler，只在入口做设备鉴权和方法白名单，不另建查询或投影；每个连接独立持有事件订阅，断开即释放。
 
-手机网页是 `apps/desktop` 内的独立 Vite 入口，与桌面 renderer 共用 store、transport 与会话区组件。它把 `SessionClientApi` 和工作台 bridge 实现为 WebSocket 客户端，替代 Electron preload；重连沿用 store-bridge 的 cursor 回放与断档重拉快照。页面随桌面构建产物打包，由网关提供。
+手机网页是 `apps/desktop` 内的独立 Vite 入口，与桌面 renderer 共用 store、transport 与会话区组件。它把 `SessionClientApi` 和工作台 bridge 实现为 WebSocket 客户端，替代 Electron preload；手机端不持有桌面的全量会话镜像：连接后只订阅之后的事件，会话内容按当前查看的分支读取；重连按 cursor 回放补齐，出现断档时丢弃已知会话窗口，重读列表和当前会话后从当前位置继续订阅。会话树查询附带树内各会话的运行状态与更新时间，供分支浮层使用。WebSocket 帧压缩传输。页面随桌面构建产物打包，由网关提供。
 
 隧道由网关的 frpc 管理器负责：按设置在 `<baseDir>/remote/` 生成 frpc 配置，把 VPS 端口映射到本次网关端口，以子进程运行并随远程访问关闭或应用退出结束，运行状态进入 `remote.status`。
 
