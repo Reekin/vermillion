@@ -5,6 +5,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { brotliCompress, constants as zlib, gzip } from "node:zlib";
 import { extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import type { RemoteDevices } from "./devices.js";
 import { allowRemoteRequest } from "./policy.js";
@@ -23,6 +24,9 @@ export type GatewayOptions = {
 const bearer = (request: IncomingMessage): string | undefined => request.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
 const contentTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" };
 const compressible = new Set([".html", ".js", ".css", ".svg"]);
+/** Desktop images a paired phone may read to show session images; no other file type is served. */
+const imageTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const brotli = promisify(brotliCompress);
 const gzipAsync = promisify(gzip);
 type StaticFile = { mtimeMs: number; etag: string; raw: Buffer; br?: Buffer; gzip?: Buffer };
@@ -66,7 +70,8 @@ export async function startRemoteGateway(options: GatewayOptions) {
     };
     try {
       if (!originAllowed(req)) { reply(403, { error: "Origin denied" }); return; }
-      const path = new URL(req.url ?? "/", publicOrigin).pathname;
+      const url = new URL(req.url ?? "/", publicOrigin);
+      const path = url.pathname;
       if (path === "/api/pair" && req.method === "POST") {
         let body = "";
         for await (const chunk of req) {
@@ -83,6 +88,19 @@ export async function startRemoteGateway(options: GatewayOptions) {
         if (!device) { reply(401, { error: "Unauthorized" }); return; }
         await options.devices.connected(device.deviceId);
         reply(200, await options.summary());
+        return;
+      }
+      if (path === "/api/image" && req.method === "GET") {
+        const device = options.devices.authenticate(bearer(req));
+        if (!device) { reply(401, { error: "Unauthorized" }); return; }
+        let file: string;
+        try { file = fileURLToPath(new URL(url.searchParams.get("url") ?? "")); } catch { reply(400, { error: "Invalid image URL" }); return; }
+        const type = imageTypes[extname(file).toLowerCase()];
+        if (!type) { reply(403, { error: "Only image files can be read" }); return; }
+        const info = await stat(file);
+        if (!info.isFile()) { reply(404, { error: "Not found" }); return; }
+        if (info.size > MAX_IMAGE_BYTES) { reply(413, { error: "Image too large" }); return; }
+        res.writeHead(200, { "content-type": type, "content-length": info.size, "cache-control": "private, max-age=86400" }).end(await readFile(file));
         return;
       }
       if (path === "/api/push" && (req.method === "POST" || req.method === "DELETE")) {

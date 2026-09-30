@@ -69,7 +69,6 @@
 .awb-mobile-session .awb-transcript__content { width: 100%; min-width: 0; }
 .awb-mobile-session .awb-chat-entry { min-width: 0; overflow-wrap: anywhere; }
 .awb-mobile-session :is(.awb-turn-process, .awb-approval-item) button, .awb-mobile-session summary { min-height: 44px; min-width: 44px; }
-.awb-mobile-activity summary { padding: 12px 0; cursor: pointer; color: var(--awb-ink-muted); font-size: var(--awb-text-caption); }
 
 .awb-mobile-composer {
   flex: none;

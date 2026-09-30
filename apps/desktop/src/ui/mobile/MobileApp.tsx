@@ -7,6 +7,7 @@ import { createDesktopTransport } from "../../transport/desktop-transport.js";
 import { createRemoteClient } from "../../transport/remote-client.js";
 import { connectDesktopTransportToStore } from "../../transport/store-bridge.js";
 import { MobileSessionPane } from "../chat-shell/MobileSessionPane.js";
+import { setLocalImageLoader } from "../chat-shell/local-image-preview.js";
 import { createCoalescedRefresh } from "../chat-shell/coalesced-refresh.js";
 import { formatRelativeActivityAge } from "../chat-shell/SessionPane.js";
 import { useRendererStoreState } from "../chat-shell/use-renderer-store-state.js";
@@ -202,6 +203,15 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
     return { remote, client: createWorkbenchClient(remote.workbench), transport, store, recovery, drafts: new Map<string, string>() };
   });
   const { remote, client, transport, store } = runtime;
+  // Session images are desktop files; the page reads them through the gateway with this device's credential.
+  useEffect(() => {
+    setLocalImageLoader(async (fileUrl) => {
+      const response = await fetch(`/api/image?url=${encodeURIComponent(fileUrl)}`, { headers: { authorization: `Bearer ${token}` } });
+      if (!response.ok) throw new Error(`Image request failed: ${response.status}`);
+      return URL.createObjectURL(await response.blob());
+    });
+    return () => setLocalImageLoader(undefined);
+  }, [token]);
   const connection = useSyncExternalStore(remote.subscribeConnection, remote.getConnectionState);
   const connected = connection === "connected";
   const [route, setRoute] = useState(() => parseMobileRoute(location.hash));

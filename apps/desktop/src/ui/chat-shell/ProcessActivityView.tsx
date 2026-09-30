@@ -24,7 +24,7 @@ import {
 } from "@vermillion/shared";
 import type { ImageLightboxState } from "./ImageLightbox.js";
 import { compareTranscriptItems } from "./transcript-order.js";
-import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
+import { useLocalImageSrc } from "./local-image-preview.js";
 import { normalizeTerminalOutput } from "./terminal-output.js";
 import { t } from "../../i18n/index.js";
 import { useT } from "../../i18n/react.js";
@@ -223,7 +223,7 @@ export const ProcessActivityItemView = ({
   const inputText = entry.inputText?.trim();
   const outputText = rawOutputText && rawOutputText !== inputText ? rawOutputText : undefined;
   const imageOutput = splitProcessImageOutput(outputText);
-  const imagePreviewSrc = buildLocalImagePreviewSrc(imageOutput?.src, entry.id);
+  const imagePreviewSrc = useLocalImageSrc(imageOutput?.src, entry.id);
   const imageText =
     imageOutput?.text === `path: ${inputText}` ? undefined : imageOutput?.text;
   const row = (

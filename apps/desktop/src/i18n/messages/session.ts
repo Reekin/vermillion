@@ -211,8 +211,7 @@ export const session = defineMessages(
     "session.skillEnabled": "已启用",
     "session.skillDisabled": "已停用",
     "session.approveWithRule": "批准并记住规则",
-    "session.applyNetworkRule": "应用网络规则",
-    "session.toolAndTerminalOutput": (p: { count: number }) => `工具与终端输出 · ${p.count}`
+    "session.applyNetworkRule": "应用网络规则"
   },
   {
     "session.imagePreview": "Image preview",
@@ -422,7 +421,6 @@ export const session = defineMessages(
     "session.skillEnabled": "Enabled",
     "session.skillDisabled": "Disabled",
     "session.approveWithRule": "Approve and remember rule",
-    "session.applyNetworkRule": "Apply network rule",
-    "session.toolAndTerminalOutput": (p) => `Tool and terminal output · ${p.count}`
+    "session.applyNetworkRule": "Apply network rule"
   }
 );

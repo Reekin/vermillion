@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ImgHTMLAttributes,
   type ReactNode,
   type ReactElement
 } from "react";
@@ -16,7 +17,7 @@ import type { MessageBlock } from "@vermillion/shared";
 import { fileUriToPath } from "@vermillion/shared";
 import { createDesktopTransport } from "../../transport/desktop-transport.js";
 import { resolveLocalFileLinkTarget } from "./local-markdown-target.js";
-import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
+import { useLocalImageSrc } from "./local-image-preview.js";
 import { writeClipboardText } from "./clipboard.js";
 import { t } from "../../i18n/index.js";
 import { useT } from "../../i18n/react.js";
@@ -602,25 +603,32 @@ export const renderMessageMarkdown = ({
           </span>
         );
       },
-      img: ({ src, alt, node: _ignoredNode, ...props }) => {
-        const previewSrc = buildLocalImagePreviewSrc(src, cacheKey);
-        if (!src || !onPreviewImage) {
-          return <img src={previewSrc} alt={alt ?? ""} {...props} />;
-        }
-        return (
-          <button
-            type="button"
-            className="awb-inline-image-button"
-            onClick={() =>
-              onPreviewImage({ src: previewSrc ?? src, alt: alt ?? t("session.imagePreview") })
-            }
-          >
-            <img src={previewSrc} alt={alt ?? ""} {...props} />
-          </button>
-        );
-      }
+      img: ({ src, alt, node: _ignoredNode, ...props }) => (
+        <MessageImage src={src} alt={alt} cacheKey={cacheKey} onPreviewImage={onPreviewImage} imageProps={props} />
+      )
     }
   });
+
+/** A message image; desktop file images load through the host where the page cannot read them directly. */
+const MessageImage = ({ src, alt, cacheKey, onPreviewImage, imageProps }: {
+  src?: string; alt?: string; cacheKey: string;
+  onPreviewImage?: (input: { src: string; alt: string }) => void;
+  imageProps: ImgHTMLAttributes<HTMLImageElement>;
+}): ReactElement => {
+  const previewSrc = useLocalImageSrc(src, cacheKey);
+  if (!src || !onPreviewImage) {
+    return <img src={previewSrc} alt={alt ?? ""} {...imageProps} />;
+  }
+  return (
+    <button
+      type="button"
+      className="awb-inline-image-button"
+      onClick={() => onPreviewImage({ src: previewSrc ?? src, alt: alt ?? t("session.imagePreview") })}
+    >
+      <img src={previewSrc} alt={alt ?? ""} {...imageProps} />
+    </button>
+  );
+};
 
 const MarkdownRenderer = memo(renderMessageMarkdown);
 

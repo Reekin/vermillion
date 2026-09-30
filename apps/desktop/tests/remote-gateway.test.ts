@@ -3,6 +3,7 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { once } from "node:events";
 import { WebSocket } from "ws";
 import { describe, expect, it, vi } from "vitest";
@@ -187,6 +188,26 @@ describe("remote gateway over HTTP and WebSocket", () => {
       const authorized = await fetch(`${f.http}/api/summary`, { headers: { authorization: `Bearer ${token}` } });
       expect(authorized.status).toBe(200);
       expect(await authorized.json()).toEqual({ desktopName: "Test desktop", unread: 2 });
+    });
+  });
+
+  it("serves desktop image files to paired devices only, and no other file type", async () => {
+    await withGateway(async (f) => {
+      const pairing = f.devices.pair(publicUrl, "Test desktop");
+      const { token } = await (await fetch(`${f.http}/api/pair`, { method: "POST", body: JSON.stringify({ code: pairing.code, name: "Phone" }) })).json() as { token: string };
+      const image = join(f.assetsDir, "shot.png");
+      const secret = join(f.assetsDir, "notes.txt");
+      await writeFile(image, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      await writeFile(secret, "private");
+      const read = (file: string, auth?: string) => fetch(`${f.http}/api/image?url=${encodeURIComponent(pathToFileURL(file).href + "?awb_file_mtime=1")}`,
+        auth ? { headers: { authorization: `Bearer ${auth}` } } : {});
+      expect((await read(image)).status).toBe(401);
+      const served = await read(image, token);
+      expect(served.status).toBe(200);
+      expect(served.headers.get("content-type")).toBe("image/png");
+      expect(Buffer.from(await served.arrayBuffer())).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      expect((await read(secret, token)).status).toBe(403);
+      expect((await read(join(f.assetsDir, "missing.png"), token)).status).toBe(404);
     });
   });
 
