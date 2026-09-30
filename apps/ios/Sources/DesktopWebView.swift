@@ -90,10 +90,11 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
             webView.isOpaque = false
             webView.backgroundColor = UIColor(red: 21 / 255, green: 21 / 255, blue: 23 / 255, alpha: 1)
             webView.underPageBackgroundColor = webView.backgroundColor
-            // The page lays itself out to the visible area and its viewport forbids zoom; the outer scroll view does not bounce.
+            // The page lays itself out to the visible area; neither the page's viewport nor the outer scroll view zooms or bounces.
             webView.scrollView.contentInsetAdjustmentBehavior = .never
             webView.scrollView.isScrollEnabled = false
             webView.scrollView.bounces = false
+            webView.scrollView.pinchGestureRecognizer?.isEnabled = false
         }
         func load(target: String) {
             loaded = false

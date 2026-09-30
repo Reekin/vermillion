@@ -6,7 +6,13 @@ final class PairingUITests: XCTestCase {
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
     }
 
-    // Supply isolated gateways through TEST_RUNNER_IOS_GATEWAYS when invoking xcodebuild.
+    private func edgeSwipe(_ app: XCUIApplication) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+    }
+
+    // Supply isolated gateways through TEST_RUNNER_IOS_GATEWAYS when invoking xcodebuild; TEST_RUNNER_IOS_SESSION names a
+    // session title on the first desktop for the in-session edge swipe.
     func testIsolatedGateways() throws {
         struct Gateway: Decodable { let url: String; let code: String; let name: String }
         guard let json = ProcessInfo.processInfo.environment["IOS_GATEWAYS"] else {
@@ -40,6 +46,25 @@ final class PairingUITests: XCTestCase {
             app.webViews.buttons.matching(NSPredicate(format: "label IN %@", ["桌面", "Desktops"])).firstMatch.tap()
             XCTAssertTrue(app.navigationBars["桌面列表"].waitForExistence(timeout: 5))
         }
+        // Pinch does not zoom; edge swipes go back a level at a time.
+        app.buttons.containing(.staticText, identifier: gateways[0].name).firstMatch.tap()
+        let inbox = app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS 'Inbox'")).firstMatch
+        XCTAssertTrue(inbox.waitForExistence(timeout: 10))
+        let before = inbox.frame
+        app.webViews.firstMatch.pinch(withScale: 2.5, velocity: 2)
+        XCTAssertEqual(inbox.frame, before)
+        if let title = ProcessInfo.processInfo.environment["IOS_SESSION"] {
+            let row = app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 10))
+            row.tap()
+            XCTAssertTrue(app.webViews.textViews.firstMatch.waitForExistence(timeout: 10))
+            capture("Session before edge swipe", app: app)
+            edgeSwipe(app)
+            XCTAssertTrue(inbox.waitForExistence(timeout: 5))
+            XCTAssertFalse(app.navigationBars["桌面列表"].exists)
+        }
+        edgeSwipe(app)
+        XCTAssertTrue(app.navigationBars["桌面列表"].waitForExistence(timeout: 5))
         // A cold app process still uses Keychain credentials.
         app.terminate(); app.launch()
         XCTAssertTrue(app.buttons.containing(.staticText, identifier: gateways[0].name).firstMatch.waitForExistence(timeout: 20))
