@@ -29,6 +29,7 @@ targets:
       properties:
         CFBundleDisplayName: Vermillion
         UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
         NSCameraUsageDescription: 扫描桌面配对二维码
         CFBundleURLTypes:
           - CFBundleURLSchemes: [vermillion]

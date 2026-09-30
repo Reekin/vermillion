@@ -1019,9 +1019,9 @@ export class SessionShellService {
   }
 
   public async getChatTree(sessionId: string, scope?: ChatTreeScope,
-    knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string): Promise<ChatTreeSnapshot> {
+    knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string, viewSessionId?: string): Promise<ChatTreeSnapshot> {
     return this.withRead(readId, sessionId, async (signal) => {
-      return this.requireWrapperChatTree().get(sessionId, scope, knownWindows, signal);
+      return this.requireWrapperChatTree().get(sessionId, scope, knownWindows, signal, viewSessionId);
     });
   }
 

@@ -1,4 +1,6 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -89,6 +91,7 @@ async function gatewayFixture(devices: RemoteDevices, directory: string) {
   });
   return {
     gateway, devices, handlers, workbenchHandlers, service, routers, workbenchRequest, summary,
+    assetsDir: directory,
     http: `http://127.0.0.1:${gateway.port}`,
     socket: `ws://127.0.0.1:${gateway.port}/api/socket`,
     async pair() {
@@ -184,6 +187,34 @@ describe("remote gateway over HTTP and WebSocket", () => {
       const authorized = await fetch(`${f.http}/api/summary`, { headers: { authorization: `Bearer ${token}` } });
       expect(authorized.status).toBe(200);
       expect(await authorized.json()).toEqual({ desktopName: "Test desktop", unread: 2 });
+    });
+  });
+
+  it("caches hashed assets for good, revalidates the entry page and compresses both", async () => {
+    await withGateway(async (f) => {
+      const script = "export const phone = true;\n".repeat(200);
+      await mkdir(join(f.assetsDir, "assets"), { recursive: true });
+      await writeFile(join(f.assetsDir, "mobile.html"), "<!doctype html><title>phone</title>" + " ".repeat(2000));
+      await writeFile(join(f.assetsDir, "assets", "mobile-abc123.js"), script);
+      // Raw HTTP so the test sees the encoded body exactly as the phone receives it.
+      const get = (path: string, headers: Record<string, string>) => new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }>((done, fail) => {
+        httpRequest(`${f.http}${path}`, { headers }, (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () => done({ status: response.statusCode ?? 0, headers: response.headers, body: Buffer.concat(chunks) }));
+        }).on("error", fail).end();
+      });
+      const asset = await get("/assets/mobile-abc123.js", { "accept-encoding": "gzip, deflate, br" });
+      expect(asset.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect(asset.headers["content-encoding"]).toBe("br");
+      expect(brotliDecompressSync(asset.body).toString()).toBe(script);
+      const gzip = await get("/assets/mobile-abc123.js", { "accept-encoding": "gzip" });
+      expect(gunzipSync(gzip.body).toString()).toBe(script);
+      const entry = await get("/", { "accept-encoding": "br" });
+      expect(entry.headers["cache-control"]).toBe("no-cache");
+      const revalidated = await get("/", { "if-none-match": String(entry.headers.etag) });
+      expect(revalidated.status).toBe(304);
+      expect((await get("/api/summary", {})).headers["cache-control"]).toBe("no-store");
     });
   });
 

@@ -270,11 +270,11 @@ export class WrapperChatTreeService {
   }
 
   private buildProjection(
-    sessionId: string, loaded: ReadonlySet<string>, withWindows = false, knownWindows?: KnownSessionWindows
+    sessionId: string, loaded: ReadonlySet<string>, withWindows = false, knownWindows?: KnownSessionWindows, viewSessionId?: string
   ): TreeProjection {
     const span = beginSessionStage("tree.project", { memberSessionId: sessionId, members: loaded.size, withWindows });
     try {
-      const result = this.buildProjectionValue(sessionId, loaded, withWindows, knownWindows);
+      const result = this.buildProjectionValue(sessionId, loaded, withWindows, knownWindows, viewSessionId);
       span.emit("end", { outcome: "ok", nodes: result.tree.nodes.length, windows: result.tree.windows?.length ?? 0 });
       return result;
     } catch (error) {
@@ -287,7 +287,8 @@ export class WrapperChatTreeService {
     sessionId: string,
     loaded: ReadonlySet<string>,
     withWindows = false,
-    knownWindows?: KnownSessionWindows
+    knownWindows?: KnownSessionWindows,
+    viewSessionId?: string
   ): TreeProjection {
     const { runtimeService, sessionIndexStore: index } = this.options;
     const treeId = index.getTreeId(sessionId);
@@ -349,7 +350,7 @@ export class WrapperChatTreeService {
     }
     const visibleNodes = nodes.filter((node) => !hidden.has(node.nodeId));
     for (const node of visibleNodes) node.sessionId = turnsById.get(node.nodeId)!.sessionId;
-    const view = index.getTreeView(treeId);
+    const view = viewSessionId ? { sessionId: viewSessionId } : index.getTreeView(treeId);
     const position = viewPosition({ paths, turnsById, hidden }, view && paths.has(view.sessionId) ? view
       : { sessionId: paths.has(sessionId) ? sessionId : paths.keys().next().value ?? treeId });
     const windows = !withWindows ? undefined : members.flatMap((memberId) => {
@@ -412,11 +413,11 @@ export class WrapperChatTreeService {
    * 读取会话树：没有快照时等待本代加载完成；快照稳定时从已加载成员派生新投影；
    * 刷新进行中或刷新失败时保持已发布快照，不让中间结果覆盖已显示的树。
    */
-  public async get(sessionId: string, scope: ChatTreeScope = "tree", knownWindows?: KnownSessionWindows, signal?: AbortSignal): Promise<ChatTreeSnapshot> {
+  public async get(sessionId: string, scope: ChatTreeScope = "tree", knownWindows?: KnownSessionWindows, signal?: AbortSignal, viewSessionId?: string): Promise<ChatTreeSnapshot> {
     signal?.throwIfAborted();
     await this.options.sessionIndexStore.ready();
     signal?.throwIfAborted();
-    if (scope === "path") return this.getViewPath(sessionId, knownWindows, signal);
+    if (scope === "path") return this.getViewPath(sessionId, knownWindows, signal, viewSessionId);
     const state = this.treeState(sessionId);
     if (state.published) {
       await this.rebuildIfSettled(sessionId, state, signal);
@@ -439,10 +440,12 @@ export class WrapperChatTreeService {
 
   /**
    * 读取当前查看路径：只加载被查看分支及其 fork 祖先，并附带这些成员的正文窗口，
-   * 使消息区不必等待整棵树的其余分支。
+   * 使消息区不必等待整棵树的其余分支。指定 viewSessionId 时读取该成员分支末端，不改变保存的查看位置。
    */
-  private async getViewPath(sessionId: string, knownWindows?: KnownSessionWindows, signal?: AbortSignal): Promise<ChatTreeSnapshot> {
-    const chain = this.viewPathMembers(sessionId);
+  private async getViewPath(sessionId: string, knownWindows?: KnownSessionWindows, signal?: AbortSignal, viewSessionId?: string): Promise<ChatTreeSnapshot> {
+    const index = this.options.sessionIndexStore;
+    const view = viewSessionId && index.getTreeMembers(sessionId).includes(viewSessionId) ? viewSessionId : undefined;
+    const chain = this.viewPathMembers(sessionId, view);
     const members = new Set<string>();
     let completed = 0;
     reportSessionReadCounts(completed, chain.length);
@@ -453,14 +456,14 @@ export class WrapperChatTreeService {
       reportSessionReadCounts(++completed, chain.length);
     }));
     signal?.throwIfAborted();
-    return this.buildProjection(sessionId, members, true, knownWindows).tree;
+    return this.buildProjection(sessionId, members, true, knownWindows, view).tree;
   }
 
   /** 查看路径的成员：被查看分支及其 fork 祖先，按祖先在前排列。 */
-  private viewPathMembers(sessionId: string): string[] {
+  private viewPathMembers(sessionId: string, viewSessionId?: string): string[] {
     const index = this.options.sessionIndexStore;
     const members = new Set(index.getTreeMembers(sessionId));
-    const view = index.getTreeView(index.getTreeId(sessionId));
+    const view = viewSessionId ? { sessionId: viewSessionId } : index.getTreeView(index.getTreeId(sessionId));
     const viewed = view && members.has(view.sessionId) ? view.sessionId
       : members.has(sessionId) ? sessionId
         : [...members][0];

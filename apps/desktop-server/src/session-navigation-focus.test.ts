@@ -42,6 +42,11 @@ it("explicit activation selects the requested member tip and emits a refresh, wh
     runtime.subscribe(events, { eventTypes: ["conversationGraph.updated"] });
     await shell.activateSession("root");
     expect((await tree.get("root")).currentSessionId).toBe("branch");
+    // A remote reader can view another branch without moving the saved view.
+    expect(await rpc.handleRequest({ id: "view", method: "chatTree.get", params: { sessionId: "root", scope: "path", viewSessionId: "root" } }))
+      .toMatchObject({ ok: true, result: { chatTree: { currentSessionId: "root", currentNodeId: "root-turn", visibleTurnIds: ["root-turn"] } } });
+    expect(index.getTreeView("root")).toEqual({ sessionId: "branch", nodeId: "branch-turn", followTip: false });
+    expect((await tree.get("root", "path")).currentSessionId).toBe("branch");
     expect(events).not.toHaveBeenCalled();
     expect(await rpc.handleRequest({ id: "focus", method: "sessionBrowser.activate", params: { sessionId: "root", focusTree: true } })).toMatchObject({ ok: true });
     expect(await tree.get("root")).toMatchObject({ currentSessionId: "root", currentNodeId: "root-turn", visibleTurnIds: ["root-turn"] });

@@ -436,7 +436,7 @@ export const createWorkbenchRpcHandler = (
               method: request.method,
               ok: true,
               result: {
-                chatTree: await shellService.getChatTree(request.params.sessionId, request.params.scope, request.params.knownWindows, request.params.readId)
+                chatTree: await shellService.getChatTree(request.params.sessionId, request.params.scope, request.params.knownWindows, request.params.readId, request.params.viewSessionId)
               }
             });
           case "chatTree.cancelRead":
