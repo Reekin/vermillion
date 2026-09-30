@@ -26,7 +26,6 @@ import {
 } from "./ProcessActivityView.js";
 
 export type TurnProcessPanelProps = {
-  collapseActivity?: boolean;
   row: TurnTranscriptRow;
   hiddenRows?: TurnTranscriptRow[];
   participantDirectory: ParticipantDirectory;
@@ -127,7 +126,6 @@ export const buildTurnHistoryItems = (
   ].sort(compareTranscriptItems(row.turn));
 
 export const TurnProcessPanel = ({
-  collapseActivity = false,
   row,
   hiddenRows = [],
   participantDirectory,
@@ -194,10 +192,7 @@ export const TurnProcessPanel = ({
 
       {renderStandaloneActivity &&
         (row.toolCalls.length > 0 || row.terminalStreams.length > 0) && (
-          collapseActivity ? <details className="awb-mobile-activity">
-            <summary>{t("session.toolAndTerminalOutput", { count: row.toolCalls.length + row.terminalStreams.length })}</summary>
-            <ProcessActivityView turn={row.turn} toolCalls={row.toolCalls} terminalStreams={row.terminalStreams} onPreviewImage={onPreviewImage} />
-          </details> : <ProcessActivityView
+          <ProcessActivityView
             turn={row.turn}
             toolCalls={row.toolCalls}
             terminalStreams={row.terminalStreams}

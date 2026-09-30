@@ -5,7 +5,7 @@ import type { SessionReadProgress } from "@vermillion/shared";
 import { readSession, type ReadSessionArgs } from "./read-session-host-tool.js";
 import { buildReadSessionActivity, type ReadSessionTranscriptResult } from "./read-session-transcript.js";
 import type { HostToolRegistry } from "./host-tools.js";
-import type { ChatTreeScope, ChatTreeSnapshot, WrapperChatTreeService } from "./wrapper-chat-tree.js";
+import type { ChatTreePage, ChatTreeScope, ChatTreeSnapshot, WrapperChatTreeService } from "./wrapper-chat-tree.js";
 import type {
   ChatInteractionCapabilitiesRpc,
   ChatSession,
@@ -1019,9 +1019,15 @@ export class SessionShellService {
   }
 
   public async getChatTree(sessionId: string, scope?: ChatTreeScope,
-    knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string): Promise<ChatTreeSnapshot> {
+    knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string, viewSessionId?: string,
+    page?: ChatTreePage): Promise<ChatTreeSnapshot> {
     return this.withRead(readId, sessionId, async (signal) => {
-      return this.requireWrapperChatTree().get(sessionId, scope, knownWindows, signal);
+      const tree = await this.requireWrapperChatTree().get(sessionId, scope, knownWindows, signal, viewSessionId, page);
+      const members = (tree.memberSessionIds ?? []).flatMap((memberId) => {
+        const session = this.runtimeService.getSession(memberId);
+        return session ? [{ sessionId: memberId, status: session.status, updatedAt: session.updatedAt }] : [];
+      });
+      return { ...tree, members };
     });
   }
 

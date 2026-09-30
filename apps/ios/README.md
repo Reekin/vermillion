@@ -39,9 +39,12 @@ This fills the pairing form; tap 配对 to confirm. Camera scanning requires a d
 - `POST /api/push`, bearer authorization, JSON `{token,environment}`. Token is lowercase APNs hex; environment is `sandbox` for Debug, `production` for Release.
 - `DELETE /api/push`, bearer authorization, unregisters before local removal.
 - HTTP redirects are refused for all API requests. Only HTTPS origins without userinfo, query, or path are accepted for pairing.
-- At document start, the main frame at the paired HTTPS origin receives `window.__VERMILLION_REMOTE__ = {token}`. No token is placed in a URL. Navigation and response policies reject other origins, including redirects; new windows stay within the paired origin. The web data store is nonpersistent.
-- The matching HTTPS main frame can return to the native list with `window.webkit.messageHandlers.vermillion.postMessage({type:'exit'})`. The native toolbar also provides 桌面列表, including while the desktop is offline.
-- APNs custom fields are `desktopUrl` (paired HTTPS origin) and `target` (`#/session/<encoded-id>`, `#/inbox/<encoded-workspace>/<encoded-key>`, or `#/inbox` for a test notification). Unknown desktops and invalid paths are rejected. A notification selects its desktop and replaces the current native destination.
+- At document start, the main frame at the paired HTTPS origin receives `window.__VERMILLION_REMOTE__ = {token}`. No token is placed in a URL. Navigation and response policies reject other origins, including redirects; new windows stay within the paired origin. Each desktop keeps one page for the life of the App process, so returning to it shows it at once; the default persistent website data store keeps the HTTP cache. The credential is only injected per load, never written to web storage by the App. Re-pairing a desktop replaces its page; a terminated web content process reloads the page at the list level.
+- The desktop page is pushed without a native navigation bar; the page draws its own top bar. The matching HTTPS main frame posts to `window.webkit.messageHandlers.vermillion`:
+  - `{type:'exit'}` returns to the desktop list (the page's 「‹ 桌面」 row).
+  - `{type:'level', level:'list'|'session'}` reports the page level. The system edge swipe returns to the desktop list only at the list level; inside a session the page's own edge swipe returns to its list.
+- When a page cannot load, a native screen shows the error with 重试 and 返回桌面列表. Page zoom and link previews are disabled.
+- APNs custom fields are `desktopUrl` (paired HTTPS origin) and `target` (`#/session/<encoded-id>`, `#/inbox/<encoded-workspace>/<encoded-key>`, or `#/inbox` for a test notification). Unknown desktops and invalid paths are rejected. A notification pushes its desktop (reusing its kept page) and sets the page's route to the target.
 
 Enable notifications using 开启通知. Registration is sent to every paired desktop, including desktops paired after APNs registration; foreground and pull-to-refresh retry registration failures. The list shows failed registrations.
 

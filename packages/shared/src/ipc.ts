@@ -10,7 +10,7 @@ import {
   zTurnId
 } from "./common.js";
 import { commandTypes, zCommandEnvelopeSchema, zChatTreeSendInputSchema, zChatTreeSendOperationSchema } from "./commands.js";
-import { zChatSessionSchema, zDomainSnapshotSchema } from "./domain.js";
+import { zChatSessionSchema, zDomainSnapshotSchema, zSessionStatus } from "./domain.js";
 import {
   zEngineDefinitionRpcSchema,
   zEngineModelCatalogRpcSchema,
@@ -354,6 +354,10 @@ const zChatTreeSnapshotSchema = z.object({
   visibleNodeIds: z.array(z.string().min(1)).optional(),
   visibleTurnIds: z.array(zTurnId).optional(),
   nodes: z.array(zChatTreeNodeSchema).default([]),
+  /** Status and last update of the tree's sessions known to the runtime, so a reader need not hold them all. */
+  members: z.array(z.object({ sessionId: zSessionId, status: zSessionStatus, updatedAt: z.string().min(1) })).optional(),
+  /** Paged path reads: turns in the returned windows whose tool or terminal text was cut to the page's maxTextLength. */
+  truncatedTurnIds: z.array(zTurnId).optional(),
   fetchedAt: z.string().min(1)
 });
 
@@ -748,7 +752,22 @@ const zChatTreeGetRequestSchema = z.object({
     scope: z.enum(["tree", "path"]).optional(),
     /** Complete member baselines actually held by the caller, with applied event watermarks. */
     knownWindows: z.record(z.object({ revision: z.string().min(1), cursor: z.string().min(1).optional() })).optional(),
-    readId: z.string().min(1).optional()
+    readId: z.string().min(1).optional(),
+    /** path only: read this member's branch tip instead of the saved view, without changing the saved view. */
+    viewSessionId: zSessionId.optional(),
+    /**
+     * path only: return windows for part of the viewed path instead of every member's whole history.
+     * `turnIds` selects those turns; otherwise the last `turns` path turns before `beforeTurnId` (or the tip).
+     * Completed turns' tool and terminal text longer than `maxTextLength` is cut, except `fullTurnIds`.
+     * Paged windows cover only their turns and never replace a member's whole history.
+     */
+    page: z.object({
+      turns: z.number().int().positive().optional(),
+      beforeTurnId: zTurnId.optional(),
+      turnIds: z.array(zTurnId).optional(),
+      maxTextLength: z.number().int().positive().optional(),
+      fullTurnIds: z.array(zTurnId).optional()
+    }).optional()
   })
 });
 

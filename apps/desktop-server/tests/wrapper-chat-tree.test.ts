@@ -211,6 +211,31 @@ describe("wrapper session trees", () => {
     f.service.dispose();
   });
 
+  it("pages the viewed path by turn and cuts long tool output of completed turns", async () => {
+    const f = await fixture();
+    const time = "2026-09-07T00:00:00Z";
+    f.snapshot.turns.find((turn) => turn.turnId === "a")!.toolCallIds.push("tool-a");
+    f.snapshot.toolCalls.push({ toolCallId: "tool-a", sessionId: "root", turnId: "a", toolName: "shell", status: "completed",
+      inputSummary: "ls", outputSummary: "x".repeat(50), startedAt: time });
+    const latest = await f.service.get("branch", "path", undefined, undefined, undefined, { turns: 1, maxTextLength: 10 });
+    // Only the tip turn of the path is carried, and a page never replaces a member's whole history.
+    expect(latest.windows?.map((window) => [window.sessionId, window.snapshot.turns.map((turn) => turn.turnId)])).toEqual([["branch", ["c"]]]);
+    expect(latest.windows?.every((window) => !window.replaceSessionHistory)).toBe(true);
+    expect(latest.visibleTurnIds).toEqual(["a", "c"]);
+    const older = await f.service.get("branch", "path", undefined, undefined, undefined, { turns: 5, beforeTurnId: "c", maxTextLength: 10 });
+    // Turn b of root is off the viewed path and stays out.
+    expect(older.windows?.map((window) => [window.sessionId, window.snapshot.turns.map((turn) => turn.turnId)])).toEqual([["root", ["a"]]]);
+    expect(older.windows?.[0]?.snapshot.toolCalls[0]?.outputSummary).toBe("x".repeat(10) + "\n…");
+    expect(older.truncatedTurnIds).toEqual(["a"]);
+    expect(f.snapshot.toolCalls[0]?.outputSummary).toHaveLength(50);
+    const full = await f.service.get("branch", "path", undefined, undefined, undefined, { turnIds: ["a"] });
+    expect(full.windows?.[0]?.snapshot.toolCalls[0]?.outputSummary).toHaveLength(50);
+    expect(full.truncatedTurnIds).toEqual([]);
+    const kept = await f.service.get("branch", "path", undefined, undefined, undefined, { turns: 5, maxTextLength: 10, fullTurnIds: ["a"] });
+    expect(kept.truncatedTurnIds).toEqual([]);
+    f.service.dispose();
+  });
+
   it("waits for every member before publishing concurrent tree reads", async () => {
     const f = await fixture();
     let releaseBranch!: () => void;

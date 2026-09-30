@@ -32,20 +32,20 @@ describe("mobile conversation", () => {
     expect(mobileSendSessionId(path)).toBe("new-branch");
   });
 
-  it("collapses running tool output without concealing pending approval controls", () => {
+  it("shows each running step's own action, one row per step, alongside pending approvals", () => {
     const row = {
-      toolCalls: [{ toolCallId: "tool", sessionId: "s", turnId: "t", toolName: "shell", status: "running", inputSummary: "pwd" }],
+      toolCalls: [
+        { toolCallId: "tool-1", sessionId: "s", turnId: "t", toolName: "commandExecution", status: "running", inputSummary: "pnpm test", startedAt: "2026-09-26T00:00:01Z" },
+        { toolCallId: "tool-2", sessionId: "s", turnId: "t", toolName: "commandExecution", status: "completed", inputSummary: "git status", startedAt: "2026-09-26T00:00:00Z" }
+      ],
       terminalStreams: [], interactions: [],
       approvals: [{ requestId: "approval", sessionId: "s", turnId: "t", status: "pending", kind: "command", title: "Allow command", requestedAt: "2026-09-26T00:00:00Z" }]
     } as unknown as TurnTranscriptRow;
-    const render = (collapseActivity: boolean) => renderToStaticMarkup(<TurnProcessPanel
-      row={row} participantDirectory={buildParticipantDirectory([])} collapseActivity={collapseActivity}
-      onRespondApproval={async () => undefined} />);
-    const mobile = render(true);
-    expect(mobile).toContain('<details class="awb-mobile-activity">');
-    expect(mobile).not.toContain('<details class="awb-mobile-activity" open');
-    expect(mobile.indexOf("Allow command")).toBeGreaterThan(mobile.indexOf("</details>"));
-    expect(mobile).toContain("批准");
-    expect(render(false)).not.toContain("awb-mobile-activity");
+    const html = renderToStaticMarkup(<TurnProcessPanel row={row} participantDirectory={buildParticipantDirectory([])} onRespondApproval={async () => undefined} />);
+    expect(html.match(/class="awb-process-step__row"/g)).toHaveLength(2);
+    expect(html).toContain("pnpm test");
+    expect(html).toContain("git status");
+    expect(html).toContain("Allow command");
+    expect(html).toContain("批准");
   });
 });

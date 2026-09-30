@@ -1,7 +1,11 @@
 import { ServiceError } from "@vermillion/workbench";
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { promisify } from "node:util";
+import { brotliCompress, constants as zlib, gzip } from "node:zlib";
 import { extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import type { RemoteDevices } from "./devices.js";
 import { allowRemoteRequest } from "./policy.js";
@@ -19,6 +23,37 @@ export type GatewayOptions = {
 };
 const bearer = (request: IncomingMessage): string | undefined => request.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
 const contentTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" };
+const compressible = new Set([".html", ".js", ".css", ".svg"]);
+/** Desktop images a paired phone may read to show session images; no other file type is served. */
+const imageTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const brotli = promisify(brotliCompress);
+const gzipAsync = promisify(gzip);
+type StaticFile = { mtimeMs: number; etag: string; raw: Buffer; br?: Buffer; gzip?: Buffer };
+
+/** Static files are read and compressed once per build; hashed assets never change once served. */
+const createStaticCache = () => {
+  const files = new Map<string, Promise<StaticFile>>();
+  return async (file: string): Promise<StaticFile> => {
+    const { mtimeMs } = await stat(file);
+    const cached = files.get(file);
+    if (cached && (await cached).mtimeMs === mtimeMs) return cached;
+    const load = (async () => {
+      const raw = await readFile(file);
+      const entry: StaticFile = { mtimeMs, raw, etag: `"${createHash("sha256").update(raw).digest("base64url").slice(0, 27)}"` };
+      if (compressible.has(extname(file)) && raw.length > 1024) {
+        [entry.br, entry.gzip] = await Promise.all([
+          brotli(raw, { params: { [zlib.BROTLI_PARAM_QUALITY]: 9, [zlib.BROTLI_PARAM_SIZE_HINT]: raw.length } }),
+          gzipAsync(raw, { level: 9 })
+        ]);
+      }
+      return entry;
+    })();
+    files.set(file, load);
+    load.catch(() => files.delete(file));
+    return load;
+  };
+};
 
 export async function startRemoteGateway(options: GatewayOptions) {
   const connections = new Map<WebSocket, string>();
@@ -26,6 +61,7 @@ export async function startRemoteGateway(options: GatewayOptions) {
   const sockets = new Set<import("node:net").Socket>();
   const publicOrigin = new URL(options.publicUrl).origin;
   const originAllowed = (request: IncomingMessage) => !request.headers.origin || request.headers.origin === publicOrigin;
+  const staticFile = createStaticCache();
   const server = createServer(async (req, res) => {
     res.setHeader("cache-control", "no-store");
     res.setHeader("x-content-type-options", "nosniff");
@@ -34,7 +70,8 @@ export async function startRemoteGateway(options: GatewayOptions) {
     };
     try {
       if (!originAllowed(req)) { reply(403, { error: "Origin denied" }); return; }
-      const path = new URL(req.url ?? "/", publicOrigin).pathname;
+      const url = new URL(req.url ?? "/", publicOrigin);
+      const path = url.pathname;
       if (path === "/api/pair" && req.method === "POST") {
         let body = "";
         for await (const chunk of req) {
@@ -51,6 +88,19 @@ export async function startRemoteGateway(options: GatewayOptions) {
         if (!device) { reply(401, { error: "Unauthorized" }); return; }
         await options.devices.connected(device.deviceId);
         reply(200, await options.summary());
+        return;
+      }
+      if (path === "/api/image" && req.method === "GET") {
+        const device = options.devices.authenticate(bearer(req));
+        if (!device) { reply(401, { error: "Unauthorized" }); return; }
+        let file: string;
+        try { file = fileURLToPath(new URL(url.searchParams.get("url") ?? "")); } catch { reply(400, { error: "Invalid image URL" }); return; }
+        const type = imageTypes[extname(file).toLowerCase()];
+        if (!type) { reply(403, { error: "Only image files can be read" }); return; }
+        const info = await stat(file);
+        if (!info.isFile()) { reply(404, { error: "Not found" }); return; }
+        if (info.size > MAX_IMAGE_BYTES) { reply(413, { error: "Image too large" }); return; }
+        res.writeHead(200, { "content-type": type, "content-length": info.size, "cache-control": "private, max-age=86400" }).end(await readFile(file));
         return;
       }
       if (path === "/api/push" && (req.method === "POST" || req.method === "DELETE")) {
@@ -85,14 +135,29 @@ export async function startRemoteGateway(options: GatewayOptions) {
         throw error;
       }
       if (!file.startsWith(root + sep)) { reply(403, { error: "Path denied" }); return; }
-      res.writeHead(200, { "content-type": contentTypes[extname(file)] ?? "application/octet-stream" }).end(await readFile(file));
+      const entry = await staticFile(file);
+      // Hashed build assets are immutable; the entry page is revalidated so a desktop update reaches the phone.
+      res.setHeader("cache-control", asset === "mobile.html" ? "no-cache" : "public, max-age=31536000, immutable");
+      res.setHeader("etag", entry.etag);
+      res.setHeader("vary", "accept-encoding");
+      if (req.headers["if-none-match"] === entry.etag) { res.writeHead(304).end(); return; }
+      const accepted = String(req.headers["accept-encoding"] ?? "");
+      const [encoding, body] = entry.br && /\bbr\b/.test(accepted) ? ["br", entry.br]
+        : entry.gzip && /\bgzip\b/.test(accepted) ? ["gzip", entry.gzip] : [undefined, entry.raw];
+      res.writeHead(200, {
+        "content-type": contentTypes[extname(file)] ?? "application/octet-stream",
+        "content-length": body.length,
+        ...(encoding ? { "content-encoding": encoding } : {})
+      }).end(body);
     } catch (error) {
       if (res.headersSent) { res.end(); return; }
       reply((error as NodeJS.ErrnoException).code === "ENOENT" ? 404 : 400, { error: error instanceof Error ? error.message : "Request failed", ...(error instanceof ServiceError ? { text: error.text } : {}) });
     }
   });
   server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
-  const wsServer = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024, perMessageDeflate: false });
+  const wsServer = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024,
+    // Session history is verbose JSON; compressing frames keeps reads fast over a thin VPS link.
+    perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: 6 } } });
   server.on("upgrade", (req, socket, head) => {
     if (req.url !== "/api/socket" || !originAllowed(req)) { socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); return; }
     // Browsers cannot set Authorization on a WebSocket handshake. Authenticate the first frame

@@ -1,6 +1,9 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { once } from "node:events";
 import { WebSocket } from "ws";
 import { describe, expect, it, vi } from "vitest";
@@ -89,6 +92,7 @@ async function gatewayFixture(devices: RemoteDevices, directory: string) {
   });
   return {
     gateway, devices, handlers, workbenchHandlers, service, routers, workbenchRequest, summary,
+    assetsDir: directory,
     http: `http://127.0.0.1:${gateway.port}`,
     socket: `ws://127.0.0.1:${gateway.port}/api/socket`,
     async pair() {
@@ -184,6 +188,54 @@ describe("remote gateway over HTTP and WebSocket", () => {
       const authorized = await fetch(`${f.http}/api/summary`, { headers: { authorization: `Bearer ${token}` } });
       expect(authorized.status).toBe(200);
       expect(await authorized.json()).toEqual({ desktopName: "Test desktop", unread: 2 });
+    });
+  });
+
+  it("serves desktop image files to paired devices only, and no other file type", async () => {
+    await withGateway(async (f) => {
+      const pairing = f.devices.pair(publicUrl, "Test desktop");
+      const { token } = await (await fetch(`${f.http}/api/pair`, { method: "POST", body: JSON.stringify({ code: pairing.code, name: "Phone" }) })).json() as { token: string };
+      const image = join(f.assetsDir, "shot.png");
+      const secret = join(f.assetsDir, "notes.txt");
+      await writeFile(image, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      await writeFile(secret, "private");
+      const read = (file: string, auth?: string) => fetch(`${f.http}/api/image?url=${encodeURIComponent(pathToFileURL(file).href + "?awb_file_mtime=1")}`,
+        auth ? { headers: { authorization: `Bearer ${auth}` } } : {});
+      expect((await read(image)).status).toBe(401);
+      const served = await read(image, token);
+      expect(served.status).toBe(200);
+      expect(served.headers.get("content-type")).toBe("image/png");
+      expect(Buffer.from(await served.arrayBuffer())).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      expect((await read(secret, token)).status).toBe(403);
+      expect((await read(join(f.assetsDir, "missing.png"), token)).status).toBe(404);
+    });
+  });
+
+  it("caches hashed assets for good, revalidates the entry page and compresses both", async () => {
+    await withGateway(async (f) => {
+      const script = "export const phone = true;\n".repeat(200);
+      await mkdir(join(f.assetsDir, "assets"), { recursive: true });
+      await writeFile(join(f.assetsDir, "mobile.html"), "<!doctype html><title>phone</title>" + " ".repeat(2000));
+      await writeFile(join(f.assetsDir, "assets", "mobile-abc123.js"), script);
+      // Raw HTTP so the test sees the encoded body exactly as the phone receives it.
+      const get = (path: string, headers: Record<string, string>) => new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }>((done, fail) => {
+        httpRequest(`${f.http}${path}`, { headers }, (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () => done({ status: response.statusCode ?? 0, headers: response.headers, body: Buffer.concat(chunks) }));
+        }).on("error", fail).end();
+      });
+      const asset = await get("/assets/mobile-abc123.js", { "accept-encoding": "gzip, deflate, br" });
+      expect(asset.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect(asset.headers["content-encoding"]).toBe("br");
+      expect(brotliDecompressSync(asset.body).toString()).toBe(script);
+      const gzip = await get("/assets/mobile-abc123.js", { "accept-encoding": "gzip" });
+      expect(gunzipSync(gzip.body).toString()).toBe(script);
+      const entry = await get("/", { "accept-encoding": "br" });
+      expect(entry.headers["cache-control"]).toBe("no-cache");
+      const revalidated = await get("/", { "if-none-match": String(entry.headers.etag) });
+      expect(revalidated.status).toBe(304);
+      expect((await get("/api/summary", {})).headers["cache-control"]).toBe("no-store");
     });
   });
 

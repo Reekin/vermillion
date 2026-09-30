@@ -115,9 +115,9 @@ Worker、监工等 agent 登记的说明与外部原文按文字保存和显示�
 
 产品行为见[手机远程](../Workbench/Mobile/PRD.md)，安全与连接约束见[手机远程实现规范](../Workbench/Mobile/Standards.md)。
 
-远程网关属于桌面主进程（`apps/desktop/src/electron/remote/`），开启远程访问时在 loopback 随机端口启动。HTTP 提供手机网页静态资源、配对与推送登记接口；一条 WebSocket 连接承载会话 RPC、会话事件推送、工作台 RPC 与 `WorkbenchEvent`。网关复用 renderer 所用的同一个 session router 与工作台 RPC handler，只在入口做设备鉴权和方法白名单，不另建查询或投影；每个连接独立持有事件订阅，断开即释放。
+远程网关属于桌面主进程（`apps/desktop/src/electron/remote/`），开启远程访问时在 loopback 随机端口启动。HTTP 提供手机网页静态资源、配对、推送登记与桌面图片读取接口；会话区通过可替换的图片加载入口显示本机文件图片，手机网页把它接到图片读取接口；一条 WebSocket 连接承载会话 RPC、会话事件推送、工作台 RPC 与 `WorkbenchEvent`。网关复用 renderer 所用的同一个 session router 与工作台 RPC handler，只在入口做设备鉴权和方法白名单，不另建查询或投影；每个连接独立持有事件订阅，断开即释放。
 
-手机网页是 `apps/desktop` 内的独立 Vite 入口，与桌面 renderer 共用 store、transport 与会话区组件。它把 `SessionClientApi` 和工作台 bridge 实现为 WebSocket 客户端，替代 Electron preload；重连沿用 store-bridge 的 cursor 回放与断档重拉快照。页面随桌面构建产物打包，由网关提供。
+手机网页是 `apps/desktop` 内的独立 Vite 入口，与桌面 renderer 共用 store、transport 与会话区组件。它把 `SessionClientApi` 和工作台 bridge 实现为 WebSocket 客户端，替代 Electron preload；手机端不持有桌面的全量会话镜像：连接后只订阅之后的事件，会话内容按当前查看的分支读取；重连按 cursor 回放补齐，出现断档时丢弃已知会话窗口，重读列表和当前会话后从当前位置继续订阅。会话树查询附带树内各会话的运行状态与更新时间，供分支浮层使用。WebSocket 帧压缩传输。页面随桌面构建产物打包，由网关提供。
 
 隧道由网关的 frpc 管理器负责：按设置在 `<baseDir>/remote/` 生成 frpc 配置，把 VPS 端口映射到本次网关端口，以子进程运行并随远程访问关闭或应用退出结束，运行状态进入 `remote.status`。
 
@@ -125,4 +125,4 @@ Worker、监工等 agent 登记的说明与外部原文按文字保存和显示�
 
 远程设置、设备记录（凭据哈希、名称、APNs device token 与环境、最近连接时间）和 frpc 配置保存在全局 `<baseDir>/remote/`，不写入 workspace 注册表。`remote.*` 方法由主进程处理，经 local endpoint 供 CLI 调用，设置页通过同一组方法读写。
 
-iOS App 位于 `apps/ios`（XcodeGen 描述工程）：SwiftUI 实现桌面列表、配对与推送登记，配对凭据存钥匙串；进入桌面时用 WKWebView 加载该桌面网关提供的手机网页，并在页面脚本执行前注入该桌面的凭据；APNs device token 登记到每台已配对桌面；点击通知时按推送携带的桌面与目标打开对应页面。
+iOS App 位于 `apps/ios`（XcodeGen 描述工程）：SwiftUI 实现桌面列表、配对与推送登记，配对凭据存钥匙串；进入桌面时以导航推入方式显示全屏 WKWebView，加载该桌面网关提供的手机网页，并在页面脚本执行前注入该桌面的凭据，桌面页面内的导航由网页负责，App 不叠加原生导航栏。每台桌面的 WKWebView 在离开后保留，使用持久网页缓存；网页通过消息通道请求返回桌面列表。APNs device token 登记到每台已配对桌面；点击通知时按推送携带的桌面与目标打开对应页面。

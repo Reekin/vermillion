@@ -49,10 +49,9 @@ describe("compiled Markdown reuse", () => {
     const current = renderMessageMarkdown({ text, cacheKey, onPreviewImage: currentPreview, renderFileLinkContextMenu: currentMenu });
     expect(messageMarkdownAstCache.get(cacheKey, text)).toBe(ast);
     const image = compiledElement(current, "img")!;
-    const button = (image.type as (props: unknown) => ReactElement<any>)(image.props);
-    button.props.onClick();
-    expect(currentPreview).toHaveBeenCalledWith(expect.objectContaining({ alt: "preview" }));
-    expect(oldPreview).not.toHaveBeenCalled();
+    const messageImage = (image.type as (props: unknown) => ReactElement<any>)(image.props);
+    expect(messageImage.props.onPreviewImage).toBe(currentPreview);
+    expect(messageImage.props.alt).toBe("preview");
     const anchor = compiledElement(current, "a")!;
     const fileLink = (anchor.type as (props: unknown) => ReactElement<any>)(anchor.props);
     expect(fileLink.props.renderFileLinkContextMenu).toBe(currentMenu);

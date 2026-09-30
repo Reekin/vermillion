@@ -48,12 +48,13 @@ final class RemoteTests: XCTestCase {
         let store = DesktopStore()
         store.desktops = [Desktop(origin: URL(string: "https://test.example")!, deviceId: "id", name: "Mac", token: "secret")]
         store.notification(["desktopUrl": "https://evil.example", "target": "#/session/abc"])
-        XCTAssertNil(store.destination)
+        XCTAssertTrue(store.path.isEmpty)
         store.notification(["desktopUrl": "https://test.example", "target": "#/inbox/workspace/key"])
-        XCTAssertEqual(store.destination?.target, "#/inbox/workspace/key")
-        XCTAssertEqual(store.destination?.desktop.name, "Mac")
+        XCTAssertEqual(store.path, ["https://test.example"])
+        XCTAssertEqual(store.lastOpened?.target, "#/inbox/workspace/key")
         store.notification(["desktopUrl": "https://test.example", "target": "#/inbox"])
-        XCTAssertEqual(store.destination?.target, "#/inbox")
+        XCTAssertEqual(store.lastOpened?.target, "#/inbox")
+        XCTAssertEqual(store.path, ["https://test.example"])
     }
     @MainActor func testOfflineDesktopCanBeRemoved() async throws {
         let previous = try Credentials.load()

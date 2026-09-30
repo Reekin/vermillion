@@ -24,7 +24,7 @@ import {
 } from "@vermillion/shared";
 import type { ImageLightboxState } from "./ImageLightbox.js";
 import { compareTranscriptItems } from "./transcript-order.js";
-import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
+import { useLocalImageSrc } from "./local-image-preview.js";
 import { normalizeTerminalOutput } from "./terminal-output.js";
 import { DiffHunks, DiffStat } from "./DiffView.js";
 import { t } from "../../i18n/index.js";
@@ -215,6 +215,29 @@ export const buildProcessActivityEntries = (
   });
 };
 
+const ProcessStepImage = ({
+  image,
+  cacheKey,
+  onPreviewImage
+}: {
+  image: ProcessImage;
+  cacheKey: string;
+  onPreviewImage?: (input: ImageLightboxState) => void;
+}): ReactElement => {
+  const src = useLocalImageSrc(image.src, cacheKey);
+  return onPreviewImage ? (
+    <button
+      type="button"
+      className="awb-inline-image-button"
+      onClick={() => onPreviewImage({ src: src ?? image.src, alt: image.alt })}
+    >
+      <img src={src} alt={image.alt} loading="lazy" />
+    </button>
+  ) : (
+    <img className="awb-process-step__image" src={src} alt={image.alt} loading="lazy" />
+  );
+};
+
 const ProcessStepBody = ({
   entryId,
   inputText,
@@ -246,21 +269,9 @@ const ProcessStepBody = ({
       {inputText ? <code className="awb-process-step__input">{inputText}</code> : null}
       {images.length > 0 ? (
         <div className="awb-process-step__media-output">
-          {images.map((image, index) => {
-            const src = buildLocalImagePreviewSrc(image.src, entryId) ?? image.src;
-            return onPreviewImage ? (
-              <button
-                key={index}
-                type="button"
-                className="awb-inline-image-button"
-                onClick={() => onPreviewImage({ src, alt: image.alt })}
-              >
-                <img src={src} alt={image.alt} loading="lazy" />
-              </button>
-            ) : (
-              <img key={index} className="awb-process-step__image" src={src} alt={image.alt} loading="lazy" />
-            );
-          })}
+          {images.map((image, index) => (
+            <ProcessStepImage key={index} image={image} cacheKey={entryId} onPreviewImage={onPreviewImage} />
+          ))}
           {text ? <pre className="awb-process-step__output">{text}</pre> : null}
         </div>
       ) : text ? (

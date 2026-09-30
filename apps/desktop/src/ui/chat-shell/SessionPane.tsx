@@ -586,7 +586,6 @@ export const TranscriptPane = memo(
                   <TurnProcessPanel
                     row={visibleRow}
                     hiddenRows={[]}
-                    collapseActivity={compactProcess}
                     participantDirectory={participantDirectory}
                     onPreviewImage={onPreviewImage}
                     renderFileLinkContextMenu={renderFileLinkContextMenu}
