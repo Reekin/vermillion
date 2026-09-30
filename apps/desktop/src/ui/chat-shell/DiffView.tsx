@@ -11,18 +11,19 @@ export const DiffStat = ({ added, deleted }: { added: number; deleted: number })
 
 /**
  * A unified diff as hunks with added and deleted lines marked; text that does not parse as a
- * diff is shown as it is. `showPaths` heads each file with its path, for patches spanning files.
+ * diff is shown as it is. `showPaths` heads each file with its path when the patch spans files.
  */
 export const DiffHunks = ({ diff, showPaths = false }: { diff: string; showPaths?: boolean }): ReactElement => {
   const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
   if (!files.some((file) => file.hunks.length > 0)) {
     return <pre className="awb-diff__raw">{diff}</pre>;
   }
+  const headed = showPaths && files.length > 1;
   return (
     <div className="awb-diff">
       {files.map((file, fileIndex) => (
         <div key={fileIndex}>
-          {showPaths ? <div className="awb-diff__path">{file.displayPath}</div> : null}
+          {headed ? <div className="awb-diff__path">{file.displayPath}</div> : null}
           {file.hunks.map((hunk, hunkIndex) => (
             <section key={hunkIndex}>
               <div className="awb-diff__hunk">{hunk.header}</div>
