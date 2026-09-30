@@ -1,4 +1,6 @@
 import { createCodexAdapter } from "@vermillion/adapters";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { SkillDescriptorRpc } from "@vermillion/shared";
 import type {
   EngineIntegration,
@@ -78,7 +80,8 @@ export const createCodexEngineIntegration = (
     },
     hostTools: host.hostTools,
     now,
-    writeDiagnostic: host.writeDiagnostic
+    writeDiagnostic: host.writeDiagnostic,
+    toolImageDir: join(host.persistenceBaseDir ?? join(homedir(), ".vermillion"), "tool-images")
   });
   const sessionActions = new CodexSessionActionsProvider({
     codexRuntimePort: runtimePort

@@ -3,6 +3,7 @@ import type { ThreadItem } from "../../../codex-app-server-generated/v2/ThreadIt
 import { statSync } from "node:fs";
 import { filePathToFileUri, type ToolAction } from "@vermillion/shared";
 import { mergeFileChangeDiffs } from "../../../file-change-diff.js";
+import type { CodexToolImageStore } from "./tool-images.js";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -61,15 +62,24 @@ const toolCallStatus = (status: string, failed: boolean) =>
     ? "failed" as const
     : status === "inProgress" ? "running" as const : "completed" as const;
 
+const toolImageLine = (
+  images: CodexToolImageStore,
+  source: string
+): string | undefined => {
+  const src = images.resolve(source);
+  return src ? imageMarkdown("Tool image", src) : undefined;
+};
+
 export const summarizeCodexDynamicToolCall = (
-  item: Extract<ThreadItem, { type: "dynamicToolCall" }>
+  item: Extract<ThreadItem, { type: "dynamicToolCall" }>,
+  images: CodexToolImageStore
 ) => {
   const toolName = item.namespace ? `${item.namespace}.${item.tool}` : item.tool;
   const args = stringifySummary(item.arguments);
   const outputSummary = item.contentItems
     ?.map((contentItem) => {
       if (contentItem.type === "inputText") return contentItem.text;
-      if (contentItem.type === "inputImage") return contentItem.imageUrl;
+      if (contentItem.type === "inputImage") return toolImageLine(images, contentItem.imageUrl);
       return undefined;
     })
     .filter((value): value is string => Boolean(value?.trim()))
@@ -83,7 +93,8 @@ export const summarizeCodexDynamicToolCall = (
 };
 
 export const summarizeCodexMcpToolCall = (
-  item: Extract<ThreadItem, { type: "mcpToolCall" }>
+  item: Extract<ThreadItem, { type: "mcpToolCall" }>,
+  images: CodexToolImageStore
 ) => {
   const toolName = `mcp.${item.server}.${item.tool}`;
   const args = stringifySummary(item.arguments);
@@ -91,6 +102,10 @@ export const summarizeCodexMcpToolCall = (
     .map((entry) => {
       if (isRecord(entry)) {
         if (typeof entry.text === "string") return entry.text;
+        if (entry.type === "image" && typeof entry.data === "string") {
+          const mimeType = typeof entry.mimeType === "string" ? entry.mimeType : "image/png";
+          return toolImageLine(images, `data:${mimeType};base64,${entry.data}`);
+        }
         if (typeof entry.url === "string") return entry.url;
       }
       return stringifySummary(entry);
@@ -130,7 +145,8 @@ export const summarizeCodexRawReasoningItem = (
 };
 
 export const summarizeCodexFunctionOutputBody = (
-  output: Extract<ResponseItem, { type: "custom_tool_call_output" }>["output"]
+  output: Extract<ResponseItem, { type: "custom_tool_call_output" }>["output"],
+  images: CodexToolImageStore
 ): string | undefined => {
   if (typeof output === "string") {
     return output.trim().length > 0 ? output : undefined;
@@ -141,7 +157,7 @@ export const summarizeCodexFunctionOutputBody = (
         return entry.text;
       }
       if (entry.type === "input_image") {
-        return entry.image_url;
+        return toolImageLine(images, entry.image_url);
       }
       return undefined;
     })

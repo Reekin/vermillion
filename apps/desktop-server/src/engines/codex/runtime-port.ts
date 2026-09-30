@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -100,6 +101,7 @@ import {
   summarizeCodexFileChange,
   codexCommandActions
 } from "./extensions/process-activity.js";
+import { CodexToolImageStore } from "./extensions/tool-images.js";
 import { resolveHostToolDefinition } from "../../host-tools.js";
 import type {
   HostToolContentItem,
@@ -254,6 +256,8 @@ export type CodexAppServerRuntimePortOptions = {
   hostTools?: HostToolRegistry;
   now?: () => string;
   writeDiagnostic?: (input: DiagnosticsWriteInputRpc) => void;
+  /** Directory for images returned inside tool outputs; defaults to `~/.vermillion/tool-images`. */
+  toolImageDir?: string;
 };
 
 const localRequestId = (value: string | number): string => String(value);
@@ -826,6 +830,7 @@ export class CodexAppServerRuntimePort
     | ((sessionId: string) => string | undefined)
     | undefined;
   private readonly hostTools: HostToolRegistry | undefined;
+  public readonly toolImages: CodexToolImageStore;
   private readonly now: () => string;
   private readonly listeners = new Set<RuntimeListener>();
   private readonly lifecycle = createRuntimeLifecycleController();
@@ -905,6 +910,9 @@ export class CodexAppServerRuntimePort
     this.recordTurnChanges = options.recordTurnChanges;
     this.recordRoleContextRebuilt = options.recordRoleContextRebuilt;
     this.hostTools = options.hostTools;
+    this.toolImages = new CodexToolImageStore(
+      options.toolImageDir ?? join(homedir(), ".vermillion", "tool-images")
+    );
     this.now = options.now ?? (() => new Date().toISOString());
     this.pipelineDiagnostics = options.writeDiagnostic
       ? new RuntimePipelineDiagnostics({ write: options.writeDiagnostic })
@@ -3508,7 +3516,7 @@ export class CodexAppServerRuntimePort
     }
 
     if (isCodexMcpToolCallThreadItem(item)) {
-      const summary = summarizeCodexMcpToolCall(item);
+      const summary = summarizeCodexMcpToolCall(item, this.toolImages);
       if (method === "item/started") {
         this.emitEvent("tool.started", {
           sessionId,
@@ -3572,7 +3580,7 @@ export class CodexAppServerRuntimePort
     }
 
     if (isCodexDynamicToolCallThreadItem(item)) {
-      const summary = summarizeCodexDynamicToolCall(item);
+      const summary = summarizeCodexDynamicToolCall(item, this.toolImages);
       if (method === "item/started") {
         this.emitEvent("tool.started", {
           sessionId,
@@ -3731,7 +3739,7 @@ export class CodexAppServerRuntimePort
         turnId,
         toolCallId,
         status: mapCodexResponseItemStatus(undefined),
-        outputSummary: summarizeCodexFunctionOutputBody(item.output),
+        outputSummary: summarizeCodexFunctionOutputBody(item.output, this.toolImages),
         engineId: this.engineId
       });
       this.rawCustomToolNameByTurnAndCall.delete(rawCustomToolKey);

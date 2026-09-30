@@ -80,6 +80,7 @@ import {
   summarizeCodexFileChange,
   codexCommandActions
 } from "./extensions/process-activity.js";
+import type { CodexToolImageStore } from "./extensions/tool-images.js";
 import {
   consumeCodexRolloutTimestampForItem,
   type CodexRolloutTimestampGroup,
@@ -470,9 +471,10 @@ const hydrateCodexTurnEntities = async (input: {
   thread: Thread;
   rolloutPath?: string;
   turnChangesStore?: CodexTurnChangesStore;
+  toolImages: CodexToolImageStore;
   signal?: AbortSignal;
 }): Promise<HydratedCodexTurnEntities | undefined> => {
-  const { entry, thread, rolloutPath, turnChangesStore, signal } = input;
+  const { entry, thread, rolloutPath, turnChangesStore, toolImages, signal } = input;
   const turns: HydratedTurn[] = [];
   const messageBlocks: MessageBlock[] = [];
   const toolCalls: ToolCall[] = [];
@@ -735,8 +737,8 @@ const hydrateCodexTurnEntities = async (input: {
 
       if (isCodexDynamicToolCallThreadItem(item) || isCodexMcpToolCallThreadItem(item)) {
         const summary = item.type === "dynamicToolCall"
-          ? summarizeCodexDynamicToolCall(item)
-          : summarizeCodexMcpToolCall(item);
+          ? summarizeCodexDynamicToolCall(item, toolImages)
+          : summarizeCodexMcpToolCall(item, toolImages);
         toolCallIds.push(itemEntityId);
         toolCalls.push(parseToolCall({
           toolCallId: itemEntityId,
@@ -1079,6 +1081,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         thread,
         rolloutPath: rolloutPathForEntry(entry, thread),
         turnChangesStore: this.turnChangesStore,
+        toolImages: this.codexRuntimePort.toolImages,
         signal: input.signal
       }));
       if (!hydratedTurns) {
@@ -1194,6 +1197,7 @@ export class CodexSessionDiscoveryProvider implements SessionDiscoveryProvider {
         thread: pageThread,
         rolloutPath: rolloutPathForEntry(entry, thread),
         turnChangesStore: this.turnChangesStore,
+        toolImages: this.codexRuntimePort.toolImages,
         signal: input.signal
       });
       if (!hydratedTurns) {

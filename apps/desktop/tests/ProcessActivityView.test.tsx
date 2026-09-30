@@ -116,4 +116,40 @@ describe("ProcessActivityView", () => {
     });
     expect(container.textContent).not.toContain("path: I:/images/image (1).png");
   });
+
+  it("renders a step's output only after it is expanded", async () => {
+    const { container } = render(
+      <ProcessActivityView
+        toolCalls={[tool({ toolName: "exec", inputSummary: "tools.exec()", outputSummary: "large output" })]}
+        terminalStreams={[]}
+      />
+    );
+
+    expect(container.querySelector(".awb-process-step__body")).toBeNull();
+    await userEvent.click(container.querySelector("summary")!);
+    expect(container.querySelector(".awb-process-step__output")?.textContent).toBe("large output");
+  });
+
+  it("shows every image in a tool output next to its text", async () => {
+    const { container } = render(
+      <ProcessActivityView
+        toolCalls={[
+          tool({
+            toolName: "exec",
+            inputSummary: "tools.exec()",
+            outputSummary: "Script completed\n![Tool image](file:///C:/cache/a.png)\n![Tool image](file:///C:/cache/b.png)\ndone"
+          })
+        ]}
+        terminalStreams={[]}
+      />
+    );
+
+    await userEvent.click(container.querySelector("summary")!);
+    const sources = [...container.querySelectorAll("img")].map((image) => image.getAttribute("src"));
+    expect(sources).toEqual([
+      "file:///C:/cache/a.png?awb_image_cache=tool%3Atool-1",
+      "file:///C:/cache/b.png?awb_image_cache=tool%3Atool-1"
+    ]);
+    expect(container.querySelector(".awb-process-step__output")?.textContent).toBe("Script completed\ndone");
+  });
 });

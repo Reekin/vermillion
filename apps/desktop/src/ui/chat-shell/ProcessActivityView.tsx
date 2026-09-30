@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import {
   Archive,
   Bot,
@@ -78,28 +78,19 @@ const compareIsoDateAsc = (left?: string, right?: string): number => {
   return leftDate - rightDate;
 };
 
-const splitProcessImageOutput = (
-  value: string | undefined
-): { alt: string; src: string; text?: string } | undefined => {
-  if (!value) {
+type ProcessImage = { alt: string; src: string };
+
+/** A whole output line of the form `![alt](src)`; the src may itself contain parentheses. */
+const parseImageLine = (line: string): ProcessImage | undefined => {
+  const value = line.trim();
+  if (!value.startsWith("![") || !value.endsWith(")")) {
     return undefined;
   }
-  const imageStart = value.indexOf("![");
-  if (imageStart < 0) {
-    return undefined;
-  }
-  const altEnd = value.indexOf("](", imageStart + 2);
+  const altEnd = value.indexOf("](");
   if (altEnd < 0) {
     return undefined;
   }
-  const srcStart = altEnd + 2;
-  const lineEnd = value.indexOf("\n", srcStart);
-  const searchEnd = lineEnd >= 0 ? lineEnd : value.length;
-  const closeIndex = value.lastIndexOf(")", searchEnd);
-  if (closeIndex < srcStart) {
-    return undefined;
-  }
-  const rawSrc = value.slice(srcStart, closeIndex).trim();
+  const rawSrc = value.slice(altEnd + 2, -1).trim();
   const src =
     rawSrc.startsWith("<") && rawSrc.endsWith(">")
       ? rawSrc.slice(1, -1).trim()
@@ -107,12 +98,27 @@ const splitProcessImageOutput = (
   if (!src) {
     return undefined;
   }
-  const text = `${value.slice(0, imageStart)}${value.slice(closeIndex + 1)}`.trim();
   return {
-    alt: value.slice(imageStart + 2, altEnd).trim() || t("session.imagePreview"),
-    src,
-    text: text.length > 0 ? text : undefined
+    alt: value.slice(2, altEnd).trim() || t("session.imagePreview"),
+    src
   };
+};
+
+const splitProcessImageOutput = (
+  value: string
+): { images: ProcessImage[]; text?: string } => {
+  const images: ProcessImage[] = [];
+  const textLines: string[] = [];
+  for (const line of value.split("\n")) {
+    const image = parseImageLine(line);
+    if (image) {
+      images.push(image);
+    } else {
+      textLines.push(line);
+    }
+  }
+  const text = textLines.join("\n").trim();
+  return { images, text: text.length > 0 ? text : undefined };
 };
 
 const lastExitCode = (streams: TerminalStream[]): number | undefined =>
@@ -208,6 +214,49 @@ export const buildProcessActivityEntries = (
   });
 };
 
+const ProcessStepBody = ({
+  entryId,
+  inputText,
+  outputText,
+  onPreviewImage
+}: {
+  entryId: string;
+  inputText?: string;
+  outputText?: string;
+  onPreviewImage?: (input: ImageLightboxState) => void;
+}): ReactElement => {
+  const output = outputText ? splitProcessImageOutput(outputText) : undefined;
+  const images = output?.images ?? [];
+  const text = images.length > 0 && output?.text === `path: ${inputText}` ? undefined : output?.text;
+  return (
+    <div className="awb-process-step__body">
+      {inputText ? <code className="awb-process-step__input">{inputText}</code> : null}
+      {images.length > 0 ? (
+        <div className="awb-process-step__media-output">
+          {images.map((image, index) => {
+            const src = buildLocalImagePreviewSrc(image.src, entryId) ?? image.src;
+            return onPreviewImage ? (
+              <button
+                key={index}
+                type="button"
+                className="awb-inline-image-button"
+                onClick={() => onPreviewImage({ src, alt: image.alt })}
+              >
+                <img src={src} alt={image.alt} loading="lazy" />
+              </button>
+            ) : (
+              <img key={index} className="awb-process-step__image" src={src} alt={image.alt} loading="lazy" />
+            );
+          })}
+          {text ? <pre className="awb-process-step__output">{text}</pre> : null}
+        </div>
+      ) : text ? (
+        <pre className="awb-process-step__output">{text}</pre>
+      ) : null}
+    </div>
+  );
+};
+
 export const ProcessActivityItemView = ({
   entry,
   onPreviewImage
@@ -216,16 +265,13 @@ export const ProcessActivityItemView = ({
   onPreviewImage?: (input: ImageLightboxState) => void;
 }): ReactElement => {
   useT();
+  const [open, setOpen] = useState(false);
   const { step } = entry;
   const words = toolStepWords(step);
   const Icon = stepIcons[step.kind];
   const rawOutputText = entry.outputText?.trim();
   const inputText = entry.inputText?.trim();
   const outputText = rawOutputText && rawOutputText !== inputText ? rawOutputText : undefined;
-  const imageOutput = splitProcessImageOutput(outputText);
-  const imagePreviewSrc = buildLocalImagePreviewSrc(imageOutput?.src, entry.id);
-  const imageText =
-    imageOutput?.text === `path: ${inputText}` ? undefined : imageOutput?.text;
   const row = (
     <>
       <Icon className="awb-process-step__icon" size={14} aria-hidden="true" />
@@ -245,34 +291,21 @@ export const ProcessActivityItemView = ({
     );
   }
   return (
-    <details className="awb-process-step" data-kind={step.kind} data-failed={step.failed || undefined}>
+    <details
+      className="awb-process-step"
+      data-kind={step.kind}
+      data-failed={step.failed || undefined}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className="awb-process-step__row">{row}</summary>
-      <div className="awb-process-step__body">
-        {inputText ? <code className="awb-process-step__input">{inputText}</code> : null}
-        {imageOutput ? (
-          <div className="awb-process-step__media-output">
-            {onPreviewImage ? (
-              <button
-                type="button"
-                className="awb-inline-image-button"
-                onClick={() =>
-                  onPreviewImage({
-                    src: imagePreviewSrc ?? imageOutput.src,
-                    alt: imageOutput.alt
-                  })
-                }
-              >
-                <img src={imagePreviewSrc} alt={imageOutput.alt} />
-              </button>
-            ) : (
-              <img className="awb-process-step__image" src={imagePreviewSrc} alt={imageOutput.alt} />
-            )}
-            {imageText ? <pre className="awb-process-step__output">{imageText}</pre> : null}
-          </div>
-        ) : outputText ? (
-          <pre className="awb-process-step__output">{outputText}</pre>
-        ) : null}
-      </div>
+      {open ? (
+        <ProcessStepBody
+          entryId={entry.id}
+          inputText={inputText}
+          outputText={outputText}
+          onPreviewImage={onPreviewImage}
+        />
+      ) : null}
     </details>
   );
 };
