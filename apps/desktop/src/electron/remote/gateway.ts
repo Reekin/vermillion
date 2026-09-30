@@ -137,7 +137,9 @@ export async function startRemoteGateway(options: GatewayOptions) {
     }
   });
   server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
-  const wsServer = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024, perMessageDeflate: false });
+  const wsServer = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024,
+    // Session history is verbose JSON; compressing frames keeps reads fast over a thin VPS link.
+    perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: 6 } } });
   server.on("upgrade", (req, socket, head) => {
     if (req.url !== "/api/socket" || !originAllowed(req)) { socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); return; }
     // Browsers cannot set Authorization on a WebSocket handshake. Authenticate the first frame

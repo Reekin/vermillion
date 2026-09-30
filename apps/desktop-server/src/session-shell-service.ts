@@ -1021,7 +1021,12 @@ export class SessionShellService {
   public async getChatTree(sessionId: string, scope?: ChatTreeScope,
     knownWindows?: Record<string, { revision: string; cursor?: string }>, readId?: string, viewSessionId?: string): Promise<ChatTreeSnapshot> {
     return this.withRead(readId, sessionId, async (signal) => {
-      return this.requireWrapperChatTree().get(sessionId, scope, knownWindows, signal, viewSessionId);
+      const tree = await this.requireWrapperChatTree().get(sessionId, scope, knownWindows, signal, viewSessionId);
+      const members = (tree.memberSessionIds ?? []).flatMap((memberId) => {
+        const session = this.runtimeService.getSession(memberId);
+        return session ? [{ sessionId: memberId, status: session.status, updatedAt: session.updatedAt }] : [];
+      });
+      return { ...tree, members };
     });
   }
 

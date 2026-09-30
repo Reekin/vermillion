@@ -168,14 +168,15 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const [cache] = useState(readCache);
   const [runtime] = useState(() => {
     const store = createRendererStore();
+    // The phone never mirrors the whole desktop: after missed events it re-reads what it shows and follows from now.
+    const recovery = { reread: () => {} };
     const remote = createRemoteClient(token, { onReplayGap: async () => {
       store.clearKnownSessionWindows();
-      const result = await transport.domain.snapshot();
-      store.hydrateSnapshot(result.snapshot, result.cursor);
-      return result.cursor;
+      recovery.reread();
+      return undefined;
     } });
     const transport = createDesktopTransport(remote.session);
-    return { remote, client: createWorkbenchClient(remote.workbench), transport, store, drafts: new Map<string, string>() };
+    return { remote, client: createWorkbenchClient(remote.workbench), transport, store, recovery, drafts: new Map<string, string>() };
   });
   const { remote, client, transport, store } = runtime;
   const connection = useSyncExternalStore(remote.subscribeConnection, remote.getConnectionState);
@@ -190,6 +191,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const [inboxError, setInboxError] = useState<string>();
   const [inboxLoading, setInboxLoading] = useState(!cache);
   const [reloadSignal, setReloadSignal] = useState(0);
+  runtime.recovery.reread = () => { void sidebar.reload(); setReloadSignal((value) => value + 1); };
   const [inboxRefresh] = useState(createCoalescedRefresh);
   const [workspaceRefresh] = useState(createCoalescedRefresh);
   const [treeRefresh] = useState(createCoalescedRefresh);
@@ -264,7 +266,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
     if (!connected) return;
     let cancelled = false;
     let subscription: Awaited<ReturnType<typeof connectDesktopTransportToStore>> | undefined;
-    void connectDesktopTransportToStore({ transport, store, isBackgroundStream: ({ event }) => {
+    void connectDesktopTransportToStore({ transport, store, hydrateSnapshot: false, onReplayGap: runtime.recovery.reread, isBackgroundStream: ({ event }) => {
       const scope = visibleScope.current;
       return scope.turnIds.size > 0
         ? !("turnId" in event && typeof event.turnId === "string" && scope.turnIds.has(event.turnId))
@@ -330,9 +332,9 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const domain = store.getDomainReadModel();
   const describeBranch = (branch: TreeBranch): BranchDetail => {
     const worker = projection.workers.find((entry) => entry.sessionId === branch.sessionId);
-    const session = domain.getSession(branch.sessionId);
-    const waiting = session?.status === "awaiting_approval" ? t("session.statusAwaitingApproval") : undefined;
-    const time = formatRelativeActivityAge(session?.updatedAt);
+    const member = snapshot?.members?.find((entry) => entry.sessionId === branch.sessionId);
+    const waiting = member?.status === "awaiting_approval" ? t("session.statusAwaitingApproval") : undefined;
+    const time = formatRelativeActivityAge(member?.updatedAt);
     // A preparation branch goes on to run its request's first work item, so it is marked P until preparation completes and W after.
     if (worker) {
       const status = relevantWork?.requests.find((request) => request.requestId === worker.requestId)?.status;

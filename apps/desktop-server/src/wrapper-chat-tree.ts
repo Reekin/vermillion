@@ -32,6 +32,7 @@ export type ChatTreeSnapshot = {
   visibleNodeIds?: string[];
   visibleTurnIds?: string[];
   nodes: ChatTreeNodeSnapshot[];
+  members?: Array<{ sessionId: string; status: "idle" | "running" | "awaiting_approval" | "error" | "completed"; updatedAt: string }>;
   fetchedAt: string;
 };
 

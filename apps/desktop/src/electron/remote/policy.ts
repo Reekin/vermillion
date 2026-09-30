@@ -3,7 +3,7 @@ import { safeParseSessionRpcRequest } from "@vermillion/shared";
 const sessionReads = new Set([
   "sessionBrowser.list", "sessionBrowser.changes", "sessionBrowser.open", "session.list",
   "chatTree.get", "chatTree.readProgress", "chatTree.cancelRead", "chatTree.markRead",
-  "events.subscribe", "events.replay", "events.unsubscribe", "domain.snapshot", "workspace.list",
+  "events.subscribe", "events.replay", "events.unsubscribe", "workspace.list",
   "engine.list", "engine.getSurface", "chat.getCapabilities"
 ]);
 const workbenchMethods = new Set(["workspace.list", "workItem.get", "workItem.list", "work.list", "inbox.list", "decision.answer", "inbox.acknowledge"]);

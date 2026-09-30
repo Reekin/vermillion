@@ -16,6 +16,11 @@ export type ConnectDesktopTransportToStoreInput = {
   fromCursor?: string;
   subscriptionId?: string;
   hydrateSnapshot?: boolean;
+  /**
+   * Replaces the full-snapshot recovery when replay reports a gap: known session windows are
+   * dropped, the caller re-reads what it shows, and the subscription starts from now.
+   */
+  onReplayGap?: () => void;
   onBacklogPressure?: (pressure: EventBacklogPressure) => void;
   isBackgroundStream?: EventSubscribeInput["isBackgroundStream"];
 };
@@ -48,7 +53,12 @@ export const connectDesktopTransportToStore = async (
 
     if (replayResult.status === "gap") {
       input.store.clearKnownSessionWindows();
-      await hydrateSnapshot();
+      if (input.onReplayGap) {
+        input.onReplayGap();
+        fromCursor = undefined;
+      } else {
+        await hydrateSnapshot();
+      }
     } else {
       input.store.ingestEnvelopes(replayResult.envelopes);
       fromCursor = replayResult.envelopes.at(-1)?.cursor ?? fromCursor;

@@ -10,7 +10,7 @@ import {
   zTurnId
 } from "./common.js";
 import { commandTypes, zCommandEnvelopeSchema, zChatTreeSendInputSchema, zChatTreeSendOperationSchema } from "./commands.js";
-import { zChatSessionSchema, zDomainSnapshotSchema } from "./domain.js";
+import { zChatSessionSchema, zDomainSnapshotSchema, zSessionStatus } from "./domain.js";
 import {
   zEngineDefinitionRpcSchema,
   zEngineModelCatalogRpcSchema,
@@ -354,6 +354,8 @@ const zChatTreeSnapshotSchema = z.object({
   visibleNodeIds: z.array(z.string().min(1)).optional(),
   visibleTurnIds: z.array(zTurnId).optional(),
   nodes: z.array(zChatTreeNodeSchema).default([]),
+  /** Status and last update of the tree's sessions known to the runtime, so a reader need not hold them all. */
+  members: z.array(z.object({ sessionId: zSessionId, status: zSessionStatus, updatedAt: z.string().min(1) })).optional(),
   fetchedAt: z.string().min(1)
 });
 

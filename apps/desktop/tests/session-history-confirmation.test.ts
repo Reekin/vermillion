@@ -29,4 +29,17 @@ describe("history confirmation on reconnect", () => {
     expect(store.getKnownSessionWindows()).toEqual({ a: { revision: "epoch", cursor: "cursor-2" } });
     expect(store.getDomainReadModel().getMessageBlock("m:md")?.text).toBe("retained");
   });
+
+  it("lets a reader re-read what it shows instead of loading the full snapshot after a gap", async () => {
+    const store = createRendererStore();
+    store.hydrateSessionWindows([{ sessionId: "a", snapshot: parseDomainSnapshot({}), replaceSessionHistory: true, revision: "epoch", cursor: "cursor-1" }]);
+    const snapshot = vi.fn();
+    const subscribe = vi.fn(async () => ({ subscriptionId: "test", unsubscribe: async () => {} }));
+    const transport = { events: { replay: vi.fn(async () => ({ status: "gap", envelopes: [] })), subscribe }, domain: { snapshot } } as unknown as DesktopTransport;
+    const onReplayGap = vi.fn(() => expect(store.getKnownSessionWindows()).toEqual({}));
+    await connectDesktopTransportToStore({ transport, store, fromCursor: "cursor-1", hydrateSnapshot: false, onReplayGap });
+    expect(onReplayGap).toHaveBeenCalledOnce();
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(subscribe).toHaveBeenCalledWith(expect.objectContaining({ fromCursor: undefined }));
+  });
 });
