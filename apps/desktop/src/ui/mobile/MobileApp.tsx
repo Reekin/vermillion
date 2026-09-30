@@ -85,39 +85,62 @@ function Pairing({ paired }: { paired: (token: string) => void }) {
   </main>;
 }
 
-/** Right swipe from the left edge closes the session layer; the layer follows the finger. */
-const useEdgeSwipe = (onBack: () => void) => {
+/** Share of the width the list takes while the session stays in view beside it. */
+const DRAWER_SHARE = 0.75;
+
+/**
+ * Inside a session the list slides in from the left over three quarters of the width, and the session
+ * stays visible in the remaining quarter. A right swipe from the left edge opens it; a left swipe on the
+ * list or the visible session, or a tap on the session, closes it. The session layer follows the finger.
+ */
+const useDrawer = () => {
+  const [open, setOpen] = useState(false);
   const [offset, setOffset] = useState<number>();
-  const gesture = useRef<{ x: number; y: number; at: number; tracking: boolean; last: number }>(undefined);
-  const handlers = {
-    onTouchStart: (event: React.TouchEvent) => {
-      const touch = event.touches[0];
-      gesture.current = touch && touch.clientX <= 24 && event.touches.length === 1
-        ? { x: touch.clientX, y: touch.clientY, at: performance.now(), tracking: false, last: 0 } : undefined;
-    },
-    onTouchMove: (event: React.TouchEvent) => {
-      const current = gesture.current;
-      const touch = event.touches[0];
-      if (!current || !touch) return;
-      const dx = touch.clientX - current.x;
-      if (!current.tracking) {
-        if (Math.abs(touch.clientY - current.y) > Math.abs(dx)) { gesture.current = undefined; return; }
-        if (dx < 8) return;
-        current.tracking = true;
-      }
-      current.last = Math.max(0, dx);
-      setOffset(current.last);
-    },
-    onTouchEnd: () => {
-      const current = gesture.current;
-      gesture.current = undefined;
-      if (!current?.tracking) return;
-      const velocity = current.last / Math.max(1, performance.now() - current.at);
-      if (current.last > window.innerWidth * 0.35 || velocity > 0.5) onBack();
-      setOffset(undefined);
-    }
+  const gesture = useRef<{ x: number; y: number; at: number; base: number; tracking: boolean; last: number }>(undefined);
+  const width = () => window.innerWidth * DRAWER_SHARE;
+  const begin = (event: React.TouchEvent, base: number) => {
+    const touch = event.touches[0];
+    gesture.current = touch && event.touches.length === 1
+      ? { x: touch.clientX, y: touch.clientY, at: performance.now(), base, tracking: false, last: base } : undefined;
   };
-  return { offset, handlers: { ...handlers, onTouchCancel: handlers.onTouchEnd } };
+  const move = (event: React.TouchEvent) => {
+    const current = gesture.current;
+    const touch = event.touches[0];
+    if (!current || !touch) return;
+    const dx = touch.clientX - current.x;
+    if (!current.tracking) {
+      if (Math.abs(touch.clientY - current.y) > Math.abs(dx)) { gesture.current = undefined; return; }
+      if (Math.abs(dx) < 8) return;
+      // Opening only follows a rightward drag and closing only a leftward one.
+      if ((current.base === 0) !== (dx > 0)) { gesture.current = undefined; return; }
+      current.tracking = true;
+    }
+    current.last = Math.min(width(), Math.max(0, current.base + dx));
+    setOffset(current.last);
+  };
+  const end = () => {
+    const current = gesture.current;
+    gesture.current = undefined;
+    if (!current?.tracking) return;
+    const velocity = (current.last - current.base) / Math.max(1, performance.now() - current.at);
+    setOpen(current.base === 0
+      ? current.last > width() * 0.35 || velocity > 0.5
+      : !(current.last < width() * 0.65 || velocity < -0.5));
+    setOffset(undefined);
+  };
+  const common = { onTouchMove: move, onTouchEnd: end, onTouchCancel: end };
+  return {
+    open, setOpen, offset, progress: offset !== undefined ? offset / width() : open ? 1 : 0,
+    /** On the session layer while closed: only drags starting at the left edge open the list. */
+    sessionHandlers: { ...common, onTouchStart: (event: React.TouchEvent) => {
+      const touch = event.touches[0];
+      if (!open && touch && touch.clientX <= 24) begin(event, 0); else gesture.current = undefined;
+    } },
+    /** On the open list and the visible session: a leftward drag anywhere closes, except inside horizontal scrollers. */
+    listHandlers: { ...common, onTouchStart: (event: React.TouchEvent) => {
+      if (open && !(event.target as Element).closest?.(".vm-choice-chips")) begin(event, width()); else gesture.current = undefined;
+    } }
+  };
 };
 
 type BranchDetail = { title: string; marker?: string; detail?: string; time?: string };
@@ -205,8 +228,6 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const sessions = sidebar.sessions.length || (connected && !sidebar.loading) ? sidebar.sessions
     : (cache?.sessions ?? []).filter((session) => !workspaceFilter || session.workspaceId === workspaceFilter);
 
-  // Session layer lifecycle: pushed in on open, slid out before the route returns to the list.
-  const [leaving, setLeaving] = useState(false);
   const [branchSessionId, setBranchSessionId] = useState<string>();
   const [branchSheet, setBranchSheet] = useState(false);
   const [tree, setTree] = useState<{ sessionId: string; snapshot: ChatTreeSnapshotRpc }>();
@@ -218,15 +239,14 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
     else history.replaceState(null, "", hash);
     setRoute(parseMobileRoute(hash));
   }, []);
-  const openSession = (sessionId: string) => navigate(sessionHash(sessionId), "push");
-  const closeSession = () => {
-    if (leaving) return;
-    setLeaving(true);
-    setBranchSheet(false);
-    setTimeout(() => { setLeaving(false); navigate(listHash(listTab), "back"); }, 280);
+  const drawer = useDrawer();
+  const openSession = (id: string) => {
+    drawer.setOpen(false);
+    // Switching sessions from the list beside a session replaces it rather than stacking history.
+    if (route.page !== "session" || id !== route.sessionId) navigate(sessionHash(id), route.page === "session" ? "replace" : "push");
   };
-  const swipe = useEdgeSwipe(closeSession);
-  const selectTab = (tab: "sessions" | "inbox") => { setListTab(tab); navigate(listHash(tab), "replace"); };
+  // Tabs beside an open session only switch the list; the session stays.
+  const selectTab = (tab: "sessions" | "inbox") => { setListTab(tab); if (route.page !== "session") navigate(listHash(tab), "replace"); };
 
   useEffect(() => {
     const changed = () => setRoute(parseMobileRoute(location.hash));
@@ -236,8 +256,10 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   }, []);
   useEffect(() => { if (route.page !== "session") setListTab(route.page); }, [route.page]);
   const sessionId = route.page === "session" ? route.sessionId : undefined;
-  useEffect(() => { setBranchSessionId(undefined); setCurrentBranch(undefined); setBranchSheet(false); setTree(undefined); setTreeError(undefined); }, [sessionId]);
-  useEffect(() => { postNative({ type: "level", level: sessionId ? "session" : "list" }); }, [sessionId]);
+  useEffect(() => { setBranchSessionId(undefined); setCurrentBranch(undefined); setBranchSheet(false); setTree(undefined); setTreeError(undefined); drawer.setOpen(false); }, [sessionId]);
+  // With the list open beside a session the page is at its list level, so the system edge swipe returns to the desktops.
+  const fullSession = Boolean(sessionId) && !drawer.open;
+  useEffect(() => { postNative({ type: "level", level: fullSession ? "session" : "list" }); }, [fullSession]);
 
   const refreshInbox = () => inboxRefresh.request(async (signal) => {
     try {
@@ -349,11 +371,13 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
   const workspaceLabel = (id?: string) => workspaces.find((w) => w.workspaceId === id)?.label;
 
   if (connection === "unauthorized") return <EmptyState title={t("mobile.unauthorized")} hint={t("mobile.unauthorizedHint")} action={<Button onClick={inApp() ? () => postNative({ type: "exit" }) : reset}>{inApp() ? t("mobile.desktops") : t("mobile.repair")}</Button>} />;
-  const covered = Boolean(sessionId) && !leaving;
-  const dragging = swipe.offset !== undefined;
+  const dragging = drawer.offset !== undefined;
+  const beside = Boolean(sessionId) && (drawer.open || dragging);
+  const covered = Boolean(sessionId) && !beside;
   return <>
-    <section className="vm-mobile-layer" data-level="list" data-covered={covered && !dragging ? "" : undefined} aria-hidden={covered || undefined}
-      style={dragging ? { transform: `translateX(calc(-28% + ${(swipe.offset ?? 0) * 0.28}px))`, transition: "none" } : undefined}>
+    <section className="vm-mobile-layer" data-level="list" data-covered={covered ? "" : undefined} data-drawer={beside ? "" : undefined}
+      aria-hidden={covered || undefined} {...(sessionId ? drawer.listHandlers : {})}
+      style={dragging ? { transform: `translateX(${-28 * (1 - drawer.progress)}%)`, transition: "none" } : undefined}>
       <ListHeader title={listTab === "inbox" ? "Inbox" : t("mobile.sessionsTab")} desktopName={desktopName} connected={connected}>
         {listTab === "sessions" && workspaces.length > 0 && <ChoiceChips label={t("mobile.workspaceFilter")} value={workspaceFilter} onChange={setWorkspaceFilter}
           items={[{ value: "", label: t("mobile.allWorkspaces") }, ...workspaces.map((w) => ({ value: w.workspaceId, label: w.label }))]} />}
@@ -364,7 +388,7 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
           : workspaceError || (connected && sidebar.error) ? <EmptyState title={t("mobile.sessionsFailed")} hint={workspaceError ?? sidebar.error} action={<Button onClick={() => { void refreshWorkspaces(); void sidebar.reload(); }}>{t("common.retry")}</Button>} />
             : !sessions.length ? <EmptyState title={sidebar.loading || !connected ? t("mobile.loadingSessions") : t("mobile.noSessions")} />
               : <ul>{sessions.map((s) => <li key={s.sessionId}>
-                <ListRow onClick={() => openSession(s.sessionId)} title={s.title} leading={<><StatusDot status={s.statusDot} />{s.role && s.role !== "design-partner" && <Badge>{roleLabel(s.role) ?? s.role}</Badge>}</>}
+                <ListRow selected={s.sessionId === sessionId} onClick={() => openSession(s.sessionId)} title={s.title} leading={<><StatusDot status={s.statusDot} />{s.role && s.role !== "design-partner" && <Badge>{roleLabel(s.role) ?? s.role}</Badge>}</>}
                   meta={!workspaceFilter ? workspaceLabel(s.workspaceId) : undefined} trailing={formatRelativeActivityAge(s.activityAt ?? s.lastCompletedTurnAt)} />
               </li>)}</ul>}
       </div>
@@ -373,19 +397,21 @@ function ConnectedApp({ token, reset }: { token: string; reset: () => void }) {
         { id: "inbox", label: "Inbox", icon: InboxIcon, badge: items.length }
       ]} />
     </section>
-    {sessionId && <section className="vm-mobile-layer" data-level="session" data-leaving={leaving ? "" : undefined} {...swipe.handlers}
-      style={dragging ? { transform: `translateX(${swipe.offset}px)`, transition: "none" } : undefined}>
+    {sessionId && <section className="vm-mobile-layer" data-level="session" data-drawer={drawer.open && !dragging ? "" : undefined} {...drawer.sessionHandlers}
+      style={dragging ? { transform: `translateX(${drawer.offset}px)`, transition: "none" } : undefined}>
       <MobileSessionPane sessionId={sessionId} store={store} transport={transport} reloadSignal={reloadSignal} disabled={!connected}
         onVisiblePathChange={onVisiblePathChange} draftCache={runtime.drafts}
         branchSessionId={branchSessionId ?? (treeSession && treeSession.sessionId !== sessionId ? sessionId : undefined)}
         title={treeSession?.title ?? domain.getSession(sessionId)?.title ?? t("mobile.session")}
         workspaceLabel={workspaceLabel(snapshot?.workspaceId ?? treeSession?.workspaceId)}
-        backLabel={t("mobile.back")} onBack={closeSession}
+        backLabel={t("mobile.openList")} onBack={() => drawer.setOpen(true)}
         branches={snapshot ? { count: branches.length, status: branchesStatus(branches) } : undefined}
         onOpenBranches={() => setBranchSheet(true)} />
       {branchSheet && <BranchSheet branches={branches} current={currentBranch} describe={describeBranch} loading={!snapshot} error={treeError}
         onClose={() => setBranchSheet(false)}
         onSelect={(id) => { setBranchSessionId(id); setBranchSheet(false); }} />}
+      {beside && <button type="button" className="vm-mobile-peek" aria-label={t("mobile.returnToSession")}
+        onClick={() => drawer.setOpen(false)} {...drawer.listHandlers} />}
     </section>}
   </>;
 }

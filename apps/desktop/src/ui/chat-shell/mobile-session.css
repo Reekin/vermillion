@@ -77,31 +77,6 @@
   border-top: 1px solid var(--awb-rule);
   background: var(--awb-bg);
 }
-.awb-mobile-runbar {
-  display: flex;
-  min-height: 24px;
-  margin-bottom: 4px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--awb-status-running);
-  font-size: var(--awb-text-caption);
-}
-.awb-mobile-runbar > span { display: inline-flex; min-width: 0; align-items: center; gap: 6px; }
-/* Stop and Send are 44pt hit boxes around a smaller drawn control; negative margins keep the rows compact. */
-.awb-mobile-stop, .awb-mobile-send { display: grid; min-width: 44px; min-height: 44px; place-items: center; color: var(--awb-ink); }
-.awb-mobile-stop { margin: -10px -4px; padding: 0 4px; }
-.awb-mobile-stop > span {
-  display: inline-flex;
-  height: 24px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 10px;
-  border: 1px solid var(--awb-control-border);
-  border-radius: 12px;
-  font: 500 var(--awb-text-caption) var(--awb-font-sans);
-}
-.awb-mobile-stop:disabled { opacity: var(--awb-control-disabled-opacity); }
 .awb-mobile-composer__error { margin: 0 0 6px; color: var(--awb-ink-strong); font-size: var(--awb-text-caption); overflow-wrap: anywhere; }
 .awb-mobile-field {
   display: flex;
@@ -128,7 +103,8 @@
   font: 16px/1.45 var(--awb-font-sans);
 }
 .awb-mobile-field textarea::placeholder { color: var(--awb-ink-faint); }
-.awb-mobile-send { flex: none; width: 44px; height: 44px; margin: -6px; }
+/* The send button is a 44pt hit box around a smaller drawn circle; negative margins keep the field compact. */
+.awb-mobile-send { display: grid; flex: none; width: 44px; height: 44px; margin: -6px; place-items: center; color: var(--awb-ink); }
 .awb-mobile-send > span {
   display: grid;
   width: 32px;
@@ -139,3 +115,4 @@
   color: var(--awb-bg);
 }
 .awb-mobile-send:disabled > span { background: var(--awb-panel-elevated); color: var(--awb-ink-faint); }
+.awb-mobile-send[data-action="stop"]:disabled > span { opacity: var(--awb-control-disabled-opacity); background: var(--awb-ink-strong); color: var(--awb-bg); }

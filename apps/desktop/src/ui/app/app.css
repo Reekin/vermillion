@@ -585,8 +585,11 @@ button.vm-row-cells__title:hover { text-decoration: underline; text-underline-of
 .vm-mobile-pair { max-width: 440px; margin: auto; padding: calc(env(safe-area-inset-top) + 48px) 24px 48px; }
 .vm-mobile-layer { position: absolute; inset: 0; display: flex; min-height: 0; flex-direction: column; background: var(--awb-bg); transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .vm-mobile-layer[data-level="list"][data-covered] { transform: translateX(-28%); }
+/* Beside an open session the list takes three quarters of the width; the session stays in view in the last quarter. */
+.vm-mobile-layer[data-level="list"][data-drawer] { right: 25%; }
+.vm-mobile-layer[data-level="session"][data-drawer] { transform: translateX(75%); }
+.vm-mobile-peek { position: absolute; inset: 0; z-index: 2; background: oklch(0 0 0 / 30%); }
 .vm-mobile-layer[data-level="session"] { z-index: 1; box-shadow: -1px 0 0 var(--awb-rule-strong), -12px 0 28px oklch(0 0 0 / 35%); animation: vm-push-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-.vm-mobile-layer[data-level="session"][data-leaving] { transform: translateX(100%); }
 @keyframes vm-push-in { from { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { .vm-mobile-layer { transition: none; animation: none; } }
 .vm-mobile-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--awb-rule); }

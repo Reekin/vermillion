@@ -297,19 +297,21 @@ const MobileSessionContent = ({
       draft={draft} onDraft={setDraft} onSend={send} error={disabled ? undefined : error}
       canSend={!disabled && !busy && Boolean(path) && Boolean(draft.trim())}
       placeholder={running ? t("session.runningCanSteer") : t("mobile.messagePlaceholder")}
-      run={running && currentTurn && !disabled ? {
-        label: awaitingApproval ? t("mobile.runningAwaitingApproval") : t("session.statusRunning"),
-        stopping: busy,
-        onStop: () => { void runAction(() => transport.chat.interrupt({ sessionId: targetSessionId, turnId: currentTurn.turnId })); }
-      } : undefined}
+      onStop={running && currentTurn && !disabled
+        ? () => { void runAction(() => transport.chat.interrupt({ sessionId: targetSessionId, turnId: currentTurn.turnId })); }
+        : undefined}
+      stopping={busy}
     />
   </div>;
 };
 
-/** One-line input that grows with its text; a run strip with Stop appears above it only while a turn runs. */
-const MobileComposer = ({ draft, onDraft, onSend, canSend, placeholder, error, run }: {
+/**
+ * One-line input that grows with its text. While a turn runs and nothing is typed, the send button stops
+ * the turn; typed text is sent into the running turn as usual.
+ */
+const MobileComposer = ({ draft, onDraft, onSend, canSend, placeholder, error, onStop, stopping }: {
   draft: string; onDraft: (value: string) => void; onSend: () => void; canSend: boolean; placeholder: string; error?: string;
-  run?: { label: string; stopping: boolean; onStop: () => void };
+  onStop?: () => void; stopping: boolean;
 }) => {
   const field = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -318,16 +320,16 @@ const MobileComposer = ({ draft, onDraft, onSend, canSend, placeholder, error, r
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight}px`;
   }, [draft]);
+  const stop = onStop && !draft.trim();
   return <form className="awb-mobile-composer" onSubmit={(event) => { event.preventDefault(); if (canSend) onSend(); }}>
-    {run && <div className="awb-mobile-runbar" role="status">
-      <span><i className="awb-mobile-dot" data-status="running" />{run.label}</span>
-      <button type="button" className="awb-mobile-stop" disabled={run.stopping} onClick={run.onStop}><span><Square size={9} fill="currentColor" />{t("session.stop")}</span></button>
-    </div>}
     {error && <p className="awb-mobile-composer__error" role="alert">{error}</p>}
     <div className="awb-mobile-field">
       <textarea ref={field} rows={1} aria-label={t("mobile.message")} placeholder={placeholder} value={draft}
         onChange={(event) => onDraft(event.target.value)} />
-      <button type="submit" className="awb-mobile-send" aria-label={t("session.send")} disabled={!canSend}><span><ArrowUp size={18} strokeWidth={2.2} /></span></button>
+      {stop
+        ? <button type="button" className="awb-mobile-send" data-action="stop" aria-label={t("session.stop")} disabled={stopping} onClick={onStop}>
+          <span><Square size={12} fill="currentColor" /></span></button>
+        : <button type="submit" className="awb-mobile-send" aria-label={t("session.send")} disabled={!canSend}><span><ArrowUp size={18} strokeWidth={2.2} /></span></button>}
     </div>
   </form>;
 };
