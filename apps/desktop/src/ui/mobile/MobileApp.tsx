@@ -42,10 +42,15 @@ type NativeMessage = { type: "exit" } | { type: "level"; level: "list" | "sessio
 const postNative = (message: NativeMessage) => window.webkit?.messageHandlers?.vermillion?.postMessage(message);
 
 /** Keeps the page as tall as the visible area, so the composer rides on top of the keyboard. */
+/**
+ * In a browser the page fits itself to the visual viewport so the composer rides on the keyboard. In the App
+ * the native host already shrinks the web view above the keyboard; reading the visual viewport there counts
+ * the keyboard twice and can leave a stale, shorter page, so the page simply fills the web view.
+ */
 const useVisualViewportHeight = () => {
   useEffect(() => {
     const viewport = window.visualViewport;
-    if (!viewport) return;
+    if (!viewport || inApp()) return;
     const update = () => {
       document.documentElement.style.setProperty("--vm-viewport-height", `${viewport.height}px`);
       if (window.scrollY) window.scrollTo(0, 0);
