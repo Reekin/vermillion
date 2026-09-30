@@ -9,7 +9,7 @@ import { buildParticipantDirectory } from "./participant-directory.js";
 import { useRendererConversationParticipants, useRendererSessionSelection, useRendererStoreState, useRendererVisibleTurnsRevision } from "./use-renderer-store-state.js";
 import { useTranscriptViewportController } from "./use-transcript-viewport-controller.js";
 import { createCoalescedRefresh } from "./coalesced-refresh.js";
-import { toggleProcessVisibility, type ProcessVisibilityOverride } from "./process-visibility.js";
+import { resolveProcessExpanded, toggleProcessVisibility, type ProcessVisibilityOverride } from "./process-visibility.js";
 import { t } from "../../i18n/index.js";
 import "./mobile-session.css";
 
@@ -53,6 +53,19 @@ export const mobileVisiblePath = (path: ChatTreeSnapshotRpc): ChatTreeSnapshotRp
     visibleTurnIds: visibleNodeIds.flatMap((id) => byId.get(id)?.turnId ? [byId.get(id)!.turnId!] : []) };
 };
 
+/** Turns read per page, and the length past which completed turns' tool and terminal text is cut until expanded. */
+const PAGE_TURNS = 6;
+const PAGE_TEXT_LENGTH = 600;
+
+/** The loaded run of the path ending at its newest loaded turn; the phone never shows a gap. */
+export const loadedPathRange = (turnIds: readonly string[], loaded: (turnId: string) => boolean): { start: number; end: number } => {
+  let end = turnIds.length;
+  while (end > 0 && !loaded(turnIds[end - 1]!)) end--;
+  let start = end;
+  while (start > 0 && loaded(turnIds[start - 1]!)) start--;
+  return { start, end };
+};
+
 /** The mobile shell owns the single transport/store binding and reconnect signal. */
 export const MobileSessionPane = (props: MobileSessionPaneProps) =>
   <MobileSessionContent key={props.sessionId} {...props} />;
@@ -74,26 +87,40 @@ const MobileSessionContent = ({
   const refreshQueue = useMemo(createCoalescedRefresh, [sessionId, store, transport]);
   const mounted = useRef(true);
   const actionPending = useRef(false);
-  const refresh = useCallback(() => refreshQueue.request(async (signal) => {
+  // Turns whose tool output arrived cut, and turns the user expanded and now holds in full.
+  const truncatedTurns = useRef(new Set<string>());
+  const fullTurns = useRef(new Set<string>());
+  /** Reads part of the viewed path; paged windows merge into what the phone already holds. */
+  const readPage = useCallback(async (
+    page: { turns?: number; beforeTurnId?: string; turnIds?: string[]; maxTextLength?: number },
+    options: { signal?: AbortSignal; view?: string; beforeHydrate?: () => void } = {}
+  ) => {
     const readId = crypto.randomUUID();
     const finish = store.beginSessionWindowRead(readId);
     try {
       const next = await transport.chatTree.get(sessionId, {
-        scope: "path", knownWindows: store.getKnownSessionWindows(), readId, signal, ...(viewSessionId ? { viewSessionId } : {})
+        scope: "path", readId, signal: options.signal, ...(options.view ? { viewSessionId: options.view } : {}),
+        page: { ...page, ...(page.maxTextLength ? { fullTurnIds: [...fullTurns.current] } : {}) }
       });
-      if (signal.aborted) return;
-      setTreeId(next.treeId ?? next.sessionId);
+      if (options.signal?.aborted) return undefined;
+      for (const turnId of next.truncatedTurnIds ?? []) truncatedTurns.current.add(turnId);
+      options.beforeHydrate?.();
       store.hydrateSessionWindows((next.windows ?? []).map((window) => ({
         sessionId: window.sessionId, snapshot: window.snapshot, cursor: window.cursor,
-        replaceSessionHistory: window.replaceSessionHistory,
-        revision: !window.hasOlder && !window.hasNewer ? window.revision : undefined
+        replaceSessionHistory: window.replaceSessionHistory
       })), readId);
-      setPath({ ...mobileVisiblePath(next), windows: undefined });
-      setError(undefined);
+      return next;
     } finally {
       finish();
     }
-  }), [refreshQueue, sessionId, store, transport, viewSessionId]);
+  }, [sessionId, store, transport]);
+  const refresh = useCallback(() => refreshQueue.request(async (signal) => {
+    const next = await readPage({ turns: PAGE_TURNS, maxTextLength: PAGE_TEXT_LENGTH }, { signal, view: viewSessionId });
+    if (!next) return;
+    setTreeId(next.treeId ?? next.sessionId);
+    setPath({ ...mobileVisiblePath(next), windows: undefined });
+    setError(undefined);
+  }), [readPage, refreshQueue, viewSessionId]);
 
   useEffect(() => {
     mounted.current = true;
@@ -119,9 +146,11 @@ const MobileSessionContent = ({
     () => ({ session: domain.getSession(targetSessionId) }));
   const participants = useRendererConversationParticipants(store, session?.conversationId);
   const directory = useMemo(() => buildParticipantDirectory(participants), [participants]);
+  const range = useMemo(() => loadedPathRange(turnIds, (id) => Boolean(domain.getTurn(id))), [domain, visiblePathKey, revision]);
   const turns = useMemo(() => path
-    ? turnIds.map((id) => domain.getTurn(id)).filter((turn): turn is Turn => Boolean(turn))
-    : [], [domain, path, revision]);
+    ? turnIds.slice(range.start, range.end).map((id) => domain.getTurn(id)).filter((turn): turn is Turn => Boolean(turn))
+    : [], [domain, path, range, revision]);
+  const hasOlder = Boolean(path) && range.start > 0 && range.end > 0;
   const rows = useMemo(() => buildTurnTranscriptRows(domain, turns, directory), [domain, turns, directory]);
   const currentTurn = (session?.lastTurnId ? domain.getTurn(session.lastTurnId) : undefined) ?? turns.at(-1);
   const completedVisibleKey = turns.filter((turn) => turn.status === "completed").map((turn) => turn.turnId).join("\n");
@@ -141,6 +170,49 @@ const MobileSessionContent = ({
   });
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const olderPending = useRef(false);
+  const loadOlder = useCallback(async () => {
+    const beforeTurnId = turnIds[range.start];
+    if (!hasOlder || disabled || olderPending.current || !beforeTurnId) return;
+    olderPending.current = true;
+    setLoadingOlder(true);
+    try {
+      await readPage({ turns: PAGE_TURNS, beforeTurnId, maxTextLength: PAGE_TEXT_LENGTH }, {
+        view: targetSessionId,
+        // Keep the reader on the message they were looking at while earlier turns are inserted above it.
+        beforeHydrate: () => {
+          const element = viewportRef.current.transcriptRef.current;
+          if (element) viewportRef.current.queuePrependScrollRestore({
+            sessionId, previousScrollHeight: element.scrollHeight, previousScrollTop: element.scrollTop
+          });
+        }
+      });
+    } catch (cause) {
+      if (mounted.current) setError((cause as Error).message);
+    } finally {
+      olderPending.current = false;
+      if (mounted.current) setLoadingOlder(false);
+    }
+  }, [disabled, hasOlder, range.start, readPage, sessionId, targetSessionId, visiblePathKey]);
+  // Reaching the top of the loaded messages loads the page before them.
+  useEffect(() => {
+    const element = viewport.transcriptRef.current;
+    if (!element || !hasOlder) return;
+    const onScroll = () => { if (element.scrollTop < 240) void loadOlder(); };
+    element.addEventListener("scroll", onScroll, { passive: true });
+    return () => element.removeEventListener("scroll", onScroll);
+  }, [hasOlder, loadOlder, viewport.transcriptRef]);
+  const loadFullTurn = (turnId: string) => {
+    truncatedTurns.current.delete(turnId);
+    fullTurns.current.add(turnId);
+    void readPage({ turnIds: [turnId] }, { view: targetSessionId }).catch((cause: Error) => {
+      fullTurns.current.delete(turnId);
+      truncatedTurns.current.add(turnId);
+      if (mounted.current) setError(cause.message);
+    });
+  };
+  const activeWindow = useMemo(() => ({ sessionId: targetSessionId, hasOlder, hasNewer: false }), [targetSessionId, hasOlder]);
   useEffect(() => { viewportRef.current.scrollToBottom(sessionId); }, [sessionId, targetSessionId]);
   useEffect(() => {
     const nodeId = path?.visibleNodeIds?.at(-1);
@@ -209,9 +281,14 @@ const MobileSessionContent = ({
       engineExtensionRefreshSignal={0} activeSessionId={targetSessionId}
       isOpeningSelectedSession={!path && !error} isSwitchPending={!path && !error}
       openingError={!path && !disabled ? error : undefined} onRetryOpening={() => { void runAction(refresh); }}
-      loadingOlderTurns={false} onLoadOlder={() => undefined}
+      activeSessionWindow={activeWindow}
+      loadingOlderTurns={loadingOlder} onLoadOlder={() => { void loadOlder(); }}
       processVisibilityByTurnId={visibility}
-      onToggleProcess={(id, expanded) => setVisibility((value) => toggleProcessVisibility(value, id, expanded))}
+      onToggleProcess={(id, defaultExpanded) => {
+        const next = toggleProcessVisibility(visibility, id, defaultExpanded);
+        if (resolveProcessExpanded(defaultExpanded, next[id]) && truncatedTurns.current.has(id)) loadFullTurn(id);
+        setVisibility(next);
+      }}
       onRetrySend={async () => undefined}
       onRespondApproval={disabled ? undefined : async (input) => { await transport.approval.respond(input); await refresh(); }}
       onRespondInteraction={disabled ? undefined : async (input) => { await transport.interaction.respond(input); await refresh(); }}

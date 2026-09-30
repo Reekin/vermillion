@@ -337,7 +337,9 @@ export type DesktopTransport = {
     operations: (input: { sessionId: string }) => Promise<{ operations: import("@vermillion/shared").ChatTreeSendOperation[] }>;
     get: (
       sessionId: string,
-      options?: { scope?: "tree" | "path"; knownWindows?: Record<string, { revision: string; cursor?: string }>; readId?: string; viewSessionId?: string; signal?: AbortSignal; onProgress?: (progress: SessionReadProgress) => void }
+      options?: { scope?: "tree" | "path"; knownWindows?: Record<string, { revision: string; cursor?: string }>; readId?: string; viewSessionId?: string;
+        page?: { turns?: number; beforeTurnId?: string; turnIds?: string[]; maxTextLength?: number; fullTurnIds?: string[] };
+        signal?: AbortSignal; onProgress?: (progress: SessionReadProgress) => void }
     ) => Promise<ChatTreeSnapshotRpc>;
     jump: (input: {
       sessionId: string;
@@ -928,6 +930,7 @@ export const createDesktopTransport = (
           ...(options?.scope ? { scope: options.scope } : {}),
           ...(options?.knownWindows ? { knownWindows: options.knownWindows } : {}),
           ...(options?.viewSessionId ? { viewSessionId: options.viewSessionId } : {}),
+          ...(options?.page ? { page: options.page } : {}),
           ...(readId ? { readId } : {})
         }));
         return result.chatTree;
