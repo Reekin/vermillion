@@ -12,6 +12,7 @@ const zToolStepResult = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("running") }),
   z.object({ kind: z.literal("failed"), exitCode: z.number().int().optional() }),
   z.object({ kind: z.literal("output"), lines: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal("diff"), added: z.number().int().nonnegative(), deleted: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("agents"), errored: z.number().int().nonnegative(), completed: z.number().int().nonnegative() })
 ]);
 

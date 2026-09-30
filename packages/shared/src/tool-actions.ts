@@ -1,4 +1,5 @@
 import type { ToolAction, ToolCall } from "./domain.js";
+import { summarizeUnifiedDiff } from "./unified-diff.js";
 
 /**
  * Engine-neutral structure of tool calls as steps (action, object, result) and a per-turn summary.
@@ -40,6 +41,8 @@ export type ToolStepResult =
   | { kind: "failed"; exitCode?: number }
   /** Printed output lines; 0 means no output. */
   | { kind: "output"; lines: number }
+  /** Lines an applied patch added and deleted. */
+  | { kind: "diff"; added: number; deleted: number }
   | { kind: "agents"; errored: number; completed: number };
 
 export type ToolStep = {
@@ -262,6 +265,12 @@ const describeAgentStep = (toolCall: ToolCall, running: boolean): ToolStep => {
 const failureResult = (exitCode: number | undefined): ToolStepResult =>
   typeof exitCode === "number" ? { kind: "failed", exitCode } : { kind: "failed" };
 
+/** An edit's output is the patch it applied; other edit output reports nothing countable. */
+const diffResult = (text: string | undefined): ToolStepResult | undefined => {
+  const summary = summarizeUnifiedDiff(text);
+  return summary.fileCount > 0 ? { kind: "diff", added: summary.linesAdded, deleted: summary.linesDeleted } : undefined;
+};
+
 /** One step for a tool call: action kind, object and result. */
 export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}): ToolStep => {
   const running = toolCall.status === "running";
@@ -323,7 +332,7 @@ export const describeToolStep = (toolCall: ToolCall, output: ToolStepOutput = {}
   const lines = outputLines(text);
   const result: ToolStepResult | undefined = running ? { kind: "running" }
     : failed ? failureResult(output.exitCode)
-      : kind === "edit" ? undefined
+      : kind === "edit" ? diffResult(text)
         : { kind: "output", lines };
 
   return {

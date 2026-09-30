@@ -43,6 +43,11 @@
   --awb-state-attention-soft: var(--awb-severity-warning-soft);
   --awb-state-info: var(--awb-severity-info);
   --awb-state-info-soft: var(--awb-severity-info-soft);
+  /* Diff lines and counts: added in the done green, deleted in the failed rose, low saturation. */
+  --awb-diff-add: var(--awb-state-done);
+  --awb-diff-add-soft: rgba(143, 188, 152, 0.12);
+  --awb-diff-delete: var(--awb-state-failed);
+  --awb-diff-delete-soft: rgba(212, 138, 134, 0.12);
   --awb-warm: #8c8987;
   --awb-radius-soft: 4px;
   --awb-radius-tight: 3px;
@@ -1860,6 +1865,80 @@ summary.awb-process-step__row:hover {
   display: grid;
   gap: 8px;
   justify-items: start;
+}
+
+.awb-process-step__diff {
+  max-height: 360px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--awb-input);
+}
+
+/* Unified diff: shared by process edit steps and the Diff dialog. */
+.awb-diff {
+  min-width: max-content;
+  font: var(--awb-text-micro) / 1.7 var(--awb-font-mono);
+  tab-size: 4;
+}
+
+.awb-diff pre {
+  margin: 0;
+  font: inherit;
+}
+
+.awb-diff__path {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--awb-rule);
+  color: var(--awb-ink-strong);
+}
+
+.awb-diff__hunk {
+  padding: 4px 12px;
+  background: var(--awb-panel-soft);
+  color: var(--awb-ink-muted);
+  white-space: pre;
+}
+
+.awb-diff__line {
+  padding: 0 12px 0 9px;
+  border-left: 3px solid transparent;
+  color: var(--awb-ink-muted);
+  white-space: pre;
+}
+
+.awb-diff__line.is-add {
+  border-left-color: var(--awb-diff-add);
+  background: var(--awb-diff-add-soft);
+  color: var(--awb-ink-strong);
+}
+
+.awb-diff__line.is-delete {
+  border-left-color: var(--awb-diff-delete);
+  background: var(--awb-diff-delete-soft);
+  color: var(--awb-ink);
+}
+
+.awb-diff__raw {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--awb-ink);
+  font: var(--awb-text-micro) / 1.6 var(--awb-font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.awb-diff-stat {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--awb-font-mono);
+}
+
+.awb-diff-stat .is-add {
+  color: var(--awb-diff-add);
+}
+
+.awb-diff-stat .is-delete {
+  color: var(--awb-diff-delete);
 }
 
 .awb-process-step__media-output .awb-inline-image-button,

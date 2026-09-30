@@ -37,6 +37,14 @@ describe("tool actions", () => {
     expect(toolStepObjectText(search.object)).toBe("\"TODO\" · src");
   });
 
+  it("reports an applied patch by the lines it added and deleted", () => {
+    const patch = "diff --git a/docs/a.md b/docs/a.md\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1,3 +1,3 @@\n keep\n-old\n+new\n+more";
+    const edit = call({ toolName: "fileChange", actions: [{ kind: "edit", target: "docs/a.md" }] });
+    expect(describeToolStep(edit, { text: patch }))
+      .toMatchObject({ kind: "edit", object: { kind: "files", names: ["a.md"] }, result: { kind: "diff", added: 2, deleted: 1 } });
+    expect(describeToolStep(edit, { text: "Wrote docs/a.md" }).result).toBeUndefined();
+  });
+
   it("shows commands the engine did not classify as the command itself, without the shell wrapper", () => {
     const step = describeToolStep(call({ inputSummary: pwsh("git status --short") }), { text: "", exitCode: 0 });
     expect(step).toMatchObject({ kind: "run", object: text("git status --short"), result: { kind: "output", lines: 0 } });

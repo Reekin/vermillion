@@ -5,6 +5,7 @@ import {
 } from "@vermillion/shared";
 import { DiffDialog } from "../../../ui/app/components/DiffDialog.js";
 import { Button } from "../../../ui/chat-shell/Button.js";
+import { DiffStat } from "../../../ui/chat-shell/DiffView.js";
 import { useT } from "../../../i18n/react.js";
 
 export type CodexTurnChangesExtensionProps = {
@@ -91,10 +92,7 @@ export const CodexTurnChangesExtension = ({
     <section className="vm-changes" aria-label={t("session.fileChanges")}>
       <header className="vm-changes__header">
         <span className="vm-changes__title">{t("session.fileChangeCount", { count: summary.fileCount })}</span>
-        <span className="vm-changes__stats">
-          <span className="is-add">+{summary.linesAdded}</span>
-          <span className="is-delete">−{summary.linesDeleted}</span>
-        </span>
+        <DiffStat added={summary.linesAdded} deleted={summary.linesDeleted} />
         <Button
           variant="ghost"
           size="sm"
@@ -126,10 +124,7 @@ export const CodexTurnChangesExtension = ({
                   {slash >= 0 && <span className="vm-changes__dir"><bdi>{relative.slice(0, slash + 1)}</bdi></span>}
                   <span className="vm-changes__name">{relative.slice(slash + 1)}</span>
                 </span>
-                <span className="vm-changes__stats">
-                  <span className="is-add">+{fileSummary.linesAdded}</span>
-                  <span className="is-delete">−{fileSummary.linesDeleted}</span>
-                </span>
+                <DiffStat added={fileSummary.linesAdded} deleted={fileSummary.linesDeleted} />
               </button>
             </li>
           );

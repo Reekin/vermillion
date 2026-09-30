@@ -36,6 +36,8 @@ export const toolStepResult = (result: ToolStepResult | undefined): string | und
       return result.exitCode === undefined ? t("step.result.failed") : t("step.result.failedExit", { exitCode: result.exitCode });
     case "output":
       return result.lines > 0 ? t("step.result.lines", { lines: result.lines }) : t("step.result.noOutput");
+    case "diff":
+      return `+${result.added} −${result.deleted}`;
     case "agents":
       return result.errored > 0 ? t("step.result.agentsErrored", { count: result.errored })
         : result.completed > 0 ? t("step.result.agentsCompleted", { count: result.completed })

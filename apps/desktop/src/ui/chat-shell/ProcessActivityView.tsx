@@ -26,6 +26,7 @@ import type { ImageLightboxState } from "./ImageLightbox.js";
 import { compareTranscriptItems } from "./transcript-order.js";
 import { buildLocalImagePreviewSrc } from "./local-image-preview.js";
 import { normalizeTerminalOutput } from "./terminal-output.js";
+import { DiffHunks, DiffStat } from "./DiffView.js";
 import { t } from "../../i18n/index.js";
 import { useT } from "../../i18n/react.js";
 import { toolStepWords } from "../../i18n/tool-steps.js";
@@ -218,13 +219,25 @@ const ProcessStepBody = ({
   entryId,
   inputText,
   outputText,
+  diff,
   onPreviewImage
 }: {
   entryId: string;
   inputText?: string;
   outputText?: string;
+  /** The output is the patch an edit applied; it already names the files. */
+  diff: boolean;
   onPreviewImage?: (input: ImageLightboxState) => void;
 }): ReactElement => {
+  if (diff && outputText) {
+    return (
+      <div className="awb-process-step__body">
+        <div className="awb-process-step__diff">
+          <DiffHunks diff={outputText} showPaths />
+        </div>
+      </div>
+    );
+  }
   const output = outputText ? splitProcessImageOutput(outputText) : undefined;
   const images = output?.images ?? [];
   const text = images.length > 0 && output?.text === `path: ${inputText}` ? undefined : output?.text;
@@ -272,6 +285,7 @@ export const ProcessActivityItemView = ({
   const rawOutputText = entry.outputText?.trim();
   const inputText = entry.inputText?.trim();
   const outputText = rawOutputText && rawOutputText !== inputText ? rawOutputText : undefined;
+  const diffResult = step.result?.kind === "diff" ? step.result : undefined;
   const row = (
     <>
       <Icon className="awb-process-step__icon" size={14} aria-hidden="true" />
@@ -279,7 +293,7 @@ export const ProcessActivityItemView = ({
       <span className="awb-process-step__object">{words.object}</span>
       <span className="awb-process-step__result">
         {step.running ? <span className="awb-process-step__spinner" aria-hidden="true" /> : null}
-        {words.result}
+        {diffResult ? <DiffStat added={diffResult.added} deleted={diffResult.deleted} /> : words.result}
       </span>
     </>
   );
@@ -303,6 +317,7 @@ export const ProcessActivityItemView = ({
           entryId={entry.id}
           inputText={inputText}
           outputText={outputText}
+          diff={Boolean(diffResult)}
           onPreviewImage={onPreviewImage}
         />
       ) : null}
